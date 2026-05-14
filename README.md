@@ -40,6 +40,9 @@ tmpdir=$(mktemp -d)
 find "$tmpdir/evidence/quickstart" -maxdepth 1 -type f | sort
 ```
 
+The API Case JSON format and Evidence output contract are documented in
+[docs/api-case-format.md](docs/api-case-format.md).
+
 ## Direction
 
 - Keep the default developer experience local and lightweight.
