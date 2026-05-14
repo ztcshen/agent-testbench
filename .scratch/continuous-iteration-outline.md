@@ -114,6 +114,9 @@ generic, profile-driven, and local-first.
 - Workflow step context/service slice: `workflow-step.html` now renders
   reference-style context and service evidence panels from catalog and runtime
   snapshot data.
+- Workflow run step evidence slice: `workflow-run.html` now renders stored
+  step summaries with catalog service links, step detail links, topology
+  filters, and body-health diagnostics.
 
 ## Open Task Queue
 

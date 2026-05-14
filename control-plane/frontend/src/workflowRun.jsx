@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { fetchJSON, queryParam, statusTone } from "./workflowPagesCommon.jsx";
+import { fetchJSON, queryParam, serviceName, statusTone } from "./workflowPagesCommon.jsx";
 
 function shortTime(value) {
   if (!value) return "-";
@@ -32,17 +32,102 @@ function RunCard({ run, selected }) {
   );
 }
 
+function stepID(step, index) {
+  return step.stepId || step.id || `step-${index + 1}`;
+}
+
+function stepStatus(step) {
+  if (step.status) return step.status;
+  if (step.stepOk === false || step.ok === false) return "failed";
+  if (step.stepOk === true || step.ok === true) return "passed";
+  return "unknown";
+}
+
+function traceTopologyHref(runID, step) {
+  const params = new URLSearchParams();
+  params.set("workflowRunId", runID || "");
+  const traceFilter = step.stepId || step.summary?.requestId || "";
+  if (traceFilter) params.set("traceFilter", traceFilter);
+  return `/trace-topology.html?${params.toString()}`;
+}
+
+function workflowStepHref(run, step) {
+  const params = new URLSearchParams();
+  params.set("workflow", run?.workflowId || "");
+  params.set("step", step.stepId || step.id || "");
+  if (run?.id) params.set("runId", run.id);
+  return `/workflow-step.html?${params.toString()}`;
+}
+
+function catalogStepFor(run, step, catalog) {
+  const workflow = (catalog?.workflows || []).find((item) => item.id === run?.workflowId);
+  return (workflow?.steps || []).find((item) => item.id === (step.stepId || step.id)) || null;
+}
+
+function stepServiceID(run, step, catalog) {
+  return step.serviceId || step.summary?.serviceId || step.summary?.targetServiceId || catalogStepFor(run, step, catalog)?.serviceId || "";
+}
+
+function serviceHref(serviceID, catalog) {
+  const service = (catalog?.services || []).find((item) => item.id === serviceID);
+  if (service?.role === "external") return "/service-inventory.html";
+  return `/environment-node.html?id=${encodeURIComponent(serviceID)}`;
+}
+
+function StepBodyHealth({ step }) {
+  const bodyHealth = step.bodyHealth || {};
+  const message = bodyHealth.message || "";
+  const level = bodyHealth.level || (bodyHealth.ok === false ? "failed" : "ok");
+  if (bodyHealth.ok !== false && !message) return null;
+  return (
+    <div className={`workflow-run-step-body-health ${bodyHealth.ok === false ? "failed" : "passed"}`}>
+      <span>body health</span>
+      <strong>{`${level}${message ? ` · ${message}` : ""}`}</strong>
+    </div>
+  );
+}
+
+function StepCard({ run, step, index, catalog }) {
+  const id = stepID(step, index);
+  const status = stepStatus(step);
+  const serviceID = stepServiceID(run, step, catalog);
+  const summary = step.summary || {};
+  const line = [
+    id,
+    summary.httpCode ? `http ${summary.httpCode}` : "",
+    summary.requestId || "",
+    step.elapsedMs || summary.elapsedMs ? `${step.elapsedMs || summary.elapsedMs} ms` : "",
+  ].filter(Boolean).join(" · ");
+  return (
+    <article className={`workflow-run-step-card ${statusTone(status)}`}>
+      <div>
+        <strong>{`${String(index + 1).padStart(2, "0")} ${step.title || id}`}</strong>
+        <span className={`status-pill ${statusTone(status)}`}>{status}</span>
+      </div>
+      <p>{line || "-"}</p>
+      <StepBodyHealth step={step} />
+      <div className="workflow-run-step-service-links">
+        {serviceID ? <a href={serviceHref(serviceID, catalog)}>{serviceName(catalog?.services, serviceID)}</a> : null}
+        <a href={workflowStepHref(run, step)}>接口明细</a>
+        {run?.id ? <a href={traceTopologyHref(run.id, step)}>过滤拓扑</a> : null}
+      </div>
+    </article>
+  );
+}
+
 function WorkflowRunApp() {
   const [runs, setRuns] = useState(null);
   const [detail, setDetail] = useState(null);
+  const [catalog, setCatalog] = useState(null);
   const [message, setMessage] = useState("loading");
   const requestedID = queryParam("id") || queryParam("runId");
 
   async function refresh() {
     setMessage("loading");
     try {
-      const payload = await fetchJSON("/api/runs");
+      const [payload, catalogPayload] = await Promise.all([fetchJSON("/api/runs"), fetchJSON("/api/catalog")]);
       setRuns(payload);
+      setCatalog(catalogPayload);
       const selected = requestedID || payload.workflowRuns?.[0]?.id || "";
       if (selected) {
         try {
@@ -64,7 +149,7 @@ function WorkflowRunApp() {
   const workflowRuns = runs?.workflowRuns || [];
   const selectedRun = detail?.run || detail || workflowRuns[0] || null;
   const selectedID = selectedRun?.id || selectedRun?.runId || requestedID;
-  const summary = useMemo(() => parseSummary(selectedRun), [selectedRun]);
+  const summary = useMemo(() => detail?.summary || parseSummary(selectedRun), [detail, selectedRun]);
   const steps = summary.steps || detail?.steps || [];
   const identifiers = Object.entries(summary.identifiers || summary.ids || {});
 
@@ -99,10 +184,7 @@ function WorkflowRunApp() {
           <div className="section-head"><div><h2>Steps</h2><p>{`${steps.length || 0} step records`}</p></div></div>
           <div className="workflow-run-trace-topologies">
             {steps.length ? steps.map((step, index) => (
-              <article className="workflow-run-trace-card" key={step.stepId || step.id || index}>
-                <strong>{step.stepId || step.id || `step-${index + 1}`}</strong>
-                <span>{step.status || (step.ok ? "passed" : "unknown")}</span>
-              </article>
+              <StepCard run={selectedRun} step={step} index={index} catalog={catalog} key={stepID(step, index)} />
             )) : <p className="dashboard-empty">当前 run 没有 step 摘要。</p>}
           </div>
         </section>
