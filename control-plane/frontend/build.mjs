@@ -12,6 +12,7 @@ await build({
   entryPoints: {
     controlPlane: resolve(root, "src/controlPlane.jsx"),
     agentTest: resolve(root, "src/agentTest.jsx"),
+    agentRun: resolve(root, "src/agentRun.jsx"),
     apiCases: resolve(root, "src/apiCases.jsx"),
     caseRuns: resolve(root, "src/caseRuns.jsx"),
     dashboard: resolve(root, "src/dashboard.jsx"),
@@ -19,7 +20,9 @@ await build({
     environmentNodes: resolve(root, "src/environmentNodes.jsx"),
     interfaceNode: resolve(root, "src/interfaceNode.jsx"),
     interfaceNodes: resolve(root, "src/interfaceNodes.jsx"),
+    replayEvidence: resolve(root, "src/replayEvidence.jsx"),
     serviceInventory: resolve(root, "src/serviceInventory.jsx"),
+    traceTopology: resolve(root, "src/traceTopology.jsx"),
     workflowDetail: resolve(root, "src/workflowDetail.jsx"),
     workflowBlueprintDemo: resolve(root, "src/workflowBlueprintDemo.jsx"),
     workflowRun: resolve(root, "src/workflowRun.jsx"),

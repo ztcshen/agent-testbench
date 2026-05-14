@@ -8,72 +8,7 @@
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
-    <main class="app trace-topology-page" data-template-id="TPL-SKYWALKING-TOPOLOGY-V1">
-      <div class="template-watermark" aria-label="模板编号">TPL-SKYWALKING-TOPOLOGY-V1</div>
-      <section class="topbar">
-        <div>
-          <h1>Trace topology</h1>
-          <p id="traceTopologyTitle">run loading</p>
-        </div>
-        <div class="actions">
-          <span id="traceTopologyStatus" class="workflow-step-status-pill" role="status">loading</span>
-          <a class="button-link" href="/">控制台</a>
-          <a id="traceTopologyRunLink" class="button-link" href="/workflow-run.html">Workflow run</a>
-          <a class="button-link" href="/dashboard.html">环境大盘</a>
-        </div>
-      </section>
-
-      <section id="traceTopologySummary" class="trace-topology-summary" aria-label="Trace topology summary"></section>
-
-      <section class="trace-topology-controls" aria-label="Trace topology filters">
-        <label class="workflow-filter">
-          <span>筛选</span>
-          <input id="traceTopologyFilter" type="search" placeholder="step / node / request / trace" spellcheck="false">
-        </label>
-        <select id="traceTopologyStatusFilter" title="按 step topology 状态过滤">
-          <option value="">All status</option>
-          <option value="complete">Complete</option>
-          <option value="partial">Partial</option>
-        </select>
-        <select id="traceTopologyExitFilter" title="按 exit 类型过滤">
-          <option value="">All exits</option>
-          <option value="unresolved">Unresolved</option>
-          <option value="external">External</option>
-        </select>
-      </section>
-
-      <section class="trace-topology-shell">
-        <section class="trace-topology-panel">
-          <div class="section-head">
-            <div>
-              <h2>Step matrix</h2>
-              <p id="traceTopologyMatrixMeta">loading</p>
-            </div>
-          </div>
-          <div id="traceTopologyMatrix" class="trace-topology-matrix"></div>
-        </section>
-
-        <section class="trace-topology-panel">
-          <div class="section-head">
-            <div>
-              <h2>Confirmed edges</h2>
-              <p id="traceTopologyEdgesMeta">loading</p>
-            </div>
-          </div>
-          <div id="traceTopologyEdges" class="trace-topology-list"></div>
-        </section>
-
-        <section class="trace-topology-panel">
-          <div class="section-head">
-            <div>
-              <h2>External and unresolved exits</h2>
-              <p id="traceTopologyExitsMeta">loading</p>
-            </div>
-          </div>
-          <div id="traceTopologyExits" class="trace-topology-list"></div>
-        </section>
-      </section>
-    </main>
-    <script src="/trace-topology.js"></script>
+    <div id="react-trace-topology-root"></div>
+    <script type="module" src="/assets/react/traceTopology.js"></script>
   </body>
 </html>

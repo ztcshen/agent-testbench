@@ -78,6 +78,18 @@ generic, profile-driven, and local-first.
   response byte summaries for the frontend result panel.
 - Store contract hardening slice: run summaries, API Case summaries, and
   Evidence diagnostic metadata are covered by the SQLite Store contract.
+- Workflow audit API slice: `/api/workflow-audit` exposes profile reference
+  audit plus optional Store-backed latest run and binding-case state.
+- Frontend workflow React slice: `workflow-run.html`, `workflow-detail.html`,
+  and `workflow-step.html` are served through source-built React bundles.
+- Frontend interface-node React slice: interface-node directory, detail,
+  history, and field contract pages are served through source-built React
+  bundles.
+- Profile import API slice: `/api/profile/import` imports local profile bundles
+  into the Store and can include a profile audit report.
+- Frontend run evidence React slice: Agent run, replay evidence, and trace
+  topology recovery/workbench pages are served through source-built React
+  bundles.
 
 ## Open Task Queue
 
