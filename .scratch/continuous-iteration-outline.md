@@ -48,6 +48,8 @@ generic, profile-driven, and local-first.
   clean empty-state API contract.
 - Frontend case evidence slice: reference API Case Evidence page is served with
   empty timing and incomplete-batch API contracts.
+- Frontend evidence viewer slice: reference Evidence Viewer page is served with
+  a neutral local-storage key and clean empty state.
 
 ## Open Task Queue
 
