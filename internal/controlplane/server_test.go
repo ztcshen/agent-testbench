@@ -3,6 +3,7 @@ package controlplane_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -725,6 +726,178 @@ func TestServerSavesWorkflowRunToStore(t *testing.T) {
 	}
 }
 
+func TestServerExposesWorkflowAuditWithoutStore(t *testing.T) {
+	bundle := profile.Bundle{
+		ID:          "sample",
+		DisplayName: "Sample Profile",
+		Workflows: []profile.Workflow{
+			{ID: "workflow.alpha", DisplayName: "Workflow Alpha"},
+		},
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha", ServiceID: "service.alpha"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha"},
+		},
+		WorkflowBindings: []profile.WorkflowBinding{
+			{WorkflowID: "workflow.alpha", StepID: "step.alpha", NodeID: "node.alpha", CaseID: "case.alpha", Required: true},
+		},
+	}
+	server := httptest.NewServer(controlplane.New(bundle))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/workflow-audit?workflowId=workflow.alpha", http.StatusOK)
+	if payload["ok"] != true || payload["profileId"] != "sample" || payload["workflowId"] != "workflow.alpha" {
+		t.Fatalf("workflow audit identity = %#v", payload)
+	}
+	if payload["bindingCount"] != float64(1) || payload["issueCount"] != float64(0) {
+		t.Fatalf("workflow audit counts = %#v", payload)
+	}
+	if _, ok := payload["store"]; ok {
+		t.Fatalf("workflow audit without store should not include store report: %#v", payload)
+	}
+	bindings := payload["bindings"].([]any)
+	if len(bindings) != 1 || bindings[0].(map[string]any)["caseId"] != "case.alpha" {
+		t.Fatalf("workflow audit bindings = %#v", payload)
+	}
+}
+
+func TestServerExposesWorkflowAuditStoreState(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+
+	older := time.Date(2026, 5, 14, 8, 0, 0, 0, time.UTC)
+	newer := older.Add(time.Hour)
+	for _, item := range []struct {
+		id        string
+		status    string
+		createdAt time.Time
+		caseRuns  []store.APICaseRun
+	}{
+		{
+			id:        "run.alpha",
+			status:    store.StatusPassed,
+			createdAt: older,
+			caseRuns: []store.APICaseRun{
+				{ID: "run.alpha.case.alpha", CaseID: "case.alpha", Status: store.StatusPassed, CreatedAt: older},
+			},
+		},
+		{
+			id:        "run.beta",
+			status:    store.StatusFailed,
+			createdAt: newer,
+			caseRuns: []store.APICaseRun{
+				{ID: "run.beta.case.alpha", CaseID: "case.alpha", Status: store.StatusFailed, CreatedAt: newer},
+				{ID: "run.beta.case.beta", CaseID: "case.beta", Status: store.StatusPassed, CreatedAt: newer},
+			},
+		},
+	} {
+		_, err = s.CreateRun(ctx, store.Run{
+			ID:          item.id,
+			ProfileID:   "sample",
+			WorkflowID:  "workflow.alpha",
+			Status:      item.status,
+			SummaryJSON: "{}",
+			CreatedAt:   item.createdAt,
+			UpdatedAt:   item.createdAt,
+		})
+		if err != nil {
+			t.Fatalf("create run %s: %v", item.id, err)
+		}
+		for _, caseRun := range item.caseRuns {
+			caseRun.RunID = item.id
+			_, err = s.RecordAPICaseRun(ctx, caseRun)
+			if err != nil {
+				t.Fatalf("record api case run %s: %v", caseRun.ID, err)
+			}
+		}
+	}
+
+	bundle := profile.Bundle{
+		ID: "sample",
+		Workflows: []profile.Workflow{
+			{ID: "workflow.alpha", DisplayName: "Workflow Alpha"},
+		},
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha"},
+			{ID: "node.beta", DisplayName: "Node Beta"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.alpha", NodeID: "node.alpha"},
+			{ID: "case.beta", NodeID: "node.beta"},
+		},
+		WorkflowBindings: []profile.WorkflowBinding{
+			{WorkflowID: "workflow.alpha", StepID: "step.alpha", NodeID: "node.alpha", CaseID: "case.alpha", Required: true},
+			{WorkflowID: "workflow.alpha", StepID: "step.beta", NodeID: "node.beta", CaseID: "case.beta", Required: false},
+		},
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/workflow-audit?workflowId=workflow.alpha", http.StatusOK)
+	storeReport := payload["store"].(map[string]any)
+	latestRun := storeReport["latestRun"].(map[string]any)
+	if latestRun["id"] != "run.beta" || latestRun["status"] != store.StatusFailed {
+		t.Fatalf("workflow audit latest run = %#v", storeReport)
+	}
+	bindingCases := storeReport["bindingCases"].([]any)
+	if len(bindingCases) != 2 {
+		t.Fatalf("workflow audit binding cases = %#v", storeReport)
+	}
+	alpha := bindingCases[0].(map[string]any)
+	if alpha["caseId"] != "case.alpha" || alpha["latestStatus"] != store.StatusFailed || alpha["latestRunId"] != "run.beta" || alpha["hasPassed"] != true {
+		t.Fatalf("workflow audit alpha case state = %#v", alpha)
+	}
+	beta := bindingCases[1].(map[string]any)
+	if beta["caseId"] != "case.beta" || beta["latestStatus"] != store.StatusPassed || beta["latestRunId"] != "run.beta" || beta["required"] != false {
+		t.Fatalf("workflow audit beta case state = %#v", beta)
+	}
+}
+
+func TestServerRejectsWorkflowAuditWithoutWorkflowID(t *testing.T) {
+	server := httptest.NewServer(controlplane.New(profile.Bundle{ID: "sample"}))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/workflow-audit", http.StatusBadRequest)
+	if payload["ok"] != false || !strings.Contains(payload["error"].(string), "workflowId") {
+		t.Fatalf("workflow audit missing id payload = %#v", payload)
+	}
+}
+
+func TestServerReturnsNotFoundForUnknownWorkflowAudit(t *testing.T) {
+	server := httptest.NewServer(controlplane.New(profile.Bundle{
+		ID: "sample",
+		Workflows: []profile.Workflow{
+			{ID: "workflow.alpha", DisplayName: "Workflow Alpha"},
+		},
+	}))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/workflow-audit?workflowId=workflow.missing", http.StatusNotFound)
+	if payload["ok"] != false || !strings.Contains(payload["error"].(string), "workflow not found") {
+		t.Fatalf("workflow audit missing workflow payload = %#v", payload)
+	}
+}
+
+func TestServerReturnsInternalErrorForWorkflowAuditStoreFailure(t *testing.T) {
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{
+		ID: "sample",
+		Workflows: []profile.Workflow{
+			{ID: "workflow.alpha", DisplayName: "Workflow Alpha"},
+		},
+	}, failingListRunsStore{}))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/workflow-audit?workflowId=workflow.alpha", http.StatusInternalServerError)
+	if payload["ok"] != false || !strings.Contains(payload["error"].(string), "list runs failed") {
+		t.Fatalf("workflow audit store failure payload = %#v", payload)
+	}
+}
+
 func TestServerExposesTestKitRunContracts(t *testing.T) {
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
@@ -1402,6 +1575,14 @@ func decodeJSONResponse(t *testing.T, url string, wantStatus int) map[string]any
 		t.Fatalf("decode %s: %v body=%s", url, err, raw)
 	}
 	return payload
+}
+
+type failingListRunsStore struct {
+	store.Store
+}
+
+func (failingListRunsStore) ListRuns(context.Context) ([]store.Run, error) {
+	return nil, errors.New("list runs failed")
 }
 
 func mustJSON(t *testing.T, value any) string {

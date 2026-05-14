@@ -62,6 +62,13 @@ func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 		}
 		writeJSON(w, catalogPayloadFromBundle(bundle))
 	})
+	mux.HandleFunc("/api/workflow-audit", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleWorkflowAudit(w, r, bundle, runtime)
+	})
 	mux.HandleFunc("/api/runs", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
