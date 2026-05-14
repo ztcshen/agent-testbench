@@ -27,13 +27,18 @@ generic, profile-driven, and local-first.
 
 ## Open Task Queue
 
-### Task 1: First Review Feedback
+### Task 1: Migration Source Audit Before Further Core Expansion
 
 Goal:
-- Collect review feedback from a fresh checkout or external reviewer and turn it
-  into the next small implementation queue.
+- Stop greenfield drift by auditing the next core capability against the source
+  repository before adding more behavior.
 
 Acceptance:
-- Any issue found by review maps to a small, testable slice.
+- One `needs-audit` row in `docs/migration/source-map.md` is upgraded to
+  `ported-and-scrubbed`, `reimplemented-with-rationale`, `new-core-only`, or
+  `profile-only`.
+- The source files and source tests inspected are named explicitly.
+- The next implementation task is derived from source behavior or records why
+  no source behavior applies.
 - Core/profile separation remains intact.
 - `go test ./...` and the source-domain scan pass after each slice.
