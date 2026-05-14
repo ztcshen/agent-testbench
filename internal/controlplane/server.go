@@ -128,11 +128,7 @@ func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, map[string]any{
-			"ok":       true,
-			"caseRuns": []map[string]any{},
-			"warnings": []string{},
-		})
+		handleCaseRuns(w, r, runtime)
 	})
 	mux.HandleFunc("/api/case/timing", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
