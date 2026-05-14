@@ -21,6 +21,18 @@ func New(bundle profile.Bundle) http.Handler {
 			Counts:      bundle.Counts(),
 		})
 	})
+	mux.HandleFunc("/api/profile/assets", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSON(w, profileAssetsPayload{
+			Services:       nonNil(bundle.Services),
+			Workflows:      nonNil(bundle.Workflows),
+			InterfaceNodes: nonNil(bundle.InterfaceNodes),
+			APICases:       nonNil(bundle.APICases),
+		})
+	})
 	mux.HandleFunc("/dashboard.html", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -44,9 +56,23 @@ type profilePayload struct {
 	Counts      profile.Counts `json:"counts"`
 }
 
+type profileAssetsPayload struct {
+	Services       []profile.Service       `json:"services"`
+	Workflows      []profile.Workflow      `json:"workflows"`
+	InterfaceNodes []profile.InterfaceNode `json:"interfaceNodes"`
+	APICases       []profile.APICase       `json:"apiCases"`
+}
+
 type dashboardData struct {
 	Bundle profile.Bundle
 	Counts profile.Counts
+}
+
+func nonNil[T any](items []T) []T {
+	if items == nil {
+		return []T{}
+	}
+	return items
 }
 
 func writeJSON(w http.ResponseWriter, value any) {
