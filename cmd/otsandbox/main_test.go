@@ -72,6 +72,35 @@ func TestProfileImportCommandIndexesBundleInStore(t *testing.T) {
 	}
 }
 
+func TestWorkflowPlanCommandPrintsBoundSteps(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkflowProfile(t, dir)
+
+	out := runCLI(t, "workflow", "plan", "--profile", dir, "--workflow", "workflow.alpha")
+
+	for _, want := range []string{
+		"Workflow: workflow.alpha",
+		"Step: step.one",
+		"Node: node.alpha",
+		"Case: case.alpha",
+		"Required: true",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("workflow plan output missing %q: %q", want, out)
+		}
+	}
+}
+
+func TestWorkflowPlanCommandRejectsMissingWorkflow(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkflowProfile(t, dir)
+
+	out := runCLIFails(t, "workflow", "plan", "--profile", dir, "--workflow", "workflow.missing")
+	if !strings.Contains(out, "workflow not found") || !strings.Contains(out, "workflow.missing") {
+		t.Fatalf("missing workflow output = %q", out)
+	}
+}
+
 func TestEvidenceImportCommandIndexesLegacyRuntime(t *testing.T) {
 	dir := t.TempDir()
 	sourcePath := filepath.Join(dir, "legacy.sqlite")
@@ -265,6 +294,36 @@ func writeAPICaseFile(t *testing.T, path string) {
 }`)
 	if err := os.WriteFile(path, raw, 0o644); err != nil {
 		t.Fatalf("write api case: %v", err)
+	}
+}
+
+func writeWorkflowProfile(t *testing.T, dir string) {
+	t.Helper()
+	writeFile(t, filepath.Join(dir, "profile.json"), `{
+  "id": "sample",
+  "displayName": "Sample Profile",
+  "services": [],
+  "workflows": [],
+  "interfaceNodes": [],
+  "apiCases": [],
+  "requestTemplates": [],
+  "caseDependencies": [],
+  "workflowBindings": [],
+  "fixtures": []
+}`)
+	writeFile(t, filepath.Join(dir, "workflows", "workflow.json"), `{"id":"workflow.alpha","displayName":"Workflow Alpha"}`)
+	writeFile(t, filepath.Join(dir, "interface-nodes", "node.json"), `{"id":"node.alpha","displayName":"Node Alpha"}`)
+	writeFile(t, filepath.Join(dir, "cases", "case.json"), `{"id":"case.alpha","displayName":"Case Alpha","nodeId":"node.alpha"}`)
+	writeFile(t, filepath.Join(dir, "workflow-bindings", "binding.json"), `{"workflowId":"workflow.alpha","stepId":"step.one","nodeId":"node.alpha","caseId":"case.alpha","required":true}`)
+}
+
+func writeFile(t *testing.T, path string, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create dir for %s: %v", path, err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
 	}
 }
 

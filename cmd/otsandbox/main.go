@@ -49,6 +49,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
+	case "workflow":
+		if err := runWorkflow(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 	case "case":
 		if err := runCase(context.Background(), os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -76,6 +81,7 @@ Usage:
   otsandbox profile inspect --profile PATH
   otsandbox profile import --from PATH [--store-url PATH]
   otsandbox evidence import --from PATH --profile ID [--store-url PATH]
+  otsandbox workflow plan --profile PATH --workflow ID
   otsandbox case run --case PATH [--base-url URL] [--dry-run] [--evidence-dir PATH]
   otsandbox serve [--profile PATH] [--host HOST] [--port PORT]
   otsandbox help`)
@@ -216,6 +222,58 @@ func printProfile(bundle profile.Bundle) {
 	fmt.Printf("Case Dependencies: %d\n", counts.CaseDependencies)
 	fmt.Printf("Workflow Bindings: %d\n", counts.WorkflowBindings)
 	fmt.Printf("Fixtures: %d\n", counts.Fixtures)
+}
+
+func runWorkflow(args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing workflow command")
+	}
+	switch args[0] {
+	case "plan":
+		return runWorkflowPlan(args[1:])
+	default:
+		return fmt.Errorf("unknown workflow command: %s", args[0])
+	}
+}
+
+func runWorkflowPlan(args []string) error {
+	flags := flag.NewFlagSet("workflow plan", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path")
+	workflowID := flags.String("workflow", "", "Workflow id")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	bundle, err := profile.Load(*profilePath)
+	if err != nil {
+		return err
+	}
+	if _, ok := findWorkflow(bundle, *workflowID); !ok {
+		return fmt.Errorf("workflow not found: %s", *workflowID)
+	}
+
+	fmt.Printf("Workflow: %s\n", *workflowID)
+	for _, binding := range bundle.WorkflowBindings {
+		if binding.WorkflowID != *workflowID {
+			continue
+		}
+		fmt.Printf("Step: %s\n", binding.StepID)
+		fmt.Printf("Node: %s\n", binding.NodeID)
+		if binding.CaseID != "" {
+			fmt.Printf("Case: %s\n", binding.CaseID)
+		}
+		fmt.Printf("Required: %t\n", binding.Required)
+	}
+	return nil
+}
+
+func findWorkflow(bundle profile.Bundle, id string) (profile.Workflow, bool) {
+	for _, workflow := range bundle.Workflows {
+		if workflow.ID == id {
+			return workflow, true
+		}
+	}
+	return profile.Workflow{}, false
 }
 
 func runEvidence(ctx context.Context, args []string) error {
