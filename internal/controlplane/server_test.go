@@ -1866,6 +1866,76 @@ func TestServerExposesAPICaseCapabilities(t *testing.T) {
 	}
 }
 
+func TestServerExposesAPICaseCapabilityRunsFromStore(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	started := time.Date(2026, 5, 14, 9, 0, 0, 0, time.UTC)
+	_, err = s.CreateRun(ctx, store.Run{
+		ID:           "run.alpha",
+		ProfileID:    "sample",
+		WorkflowID:   "workflow.alpha",
+		Status:       store.StatusFailed,
+		EvidenceRoot: ".runtime/evidence/run.alpha",
+		CreatedAt:    started,
+		UpdatedAt:    started,
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	_, err = s.RecordAPICaseRun(ctx, store.APICaseRun{
+		ID:                   "run.alpha.case",
+		RunID:                "run.alpha",
+		CaseID:               "case.alpha",
+		Status:               store.StatusFailed,
+		RequestSummaryJSON:   `{"method":"POST","path":"/alpha"}`,
+		AssertionSummaryJSON: `{"status":"failed","errorCount":1}`,
+		StartedAt:            started,
+		FinishedAt:           started.Add(200 * time.Millisecond),
+		CreatedAt:            started,
+	})
+	if err != nil {
+		t.Fatalf("record api case run: %v", err)
+	}
+	bundle := profile.Bundle{
+		ID:          "sample",
+		DisplayName: "Sample Profile",
+		Services: []profile.Service{
+			{ID: "service.alpha", DisplayName: "Service Alpha", Kind: "http"},
+		},
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha", ServiceID: "service.alpha"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha"},
+			{ID: "case.empty", DisplayName: "Case Empty", NodeID: "node.alpha"},
+		},
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/cases/capabilities", http.StatusOK)
+	cases := payload["cases"].([]any)
+	alpha := cases[0].(map[string]any)
+	if alpha["id"] != "case.alpha" || alpha["runCount"] != float64(1) {
+		t.Fatalf("api case run count = %#v", alpha)
+	}
+	latest := alpha["latestRun"].(map[string]any)
+	if latest["runId"] != "run.alpha" || latest["status"] != store.StatusFailed || latest["failureReason"] != "assertion errors: 1" {
+		t.Fatalf("api case latest run = %#v", latest)
+	}
+	empty := cases[1].(map[string]any)
+	if empty["id"] != "case.empty" || empty["runCount"] != float64(0) {
+		t.Fatalf("empty api case run state = %#v", empty)
+	}
+	if _, ok := empty["latestRun"]; ok {
+		t.Fatalf("empty api case should not expose latestRun: %#v", empty)
+	}
+}
+
 func TestServerRunsAPICaseAndIndexesStoreRecords(t *testing.T) {
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})

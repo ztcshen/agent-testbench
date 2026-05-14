@@ -167,7 +167,12 @@ func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, apiCaseCapabilitiesFromBundle(profiles.Current()))
+		payload, err := apiCaseCapabilitiesFromBundleWithStore(r.Context(), profiles.Current(), runtime)
+		if err != nil {
+			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, payload)
 	})
 	mux.HandleFunc("/api/cases/run", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -466,6 +471,8 @@ type apiCaseCapability struct {
 	DefaultOverrides map[string]any      `json:"defaultOverrides,omitempty"`
 	Workflow         map[string]string   `json:"workflow,omitempty"`
 	Graph            apiCaseServiceGraph `json:"graph"`
+	RunCount         int                 `json:"runCount"`
+	LatestRun        map[string]any      `json:"latestRun,omitempty"`
 }
 
 type apiCaseServiceGraph struct {

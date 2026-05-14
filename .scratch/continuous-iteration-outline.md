@@ -106,6 +106,9 @@ generic, profile-driven, and local-first.
 - Workflow catalog run state slice: `/api/catalog` now hydrates workflow
   `runCount` and `latestRun` from Store runs, and the React workflow catalog
   and detail pages render that state.
+- API Case capability run state slice: `/api/cases/capabilities` now hydrates
+  case `runCount` and `latestRun` from Store API case records, and the React
+  API Case page renders the selected case run state.
 
 ## Open Task Queue
 

@@ -105,6 +105,22 @@ function CaseResult({ result }) {
   );
 }
 
+function LatestRunSummary({ caseDef }) {
+  const latestRun = caseDef?.latestRun || null;
+  return (
+    <div className="api-case-capability-grid">
+      <KeyValue label="runs" value={String(caseDef?.runCount || 0)} />
+      <KeyValue
+        label="latest"
+        value={latestRun ? [latestRun.status || "unknown", latestRun.failureReason].filter(Boolean).join(" · ") : "no run"}
+        href={latestRun?.runId ? `/evidence-viewer.html?caseRun=${encodeURIComponent(latestRun.runId)}` : ""}
+      />
+      <KeyValue label="case run" value={latestRun?.caseRunId || "-"} />
+      <KeyValue label="elapsed" value={latestRun?.elapsedMs ? `${latestRun.elapsedMs}ms` : "-"} />
+    </div>
+  );
+}
+
 function CaseServices({ caseDef }) {
   const graph = caseDef?.graph || { nodes: [], edges: [] };
   return (
@@ -244,6 +260,7 @@ function ApiCasesApp() {
             setSelectedCase(caseDef);
             setResult(null);
           }} />
+          <LatestRunSummary caseDef={selectedCase} />
           <div className="api-case-trigger">
             <p>使用 Catalog 中声明的 case 文件、网关地址、默认参数和证据目录运行；页面不暴露请求参数。</p>
             <button className="primary-action" type="button" disabled={!selectedCase || status === "running..."} onClick={runSelectedCase}>
