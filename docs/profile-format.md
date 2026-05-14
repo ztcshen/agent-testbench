@@ -29,3 +29,17 @@ bundle contains a `profile.json` manifest.
 
 Configuration remains file-first. Store records are generated runtime indexes,
 not the source of truth for profile assets.
+
+## Split Assets
+
+Large bundles can keep assets in deterministic JSON directories next to
+`profile.json`:
+
+- `services/*.json`
+- `workflows/*.json`
+- `interface-nodes/*.json`
+- `cases/*.json`
+- `fixtures/*.json`
+
+The loader reads files in sorted path order and appends them to any assets
+declared directly in the manifest.

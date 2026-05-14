@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -26,6 +27,10 @@ func Load(path string) (Bundle, error) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&bundle); err != nil {
 		return Bundle{}, fmt.Errorf("decode profile manifest %s: %w", manifestPath, err)
+	}
+	baseDir := filepath.Dir(manifestPath)
+	if err := loadAssets(baseDir, &bundle); err != nil {
+		return Bundle{}, err
 	}
 	if err := validate(bundle); err != nil {
 		return Bundle{}, fmt.Errorf("validate profile manifest %s: %w", manifestPath, err)
@@ -55,4 +60,73 @@ func validate(bundle Bundle) error {
 		return errors.New("profile displayName is required")
 	}
 	return nil
+}
+
+func loadAssets(baseDir string, bundle *Bundle) error {
+	services, err := loadAssetDir[Service](baseDir, "services")
+	if err != nil {
+		return err
+	}
+	bundle.Services = append(bundle.Services, services...)
+
+	workflows, err := loadAssetDir[Workflow](baseDir, "workflows")
+	if err != nil {
+		return err
+	}
+	bundle.Workflows = append(bundle.Workflows, workflows...)
+
+	nodes, err := loadAssetDir[InterfaceNode](baseDir, "interface-nodes")
+	if err != nil {
+		return err
+	}
+	bundle.InterfaceNodes = append(bundle.InterfaceNodes, nodes...)
+
+	cases, err := loadAssetDir[APICase](baseDir, "cases")
+	if err != nil {
+		return err
+	}
+	bundle.APICases = append(bundle.APICases, cases...)
+
+	fixtures, err := loadAssetDir[Fixture](baseDir, "fixtures")
+	if err != nil {
+		return err
+	}
+	bundle.Fixtures = append(bundle.Fixtures, fixtures...)
+	return nil
+}
+
+func loadAssetDir[T any](baseDir string, name string) ([]T, error) {
+	dir := filepath.Join(baseDir, name)
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read profile asset directory %s: %w", dir, err)
+	}
+
+	var paths []string
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		paths = append(paths, filepath.Join(dir, entry.Name()))
+	}
+	sort.Strings(paths)
+
+	assets := make([]T, 0, len(paths))
+	for _, path := range paths {
+		var asset T
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read profile asset %s: %w", path, err)
+		}
+		decoder := json.NewDecoder(strings.NewReader(string(raw)))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&asset); err != nil {
+			return nil, fmt.Errorf("decode profile asset %s: %w", path, err)
+		}
+		assets = append(assets, asset)
+	}
+	return assets, nil
 }
