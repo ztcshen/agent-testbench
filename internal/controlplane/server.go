@@ -74,9 +74,24 @@ func New(bundle profile.Bundle) http.Handler {
 			return
 		}
 		writeJSON(w, map[string]any{
-			"ok":       true,
-			"summary":  map[string]any{"latestFailureKind": "no active failure", "failureKinds": map[string]int{}},
-			"warnings": []string{},
+			"ok": true,
+			"summary": map[string]any{
+				"capabilityCount":         0,
+				"profileCount":            0,
+				"runCount":                0,
+				"configEventCount":        0,
+				"escalationEventCount":    0,
+				"latestAcceptanceVerdict": "",
+				"latestFailureKind":       "no active failure",
+				"failureKinds":            map[string]int{},
+			},
+			"capabilities":      []map[string]any{},
+			"profiles":          []map[string]any{},
+			"agentRuns":         []map[string]any{},
+			"configEvents":      []map[string]any{},
+			"escalationEvents":  []map[string]any{},
+			"acceptanceReports": []map[string]any{},
+			"warnings":          []string{},
 		})
 	})
 	mux.HandleFunc("/api/case/runs", func(w http.ResponseWriter, r *http.Request) {
@@ -151,6 +166,8 @@ func New(bundle profile.Bundle) http.Handler {
 var staticFileNames = []string{
 	"index.html",
 	"app.js",
+	"agent-test.html",
+	"agent-test.js",
 	"interface-nodes.html",
 	"interface-nodes.js",
 	"interface-node.html",

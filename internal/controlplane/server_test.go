@@ -205,6 +205,8 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 	}{
 		{path: "/index.html", want: "sandbox-workbench-page"},
 		{path: "/app.js", want: "/api/state"},
+		{path: "/agent-test.html", want: "agent-test-page"},
+		{path: "/agent-test.js", want: "/api/agent-test"},
 		{path: "/interface-nodes.html", want: "interface-node-directory-page"},
 		{path: "/interface-nodes.js", want: "/api/interface-nodes"},
 		{path: "/interface-node.html", want: "interface-node-page"},
@@ -604,6 +606,44 @@ func TestServerExposesEmptyWorkbenchAuxiliaryAPIs(t *testing.T) {
 		if resp.StatusCode != http.StatusOK || payload["ok"] != true || payload[item.key] == nil {
 			t.Fatalf("%s payload = %#v status=%d", item.path, payload, resp.StatusCode)
 		}
+	}
+}
+
+func TestServerExposesEmptyAgentTestWorkbench(t *testing.T) {
+	server := httptest.NewServer(controlplane.New(loadEmptyProfile(t)))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/agent-test")
+	if err != nil {
+		t.Fatalf("get agent test api: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("agent test status = %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Summary struct {
+			CapabilityCount int `json:"capabilityCount"`
+			ProfileCount    int `json:"profileCount"`
+			RunCount        int `json:"runCount"`
+		} `json:"summary"`
+		Capabilities      []map[string]any `json:"capabilities"`
+		Profiles          []map[string]any `json:"profiles"`
+		AgentRuns         []map[string]any `json:"agentRuns"`
+		ConfigEvents      []map[string]any `json:"configEvents"`
+		EscalationEvents  []map[string]any `json:"escalationEvents"`
+		AcceptanceReports []map[string]any `json:"acceptanceReports"`
+		Warnings          []string         `json:"warnings"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode agent test api: %v", err)
+	}
+	if payload.Summary.CapabilityCount != 0 || payload.Summary.ProfileCount != 0 || payload.Summary.RunCount != 0 {
+		t.Fatalf("agent test summary = %#v", payload.Summary)
+	}
+	if payload.Capabilities == nil || payload.Profiles == nil || payload.AgentRuns == nil || payload.ConfigEvents == nil || payload.EscalationEvents == nil || payload.AcceptanceReports == nil || payload.Warnings == nil {
+		t.Fatalf("agent test empty arrays = %#v", payload)
 	}
 }
 

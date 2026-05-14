@@ -44,6 +44,8 @@ generic, profile-driven, and local-first.
   served with a profile-backed detail API.
 - Frontend interface-node auxiliary slice: reference interface-node history and
   field contract pages are served from generic static assets.
+- Frontend agent test slice: reference Agent Test Kit page is served with a
+  clean empty-state API contract.
 
 ## Open Task Queue
 
