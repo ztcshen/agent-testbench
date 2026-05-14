@@ -62,6 +62,9 @@ generic, profile-driven, and local-first.
   root scripts are served as neutral static assets.
 - Frontend trace evidence React slice: `trace-call.html` and
   `trace-evidence.html` are served through a neutral source-built React bundle.
+- Frontend workflow blueprint React slice: `workflow-blueprint-demo.html` and
+  `workflow-blueprint-new.html` are served through a neutral source-built
+  blueprint bundle.
 
 ## Open Task Queue
 

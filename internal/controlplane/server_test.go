@@ -223,6 +223,8 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 		{path: "/replay-evidence.js", want: "/api/replay/evidence"},
 		{path: "/trace-call.html", want: "react-control-plane-root"},
 		{path: "/trace-evidence.html", want: "react-control-plane-root"},
+		{path: "/workflow-blueprint-demo.html", want: "react-workflow-blueprint-demo-root"},
+		{path: "/workflow-blueprint-new.html", want: "react-workflow-blueprint-demo-root"},
 		{path: "/interface-nodes.html", want: "interface-node-directory-page"},
 		{path: "/interface-nodes.js", want: "/api/interface-nodes"},
 		{path: "/interface-node.html", want: "interface-node-page"},
@@ -246,6 +248,8 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 		{path: "/styles.css", want: "body"},
 		{path: "/assets/react/controlPlane.css", want: "react-control-plane"},
 		{path: "/assets/react/controlPlane.js", want: "Trace Evidence"},
+		{path: "/assets/react/workflowBlueprintDemo.css", want: "blueprint-demo-shell"},
+		{path: "/assets/react/workflowBlueprintDemo.js", want: "workflow-blueprint/v1"},
 	} {
 		resp, err := http.Get(server.URL + item.path)
 		if err != nil {

@@ -233,6 +233,8 @@ var staticFileNames = []string{
 	"replay-evidence.js",
 	"trace-call.html",
 	"trace-evidence.html",
+	"workflow-blueprint-demo.html",
+	"workflow-blueprint-new.html",
 	"interface-nodes.html",
 	"interface-nodes.js",
 	"interface-node.html",
