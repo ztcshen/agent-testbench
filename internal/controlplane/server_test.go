@@ -150,6 +150,48 @@ func TestServerImportsProfileBundleIntoRuntimeStore(t *testing.T) {
 	}
 }
 
+func TestServerProfileImportSwitchesActiveProfile(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	profileDir := writeWorkbenchSampleProfile(t)
+	server := httptest.NewServer(controlplane.NewWithStore(loadEmptyProfile(t), s))
+	defer server.Close()
+
+	initial := decodeJSONResponse(t, server.URL+"/api/profile", http.StatusOK)
+	if initial["id"] != "empty" {
+		t.Fatalf("initial profile = %#v", initial)
+	}
+
+	postJSONResponse(t, server.URL+"/api/profile/import", `{"path":`+mustJSON(t, profileDir)+`}`, http.StatusOK)
+
+	active := decodeJSONResponse(t, server.URL+"/api/profile", http.StatusOK)
+	if active["id"] != "sample" || active["displayName"] != "Sample Profile" {
+		t.Fatalf("active profile after import = %#v", active)
+	}
+	catalog := decodeJSONResponse(t, server.URL+"/api/catalog", http.StatusOK)
+	services, ok := catalog["services"].([]any)
+	if !ok || len(services) != 1 {
+		t.Fatalf("catalog after import = %#v", catalog)
+	}
+	service, ok := services[0].(map[string]any)
+	if !ok || service["id"] != "service.alpha" {
+		t.Fatalf("catalog service after import = %#v", services)
+	}
+	nodes := decodeJSONResponse(t, server.URL+"/api/interface-nodes", http.StatusOK)
+	items, ok := nodes["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("interface nodes after import = %#v", nodes)
+	}
+	item, ok := items[0].(map[string]any)
+	if !ok || item["id"] != "node.alpha" {
+		t.Fatalf("interface node after import = %#v", items)
+	}
+}
+
 func TestServerImportsProfileBundleWithAudit(t *testing.T) {
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
@@ -1762,6 +1804,30 @@ func writeAuditSampleProfile(t *testing.T) string {
 }`
 	if err := os.WriteFile(filepath.Join(profileDir, "profile.json"), []byte(raw), 0o644); err != nil {
 		t.Fatalf("write audit sample profile: %v", err)
+	}
+	return profileDir
+}
+
+func writeWorkbenchSampleProfile(t *testing.T) string {
+	t.Helper()
+	profileDir := filepath.Join(t.TempDir(), "profile")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatalf("create profile dir: %v", err)
+	}
+	raw := `{
+  "id": "sample",
+  "displayName": "Sample Profile",
+  "services": [{"id":"service.alpha","displayName":"Service Alpha","kind":"http"}],
+  "workflows": [{"id":"workflow.alpha","displayName":"Workflow Alpha"}],
+  "interfaceNodes": [{"id":"node.alpha","displayName":"Node Alpha","serviceId":"service.alpha"}],
+  "apiCases": [],
+  "requestTemplates": [],
+  "caseDependencies": [],
+  "workflowBindings": [],
+  "fixtures": []
+}`
+	if err := os.WriteFile(filepath.Join(profileDir, "profile.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write workbench sample profile: %v", err)
 	}
 	return profileDir
 }

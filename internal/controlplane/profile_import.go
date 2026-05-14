@@ -47,7 +47,7 @@ type profileImportStore struct {
 	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
-func handleProfileImport(w http.ResponseWriter, r *http.Request, runtime store.Store) {
+func handleProfileImport(w http.ResponseWriter, r *http.Request, runtime store.Store, activate func(profile.Bundle)) {
 	if runtime == nil {
 		writeJSONStatus(w, http.StatusNotImplemented, map[string]any{"ok": false, "error": "runtime store is not configured"})
 		return
@@ -64,7 +64,7 @@ func handleProfileImport(w http.ResponseWriter, r *http.Request, runtime store.S
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "path is required"})
 		return
 	}
-	report, err := importProfileBundle(r.Context(), runtime, req)
+	bundle, report, err := importProfileBundle(r.Context(), runtime, req)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if strings.HasPrefix(err.Error(), "load profile") || strings.HasPrefix(err.Error(), "digest profile") || strings.HasPrefix(err.Error(), "audit profile") {
@@ -73,22 +73,25 @@ func handleProfileImport(w http.ResponseWriter, r *http.Request, runtime store.S
 		writeJSONStatus(w, status, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
+	if activate != nil {
+		activate(bundle)
+	}
 	writeJSON(w, report)
 }
 
-func importProfileBundle(ctx context.Context, runtime store.Store, req profileImportRequest) (profileImportResponse, error) {
+func importProfileBundle(ctx context.Context, runtime store.Store, req profileImportRequest) (profile.Bundle, profileImportResponse, error) {
 	bundle, err := profile.Load(req.Path)
 	if err != nil {
-		return profileImportResponse{}, fmt.Errorf("load profile %q: %w", req.Path, err)
+		return profile.Bundle{}, profileImportResponse{}, fmt.Errorf("load profile %q: %w", req.Path, err)
 	}
 	digest, err := profile.BundleDigest(req.Path)
 	if err != nil {
-		return profileImportResponse{}, fmt.Errorf("digest profile %q: %w", req.Path, err)
+		return profile.Bundle{}, profileImportResponse{}, fmt.Errorf("digest profile %q: %w", req.Path, err)
 	}
 	counts := bundle.Counts()
 	summary, err := json.Marshal(counts)
 	if err != nil {
-		return profileImportResponse{}, fmt.Errorf("summarize profile %q: %w", bundle.ID, err)
+		return profile.Bundle{}, profileImportResponse{}, fmt.Errorf("summarize profile %q: %w", bundle.ID, err)
 	}
 	importedAt := time.Now().UTC()
 	index, err := runtime.UpsertProfileIndex(ctx, store.ProfileIndex{
@@ -99,7 +102,7 @@ func importProfileBundle(ctx context.Context, runtime store.Store, req profileIm
 		ImportedAt:   importedAt,
 	})
 	if err != nil {
-		return profileImportResponse{}, fmt.Errorf("store profile index %q: %w", bundle.ID, err)
+		return profile.Bundle{}, profileImportResponse{}, fmt.Errorf("store profile index %q: %w", bundle.ID, err)
 	}
 	response := profileImportResponse{
 		ProfileID:    bundle.ID,
@@ -122,11 +125,11 @@ func importProfileBundle(ctx context.Context, runtime store.Store, req profileIm
 			Store:      runtime,
 		})
 		if err != nil {
-			return profileImportResponse{}, fmt.Errorf("audit profile %q: %w", bundle.ID, err)
+			return profile.Bundle{}, profileImportResponse{}, fmt.Errorf("audit profile %q: %w", bundle.ID, err)
 		}
 		response.Audit = &auditReport
 	}
-	return response, nil
+	return bundle, response, nil
 }
 
 func profileImportCountsFrom(counts profile.Counts) profileImportCounts {

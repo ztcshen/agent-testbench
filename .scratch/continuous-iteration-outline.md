@@ -94,6 +94,9 @@ generic, profile-driven, and local-first.
   source-built React bundle and exposes the local profile import API.
 - Frontend Evidence Viewer React slice: case Evidence viewing and topology
   rendering are served through a source-built React bundle.
+- Active profile import slice: importing a local profile now switches the
+  running control plane to the imported bundle for profile, catalog, and
+  interface-node APIs.
 
 ## Open Task Queue
 

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 
 	"open-test-sandbox/internal/profile"
 	"open-test-sandbox/internal/store"
@@ -18,18 +19,20 @@ func New(bundle profile.Bundle) http.Handler {
 func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 	mux := http.NewServeMux()
 	staticDir := findStaticDir()
+	profiles := newProfileState(bundle)
 	mux.HandleFunc("/api/profile/import", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		handleProfileImport(w, r, runtime)
+		handleProfileImport(w, r, runtime, profiles.Replace)
 	})
 	mux.HandleFunc("/api/profile", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
+		bundle := profiles.Current()
 		writeJSON(w, profilePayload{
 			ID:          bundle.ID,
 			DisplayName: bundle.DisplayName,
@@ -41,6 +44,7 @@ func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
+		bundle := profiles.Current()
 		writeJSON(w, profileAssetsPayload{
 			Services:       nonNil(bundle.Services),
 			Workflows:      nonNil(bundle.Workflows),
@@ -53,28 +57,28 @@ func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, statePayloadFromBundle(bundle))
+		writeJSON(w, statePayloadFromBundle(profiles.Current()))
 	})
 	mux.HandleFunc("/api/dashboard", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, dashboardPayloadFromBundle(bundle))
+		writeJSON(w, dashboardPayloadFromBundle(profiles.Current()))
 	})
 	mux.HandleFunc("/api/catalog", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, catalogPayloadFromBundle(bundle))
+		writeJSON(w, catalogPayloadFromBundle(profiles.Current()))
 	})
 	mux.HandleFunc("/api/workflow-audit", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		handleWorkflowAudit(w, r, bundle, runtime)
+		handleWorkflowAudit(w, r, profiles.Current(), runtime)
 	})
 	mux.HandleFunc("/api/runs", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -102,7 +106,7 @@ func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		handleSaveWorkflowRun(w, r, bundle, runtime)
+		handleSaveWorkflowRun(w, r, profiles.Current(), runtime)
 	})
 	mux.HandleFunc("/api/workflow-runs/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -163,7 +167,7 @@ func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		handleCaseIncompleteBatches(w, r, bundle, runtime)
+		handleCaseIncompleteBatches(w, r, profiles.Current(), runtime)
 	})
 	mux.HandleFunc("/api/replay/evidence", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -177,56 +181,56 @@ func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, apiCaseCapabilitiesFromBundle(bundle))
+		writeJSON(w, apiCaseCapabilitiesFromBundle(profiles.Current()))
 	})
 	mux.HandleFunc("/api/cases/run", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		handleAPICaseRun(w, r, bundle, runtime)
+		handleAPICaseRun(w, r, profiles.Current(), runtime)
 	})
 	mux.HandleFunc("/api/test-kit/run", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		handleTestKitRun(w, r, bundle, runtime)
+		handleTestKitRun(w, r, profiles.Current(), runtime)
 	})
 	mux.HandleFunc("/api/test-kit/run-batch", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		handleTestKitRunBatch(w, r, bundle)
+		handleTestKitRunBatch(w, r, profiles.Current())
 	})
 	mux.HandleFunc("/api/interface-nodes", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, interfaceNodesPayloadFromBundle(bundle, r.URL.Query().Get("serviceId")))
+		writeJSON(w, interfaceNodesPayloadFromBundle(profiles.Current(), r.URL.Query().Get("serviceId")))
 	})
 	mux.HandleFunc("/api/interface-node/coverage", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, interfaceNodeCoveragePayloadFromBundle(bundle, r.URL.Query().Get("workflow")))
+		writeJSON(w, interfaceNodeCoveragePayloadFromBundle(profiles.Current(), r.URL.Query().Get("workflow")))
 	})
 	mux.HandleFunc("/api/interface-node/coverage-gaps", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, interfaceNodeCoverageGapsPayloadFromBundle(bundle, r.URL.Query().Get("workflow")))
+		writeJSON(w, interfaceNodeCoverageGapsPayloadFromBundle(profiles.Current(), r.URL.Query().Get("workflow")))
 	})
 	mux.HandleFunc("/api/interface-node", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		payload, ok := interfaceNodeDetailPayloadFromBundle(bundle, r.URL.Query().Get("id"))
+		payload, ok := interfaceNodeDetailPayloadFromBundle(profiles.Current(), r.URL.Query().Get("id"))
 		if !ok {
 			writeJSONStatus(w, http.StatusNotFound, payload)
 			return
@@ -270,6 +274,27 @@ func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 		serveStaticFile(w, r, staticDir, "index.html")
 	})
 	return mux
+}
+
+type profileState struct {
+	mu     sync.RWMutex
+	bundle profile.Bundle
+}
+
+func newProfileState(bundle profile.Bundle) *profileState {
+	return &profileState{bundle: bundle}
+}
+
+func (s *profileState) Current() profile.Bundle {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.bundle
+}
+
+func (s *profileState) Replace(bundle profile.Bundle) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bundle = bundle
 }
 
 var staticFileNames = []string{
