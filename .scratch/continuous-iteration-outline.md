@@ -134,6 +134,9 @@ generic, profile-driven, and local-first.
 - Template config schema slice: SQLite Store schema version 2 now includes the
   generic template, node, workflow, interface-node, case, and fixture tables
   from the reference control-plane database model.
+- Profile catalog indexing slice: profile import now projects services,
+  workflows, interface nodes, API cases, request templates, bindings,
+  fixtures, and dependencies into the generic template-config Store tables.
 
 ## Open Task Queue
 

@@ -386,12 +386,92 @@ from profile_indexes where profile_id = %s;`, sqlString(profileID)), &rows); err
 	return rows[0].toStore(), nil
 }
 
+func (s *Store) ReplaceProfileCatalog(ctx context.Context, catalog store.ProfileCatalog) error {
+	indexedAt := encodeTime(catalog.IndexedAt)
+	if indexedAt == "" {
+		indexedAt = encodeTime(utcNow())
+	}
+	statements := []string{
+		"delete from interface_node_case_dependency;",
+		"delete from fixture_profile;",
+		"delete from workflow_interface_node;",
+		"delete from interface_node_case;",
+		"delete from interface_node_request_template;",
+		"delete from interface_node_field;",
+		"delete from interface_node;",
+		"delete from workflow_node;",
+		"delete from workflow;",
+		"delete from node_config;",
+		"delete from template_config;",
+		"delete from template;",
+		"delete from kv;",
+		fmt.Sprintf(`insert into kv (key, value, updated_at) values ('active_profile_id', %s, %s);`, sqlString(catalog.ProfileID), sqlString(indexedAt)),
+	}
+	for index, service := range catalog.Services {
+		statements = append(statements, fmt.Sprintf(`
+insert into node_config (id, display_name, role, status, sort_order)
+values (%s, %s, %s, 'active', %d);`, sqlString(service.ID), sqlString(service.DisplayName), sqlString(service.Kind), index))
+	}
+	for index, workflow := range catalog.Workflows {
+		statements = append(statements, fmt.Sprintf(`
+insert into workflow (id, name, template_id, template_config_id, description, status, sort_order)
+values (%s, %s, '', '', %s, 'active', %d);`, sqlString(workflow.ID), sqlString(workflow.DisplayName), sqlString(workflow.Description), index))
+	}
+	for index, node := range catalog.InterfaceNodes {
+		statements = append(statements, fmt.Sprintf(`
+insert into interface_node (id, display_name, service_id, status, sort_order, created_at, updated_at)
+values (%s, %s, %s, 'active', %d, %s, %s);`, sqlString(node.ID), sqlString(node.DisplayName), sqlString(node.ServiceID), index, sqlString(indexedAt), sqlString(indexedAt)))
+	}
+	for index, template := range catalog.RequestTemplates {
+		statements = append(statements, fmt.Sprintf(`
+insert into interface_node_request_template (id, node_id, name, template_json, status, sort_order, created_at, updated_at)
+values (%s, %s, %s, %s, 'active', %d, %s, %s);`, sqlString(template.ID), sqlString(template.NodeID), sqlString(template.DisplayName), sqlString(stringDefault(template.TemplateJSON, "{}")), index, sqlString(indexedAt), sqlString(indexedAt)))
+	}
+	for index, item := range catalog.APICases {
+		statements = append(statements, fmt.Sprintf(`
+insert into interface_node_case (id, node_id, title, case_type, status, sort_order, created_at, updated_at)
+values (%s, %s, %s, 'api', 'active', %d, %s, %s);`, sqlString(item.ID), sqlString(item.NodeID), sqlString(item.DisplayName), index, sqlString(indexedAt), sqlString(indexedAt)))
+	}
+	for index, binding := range catalog.WorkflowBindings {
+		statements = append(statements, fmt.Sprintf(`
+insert into workflow_interface_node (workflow_id, step_id, node_id, case_id, required, sort_order)
+values (%s, %s, %s, %s, %d, %d);`, sqlString(binding.WorkflowID), sqlString(binding.StepID), sqlString(binding.NodeID), sqlString(binding.CaseID), boolInt(binding.Required), index))
+		if binding.NodeID != "" {
+			statements = append(statements, fmt.Sprintf(`
+insert into workflow_node (workflow_id, node_id, required, sort_order)
+values (%s, %s, %d, %d)
+on conflict(workflow_id, node_id, relation_type) do nothing;`, sqlString(binding.WorkflowID), sqlString(binding.NodeID), boolInt(binding.Required), index))
+		}
+	}
+	for index, fixture := range catalog.Fixtures {
+		statements = append(statements, fmt.Sprintf(`
+insert into fixture_profile (id, name, source_type, description, status, sort_order, created_at, updated_at)
+values (%s, %s, %s, %s, 'active', %d, %s, %s);`, sqlString(fixture.ID), sqlString(fixture.DisplayName), sqlString(fixture.Kind), sqlString(fixture.DataJSON), index, sqlString(indexedAt), sqlString(indexedAt)))
+	}
+	for index, dependency := range catalog.CaseDependencies {
+		statements = append(statements, fmt.Sprintf(`
+insert into interface_node_case_dependency (id, case_id, fixture_profile_id, mappings_json, status, sort_order)
+values (%s, %s, %s, %s, 'active', %d);`, sqlString(dependency.ID), sqlString(dependency.CaseID), sqlString(dependency.FixtureID), sqlString(stringDefault(dependency.MappingsJSON, "[]")), index))
+	}
+	if err := s.exec(ctx, "begin;\n"+strings.Join(statements, "\n")+"\ncommit;"); err != nil {
+		return fmt.Errorf("replace profile catalog index %q: %w", catalog.ProfileID, err)
+	}
+	return nil
+}
+
 func (s *Store) exec(ctx context.Context, statement string) error {
 	out, err := sqliteCommand(ctx, false, s.path, statement)
 	if err != nil {
 		return fmt.Errorf("run sqlite statement: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+func stringDefault(value string, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 func (s *Store) query(ctx context.Context, statement string, target any) error {

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -152,7 +153,8 @@ func TestServerImportsProfileBundleIntoRuntimeStore(t *testing.T) {
 
 func TestServerProfileImportSwitchesActiveProfile(t *testing.T) {
 	ctx := context.Background()
-	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	dbPath := filepath.Join(t.TempDir(), "sandbox.sqlite")
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: dbPath})
 	if err != nil {
 		t.Fatalf("open sqlite store: %v", err)
 	}
@@ -189,6 +191,17 @@ func TestServerProfileImportSwitchesActiveProfile(t *testing.T) {
 	item, ok := items[0].(map[string]any)
 	if !ok || item["id"] != "node.alpha" {
 		t.Fatalf("interface node after import = %#v", items)
+	}
+	for table, want := range map[string]int{
+		"node_config":             1,
+		"workflow":                1,
+		"interface_node":          1,
+		"interface_node_case":     1,
+		"workflow_interface_node": 1,
+	} {
+		if got := sqliteCountRows(t, dbPath, table); got != want {
+			t.Fatalf("%s count = %d, want %d", table, got, want)
+		}
 	}
 }
 
@@ -2145,10 +2158,10 @@ func writeWorkbenchSampleProfile(t *testing.T) string {
   "services": [{"id":"service.alpha","displayName":"Service Alpha","kind":"http"}],
   "workflows": [{"id":"workflow.alpha","displayName":"Workflow Alpha"}],
   "interfaceNodes": [{"id":"node.alpha","displayName":"Node Alpha","serviceId":"service.alpha"}],
-  "apiCases": [],
+  "apiCases": [{"id":"case.alpha","displayName":"Case Alpha","nodeId":"node.alpha"}],
   "requestTemplates": [],
   "caseDependencies": [],
-  "workflowBindings": [],
+  "workflowBindings": [{"workflowId":"workflow.alpha","stepId":"step.alpha","nodeId":"node.alpha","caseId":"case.alpha","required":true}],
   "fixtures": []
 }`
 	if err := os.WriteFile(filepath.Join(profileDir, "profile.json"), []byte(raw), 0o644); err != nil {
@@ -2172,4 +2185,17 @@ func mustJSON(t *testing.T, value any) string {
 		t.Fatalf("marshal value: %v", err)
 	}
 	return string(raw)
+}
+
+func sqliteCountRows(t *testing.T, dbPath string, table string) int {
+	t.Helper()
+	out, err := exec.Command("sqlite3", dbPath, "select count(*) from "+table+";").CombinedOutput()
+	if err != nil {
+		t.Fatalf("count %s: %v: %s", table, err, out)
+	}
+	value, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		t.Fatalf("parse %s count %q: %v", table, out, err)
+	}
+	return value
 }

@@ -33,6 +33,7 @@ type Store interface {
 
 	UpsertProfileIndex(context.Context, ProfileIndex) (ProfileIndex, error)
 	GetProfileIndex(context.Context, string) (ProfileIndex, error)
+	ReplaceProfileCatalog(context.Context, ProfileCatalog) error
 }
 
 type Run struct {
@@ -90,4 +91,72 @@ type ProfileIndex struct {
 	SummaryJSON  string
 	ImportedAt   time.Time
 	UpdatedAt    time.Time
+}
+
+type ProfileCatalog struct {
+	ProfileID        string
+	IndexedAt        time.Time
+	Services         []CatalogService
+	Workflows        []CatalogWorkflow
+	InterfaceNodes   []CatalogInterfaceNode
+	APICases         []CatalogAPICase
+	RequestTemplates []CatalogRequestTemplate
+	WorkflowBindings []CatalogWorkflowBinding
+	CaseDependencies []CatalogCaseDependency
+	Fixtures         []CatalogFixture
+}
+
+type CatalogService struct {
+	ID          string
+	DisplayName string
+	Kind        string
+}
+
+type CatalogWorkflow struct {
+	ID          string
+	DisplayName string
+	Description string
+}
+
+type CatalogInterfaceNode struct {
+	ID          string
+	DisplayName string
+	ServiceID   string
+}
+
+type CatalogAPICase struct {
+	ID          string
+	DisplayName string
+	NodeID      string
+}
+
+type CatalogRequestTemplate struct {
+	ID           string
+	DisplayName  string
+	NodeID       string
+	Method       string
+	Path         string
+	TemplateJSON string
+}
+
+type CatalogWorkflowBinding struct {
+	WorkflowID string
+	StepID     string
+	NodeID     string
+	CaseID     string
+	Required   bool
+}
+
+type CatalogCaseDependency struct {
+	ID           string
+	CaseID       string
+	FixtureID    string
+	MappingsJSON string
+}
+
+type CatalogFixture struct {
+	ID          string
+	DisplayName string
+	Kind        string
+	DataJSON    string
 }
