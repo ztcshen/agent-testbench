@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"open-test-sandbox/internal/store"
+	"open-test-sandbox/internal/store/migrations"
 )
 
 type Config struct {
@@ -31,11 +32,63 @@ func (c Config) Resolve() Config {
 	return c
 }
 
+func ConfigFromURL(storeURL string) Config {
+	if storeURL == "" {
+		return Config{}.Resolve()
+	}
+	for _, prefix := range []string{"sqlite://", "file:"} {
+		if strings.HasPrefix(storeURL, prefix) {
+			return Config{Path: strings.TrimPrefix(storeURL, prefix)}.Resolve()
+		}
+	}
+	return Config{Path: storeURL}.Resolve()
+}
+
 type Store struct {
 	path string
 }
 
 func Open(ctx context.Context, cfg Config) (*Store, error) {
+	s, err := openRaw(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.migrate(ctx); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+type MigrationStatusResult struct {
+	Path           string
+	CurrentVersion int
+	TargetVersion  int
+	AppliedCount   int
+}
+
+func (r MigrationStatusResult) HasPending() bool {
+	return r.CurrentVersion < r.TargetVersion
+}
+
+func MigrationStatus(ctx context.Context, cfg Config) (MigrationStatusResult, error) {
+	s, err := openRaw(ctx, cfg)
+	if err != nil {
+		return MigrationStatusResult{}, err
+	}
+	defer s.Close()
+	return s.migrationStatus(ctx, 0)
+}
+
+func Migrate(ctx context.Context, cfg Config) (MigrationStatusResult, error) {
+	s, err := openRaw(ctx, cfg)
+	if err != nil {
+		return MigrationStatusResult{}, err
+	}
+	defer s.Close()
+	return s.migrate(ctx)
+}
+
+func openRaw(ctx context.Context, cfg Config) (*Store, error) {
 	cfg = cfg.Resolve()
 	if cfg.Path == "" {
 		return nil, errors.New("sqlite store path is required")
@@ -46,9 +99,6 @@ func Open(ctx context.Context, cfg Config) (*Store, error) {
 
 	s := &Store{path: cfg.Path}
 	if err := s.configure(ctx); err != nil {
-		return nil, err
-	}
-	if err := s.ensureSchema(ctx); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -65,73 +115,79 @@ PRAGMA busy_timeout = 5000;
 PRAGMA journal_mode = WAL;`)
 }
 
-func (s *Store) ensureSchema(ctx context.Context) error {
+func (s *Store) migrate(ctx context.Context) (MigrationStatusResult, error) {
+	if err := s.ensureMigrationTable(ctx); err != nil {
+		return MigrationStatusResult{}, err
+	}
+	current, err := s.currentMigrationVersion(ctx)
+	if err != nil {
+		return MigrationStatusResult{}, err
+	}
+
+	applied := 0
+	for _, migration := range migrations.All() {
+		if migration.Version <= current {
+			continue
+		}
+		statement := fmt.Sprintf(`
+begin;
+%s
+insert into schema_migrations (version, name, applied_at)
+values (%d, %s, %s);
+commit;`, migration.SQL, migration.Version, sqlString(migration.Name), sqlString(encodeTime(utcNow())))
+		if err := s.exec(ctx, statement); err != nil {
+			return MigrationStatusResult{}, fmt.Errorf("apply migration %d %q: %w", migration.Version, migration.Name, err)
+		}
+		applied++
+	}
+	return s.migrationStatus(ctx, applied)
+}
+
+func (s *Store) migrationStatus(ctx context.Context, applied int) (MigrationStatusResult, error) {
+	current, err := s.currentMigrationVersion(ctx)
+	if err != nil {
+		return MigrationStatusResult{}, err
+	}
+	return MigrationStatusResult{
+		Path:           s.path,
+		CurrentVersion: current,
+		TargetVersion:  migrations.CurrentVersion,
+		AppliedCount:   applied,
+	}, nil
+}
+
+func (s *Store) ensureMigrationTable(ctx context.Context) error {
 	return s.exec(ctx, `
-create table if not exists runs (
-  id text primary key,
-  profile_id text not null,
-  workflow_id text not null,
-  status text not null,
-  evidence_root text not null,
-  summary_json text not null default '',
-  started_at text,
-  finished_at text,
-  created_at text not null,
-  updated_at text not null
-);
-
-create table if not exists api_case_runs (
-  id text primary key,
-  run_id text not null,
-  case_id text not null,
-  status text not null,
-  request_summary_json text not null default '',
-  assertion_summary_json text not null default '',
-  started_at text,
-  finished_at text,
-  created_at text not null,
-  foreign key (run_id) references runs(id) on delete cascade
-);
-
-create index if not exists idx_api_case_runs_run_id_created_at
-  on api_case_runs(run_id, created_at, id);
-
-create table if not exists evidence_records (
-  id text primary key,
-  run_id text not null,
-  case_run_id text not null default '',
-  kind text not null,
-  uri text not null,
-  media_type text not null default '',
-  sha256 text not null default '',
-  size_bytes integer not null default 0,
-  summary text not null default '',
-  created_at text not null,
-  foreign key (run_id) references runs(id) on delete cascade
-);
-
-create index if not exists idx_evidence_records_run_id_created_at
-  on evidence_records(run_id, created_at, id);
-
-create table if not exists baseline_gates (
-  profile_id text not null,
-  subject_id text not null,
-  status text not null,
-  required integer not null,
-  summary_json text not null default '',
-  checked_at text,
-  updated_at text not null,
-  primary key (profile_id, subject_id)
-);
-
-create table if not exists profile_indexes (
-  profile_id text primary key,
-  bundle_path text not null,
-  bundle_digest text not null,
-  summary_json text not null default '',
-  imported_at text,
-  updated_at text not null
+create table if not exists schema_migrations (
+  version integer primary key,
+  name text not null,
+  applied_at text not null
 );`)
+}
+
+func (s *Store) currentMigrationVersion(ctx context.Context) (int, error) {
+	var tableRows []struct {
+		Count int `json:"count"`
+	}
+	if err := s.query(ctx, `
+select count(*) as count from sqlite_master
+where type = 'table' and name = 'schema_migrations';`, &tableRows); err != nil {
+		return 0, err
+	}
+	if len(tableRows) == 0 || tableRows[0].Count == 0 {
+		return 0, nil
+	}
+
+	var versionRows []struct {
+		Version int `json:"version"`
+	}
+	if err := s.query(ctx, `select coalesce(max(version), 0) as version from schema_migrations;`, &versionRows); err != nil {
+		return 0, err
+	}
+	if len(versionRows) == 0 {
+		return 0, nil
+	}
+	return versionRows[0].Version, nil
 }
 
 func (s *Store) CreateRun(ctx context.Context, r store.Run) (store.Run, error) {
