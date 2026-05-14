@@ -5,6 +5,7 @@
   "description": "Local-first integration test sandbox for template-driven workflows, API cases, fixtures, and evidence.",
   "scripts": {
     "build:frontend": "node control-plane/frontend/build.mjs",
+    "smoke:frontend": "node tools/smoke/control-plane-smoke.mjs",
     "test": "go test ./..."
   },
   "devDependencies": {
