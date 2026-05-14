@@ -58,6 +58,49 @@ func TestImportLegacyRuntimeIndexesRunsCasesAndEvidence(t *testing.T) {
 	}
 }
 
+func TestImportLegacyRuntimeSQLiteIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	sourcePath := filepath.Join(t.TempDir(), "legacy.sqlite")
+	createLegacyRuntimeDB(t, sourcePath)
+	targetPath := filepath.Join(t.TempDir(), "store.sqlite")
+
+	result, err := evidence.ImportLegacyRuntimeSQLite(ctx, evidence.SQLiteImportOptions{
+		SourcePath: sourcePath,
+		TargetPath: targetPath,
+		ProfileID:  "sample",
+	})
+	if err != nil {
+		t.Fatalf("import sqlite legacy runtime: %v", err)
+	}
+	if result.RunCount != 2 || result.APICaseRunCount != 1 || result.EvidenceCount != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+	second, err := evidence.ImportLegacyRuntimeSQLite(ctx, evidence.SQLiteImportOptions{
+		SourcePath: sourcePath,
+		TargetPath: targetPath,
+		ProfileID:  "sample",
+	})
+	if err != nil {
+		t.Fatalf("import sqlite legacy runtime again: %v", err)
+	}
+	if second.RunCount != 2 || second.APICaseRunCount != 1 || second.EvidenceCount != 1 {
+		t.Fatalf("second result = %#v", second)
+	}
+
+	target, err := sqlite.Open(ctx, sqlite.Config{Path: targetPath})
+	if err != nil {
+		t.Fatalf("open target store: %v", err)
+	}
+	defer target.Close()
+	caseRuns, err := target.ListAPICaseRuns(ctx, "case-run-parent")
+	if err != nil {
+		t.Fatalf("list case runs: %v", err)
+	}
+	if len(caseRuns) != 1 {
+		t.Fatalf("case runs should not duplicate: %#v", caseRuns)
+	}
+}
+
 func createLegacyRuntimeDB(t *testing.T, path string) {
 	t.Helper()
 	statement := `

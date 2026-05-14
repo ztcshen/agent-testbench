@@ -223,15 +223,11 @@ func runEvidenceImport(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	s, err := sqlite.Open(ctx, sqlite.ConfigFromURL(*storeURL))
-	if err != nil {
-		return err
-	}
-	defer s.Close()
-	result, err := evidence.ImportLegacyRuntime(ctx, evidence.ImportOptions{
+	cfg := sqlite.ConfigFromURL(*storeURL)
+	result, err := evidence.ImportLegacyRuntimeSQLite(ctx, evidence.SQLiteImportOptions{
 		SourcePath: *from,
 		ProfileID:  *profileID,
-		Store:      s,
+		TargetPath: cfg.Path,
 	})
 	if err != nil {
 		return err
