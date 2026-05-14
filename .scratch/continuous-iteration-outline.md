@@ -55,7 +55,7 @@ generic, profile-driven, and local-first.
 - Frontend agent run detail slice: reference Agent Run page is served with a
   clean missing-run recovery state.
 - Frontend API Case workbench slice: reference API Case page is served with a
-  profile-backed capability API and JSON run placeholder.
+  profile-backed capability API.
 - Frontend replay evidence slice: reference Replay Evidence page is served with
   a clean missing-trace recovery state.
 - Frontend legacy script asset slice: reference dashboard and workflow catalog
@@ -65,6 +65,19 @@ generic, profile-driven, and local-first.
 - Frontend workflow blueprint React slice: `workflow-blueprint-demo.html` and
   `workflow-blueprint-new.html` are served through a neutral source-built
   blueprint bundle.
+- API Case run API slice: `/api/cases/run` executes the generic API Case
+  runner, writes Evidence, indexes Store records, and returns a viewer URL.
+- API Case profile run config slice: profile API Case assets can provide
+  `casePath`, `baseUrl`, `evidenceDir`, `timeoutSeconds`, and
+  `defaultOverrides` to the workbench.
+- API Case override slice: control-plane and CLI runs apply request body
+  overrides and record the resolved request in Evidence.
+- API Case evidence slice: `/api/case/evidence` exposes raw request and
+  response bodies from local Evidence files with Store summary fallback.
+- API Case report slice: run API responses include operation, HTTP code, and
+  response byte summaries for the frontend result panel.
+- Store contract hardening slice: run summaries, API Case summaries, and
+  Evidence diagnostic metadata are covered by the SQLite Store contract.
 
 ## Open Task Queue
 
@@ -81,20 +94,19 @@ Acceptance:
 - Core/profile separation remains intact.
 - `go test ./...` and the source-domain scan pass after each slice.
 
-### Task 2: Rebuild Remaining React Bundles From Neutral Source
+### Task 2: Expand Store-Backed Workbench APIs
 
 Goal:
-- Serve the remaining reference React-backed pages without copying source-domain
-  terms into core static assets.
+- Replace remaining placeholder or empty-only workbench APIs with Store-backed
+  generic contracts where the Store already has enough data.
 
-Blocked pages:
-- `trace-call.html`
-- `trace-evidence.html`
-- `workflow-blueprint-demo.html`
-- `workflow-blueprint-new.html`
+Candidate APIs:
+- `/api/case/incomplete-batches`
+- `/api/agent-test`
+- missing Store-backed detail fields in Workflow and API Case views
 
 Acceptance:
-- `controlPlane.js` and `workflowBlueprintDemo.js` are produced from neutral
-  source or replaced with equivalent generic source-level modules.
-- The source-domain scan passes before the bundles enter `control-plane/static`.
-- Each page has a headless smoke test proving the bundle renders.
+- Contract tests cover the new response shape.
+- A headless page smoke proves the frontend consumes the Store-backed response.
+- `go test ./...`, `npm run build:frontend`, and the source-domain scan pass
+  after each slice.
