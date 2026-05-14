@@ -188,6 +188,10 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 		{path: "/workflow-run.js", want: "/api/runs"},
 		{path: "/workflow-detail.html", want: "TPL-WORKFLOW-LONG-CHAIN-V1"},
 		{path: "/workflow-detail.js", want: "/api/catalog"},
+		{path: "/workflow-step.html", want: "TPL-INTERFACE-STEP-DETAIL-V1"},
+		{path: "/workflow-step.js", want: "/api/dashboard"},
+		{path: "/topology-renderer.js", want: "render"},
+		{path: "/interface-run-template.js", want: "render"},
 		{path: "/styles.css", want: "body"},
 		{path: "/assets/react/controlPlane.css", want: "react-control-plane"},
 	} {

@@ -34,6 +34,8 @@ generic, profile-driven, and local-first.
   with a profile-backed interface-node list API.
 - Frontend workflow detail slice: reference Workflow detail page is served and
   renders a clean empty-profile state.
+- Frontend step detail slice: reference Workflow step page and local rendering
+  helpers are served with a clean empty-profile state.
 
 ## Open Task Queue
 

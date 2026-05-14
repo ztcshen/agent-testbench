@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Workflow Step · Open Test Sandbox</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/assets/react/controlPlane.css">
+  </head>
+  <body>
+    <main class="app workflow-step-page workflow-step-compact-density" data-template-id="TPL-INTERFACE-STEP-DETAIL-V1">
+      <div class="template-watermark" aria-label="模板编号">TPL-INTERFACE-STEP-DETAIL-V1</div>
+      <section class="topbar workflow-step-topbar">
+        <div>
+          <h1 id="workflowStepTitle">Workflow Step 详情</h1>
+          <p id="workflowStepSummary">loading</p>
+        </div>
+        <div class="actions">
+          <span id="workflowStepMessage" class="workflow-step-status-pill" role="status">ready</span>
+          <a class="button-link" href="/">控制台</a>
+          <a class="button-link" href="/workflows.html">Workflow 目录</a>
+          <a class="button-link" href="/dashboard.html">环境大盘</a>
+          <a id="workflowDefinitionLink" class="button-link" href="/workflow-detail.html">返回 Workflow 定义</a>
+        </div>
+      </section>
+
+      <section id="workflowStepLoadProgress" class="workflow-step-load-progress" aria-label="Workflow Step 加载进度" aria-live="polite">
+        <div class="workflow-step-load-progress-head">
+          <strong id="workflowStepLoadProgressTitle">准备加载</strong>
+          <span id="workflowStepLoadProgressValue">0%</span>
+        </div>
+        <div class="workflow-step-load-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div id="workflowStepLoadProgressFill" class="workflow-step-load-progress-fill"></div>
+        </div>
+      </section>
+
+      <section class="workflow-step-layout">
+        <aside class="workflow-step-side">
+          <h2>定位</h2>
+          <label class="workflow-detail-selector">
+            <span>切换步骤</span>
+            <select id="workflowStepSelector"></select>
+          </label>
+          <code id="workflowStepId">-</code>
+          <h2>Workflow</h2>
+          <code id="workflowStepWorkflowId">-</code>
+          <h2>运行证据</h2>
+          <code id="workflowStepRunId">未绑定 run</code>
+          <h2>前后步骤</h2>
+          <div class="workflow-step-nav">
+            <a id="previousStepLink" class="button-link" href="#">上一步</a>
+            <a id="nextStepLink" class="button-link" href="#">下一步</a>
+          </div>
+        </aside>
+
+        <section class="workflow-step-main">
+          <section class="workflow-step-hero">
+            <div>
+              <span id="workflowStepService" class="detail-phase">service</span>
+              <h2 id="workflowStepName">-</h2>
+              <p id="workflowStepDescription">-</p>
+            </div>
+            <code id="workflowStepCase">case</code>
+          </section>
+
+          <section class="workflow-step-grid">
+            <article class="workflow-step-card">
+              <span>Action</span>
+              <strong id="workflowStepAction">-</strong>
+            </article>
+            <article class="workflow-step-card">
+              <span>Evidence</span>
+              <div id="workflowStepEvidence" class="workflow-detail-chips"></div>
+            </article>
+            <article class="workflow-step-card">
+              <span>Mock Target</span>
+              <div id="workflowStepMocks" class="workflow-detail-chips"></div>
+            </article>
+          </section>
+
+          <section id="workflowStepServiceEvidence" class="workflow-step-service-evidence" aria-label="Step service evidence"></section>
+          <section id="workflowStepObservationBoard" class="workflow-step-observation-board" aria-label="Workflow step observation board"></section>
+
+          <section id="workflowStepRunEvidence" class="workflow-step-run-evidence" aria-label="Interface run evidence">
+            <div class="section-head">
+              <div>
+                <h2>接口运行明细</h2>
+                <p id="workflowStepRunEvidenceMeta">未绑定 Workflow run</p>
+              </div>
+              <a id="workflowStepRunLink" class="button-link disabled-link" href="#">查看 Workflow Run</a>
+            </div>
+            <div id="workflowStepRunSummary" class="workflow-step-run-summary"></div>
+            <div id="workflowStepRequestResponse" class="workflow-step-request-response"></div>
+            <div class="section-head workflow-step-topology-head">
+              <div>
+                <h2>SkyWalking 拓扑</h2>
+                <p id="workflowStepTopologyMeta">等待运行证据</p>
+              </div>
+              <a id="workflowStepTopologyLink" class="button-link disabled-link" href="#">打开拓扑工作台</a>
+            </div>
+            <div id="workflowStepTopologyGraph" class="workflow-step-topology-graph"></div>
+          </section>
+
+          <section class="workflow-step-detail-card">
+            <div class="section-head">
+              <h2 id="workflowStepSequenceTitle">全步骤导航</h2>
+              <span id="workflowStepPosition" class="evidence-count">-</span>
+            </div>
+            <div id="workflowStepSequence" class="workflow-step-sequence"></div>
+          </section>
+
+          <section id="workflowStepContext" class="workflow-step-context" aria-label="Workflow step context"></section>
+        </section>
+      </section>
+    </main>
+    <script defer src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script defer src="/topology-renderer.js"></script>
+    <script defer src="/interface-run-template.js"></script>
+    <script defer src="/workflow-step.js"></script>
+  </body>
+</html>

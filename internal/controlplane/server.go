@@ -110,6 +110,10 @@ var staticFileNames = []string{
 	"workflow-run.js",
 	"workflow-detail.html",
 	"workflow-detail.js",
+	"workflow-step.html",
+	"workflow-step.js",
+	"topology-renderer.js",
+	"interface-run-template.js",
 	"styles.css",
 }
 
