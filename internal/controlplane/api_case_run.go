@@ -186,7 +186,7 @@ func apiCaseEvidenceSummary(path string, kind string, fallbackSize int64) (strin
 }
 
 func apiCaseRunReport(result apicase.RunResult) map[string]any {
-	return map[string]any{
+	report := map[string]any{
 		"run_id":        result.RunID,
 		"case_id":       result.CaseID,
 		"status":        result.Status,
@@ -196,6 +196,18 @@ func apiCaseRunReport(result apicase.RunResult) map[string]any {
 		"finished_at":   result.FinishedAt,
 		"elapsed_ms":    result.ElapsedMs,
 	}
+	if request, ok := jsonFileObject(filepath.Join(result.EvidencePath, "request.json")); ok {
+		method := strings.ToUpper(valueString(request["method"]))
+		path := valueString(request["path"])
+		report["method"] = method
+		report["path"] = path
+		report["operation"] = strings.TrimSpace(method + " " + path)
+	}
+	if response, ok := jsonFileObject(filepath.Join(result.EvidencePath, "response.json")); ok {
+		report["actual_http_code"] = intValue(response["statusCode"])
+		report["response_body_bytes"] = len(valueString(response["body"]))
+	}
+	return report
 }
 
 func apiCaseViewerURL(result apicase.RunResult) string {
@@ -244,4 +256,16 @@ func mapValue(value any) map[string]any {
 		return map[string]any{}
 	}
 	return typed
+}
+
+func jsonFileObject(path string) (map[string]any, bool) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, false
+	}
+	return out, true
 }

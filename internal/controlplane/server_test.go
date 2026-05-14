@@ -1278,10 +1278,12 @@ func TestServerRunsAPICaseAndIndexesStoreRecords(t *testing.T) {
 		DryRun    bool   `json:"dryRun"`
 		ViewerURL string `json:"viewerUrl"`
 		Report    struct {
-			RunID     string `json:"run_id"`
-			CaseID    string `json:"case_id"`
-			Status    string `json:"status"`
-			ElapsedMs int64  `json:"elapsed_ms"`
+			RunID          string `json:"run_id"`
+			CaseID         string `json:"case_id"`
+			Status         string `json:"status"`
+			Operation      string `json:"operation"`
+			ActualHTTPCode int    `json:"actual_http_code"`
+			ElapsedMs      int64  `json:"elapsed_ms"`
 		} `json:"report"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
@@ -1292,6 +1294,9 @@ func TestServerRunsAPICaseAndIndexesStoreRecords(t *testing.T) {
 	}
 	if payload.Report.RunID == "" || payload.Report.ElapsedMs < 0 {
 		t.Fatalf("api case run timing = %#v", payload.Report)
+	}
+	if payload.Report.Operation != "POST /v1/items" || payload.Report.ActualHTTPCode != 200 {
+		t.Fatalf("api case run report details = %#v", payload.Report)
 	}
 
 	runs, err := s.ListRuns(ctx)
