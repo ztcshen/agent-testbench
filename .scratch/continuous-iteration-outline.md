@@ -32,6 +32,8 @@ generic, profile-driven, and local-first.
   an empty local run index.
 - Frontend node detail slice: reference environment node detail page is served
   with a profile-backed interface-node list API.
+- Frontend workflow detail slice: reference Workflow detail page is served and
+  renders a clean empty-profile state.
 
 ## Open Task Queue
 

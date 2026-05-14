@@ -108,6 +108,8 @@ var staticFileNames = []string{
 	"service-inventory.js",
 	"workflow-run.html",
 	"workflow-run.js",
+	"workflow-detail.html",
+	"workflow-detail.js",
 	"styles.css",
 }
 

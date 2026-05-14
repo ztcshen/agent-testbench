@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Workflow 定义 · Open Test Sandbox</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/assets/react/controlPlane.css">
+  </head>
+  <body>
+    <main class="app workflow-detail-page workflow-detail-compact-density" data-template-id="TPL-WORKFLOW-LONG-CHAIN-V1">
+      <div class="template-watermark" aria-label="模板编号">TPL-WORKFLOW-LONG-CHAIN-V1</div>
+      <section class="topbar">
+        <div>
+          <h1 id="workflowDetailTitle">Workflow 定义</h1>
+          <p id="workflowDetailSummary">loading</p>
+        </div>
+        <div class="actions">
+          <span id="workflowDetailMessage" class="workflow-detail-status-pill" role="status">ready</span>
+          <a class="button-link" href="/">控制台</a>
+          <a class="button-link" href="/workflows.html">Workflow 目录</a>
+          <a class="button-link" href="/dashboard.html">环境大盘</a>
+          <label class="check-row compact-check">
+            <input id="workflowDryRun" type="checkbox">
+            <span>dry-run</span>
+          </label>
+          <button id="runWorkflowBtn" class="primary-action" type="button">运行 Workflow</button>
+        </div>
+      </section>
+
+      <section id="workflowRunnerPanel" class="workflow-run-template" aria-label="Workflow run template">
+        <div class="workflow-run-template-head">
+          <article>
+            <span>workflow</span>
+            <strong id="workflowRunnerId">-</strong>
+          </article>
+          <article>
+            <span>steps</span>
+            <strong id="workflowRunnerStepCount">0 / 0</strong>
+          </article>
+          <article>
+            <span>status</span>
+            <strong id="workflowRunnerStatus" class="status-pill idle">未运行</strong>
+          </article>
+          <article>
+            <span>elapsed</span>
+            <strong id="workflowRunnerElapsed">-</strong>
+          </article>
+        </div>
+        <section class="workflow-progress" aria-label="Workflow progress">
+          <div class="workflow-progress-head">
+            <span id="workflowProgressText">0 / 0</span>
+            <strong id="workflowProgressCurrent">等待运行</strong>
+          </div>
+          <div class="workflow-progress-track" aria-hidden="true">
+            <div id="workflowProgressFill" class="workflow-progress-fill"></div>
+          </div>
+          <div id="workflowProgressSteps" class="workflow-progress-steps"></div>
+        </section>
+      </section>
+
+      <section class="workflow-detail-layout">
+        <aside class="workflow-detail-side">
+          <h2>定义来源</h2>
+          <p id="workflowSource">loading</p>
+          <div id="workflowWarnings" class="workflow-detail-warning" hidden></div>
+          <h2>Workflow</h2>
+          <label class="workflow-detail-selector">
+            <span>切换 Workflow</span>
+            <select id="workflowSelector"></select>
+          </label>
+          <code id="workflowDetailId">-</code>
+          <h2>模板入口</h2>
+          <code id="workflowDetailEntrypoint">-</code>
+          <h2>服务覆盖</h2>
+          <div id="workflowServiceCoverage" class="workflow-service-summary"></div>
+        </aside>
+
+        <section class="workflow-detail-main">
+          <div id="workflowObservabilityBoard" class="workflow-observability-board" aria-label="Workflow observation board"></div>
+          <div id="workflowGraphPanel" class="workflow-graph-panel" aria-label="Workflow 链路"></div>
+          <div class="section-head">
+            <div>
+              <h2>步骤</h2>
+              <p id="workflowStepSummary">loading</p>
+            </div>
+          </div>
+          <div id="workflowStepList" class="workflow-detail-steps"></div>
+          <div id="workflowCoveragePanel" class="workflow-coverage-panel" aria-label="Workflow coverage"></div>
+        </section>
+      </section>
+    </main>
+    <script src="/workflow-detail.js"></script>
+  </body>
+</html>
