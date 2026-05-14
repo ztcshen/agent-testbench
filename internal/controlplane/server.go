@@ -149,13 +149,7 @@ func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, map[string]any{
-			"ok":       true,
-			"dryRun":   true,
-			"count":    0,
-			"items":    []map[string]any{},
-			"warnings": []string{},
-		})
+		handleCaseIncompleteBatches(w, r, bundle, runtime)
 	})
 	mux.HandleFunc("/api/replay/evidence", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

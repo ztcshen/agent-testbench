@@ -902,6 +902,58 @@ func TestServerExposesEmptyWorkbenchAuxiliaryAPIs(t *testing.T) {
 	}
 }
 
+func TestServerExposesIncompleteAPICasesFromStore(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+
+	_, err = s.CreateRun(ctx, store.Run{
+		ID:           "run.alpha",
+		ProfileID:    "sample",
+		Status:       store.StatusPassed,
+		EvidenceRoot: ".runtime/evidence/run.alpha",
+		SummaryJSON:  "{}",
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	_, err = s.RecordAPICaseRun(ctx, store.APICaseRun{
+		ID:                   "run.alpha.case",
+		RunID:                "run.alpha",
+		CaseID:               "case.alpha",
+		Status:               store.StatusPassed,
+		RequestSummaryJSON:   `{"method":"POST","path":"/alpha"}`,
+		AssertionSummaryJSON: `{"status":"passed","errorCount":0}`,
+	})
+	if err != nil {
+		t.Fatalf("record api case run: %v", err)
+	}
+
+	bundle := profile.Bundle{
+		ID:          "sample",
+		DisplayName: "Sample Profile",
+		APICases: []profile.APICase{
+			{ID: "case.alpha", DisplayName: "Case Alpha", CasePath: "profiles/sample/cases/case.alpha.json"},
+			{ID: "case.beta", DisplayName: "Case Beta", CasePath: "profiles/sample/cases/case.beta.json"},
+		},
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/case/incomplete-batches", http.StatusOK)
+	if payload["ok"] != true || payload["count"] != float64(1) {
+		t.Fatalf("incomplete cases payload = %#v", payload)
+	}
+	items := payload["items"].([]any)
+	item := items[0].(map[string]any)
+	if item["id"] != "case.beta" || item["reason"] != "not-run" || !strings.Contains(item["suggestedCommand"].(string), "profiles/sample/cases/case.beta.json") {
+		t.Fatalf("incomplete case item = %#v", item)
+	}
+}
+
 func TestServerExposesCaseRunsFromStore(t *testing.T) {
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
