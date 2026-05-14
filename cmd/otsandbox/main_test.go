@@ -84,6 +84,33 @@ func TestEvidenceImportCommandIndexesLegacyRuntime(t *testing.T) {
 	}
 }
 
+func TestEvidenceImportCommandCanEmitJSONReport(t *testing.T) {
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "legacy.sqlite")
+	createLegacyRuntimeDB(t, sourcePath)
+	storePath := filepath.Join(dir, "store.sqlite")
+
+	out := runCLI(t, "evidence", "import", "--from", sourcePath, "--profile", "sample", "--store-url", storePath, "--json")
+
+	var report struct {
+		SourcePath      string `json:"sourcePath"`
+		StorePath       string `json:"storePath"`
+		ProfileID       string `json:"profileId"`
+		RunCount        int    `json:"runCount"`
+		APICaseRunCount int    `json:"apiCaseRunCount"`
+		EvidenceCount   int    `json:"evidenceCount"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode evidence import json report: %v\n%s", err, out)
+	}
+	if report.SourcePath != sourcePath || report.StorePath != storePath || report.ProfileID != "sample" {
+		t.Fatalf("report paths/profile = %#v", report)
+	}
+	if report.RunCount != 2 || report.APICaseRunCount != 1 || report.EvidenceCount != 1 {
+		t.Fatalf("report counts = %#v", report)
+	}
+}
+
 func TestCaseRunDryRunCommandWritesEvidence(t *testing.T) {
 	dir := t.TempDir()
 	casePath := filepath.Join(dir, "case.json")

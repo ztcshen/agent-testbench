@@ -236,6 +236,7 @@ func runEvidenceImport(ctx context.Context, args []string) error {
 	from := flags.String("from", "", "Source runtime SQLite path")
 	profileID := flags.String("profile", "", "Profile id")
 	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -251,11 +252,33 @@ func runEvidenceImport(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	report := evidenceImportReport{
+		SourcePath:      *from,
+		StorePath:       cfg.Path,
+		ProfileID:       *profileID,
+		RunCount:        result.RunCount,
+		APICaseRunCount: result.APICaseRunCount,
+		EvidenceCount:   result.EvidenceCount,
+	}
+	if *jsonOutput {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(report)
+	}
 	fmt.Println("Imported evidence index")
 	fmt.Printf("Runs: %d\n", result.RunCount)
 	fmt.Printf("API Case Runs: %d\n", result.APICaseRunCount)
 	fmt.Printf("Evidence Records: %d\n", result.EvidenceCount)
 	return nil
+}
+
+type evidenceImportReport struct {
+	SourcePath      string `json:"sourcePath"`
+	StorePath       string `json:"storePath"`
+	ProfileID       string `json:"profileId"`
+	RunCount        int    `json:"runCount"`
+	APICaseRunCount int    `json:"apiCaseRunCount"`
+	EvidenceCount   int    `json:"evidenceCount"`
 }
 
 func runCase(ctx context.Context, args []string) error {
