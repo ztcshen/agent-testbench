@@ -126,6 +126,9 @@ generic, profile-driven, and local-first.
 - API Case post-run refresh slice: `api-cases.html` now refreshes Store-backed
   case run capability state after one-click runs while preserving the selected
   case.
+- React-only static surface slice: legacy top-level `dashboard.js` and
+  `workflows.js` are no longer served; dashboard/catalog pages use only the
+  source-built React bundles.
 
 ## Open Task Queue
 

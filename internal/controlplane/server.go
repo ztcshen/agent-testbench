@@ -294,8 +294,6 @@ func (s *profileState) Replace(bundle profile.Bundle) {
 
 var staticFileNames = []string{
 	"index.html",
-	"dashboard.js",
-	"workflows.js",
 	"agent-test.html",
 	"agent-run.html",
 	"api-cases.html",

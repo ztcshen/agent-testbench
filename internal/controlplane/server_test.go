@@ -410,8 +410,6 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 		want string
 	}{
 		{path: "/index.html", want: "react-sandbox-workbench-root"},
-		{path: "/dashboard.js", want: "/api/dashboard"},
-		{path: "/workflows.js", want: "/api/catalog"},
 		{path: "/agent-test.html", want: "react-agent-test-root"},
 		{path: "/agent-run.html", want: "react-agent-run-root"},
 		{path: "/api-cases.html", want: "react-api-cases-root"},
@@ -938,6 +936,25 @@ func TestServerExposesDashboardSnapshotForReactShell(t *testing.T) {
 	}
 	if payload.Groups[0].Items[0].Branch != "sample" || payload.Groups[0].Items[0].Profile != "sample" {
 		t.Fatalf("dashboard item profile markers = %#v", payload.Groups[0].Items[0])
+	}
+}
+
+func TestServerDoesNotServeLegacyTopLevelScripts(t *testing.T) {
+	server := httptest.NewServer(controlplane.New(loadEmptyProfile(t)))
+	defer server.Close()
+
+	for _, path := range []string{"/dashboard.js", "/workflows.js"} {
+		resp, err := http.Get(server.URL + path)
+		if err != nil {
+			t.Fatalf("get %s: %v", path, err)
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		if err := resp.Body.Close(); err != nil {
+			t.Fatalf("close %s: %v", path, err)
+		}
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("%s status = %d, want 404", path, resp.StatusCode)
+		}
 	}
 }
 
