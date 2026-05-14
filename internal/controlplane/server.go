@@ -80,6 +80,8 @@ func New(bundle profile.Bundle) http.Handler {
 		"environment-nodes.js",
 		"service-inventory.html",
 		"service-inventory.js",
+		"workflow-run.html",
+		"workflow-run.js",
 		"styles.css",
 	} {
 		name := name

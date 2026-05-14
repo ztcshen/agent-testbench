@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>运行历史 · Open Test Sandbox</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/assets/react/controlPlane.css">
+  </head>
+  <body>
+    <main class="app workflow-run-page" data-template-id="TPL-WORKFLOW-RUN-EVIDENCE-V1">
+      <div class="template-watermark" aria-label="模板编号">TPL-WORKFLOW-RUN-EVIDENCE-V1</div>
+      <section class="topbar">
+        <div>
+          <h1>Workflow run</h1>
+          <p id="workflowRunTitle">run loading</p>
+        </div>
+        <div class="actions">
+          <span id="workflowRunStatus" class="workflow-step-status-pill" role="status">loading</span>
+          <a class="button-link" href="/">控制台</a>
+          <a class="button-link" href="/dashboard.html">环境大盘</a>
+        </div>
+      </section>
+
+      <section id="workflowRunSummary" class="workflow-run-summary" aria-label="Workflow run summary"></section>
+
+      <section id="workflowRunObservationBoard" class="workflow-run-observation-board" aria-label="Workflow run configured observation board"></section>
+
+      <section class="workflow-run-shell">
+        <section class="workflow-run-panel workflow-run-steps-panel">
+          <div class="section-head">
+            <div>
+              <h2>Steps</h2>
+              <p id="workflowRunStepsMeta">loading</p>
+            </div>
+          </div>
+          <div id="workflowRunSteps" class="workflow-run-steps"></div>
+        </section>
+
+        <section class="workflow-run-panel">
+          <div class="section-head">
+            <div>
+              <h2>Trace topology</h2>
+              <p id="workflowRunTraceTopologiesMeta">loading</p>
+            </div>
+            <a id="workflowRunTraceTopologyWorkbench" class="button-link" href="/trace-topology.html">拓扑工作台</a>
+          </div>
+          <div id="workflowRunTraceTopologies" class="workflow-run-trace-topologies"></div>
+        </section>
+
+        <section class="workflow-run-panel">
+          <div class="section-head">
+            <div>
+              <h2>Identifiers</h2>
+              <p id="workflowRunIdentifiersMeta">loading</p>
+            </div>
+          </div>
+          <div id="workflowRunIdentifiers" class="workflow-run-identifiers"></div>
+        </section>
+      </section>
+    </main>
+    <script src="/workflow-run.js"></script>
+  </body>
+</html>

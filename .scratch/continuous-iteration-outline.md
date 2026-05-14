@@ -28,6 +28,8 @@ generic, profile-driven, and local-first.
   checks live under neutral guardrails.
 - Frontend navigation slice: reference environment node and service inventory
   pages are served from generic static assets.
+- Frontend run history slice: reference Workflow run page is served and handles
+  an empty local run index.
 
 ## Open Task Queue
 

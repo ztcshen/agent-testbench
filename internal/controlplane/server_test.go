@@ -182,6 +182,8 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 		{path: "/environment-nodes.js", want: "/api/dashboard"},
 		{path: "/service-inventory.html", want: "TPL-SERVICE-INVENTORY-V1"},
 		{path: "/service-inventory.js", want: "/api/catalog"},
+		{path: "/workflow-run.html", want: "TPL-WORKFLOW-RUN-EVIDENCE-V1"},
+		{path: "/workflow-run.js", want: "/api/runs"},
 		{path: "/styles.css", want: "body"},
 		{path: "/assets/react/controlPlane.css", want: "react-control-plane"},
 	} {
