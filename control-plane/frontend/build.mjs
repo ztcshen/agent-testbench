@@ -1,4 +1,4 @@
-import { rmSync } from "node:fs";
+import { copyFileSync, rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -32,3 +32,5 @@ await build({
   },
   logLevel: "info",
 });
+
+copyFileSync(resolve(root, "src/controlPlane.css"), resolve(outdir, "controlPlane.css"));

@@ -26,6 +26,8 @@ generic, profile-driven, and local-first.
 - Release hygiene pass.
 - Review feedback: source-transfer notes removed from repo, and source-domain
   checks live under neutral guardrails.
+- Frontend navigation slice: reference environment node and service inventory
+  pages are served from generic static assets.
 
 ## Open Task Queue
 

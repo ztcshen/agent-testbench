@@ -170,6 +170,42 @@ func TestServerRendersWorkflowCatalogPage(t *testing.T) {
 	}
 }
 
+func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
+	server := httptest.NewServer(controlplane.New(loadEmptyProfile(t)))
+	defer server.Close()
+
+	for _, item := range []struct {
+		path string
+		want string
+	}{
+		{path: "/environment-nodes.html", want: "TPL-ENVIRONMENT-NODE-LIST-V1"},
+		{path: "/environment-nodes.js", want: "/api/dashboard"},
+		{path: "/service-inventory.html", want: "TPL-SERVICE-INVENTORY-V1"},
+		{path: "/service-inventory.js", want: "/api/catalog"},
+		{path: "/styles.css", want: "body"},
+		{path: "/assets/react/controlPlane.css", want: "react-control-plane"},
+	} {
+		resp, err := http.Get(server.URL + item.path)
+		if err != nil {
+			t.Fatalf("get %s: %v", item.path, err)
+		}
+		raw, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			t.Fatalf("read %s: %v", item.path, readErr)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s status = %d", item.path, resp.StatusCode)
+		}
+		if strings.HasSuffix(item.path, ".css") && !strings.Contains(resp.Header.Get("Content-Type"), "text/css") {
+			t.Fatalf("%s content-type = %q", item.path, resp.Header.Get("Content-Type"))
+		}
+		if !strings.Contains(string(raw), item.want) {
+			t.Fatalf("%s missing %q", item.path, item.want)
+		}
+	}
+}
+
 func TestServerExposesCatalogForReactShell(t *testing.T) {
 	bundle := profile.Bundle{
 		ID:          "sample",
@@ -282,8 +318,10 @@ func TestServerExposesDashboardSnapshotForReactShell(t *testing.T) {
 		} `json:"summary"`
 		Groups []struct {
 			ID    string `json:"id"`
+			Label string `json:"label"`
 			Items []struct {
 				ID      string `json:"id"`
+				Name    string `json:"name"`
 				State   string `json:"state"`
 				Health  string `json:"health"`
 				Kind    string `json:"kind"`
@@ -302,7 +340,10 @@ func TestServerExposesDashboardSnapshotForReactShell(t *testing.T) {
 	if len(payload.Groups) != 1 || payload.Groups[0].ID != "business" {
 		t.Fatalf("dashboard groups = %#v", payload.Groups)
 	}
-	if len(payload.Groups[0].Items) != 1 || payload.Groups[0].Items[0].ID != "service.alpha" || payload.Groups[0].Items[0].State != "missing" {
+	if payload.Groups[0].Label != "Services" {
+		t.Fatalf("dashboard group label = %#v", payload.Groups[0])
+	}
+	if len(payload.Groups[0].Items) != 1 || payload.Groups[0].Items[0].ID != "service.alpha" || payload.Groups[0].Items[0].Name != "Service Alpha" || payload.Groups[0].Items[0].State != "missing" {
 		t.Fatalf("dashboard items = %#v", payload.Groups[0].Items)
 	}
 	if payload.Groups[0].Items[0].Branch != "sample" || payload.Groups[0].Items[0].Profile != "sample" {

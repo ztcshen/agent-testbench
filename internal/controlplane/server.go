@@ -75,6 +75,22 @@ func New(bundle profile.Bundle) http.Handler {
 		}
 		serveStaticFile(w, r, staticDir, "workflows.html")
 	})
+	for _, name := range []string{
+		"environment-nodes.html",
+		"environment-nodes.js",
+		"service-inventory.html",
+		"service-inventory.js",
+		"styles.css",
+	} {
+		name := name
+		mux.HandleFunc("/"+name, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet {
+				w.WriteHeader(http.StatusMethodNotAllowed)
+				return
+			}
+			serveStaticFile(w, r, staticDir, name)
+		})
+	}
 	mux.Handle("/assets/react/", http.StripPrefix("/assets/react/", http.FileServer(http.Dir(filepath.Join(staticDir, "assets", "react")))))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/dashboard.html", http.StatusFound)
@@ -109,12 +125,14 @@ type dashboardSummary struct {
 
 type dashboardGroup struct {
 	ID          string          `json:"id"`
+	Label       string          `json:"label"`
 	DisplayName string          `json:"displayName"`
 	Items       []dashboardItem `json:"items"`
 }
 
 type dashboardItem struct {
 	ID          string `json:"id"`
+	Name        string `json:"name,omitempty"`
 	DisplayName string `json:"displayName,omitempty"`
 	State       string `json:"state"`
 	Health      string `json:"health"`
@@ -234,6 +252,7 @@ func dashboardPayloadFromBundle(bundle profile.Bundle) dashboardPayload {
 	for _, service := range bundle.Services {
 		items = append(items, dashboardItem{
 			ID:          service.ID,
+			Name:        firstNonEmpty(service.DisplayName, service.ID),
 			DisplayName: service.DisplayName,
 			State:       "missing",
 			Health:      "unknown",
@@ -250,6 +269,7 @@ func dashboardPayloadFromBundle(bundle profile.Bundle) dashboardPayload {
 		},
 		Groups: []dashboardGroup{{
 			ID:          "business",
+			Label:       "Services",
 			DisplayName: "Services",
 			Items:       items,
 		}},
