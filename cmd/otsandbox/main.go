@@ -33,6 +33,7 @@ type profileImportReport struct {
 	BundleDigest string               `json:"bundleDigest"`
 	Counts       profileImportCounts  `json:"counts"`
 	StorePath    string               `json:"storePath"`
+	CatalogIndex profileCatalogIndex  `json:"catalogIndex"`
 	ImportedAt   time.Time            `json:"importedAt"`
 	Audit        *profileaudit.Report `json:"audit,omitempty"`
 }
@@ -46,6 +47,25 @@ type profileImportCounts struct {
 	CaseDependencies int `json:"caseDependencies"`
 	WorkflowBindings int `json:"workflowBindings"`
 	Fixtures         int `json:"fixtures"`
+}
+
+type profileCatalogIndex struct {
+	ProfileID string                    `json:"profileId"`
+	IndexedAt time.Time                 `json:"indexedAt"`
+	Counts    profileCatalogIndexCounts `json:"counts"`
+}
+
+type profileCatalogIndexCounts struct {
+	Services         int `json:"services"`
+	Workflows        int `json:"workflows"`
+	InterfaceNodes   int `json:"interfaceNodes"`
+	APICases         int `json:"apiCases"`
+	RequestTemplates int `json:"requestTemplates"`
+	CaseDependencies int `json:"caseDependencies"`
+	WorkflowBindings int `json:"workflowBindings"`
+	Fixtures         int `json:"fixtures"`
+	Templates        int `json:"templates"`
+	TemplateConfigs  int `json:"templateConfigs"`
 }
 
 func main() {
@@ -256,12 +276,17 @@ func runProfileImport(ctx context.Context, args []string) error {
 	if err := s.ReplaceProfileCatalog(ctx, profilecatalog.FromBundle(bundle, importedAt)); err != nil {
 		return err
 	}
+	catalogIndex, err := s.GetProfileCatalogIndex(ctx)
+	if err != nil {
+		return err
+	}
 	report := profileImportReport{
 		ProfileID:    bundle.ID,
 		BundlePath:   *from,
 		BundleDigest: digest,
 		Counts:       profileImportAssetCounts(bundle.Counts()),
 		StorePath:    cfg.Path,
+		CatalogIndex: profileCatalogIndexFromStore(catalogIndex),
 		ImportedAt:   importedAt,
 	}
 	if *auditOutput {
@@ -298,6 +323,25 @@ func profileImportAssetCounts(counts profile.Counts) profileImportCounts {
 		CaseDependencies: counts.CaseDependencies,
 		WorkflowBindings: counts.WorkflowBindings,
 		Fixtures:         counts.Fixtures,
+	}
+}
+
+func profileCatalogIndexFromStore(index store.ProfileCatalogIndex) profileCatalogIndex {
+	return profileCatalogIndex{
+		ProfileID: index.ProfileID,
+		IndexedAt: index.IndexedAt,
+		Counts: profileCatalogIndexCounts{
+			Services:         index.Counts.Services,
+			Workflows:        index.Counts.Workflows,
+			InterfaceNodes:   index.Counts.InterfaceNodes,
+			APICases:         index.Counts.APICases,
+			RequestTemplates: index.Counts.RequestTemplates,
+			CaseDependencies: index.Counts.CaseDependencies,
+			WorkflowBindings: index.Counts.WorkflowBindings,
+			Fixtures:         index.Counts.Fixtures,
+			Templates:        index.Counts.Templates,
+			TemplateConfigs:  index.Counts.TemplateConfigs,
+		},
 	}
 }
 

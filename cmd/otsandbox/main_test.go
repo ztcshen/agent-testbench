@@ -96,6 +96,16 @@ func TestProfileImportCommandCanEmitJSONReport(t *testing.T) {
 			WorkflowBindings int `json:"workflowBindings"`
 			Fixtures         int `json:"fixtures"`
 		} `json:"counts"`
+		CatalogIndex struct {
+			ProfileID   string `json:"profileId"`
+			IndexedAt   string `json:"indexedAt"`
+			StoreCounts struct {
+				Services        int `json:"services"`
+				Workflows       int `json:"workflows"`
+				Templates       int `json:"templates"`
+				TemplateConfigs int `json:"templateConfigs"`
+			} `json:"counts"`
+		} `json:"catalogIndex"`
 		StorePath  string `json:"storePath"`
 		ImportedAt string `json:"importedAt"`
 	}
@@ -110,6 +120,12 @@ func TestProfileImportCommandCanEmitJSONReport(t *testing.T) {
 	}
 	if report.Counts.Services != 0 || report.Counts.APICases != 0 || report.Counts.WorkflowBindings != 0 {
 		t.Fatalf("report counts = %#v", report.Counts)
+	}
+	if report.CatalogIndex.ProfileID != "empty" || report.CatalogIndex.IndexedAt == "" {
+		t.Fatalf("report catalog index identity = %#v", report.CatalogIndex)
+	}
+	if report.CatalogIndex.StoreCounts.Services != 0 || report.CatalogIndex.StoreCounts.Templates != 0 || report.CatalogIndex.StoreCounts.TemplateConfigs != 0 {
+		t.Fatalf("report catalog index counts = %#v", report.CatalogIndex.StoreCounts)
 	}
 }
 
