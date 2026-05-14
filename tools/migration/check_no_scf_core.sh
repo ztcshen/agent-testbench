@@ -4,7 +4,12 @@ set -euo pipefail
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT_DIR"
 
-PATTERN='scf|融资|放款|还款|scf-chain-sandbox|retail-gateway|scf-loan|scf-gateway|account-channel|sandboxctl'
+DENYLIST="tools/migration/source-domain-terms.txt"
+
+if [[ ! -f "$DENYLIST" ]]; then
+  echo "missing source-domain denylist: $DENYLIST" >&2
+  exit 1
+fi
 
 paths=(
   "README.md"
@@ -33,7 +38,7 @@ if [[ ${#existing[@]} -eq 0 ]]; then
   exit 0
 fi
 
-if rg -n -i "$PATTERN" "${existing[@]}"; then
+if rg -n -i -f "$DENYLIST" "${existing[@]}"; then
   echo "core contains source-domain terms; move them behind a profile or migration doc" >&2
   exit 1
 fi

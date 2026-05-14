@@ -6,6 +6,9 @@ profile-driven, and local-first.
 ## Core Rules
 
 - Do not hardcode a concrete business domain into core packages.
+- Source code and default core assets must not contain source-domain terms.
+  Put domain-specific names and language only in profile/config bundles or
+  migration-only documents.
 - Keep template configuration as reviewable files first; databases are indexes
   and runtime stores.
 - SQLite is the default local Store.
