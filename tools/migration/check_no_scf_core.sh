@@ -16,7 +16,7 @@ paths=(
   "cmd"
   "internal"
   "control-plane"
-  "profiles"
+  "profiles/empty"
   "examples"
   "compose"
 )

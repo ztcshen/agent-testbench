@@ -1,0 +1,13 @@
+{
+  "apiCases": [],
+  "caseDependencies": [],
+  "description": "Exported template configuration profile.",
+  "displayName": "SCF Chain",
+  "fixtures": [],
+  "id": "scf-chain",
+  "interfaceNodes": [],
+  "requestTemplates": [],
+  "services": [],
+  "workflowBindings": [],
+  "workflows": []
+}

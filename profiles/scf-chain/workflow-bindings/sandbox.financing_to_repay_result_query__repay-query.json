@@ -1,0 +1,7 @@
+{
+  "workflowId": "sandbox.financing_to_repay_result_query",
+  "stepId": "repay-query",
+  "nodeId": "scf.repay.result.query",
+  "caseId": "repay.result.query.default",
+  "required": true
+}

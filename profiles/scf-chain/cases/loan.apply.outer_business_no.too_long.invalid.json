@@ -1,0 +1,5 @@
+{
+  "id": "loan.apply.outer_business_no.too_long.invalid",
+  "displayName": "放款申请-outer_business_no超长",
+  "nodeId": "scf.loan.apply"
+}
