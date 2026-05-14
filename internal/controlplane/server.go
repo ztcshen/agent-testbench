@@ -36,6 +36,13 @@ func New(bundle profile.Bundle) http.Handler {
 			APICases:       nonNil(bundle.APICases),
 		})
 	})
+	mux.HandleFunc("/api/state", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSON(w, statePayloadFromBundle(bundle))
+	})
 	mux.HandleFunc("/api/dashboard", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -59,6 +66,28 @@ func New(bundle profile.Bundle) http.Handler {
 			WorkflowRuns: []map[string]any{},
 			ReplayRuns:   []map[string]any{},
 			ProbeRuns:    []map[string]any{},
+		})
+	})
+	mux.HandleFunc("/api/agent-test", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSON(w, map[string]any{
+			"ok":       true,
+			"summary":  map[string]any{"latestFailureKind": "no active failure", "failureKinds": map[string]int{}},
+			"warnings": []string{},
+		})
+	})
+	mux.HandleFunc("/api/case/runs", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSON(w, map[string]any{
+			"ok":       true,
+			"caseRuns": []map[string]any{},
+			"warnings": []string{},
 		})
 	})
 	mux.HandleFunc("/api/interface-nodes", func(w http.ResponseWriter, r *http.Request) {
@@ -94,12 +123,22 @@ func New(bundle profile.Bundle) http.Handler {
 	}
 	mux.Handle("/assets/react/", http.StripPrefix("/assets/react/", http.FileServer(http.Dir(filepath.Join(staticDir, "assets", "react")))))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/dashboard.html", http.StatusFound)
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		serveStaticFile(w, r, staticDir, "index.html")
 	})
 	return mux
 }
 
 var staticFileNames = []string{
+	"index.html",
+	"app.js",
 	"environment-nodes.html",
 	"environment-nodes.js",
 	"environment-node.html",
@@ -128,6 +167,18 @@ type profileAssetsPayload struct {
 	Workflows      []profile.Workflow      `json:"workflows"`
 	InterfaceNodes []profile.InterfaceNode `json:"interfaceNodes"`
 	APICases       []profile.APICase       `json:"apiCases"`
+}
+
+type statePayload struct {
+	Services []stateService `json:"services"`
+}
+
+type stateService struct {
+	ID     string `json:"id"`
+	Name   string `json:"name,omitempty"`
+	Kind   string `json:"kind,omitempty"`
+	Status string `json:"status"`
+	Exists bool   `json:"exists"`
 }
 
 type dashboardPayload struct {
@@ -305,6 +356,20 @@ func dashboardPayloadFromBundle(bundle profile.Bundle) dashboardPayload {
 			Items:       items,
 		}},
 	}
+}
+
+func statePayloadFromBundle(bundle profile.Bundle) statePayload {
+	services := make([]stateService, 0, len(bundle.Services))
+	for _, service := range bundle.Services {
+		services = append(services, stateService{
+			ID:     service.ID,
+			Name:   firstNonEmpty(service.DisplayName, service.ID),
+			Kind:   service.Kind,
+			Status: "missing",
+			Exists: false,
+		})
+	}
+	return statePayload{Services: services}
 }
 
 func catalogPayloadFromBundle(bundle profile.Bundle) catalogPayload {

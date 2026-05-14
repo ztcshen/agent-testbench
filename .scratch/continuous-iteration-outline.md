@@ -36,6 +36,8 @@ generic, profile-driven, and local-first.
   renders a clean empty-profile state.
 - Frontend step detail slice: reference Workflow step page and local rendering
   helpers are served with a clean empty-profile state.
+- Frontend workbench slice: reference index page is served at `/` with minimal
+  empty-state APIs for local workbench panels.
 
 ## Open Task Queue
 

@@ -145,6 +145,31 @@ func TestServerRendersDashboardForEmptyProfile(t *testing.T) {
 	}
 }
 
+func TestServerRendersWorkbenchIndexAtRoot(t *testing.T) {
+	server := httptest.NewServer(controlplane.New(loadEmptyProfile(t)))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/")
+	if err != nil {
+		t.Fatalf("get index: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("index status = %d", resp.StatusCode)
+	}
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	body := string(raw)
+	for _, want := range []string{"sandbox-workbench-page", "/app.js"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("index missing %q: %s", want, body)
+		}
+	}
+}
+
 func TestServerRendersWorkflowCatalogPage(t *testing.T) {
 	server := httptest.NewServer(controlplane.New(loadEmptyProfile(t)))
 	defer server.Close()
@@ -178,6 +203,8 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 		path string
 		want string
 	}{
+		{path: "/index.html", want: "sandbox-workbench-page"},
+		{path: "/app.js", want: "/api/state"},
 		{path: "/environment-nodes.html", want: "TPL-ENVIRONMENT-NODE-LIST-V1"},
 		{path: "/environment-nodes.js", want: "/api/dashboard"},
 		{path: "/environment-node.html", want: "TPL-ENVIRONMENT-NODE-DETAIL-V1"},
@@ -213,6 +240,45 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 		if !strings.Contains(string(raw), item.want) {
 			t.Fatalf("%s missing %q", item.path, item.want)
 		}
+	}
+}
+
+func TestServerExposesStateForWorkbenchIndex(t *testing.T) {
+	bundle := profile.Bundle{
+		ID:          "sample",
+		DisplayName: "Sample Profile",
+		Services: []profile.Service{
+			{ID: "service.alpha", DisplayName: "Service Alpha", Kind: "http"},
+		},
+	}
+	server := httptest.NewServer(controlplane.New(bundle))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/state")
+	if err != nil {
+		t.Fatalf("get state api: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("state status = %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Services []struct {
+			ID     string `json:"id"`
+			Name   string `json:"name"`
+			Kind   string `json:"kind"`
+			Status string `json:"status"`
+		} `json:"services"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode state api: %v", err)
+	}
+	if len(payload.Services) != 1 || payload.Services[0].ID != "service.alpha" || payload.Services[0].Name != "Service Alpha" {
+		t.Fatalf("state services = %#v", payload.Services)
+	}
+	if payload.Services[0].Status != "missing" {
+		t.Fatalf("state service status = %#v", payload.Services[0])
 	}
 }
 
@@ -425,6 +491,33 @@ func TestServerExposesEmptyRunListsForReactShell(t *testing.T) {
 	}
 	if payload.WorkflowRuns == nil || payload.ReplayRuns == nil || payload.ProbeRuns == nil {
 		t.Fatalf("runs should encode empty arrays: %#v", payload)
+	}
+}
+
+func TestServerExposesEmptyWorkbenchAuxiliaryAPIs(t *testing.T) {
+	server := httptest.NewServer(controlplane.New(loadEmptyProfile(t)))
+	defer server.Close()
+
+	for _, item := range []struct {
+		path string
+		key  string
+	}{
+		{path: "/api/agent-test", key: "summary"},
+		{path: "/api/case/runs", key: "caseRuns"},
+	} {
+		resp, err := http.Get(server.URL + item.path)
+		if err != nil {
+			t.Fatalf("get %s: %v", item.path, err)
+		}
+		var payload map[string]any
+		err = json.NewDecoder(resp.Body).Decode(&payload)
+		resp.Body.Close()
+		if err != nil {
+			t.Fatalf("decode %s: %v", item.path, err)
+		}
+		if resp.StatusCode != http.StatusOK || payload["ok"] != true || payload[item.key] == nil {
+			t.Fatalf("%s payload = %#v status=%d", item.path, payload, resp.StatusCode)
+		}
 	}
 }
 
