@@ -61,6 +61,13 @@ func New(bundle profile.Bundle) http.Handler {
 			ProbeRuns:    []map[string]any{},
 		})
 	})
+	mux.HandleFunc("/api/interface-nodes", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSON(w, interfaceNodesPayloadFromBundle(bundle, r.URL.Query().Get("serviceId")))
+	})
 	mux.HandleFunc("/dashboard.html", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -75,15 +82,7 @@ func New(bundle profile.Bundle) http.Handler {
 		}
 		serveStaticFile(w, r, staticDir, "workflows.html")
 	})
-	for _, name := range []string{
-		"environment-nodes.html",
-		"environment-nodes.js",
-		"service-inventory.html",
-		"service-inventory.js",
-		"workflow-run.html",
-		"workflow-run.js",
-		"styles.css",
-	} {
+	for _, name := range staticFileNames {
 		name := name
 		mux.HandleFunc("/"+name, func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodGet {
@@ -98,6 +97,18 @@ func New(bundle profile.Bundle) http.Handler {
 		http.Redirect(w, r, "/dashboard.html", http.StatusFound)
 	})
 	return mux
+}
+
+var staticFileNames = []string{
+	"environment-nodes.html",
+	"environment-nodes.js",
+	"environment-node.html",
+	"environment-node.js",
+	"service-inventory.html",
+	"service-inventory.js",
+	"workflow-run.html",
+	"workflow-run.js",
+	"styles.css",
 }
 
 type profilePayload struct {
@@ -148,6 +159,18 @@ type runsPayload struct {
 	WorkflowRuns []map[string]any `json:"workflowRuns"`
 	ReplayRuns   []map[string]any `json:"replayRuns"`
 	ProbeRuns    []map[string]any `json:"probeRuns"`
+}
+
+type interfaceNodesPayload struct {
+	Items []interfaceNodeItem `json:"items"`
+}
+
+type interfaceNodeItem struct {
+	ID              string `json:"id"`
+	DisplayName     string `json:"displayName,omitempty"`
+	ServiceID       string `json:"serviceId,omitempty"`
+	Href            string `json:"href"`
+	AdmissionStatus string `json:"admissionStatus"`
 }
 
 type catalogPayload struct {
@@ -315,6 +338,23 @@ func catalogPayloadFromBundle(bundle profile.Bundle) catalogPayload {
 			Edges: []catalogEdge{},
 		},
 	}
+}
+
+func interfaceNodesPayloadFromBundle(bundle profile.Bundle, serviceID string) interfaceNodesPayload {
+	items := make([]interfaceNodeItem, 0, len(bundle.InterfaceNodes))
+	for _, node := range bundle.InterfaceNodes {
+		if serviceID != "" && node.ServiceID != serviceID {
+			continue
+		}
+		items = append(items, interfaceNodeItem{
+			ID:              node.ID,
+			DisplayName:     node.DisplayName,
+			ServiceID:       node.ServiceID,
+			Href:            "/interface-node.html?id=" + node.ID,
+			AdmissionStatus: "pending",
+		})
+	}
+	return interfaceNodesPayload{Items: items}
 }
 
 func catalogWorkflows(bundle profile.Bundle) []catalogWorkflow {

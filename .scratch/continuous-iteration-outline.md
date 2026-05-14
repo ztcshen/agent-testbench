@@ -30,6 +30,8 @@ generic, profile-driven, and local-first.
   pages are served from generic static assets.
 - Frontend run history slice: reference Workflow run page is served and handles
   an empty local run index.
+- Frontend node detail slice: reference environment node detail page is served
+  with a profile-backed interface-node list API.
 
 ## Open Task Queue
 
