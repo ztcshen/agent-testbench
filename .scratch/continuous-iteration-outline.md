@@ -120,6 +120,9 @@ generic, profile-driven, and local-first.
 - Workflow detail interface coverage slice: `workflow-detail.html` now consumes
   interface-node coverage APIs and renders mapped/unmapped step rows plus a
   coverage-gap JSON entrypoint.
+- Workflow detail runner slice: `workflow-detail.html` now runs Workflow steps
+  through the generic Test Kit dry-run path, saves a Store-backed Workflow run,
+  and links to the saved run evidence page.
 
 ## Open Task Queue
 
