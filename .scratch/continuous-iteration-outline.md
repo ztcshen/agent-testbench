@@ -75,3 +75,21 @@ Acceptance:
 - The React build and at least one headless page smoke pass.
 - Core/profile separation remains intact.
 - `go test ./...` and the source-domain scan pass after each slice.
+
+### Task 2: Rebuild Remaining React Bundles From Neutral Source
+
+Goal:
+- Serve the remaining reference React-backed pages without copying source-domain
+  terms into core static assets.
+
+Blocked pages:
+- `trace-call.html`
+- `trace-evidence.html`
+- `workflow-blueprint-demo.html`
+- `workflow-blueprint-new.html`
+
+Acceptance:
+- `controlPlane.js` and `workflowBlueprintDemo.js` are produced from neutral
+  source or replaced with equivalent generic source-level modules.
+- The source-domain scan passes before the bundles enter `control-plane/static`.
+- Each page has a headless smoke test proving the bundle renders.
