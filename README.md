@@ -14,6 +14,32 @@ Evidence without baking any one business domain into the product.
 go test ./...
 ```
 
+Run the default local Store migration:
+
+```sh
+tmpdir=$(mktemp -d)
+./bin/otsandbox.sh store status --store-url "$tmpdir/store.sqlite"
+./bin/otsandbox.sh store migrate --store-url "$tmpdir/store.sqlite"
+```
+
+Inspect the empty profile bundle:
+
+```sh
+./bin/otsandbox.sh profile inspect --profile profiles/empty
+```
+
+Render a dry-run API Case Evidence bundle:
+
+```sh
+tmpdir=$(mktemp -d)
+./bin/otsandbox.sh case run \
+  --case examples/api-cases/create-item.json \
+  --dry-run \
+  --run-id quickstart \
+  --evidence-dir "$tmpdir/evidence"
+find "$tmpdir/evidence/quickstart" -maxdepth 1 -type f | sort
+```
+
 ## Direction
 
 - Keep the default developer experience local and lightweight.
@@ -24,5 +50,6 @@ go test ./...
 
 ## Current Status
 
-This repository is the empty project shell. The next slices add the migration
-manifest, Store boundary, profile loader, and generic Control plane.
+The project now has a neutral CLI, SQLite Store, profile loader, generic Control
+plane, runtime Evidence import path, and API Case runner. Domain-specific data
+belongs in profile/config bundles, not in core source code.

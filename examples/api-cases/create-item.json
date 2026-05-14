@@ -1,0 +1,24 @@
+{
+  "id": "case.create-item",
+  "title": "Create Item",
+  "request": {
+    "method": "POST",
+    "path": "/v1/items",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "id": "item-001",
+      "name": "Example Item"
+    }
+  },
+  "assertions": {
+    "expectedStatusCodes": [
+      200,
+      201
+    ],
+    "responseContains": [
+      "created"
+    ]
+  }
+}
