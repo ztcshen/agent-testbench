@@ -1558,6 +1558,84 @@ func TestServerExposesEmptyAgentTestWorkbench(t *testing.T) {
 	}
 }
 
+func TestServerExposesAgentTestRunsFromStore(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	first := time.Date(2026, 5, 14, 9, 0, 0, 0, time.UTC)
+	for _, item := range []store.Run{
+		{
+			ID:           "run.alpha",
+			ProfileID:    "sample",
+			WorkflowID:   "workflow.alpha",
+			Status:       store.StatusPassed,
+			EvidenceRoot: ".runtime/evidence/run.alpha",
+			SummaryJSON:  `{"diagnosisIndex":{"nextStep":"inspect evidence"}}`,
+			StartedAt:    first,
+			FinishedAt:   first.Add(time.Second),
+			CreatedAt:    first,
+		},
+		{
+			ID:           "run.beta",
+			ProfileID:    "sample",
+			WorkflowID:   "workflow.beta",
+			Status:       store.StatusFailed,
+			EvidenceRoot: ".runtime/evidence/run.beta",
+			SummaryJSON:  `{"diagnosisIndex":{"failureKind":"dependency_missing","nextStep":"add fixture data"}}`,
+			StartedAt:    first.Add(time.Minute),
+			FinishedAt:   first.Add(time.Minute + time.Second),
+			CreatedAt:    first.Add(time.Minute),
+		},
+	} {
+		if _, err := s.CreateRun(ctx, item); err != nil {
+			t.Fatalf("create run %s: %v", item.ID, err)
+		}
+	}
+	bundle := profile.Bundle{
+		ID:          "sample",
+		DisplayName: "Sample Profile",
+		Workflows: []profile.Workflow{
+			{ID: "workflow.alpha", DisplayName: "Workflow Alpha"},
+			{ID: "workflow.beta", DisplayName: "Workflow Beta"},
+		},
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/agent-test", http.StatusOK)
+	summary := payload["summary"].(map[string]any)
+	if summary["runCount"] != float64(2) || summary["latestFailureKind"] != "dependency_missing" {
+		t.Fatalf("agent test summary = %#v", summary)
+	}
+	statusCounts := summary["statusCounts"].(map[string]any)
+	if statusCounts[store.StatusPassed] != float64(1) || statusCounts[store.StatusFailed] != float64(1) {
+		t.Fatalf("agent test status counts = %#v", statusCounts)
+	}
+	runs := payload["agentRuns"].([]any)
+	if len(runs) != 2 {
+		t.Fatalf("agent runs = %#v", runs)
+	}
+	latest := runs[0].(map[string]any)
+	if latest["runId"] != "run.beta" || latest["profileId"] != "sample" || latest["workflowId"] != "workflow.beta" || latest["failureKind"] != "dependency_missing" {
+		t.Fatalf("latest agent run = %#v", latest)
+	}
+	diagnosis := latest["diagnosis"].(map[string]any)
+	if diagnosis["nextStep"] != "add fixture data" {
+		t.Fatalf("latest diagnosis = %#v", diagnosis)
+	}
+	profiles := payload["profiles"].([]any)
+	if len(profiles) != 1 || profiles[0].(map[string]any)["id"] != "sample" || profiles[0].(map[string]any)["stepCount"] != float64(2) {
+		t.Fatalf("agent test profiles = %#v", profiles)
+	}
+	capabilities := payload["capabilities"].([]any)
+	if len(capabilities) == 0 {
+		t.Fatalf("agent test capabilities = %#v", capabilities)
+	}
+}
+
 func TestServerExposesAPICaseCapabilities(t *testing.T) {
 	bundle := profile.Bundle{
 		ID:          "sample",

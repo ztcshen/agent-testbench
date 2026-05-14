@@ -97,6 +97,9 @@ generic, profile-driven, and local-first.
 - Active profile import slice: importing a local profile now switches the
   running control plane to the imported bundle for profile, catalog, and
   interface-node APIs.
+- Agent test workbench Store slice: `/api/agent-test` now exposes generic
+  Store run history, status/failure summaries, and active profile metadata for
+  the React workbench.
 
 ## Open Task Queue
 
@@ -120,8 +123,6 @@ Goal:
   generic contracts where the Store already has enough data.
 
 Candidate APIs:
-- `/api/case/incomplete-batches`
-- `/api/agent-test`
 - missing Store-backed detail fields in Workflow and API Case views
 
 Acceptance:

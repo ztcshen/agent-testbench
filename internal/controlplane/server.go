@@ -120,26 +120,7 @@ func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, map[string]any{
-			"ok": true,
-			"summary": map[string]any{
-				"capabilityCount":         0,
-				"profileCount":            0,
-				"runCount":                0,
-				"configEventCount":        0,
-				"escalationEventCount":    0,
-				"latestAcceptanceVerdict": "",
-				"latestFailureKind":       "no active failure",
-				"failureKinds":            map[string]int{},
-			},
-			"capabilities":      []map[string]any{},
-			"profiles":          []map[string]any{},
-			"agentRuns":         []map[string]any{},
-			"configEvents":      []map[string]any{},
-			"escalationEvents":  []map[string]any{},
-			"acceptanceReports": []map[string]any{},
-			"warnings":          []string{},
-		})
+		handleAgentTestWorkbench(w, r, profiles.Current(), runtime)
 	})
 	mux.HandleFunc("/api/case/runs", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
