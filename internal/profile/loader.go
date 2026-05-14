@@ -1,9 +1,12 @@
 package profile
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -60,6 +63,55 @@ func validate(bundle Bundle) error {
 		return errors.New("profile displayName is required")
 	}
 	return nil
+}
+
+func BundleDigest(path string) (string, error) {
+	manifestPath, err := resolveManifestPath(path)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("stat profile path %s: %w", path, err)
+	}
+	var files []string
+	if !info.IsDir() {
+		files = append(files, manifestPath)
+	} else {
+		baseDir := filepath.Dir(manifestPath)
+		if err := filepath.WalkDir(baseDir, func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			files = append(files, path)
+			return nil
+		}); err != nil {
+			return "", fmt.Errorf("walk profile bundle %s: %w", baseDir, err)
+		}
+	}
+	sort.Strings(files)
+
+	hash := sha256.New()
+	for _, file := range files {
+		rel := file
+		if info.IsDir() {
+			if relative, err := filepath.Rel(filepath.Dir(manifestPath), file); err == nil {
+				rel = relative
+			}
+		}
+		_, _ = io.WriteString(hash, rel)
+		_, _ = hash.Write([]byte{0})
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			return "", fmt.Errorf("read profile bundle file %s: %w", file, err)
+		}
+		_, _ = hash.Write(raw)
+		_, _ = hash.Write([]byte{0})
+	}
+	return "sha256:" + hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func loadAssets(baseDir string, bundle *Bundle) error {

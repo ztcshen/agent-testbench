@@ -2,15 +2,18 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"open-test-sandbox/internal/controlplane"
 	"open-test-sandbox/internal/profile"
+	"open-test-sandbox/internal/store"
 	"open-test-sandbox/internal/store/sqlite"
 )
 
@@ -112,23 +115,68 @@ func runProfile(args []string) error {
 		return errors.New("missing profile command")
 	}
 
-	flags := flag.NewFlagSet("profile "+args[0], flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path")
-	if err := flags.Parse(args[1:]); err != nil {
-		return err
-	}
-
 	switch args[0] {
 	case "inspect":
-		bundle, err := profile.Load(*profilePath)
-		if err != nil {
-			return err
-		}
-		printProfile(bundle)
+		return runProfileInspect(args[1:])
+	case "import":
+		return runProfileImport(context.Background(), args[1:])
 	default:
 		return fmt.Errorf("unknown profile command: %s", args[0])
 	}
+}
+
+func runProfileInspect(args []string) error {
+	flags := flag.NewFlagSet("profile inspect", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	bundle, err := profile.Load(*profilePath)
+	if err != nil {
+		return err
+	}
+	printProfile(bundle)
+	return nil
+}
+
+func runProfileImport(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("profile import", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	from := flags.String("from", "", "Profile bundle path")
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	bundle, err := profile.Load(*from)
+	if err != nil {
+		return err
+	}
+	digest, err := profile.BundleDigest(*from)
+	if err != nil {
+		return err
+	}
+	s, err := sqlite.Open(ctx, sqlite.ConfigFromURL(*storeURL))
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	summary, err := json.Marshal(bundle.Counts())
+	if err != nil {
+		return err
+	}
+	if _, err := s.UpsertProfileIndex(ctx, store.ProfileIndex{
+		ProfileID:    bundle.ID,
+		BundlePath:   *from,
+		BundleDigest: digest,
+		SummaryJSON:  string(summary),
+		ImportedAt:   time.Now().UTC(),
+	}); err != nil {
+		return err
+	}
+	fmt.Printf("Imported profile: %s\n", bundle.ID)
+	fmt.Printf("Digest: %s\n", digest)
 	return nil
 }
 

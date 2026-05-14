@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"open-test-sandbox/internal/store/sqlite"
 )
 
 func TestStoreMigrateAndStatusCommands(t *testing.T) {
@@ -32,6 +35,28 @@ func TestProfileInspectCommand(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("profile inspect output missing %q: %q", want, out)
 		}
+	}
+}
+
+func TestProfileImportCommandIndexesBundleInStore(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
+
+	out := runCLI(t, "profile", "import", "--from", "../../profiles/empty", "--store-url", dbPath)
+	if !strings.Contains(out, "Imported profile: empty") {
+		t.Fatalf("profile import output = %q", out)
+	}
+
+	s, err := sqlite.Open(context.Background(), sqlite.Config{Path: dbPath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+	index, err := s.GetProfileIndex(context.Background(), "empty")
+	if err != nil {
+		t.Fatalf("get profile index: %v", err)
+	}
+	if index.BundlePath == "" || !strings.HasPrefix(index.BundleDigest, "sha256:") {
+		t.Fatalf("profile index = %#v", index)
 	}
 }
 
