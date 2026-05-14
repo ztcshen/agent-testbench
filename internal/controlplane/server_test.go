@@ -207,6 +207,8 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 		{path: "/app.js", want: "/api/state"},
 		{path: "/agent-test.html", want: "agent-test-page"},
 		{path: "/agent-test.js", want: "/api/agent-test"},
+		{path: "/case-runs.html", want: "case-runs-page"},
+		{path: "/case-runs.js", want: "/api/case/runs"},
 		{path: "/interface-nodes.html", want: "interface-node-directory-page"},
 		{path: "/interface-nodes.js", want: "/api/interface-nodes"},
 		{path: "/interface-node.html", want: "interface-node-page"},
@@ -592,6 +594,8 @@ func TestServerExposesEmptyWorkbenchAuxiliaryAPIs(t *testing.T) {
 	}{
 		{path: "/api/agent-test", key: "summary"},
 		{path: "/api/case/runs", key: "caseRuns"},
+		{path: "/api/case/timing", key: "summary"},
+		{path: "/api/case/incomplete-batches", key: "items"},
 	} {
 		resp, err := http.Get(server.URL + item.path)
 		if err != nil {

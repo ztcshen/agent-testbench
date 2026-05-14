@@ -46,6 +46,8 @@ generic, profile-driven, and local-first.
   field contract pages are served from generic static assets.
 - Frontend agent test slice: reference Agent Test Kit page is served with a
   clean empty-state API contract.
+- Frontend case evidence slice: reference API Case Evidence page is served with
+  empty timing and incomplete-batch API contracts.
 
 ## Open Task Queue
 

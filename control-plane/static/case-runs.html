@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>API Case Evidence · Open Test Sandbox</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="app case-runs-page">
+      <section class="topbar">
+        <div>
+          <h1>API Case Evidence</h1>
+          <p id="caseRunSummary">loading</p>
+        </div>
+        <div class="actions">
+          <span id="caseRunMessage" class="console-status-pill" role="status">ready</span>
+          <a class="button-link" href="/">控制台</a>
+          <a class="button-link" href="/agent-test.html">Agent Test Kit</a>
+          <button id="refreshCaseRunsBtn" type="button" title="刷新">↻</button>
+        </div>
+      </section>
+
+      <section class="agent-test-panel">
+        <div class="agent-test-section-head">
+          <div>
+            <h2>Latest case runs</h2>
+            <p>Runtime bundles under .runtime/cases</p>
+          </div>
+          <div class="case-run-controls">
+            <label class="workflow-filter">
+              <span>筛选</span>
+              <input id="caseRunFilter" type="search" placeholder="case / failureKind / trace" spellcheck="false">
+            </label>
+            <label class="workflow-filter">
+              <span>Timing</span>
+              <select id="caseTimingKindFilter" title="按 timing evidence 类型过滤">
+                <option value="all">All timing</option>
+                <option value="case">Case runs</option>
+                <option value="candidate">Candidate batches</option>
+              </select>
+            </label>
+            <label class="workflow-filter">
+              <span>Freshness</span>
+              <select id="caseTimingFreshnessFilter" title="按 timing evidence 新鲜度过滤">
+                <option value="">All time</option>
+                <option value="60">Last 1h</option>
+                <option value="360">Last 6h</option>
+                <option value="1440">Last 24h</option>
+              </select>
+            </label>
+            <select id="caseRunStatusFilter" title="按状态过滤">
+              <option value="">All status</option>
+              <option value="fail">Fail</option>
+              <option value="pass">Pass</option>
+            </select>
+          </div>
+        </div>
+        <div id="caseRunFacets" class="case-run-facets"></div>
+        <div id="caseTimingSummary" class="case-timing-summary" aria-live="polite"></div>
+        <p id="caseTimingSlowest" class="case-timing-slowest"></p>
+        <div id="caseTimingSlowestHandoff" class="case-timing-slowest-handoff"></div>
+        <div id="caseTimingCommand" class="case-timing-command" aria-live="polite"></div>
+        <div id="caseTimingWarningSummary" class="case-timing-warning-summary"></div>
+        <div id="caseTimingWarnings" class="case-timing-warnings"></div>
+        <div id="caseIncompleteBatchSummary" class="case-incomplete-batch-summary" aria-live="polite"></div>
+        <div id="caseIncompleteBatchList" class="case-incomplete-batch-list"></div>
+        <div id="caseRunList" class="case-run-list run-history-grid"></div>
+      </section>
+    </main>
+    <script src="/case-runs.js"></script>
+  </body>
+</html>

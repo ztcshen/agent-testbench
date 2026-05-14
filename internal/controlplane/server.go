@@ -105,6 +105,38 @@ func New(bundle profile.Bundle) http.Handler {
 			"warnings": []string{},
 		})
 	})
+	mux.HandleFunc("/api/case/timing", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSON(w, map[string]any{
+			"ok": true,
+			"summary": map[string]any{
+				"caseRunCount":          0,
+				"candidateBatchCount":   0,
+				"durationMeasuredCount": 0,
+				"maxDurationMs":         0,
+				"speedup":               map[string]any{"available": false},
+				"slowestRows":           map[string]any{},
+			},
+			"warningDetails": []map[string]any{},
+			"warnings":       []string{},
+		})
+	})
+	mux.HandleFunc("/api/case/incomplete-batches", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSON(w, map[string]any{
+			"ok":       true,
+			"dryRun":   true,
+			"count":    0,
+			"items":    []map[string]any{},
+			"warnings": []string{},
+		})
+	})
 	mux.HandleFunc("/api/interface-nodes", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -168,6 +200,8 @@ var staticFileNames = []string{
 	"app.js",
 	"agent-test.html",
 	"agent-test.js",
+	"case-runs.html",
+	"case-runs.js",
 	"interface-nodes.html",
 	"interface-nodes.js",
 	"interface-node.html",
