@@ -29,10 +29,10 @@ function serviceName(caseDef, serviceId) {
   return (caseDef.graph?.nodes || []).find((node) => node.id === serviceId)?.displayName || serviceId;
 }
 
-function selectedCaseFromPayload(payload) {
+function selectedCaseFromPayload(payload, preferredID = "") {
   const cases = payload?.cases || [];
   const requested = new URLSearchParams(window.location.search).get("case");
-  return cases.find((caseDef) => caseDef.id === requested) || cases[0] || null;
+  return cases.find((caseDef) => caseDef.id === preferredID) || cases.find((caseDef) => caseDef.id === requested) || cases[0] || null;
 }
 
 function caseRunPayload(caseDef) {
@@ -187,13 +187,13 @@ function ApiCasesApp() {
   const [result, setResult] = useState(null);
   const [status, setStatus] = useState("loading");
 
-  async function loadCapabilities() {
+  async function loadCapabilities(preferredCaseID = "", nextStatus = "ready") {
     setStatus("loading...");
     try {
       const payload = await requestJSON("/api/cases/capabilities");
       setCapabilities(payload);
-      setSelectedCase(selectedCaseFromPayload(payload));
-      setStatus("ready");
+      setSelectedCase(selectedCaseFromPayload(payload, preferredCaseID));
+      setStatus(nextStatus);
     } catch (error) {
       setStatus(error.message);
     }
@@ -209,7 +209,7 @@ function ApiCasesApp() {
         body: JSON.stringify(caseRunPayload(selectedCase)),
       });
       setResult(payload);
-      setStatus(payload.ok ? "ready" : "case failed");
+      await loadCapabilities(selectedCase.id, payload.ok ? "ready" : "case failed");
     } catch (error) {
       setResult({ ok: false, dryRun: false, summary: { status: "fail", failure_reason: error.message } });
       setStatus(error.message);

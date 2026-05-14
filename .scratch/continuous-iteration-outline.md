@@ -123,6 +123,9 @@ generic, profile-driven, and local-first.
 - Workflow detail runner slice: `workflow-detail.html` now runs Workflow steps
   through the generic Test Kit dry-run path, saves a Store-backed Workflow run,
   and links to the saved run evidence page.
+- API Case post-run refresh slice: `api-cases.html` now refreshes Store-backed
+  case run capability state after one-click runs while preserving the selected
+  case.
 
 ## Open Task Queue
 
