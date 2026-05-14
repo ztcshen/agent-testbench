@@ -60,6 +60,8 @@ generic, profile-driven, and local-first.
   a clean missing-trace recovery state.
 - Frontend legacy script asset slice: reference dashboard and workflow catalog
   root scripts are served as neutral static assets.
+- Frontend trace evidence React slice: `trace-call.html` and
+  `trace-evidence.html` are served through a neutral source-built React bundle.
 
 ## Open Task Queue
 

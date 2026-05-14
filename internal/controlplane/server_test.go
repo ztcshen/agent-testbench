@@ -221,6 +221,8 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 		{path: "/trace-topology.js", want: "/api/workflow-runs/"},
 		{path: "/replay-evidence.html", want: "replay-evidence-page"},
 		{path: "/replay-evidence.js", want: "/api/replay/evidence"},
+		{path: "/trace-call.html", want: "react-control-plane-root"},
+		{path: "/trace-evidence.html", want: "react-control-plane-root"},
 		{path: "/interface-nodes.html", want: "interface-node-directory-page"},
 		{path: "/interface-nodes.js", want: "/api/interface-nodes"},
 		{path: "/interface-node.html", want: "interface-node-page"},
@@ -243,6 +245,7 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 		{path: "/interface-run-template.js", want: "render"},
 		{path: "/styles.css", want: "body"},
 		{path: "/assets/react/controlPlane.css", want: "react-control-plane"},
+		{path: "/assets/react/controlPlane.js", want: "Trace Evidence"},
 	} {
 		resp, err := http.Get(server.URL + item.path)
 		if err != nil {
