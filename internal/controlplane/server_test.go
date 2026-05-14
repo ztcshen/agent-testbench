@@ -230,8 +230,7 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 		{path: "/agent-run.js", want: "/api/agent-test"},
 		{path: "/api-cases.html", want: "api-case-page"},
 		{path: "/api-cases.js", want: "/api/cases/capabilities"},
-		{path: "/case-runs.html", want: "case-runs-page"},
-		{path: "/case-runs.js", want: "/api/case/runs"},
+		{path: "/case-runs.html", want: "react-case-runs-root"},
 		{path: "/evidence-viewer.html", want: "viewer-app"},
 		{path: "/evidence-viewer.js", want: "open-test-sandbox-evidence"},
 		{path: "/trace-topology.html", want: "trace-topology-page"},
@@ -265,6 +264,7 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 		{path: "/styles.css", want: "body"},
 		{path: "/assets/react/controlPlane.css", want: "react-control-plane"},
 		{path: "/assets/react/controlPlane.js", want: "Trace Evidence"},
+		{path: "/assets/react/caseRuns.js", want: "/api/case/incomplete-batches"},
 		{path: "/assets/react/workflowBlueprintDemo.css", want: "blueprint-demo-shell"},
 		{path: "/assets/react/workflowBlueprintDemo.js", want: "workflow-blueprint/v1"},
 	} {

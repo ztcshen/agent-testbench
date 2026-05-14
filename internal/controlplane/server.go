@@ -270,7 +270,6 @@ var staticFileNames = []string{
 	"api-cases.html",
 	"api-cases.js",
 	"case-runs.html",
-	"case-runs.js",
 	"evidence-viewer.html",
 	"evidence-viewer.js",
 	"trace-topology.html",

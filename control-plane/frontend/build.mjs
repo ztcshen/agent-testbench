@@ -11,6 +11,7 @@ rmSync(outdir, { recursive: true, force: true });
 await build({
   entryPoints: {
     controlPlane: resolve(root, "src/controlPlane.jsx"),
+    caseRuns: resolve(root, "src/caseRuns.jsx"),
     dashboard: resolve(root, "src/dashboard.jsx"),
     workflowBlueprintDemo: resolve(root, "src/workflowBlueprintDemo.jsx"),
     workflows: resolve(root, "src/workflows.jsx"),
