@@ -139,6 +139,8 @@ func New(bundle profile.Bundle) http.Handler {
 var staticFileNames = []string{
 	"index.html",
 	"app.js",
+	"interface-nodes.html",
+	"interface-nodes.js",
 	"environment-nodes.html",
 	"environment-nodes.js",
 	"environment-node.html",
@@ -219,15 +221,20 @@ type runsPayload struct {
 }
 
 type interfaceNodesPayload struct {
-	Items []interfaceNodeItem `json:"items"`
+	Source map[string]string   `json:"source"`
+	Items  []interfaceNodeItem `json:"items"`
 }
 
 type interfaceNodeItem struct {
-	ID              string `json:"id"`
-	DisplayName     string `json:"displayName,omitempty"`
-	ServiceID       string `json:"serviceId,omitempty"`
-	Href            string `json:"href"`
-	AdmissionStatus string `json:"admissionStatus"`
+	ID                   string `json:"id"`
+	DisplayName          string `json:"displayName,omitempty"`
+	ServiceID            string `json:"serviceId,omitempty"`
+	Href                 string `json:"href"`
+	AdmissionStatus      string `json:"admissionStatus"`
+	ValidationStatus     string `json:"validationStatus"`
+	ValidationIssueCount int    `json:"validationIssueCount"`
+	RequiredCaseCount    int    `json:"requiredCaseCount"`
+	PassedCaseCount      int    `json:"passedCaseCount"`
 }
 
 type catalogPayload struct {
@@ -418,14 +425,18 @@ func interfaceNodesPayloadFromBundle(bundle profile.Bundle, serviceID string) in
 			continue
 		}
 		items = append(items, interfaceNodeItem{
-			ID:              node.ID,
-			DisplayName:     node.DisplayName,
-			ServiceID:       node.ServiceID,
-			Href:            "/interface-node.html?id=" + node.ID,
-			AdmissionStatus: "pending",
+			ID:               node.ID,
+			DisplayName:      node.DisplayName,
+			ServiceID:        node.ServiceID,
+			Href:             "/interface-node.html?id=" + node.ID,
+			AdmissionStatus:  "pending",
+			ValidationStatus: "valid",
 		})
 	}
-	return interfaceNodesPayload{Items: items}
+	return interfaceNodesPayload{
+		Source: map[string]string{"kind": "profile", "id": bundle.ID},
+		Items:  items,
+	}
 }
 
 func catalogWorkflows(bundle profile.Bundle) []catalogWorkflow {

@@ -205,6 +205,8 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 	}{
 		{path: "/index.html", want: "sandbox-workbench-page"},
 		{path: "/app.js", want: "/api/state"},
+		{path: "/interface-nodes.html", want: "interface-node-directory-page"},
+		{path: "/interface-nodes.js", want: "/api/interface-nodes"},
 		{path: "/environment-nodes.html", want: "TPL-ENVIRONMENT-NODE-LIST-V1"},
 		{path: "/environment-nodes.js", want: "/api/dashboard"},
 		{path: "/environment-node.html", want: "TPL-ENVIRONMENT-NODE-DETAIL-V1"},
@@ -304,21 +306,29 @@ func TestServerExposesInterfaceNodesForService(t *testing.T) {
 	}
 
 	var payload struct {
+		Source struct {
+			Kind string `json:"kind"`
+		} `json:"source"`
 		Items []struct {
-			ID              string `json:"id"`
-			DisplayName     string `json:"displayName"`
-			ServiceID       string `json:"serviceId"`
-			Href            string `json:"href"`
-			AdmissionStatus string `json:"admissionStatus"`
+			ID                string `json:"id"`
+			DisplayName       string `json:"displayName"`
+			ServiceID         string `json:"serviceId"`
+			Href              string `json:"href"`
+			AdmissionStatus   string `json:"admissionStatus"`
+			ValidationStatus  string `json:"validationStatus"`
+			RequiredCaseCount int    `json:"requiredCaseCount"`
 		} `json:"items"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode interface nodes api: %v", err)
 	}
+	if payload.Source.Kind != "profile" {
+		t.Fatalf("interface node source = %#v", payload.Source)
+	}
 	if len(payload.Items) != 1 || payload.Items[0].ID != "node.alpha" || payload.Items[0].ServiceID != "service.alpha" {
 		t.Fatalf("interface node items = %#v", payload.Items)
 	}
-	if payload.Items[0].Href == "" || payload.Items[0].AdmissionStatus != "pending" {
+	if payload.Items[0].Href == "" || payload.Items[0].AdmissionStatus != "pending" || payload.Items[0].ValidationStatus != "valid" || payload.Items[0].RequiredCaseCount != 0 {
 		t.Fatalf("interface node link/status = %#v", payload.Items[0])
 	}
 }
