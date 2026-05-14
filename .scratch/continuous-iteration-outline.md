@@ -50,6 +50,8 @@ generic, profile-driven, and local-first.
   empty timing and incomplete-batch API contracts.
 - Frontend evidence viewer slice: reference Evidence Viewer page is served with
   a neutral local-storage key and clean empty state.
+- Frontend trace topology slice: reference Trace Topology page is served with a
+  clean missing-run recovery state.
 
 ## Open Task Queue
 

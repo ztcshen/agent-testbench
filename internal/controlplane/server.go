@@ -204,6 +204,8 @@ var staticFileNames = []string{
 	"case-runs.js",
 	"evidence-viewer.html",
 	"evidence-viewer.js",
+	"trace-topology.html",
+	"trace-topology.js",
 	"interface-nodes.html",
 	"interface-nodes.js",
 	"interface-node.html",
