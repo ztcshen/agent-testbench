@@ -1,9 +1,11 @@
 package controlplane_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -107,6 +109,150 @@ func TestServerExposesProfileAssetLists(t *testing.T) {
 	}
 	if len(payload.APICases) != 1 || payload.APICases[0].NodeID != "node.alpha" {
 		t.Fatalf("api cases payload = %#v", payload.APICases)
+	}
+}
+
+func TestServerImportsProfileBundleIntoRuntimeStore(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	server := httptest.NewServer(controlplane.NewWithStore(loadEmptyProfile(t), s))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/profile/import", `{"path":"../../profiles/empty"}`, http.StatusOK)
+
+	if payload["profileId"] != "empty" || payload["bundlePath"] != "../../profiles/empty" {
+		t.Fatalf("import payload identity = %#v", payload)
+	}
+	if digest, ok := payload["bundleDigest"].(string); !ok || !strings.HasPrefix(digest, "sha256:") {
+		t.Fatalf("import payload digest = %#v", payload["bundleDigest"])
+	}
+	if payload["importedAt"] == "" {
+		t.Fatalf("import payload importedAt = %#v", payload)
+	}
+	counts, ok := payload["counts"].(map[string]any)
+	if !ok || counts["services"] != float64(0) || counts["apiCases"] != float64(0) {
+		t.Fatalf("import payload counts = %#v", payload["counts"])
+	}
+	indexedStore, ok := payload["store"].(map[string]any)
+	if !ok || indexedStore["profileId"] != "empty" {
+		t.Fatalf("import payload store = %#v", payload["store"])
+	}
+	index, err := s.GetProfileIndex(ctx, "empty")
+	if err != nil {
+		t.Fatalf("get profile index: %v", err)
+	}
+	if index.BundlePath != "../../profiles/empty" || !strings.HasPrefix(index.BundleDigest, "sha256:") || index.ImportedAt.IsZero() {
+		t.Fatalf("profile index = %#v", index)
+	}
+}
+
+func TestServerImportsProfileBundleWithAudit(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	profileDir := writeAuditSampleProfile(t)
+	server := httptest.NewServer(controlplane.NewWithStore(loadEmptyProfile(t), s))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/profile/import", `{"path":`+mustJSON(t, profileDir)+`,"audit":true}`, http.StatusOK)
+
+	audit, ok := payload["audit"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing audit in import payload = %#v", payload)
+	}
+	if audit["ok"] != false || audit["issueCount"] != float64(2) {
+		t.Fatalf("audit summary = %#v", audit)
+	}
+	auditStore, ok := audit["store"].(map[string]any)
+	if !ok || auditStore["profileIndexed"] != true || auditStore["digestMatches"] != true {
+		t.Fatalf("audit store = %#v", audit["store"])
+	}
+}
+
+func TestServerRejectsProfileImportWithoutRuntimeStore(t *testing.T) {
+	server := httptest.NewServer(controlplane.New(loadEmptyProfile(t)))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/profile/import", `{"path":"../../profiles/empty"}`, http.StatusNotImplemented)
+
+	if payload["ok"] != false || !strings.Contains(fmt.Sprint(payload["error"]), "runtime store") {
+		t.Fatalf("missing store payload = %#v", payload)
+	}
+}
+
+func TestServerRejectsProfileImportNonPost(t *testing.T) {
+	server := httptest.NewServer(controlplane.New(loadEmptyProfile(t)))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/profile/import")
+	if err != nil {
+		t.Fatalf("get profile import: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("profile import get status = %d", resp.StatusCode)
+	}
+}
+
+func TestServerRejectsProfileImportInvalidJSON(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	server := httptest.NewServer(controlplane.NewWithStore(loadEmptyProfile(t), s))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/profile/import", `{"path":`, http.StatusBadRequest)
+
+	if payload["ok"] != false || !strings.Contains(fmt.Sprint(payload["error"]), "invalid json") {
+		t.Fatalf("invalid json payload = %#v", payload)
+	}
+}
+
+func TestServerRejectsProfileImportWithoutPath(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	server := httptest.NewServer(controlplane.NewWithStore(loadEmptyProfile(t), s))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/profile/import", `{"audit":true}`, http.StatusBadRequest)
+
+	if payload["ok"] != false || !strings.Contains(fmt.Sprint(payload["error"]), "path is required") {
+		t.Fatalf("missing path payload = %#v", payload)
+	}
+}
+
+func TestServerRejectsProfileImportForInvalidProfile(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "profile.json"), []byte(`{"id":"","displayName":"Broken Profile"}`), 0o644); err != nil {
+		t.Fatalf("write invalid profile: %v", err)
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(loadEmptyProfile(t), s))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/profile/import", `{"path":`+mustJSON(t, dir)+`}`, http.StatusBadRequest)
+
+	if payload["ok"] != false || !strings.Contains(fmt.Sprint(payload["error"]), "load profile") {
+		t.Fatalf("invalid profile payload = %#v", payload)
 	}
 }
 
@@ -1574,6 +1720,51 @@ func decodeJSONResponse(t *testing.T, url string, wantStatus int) map[string]any
 		t.Fatalf("decode %s: %v body=%s", url, err, raw)
 	}
 	return payload
+}
+
+func postJSONResponse(t *testing.T, url string, body string, wantStatus int) map[string]any {
+	t.Helper()
+	resp, err := http.Post(url, "application/json", bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatalf("post %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read %s: %v", url, err)
+	}
+	if resp.StatusCode != wantStatus {
+		t.Fatalf("%s status = %d body=%s", url, resp.StatusCode, raw)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode %s: %v body=%s", url, err, raw)
+	}
+	return payload
+}
+
+func writeAuditSampleProfile(t *testing.T) string {
+	t.Helper()
+	profileDir := filepath.Join(t.TempDir(), "profile")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatalf("create profile dir: %v", err)
+	}
+	raw := `{
+  "id": "sample",
+  "displayName": "Sample Profile",
+  "services": [],
+  "workflows": [],
+  "interfaceNodes": [],
+  "apiCases": [{"id":"case.alpha","displayName":"Case Alpha","nodeId":"node.alpha"}],
+  "requestTemplates": [],
+  "caseDependencies": [{"id":"dependency.alpha","caseId":"case.alpha","fixtureId":"fixture.missing"}],
+  "workflowBindings": [],
+  "fixtures": []
+}`
+	if err := os.WriteFile(filepath.Join(profileDir, "profile.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write audit sample profile: %v", err)
+	}
+	return profileDir
 }
 
 type failingListRunsStore struct {

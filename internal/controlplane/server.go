@@ -18,6 +18,13 @@ func New(bundle profile.Bundle) http.Handler {
 func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 	mux := http.NewServeMux()
 	staticDir := findStaticDir()
+	mux.HandleFunc("/api/profile/import", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleProfileImport(w, r, runtime)
+	})
 	mux.HandleFunc("/api/profile", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
