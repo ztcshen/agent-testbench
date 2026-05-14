@@ -14,12 +14,12 @@ Evidence without baking any one business domain into the product.
 go test ./...
 ```
 
-Run the default local Store migration:
+Run the default local Store schema upgrade:
 
 ```sh
 tmpdir=$(mktemp -d)
 ./bin/otsandbox.sh store status --store-url "$tmpdir/store.sqlite"
-./bin/otsandbox.sh store migrate --store-url "$tmpdir/store.sqlite"
+./bin/otsandbox.sh store upgrade --store-url "$tmpdir/store.sqlite"
 ```
 
 Inspect the empty profile bundle:
@@ -58,7 +58,7 @@ Store backend support is documented in
 The project now has:
 
 - a neutral CLI and generic Control plane;
-- a SQLite Store with migrations, contract tests, Evidence queries, baseline
+- a SQLite Store with schema upgrades, contract tests, Evidence queries, baseline
   gates, and backend URL validation;
 - a profile loader for manifest and split-asset bundles;
 - API Case dry-run/live execution with reproducible Evidence and Store indexes;

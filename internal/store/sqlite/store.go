@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"open-test-sandbox/internal/store"
-	"open-test-sandbox/internal/store/migrations"
+	"open-test-sandbox/internal/store/schema"
 )
 
 type Config struct {
@@ -80,39 +80,39 @@ func Open(ctx context.Context, cfg Config) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.migrate(ctx); err != nil {
+	if _, err := s.upgradeSchema(ctx); err != nil {
 		return nil, err
 	}
 	return s, nil
 }
 
-type MigrationStatusResult struct {
+type SchemaStatusResult struct {
 	Path           string
 	CurrentVersion int
 	TargetVersion  int
 	AppliedCount   int
 }
 
-func (r MigrationStatusResult) HasPending() bool {
+func (r SchemaStatusResult) HasPending() bool {
 	return r.CurrentVersion < r.TargetVersion
 }
 
-func MigrationStatus(ctx context.Context, cfg Config) (MigrationStatusResult, error) {
+func SchemaStatus(ctx context.Context, cfg Config) (SchemaStatusResult, error) {
 	s, err := openRaw(ctx, cfg)
 	if err != nil {
-		return MigrationStatusResult{}, err
+		return SchemaStatusResult{}, err
 	}
 	defer s.Close()
-	return s.migrationStatus(ctx, 0)
+	return s.schemaStatus(ctx, 0)
 }
 
-func Migrate(ctx context.Context, cfg Config) (MigrationStatusResult, error) {
+func UpgradeSchema(ctx context.Context, cfg Config) (SchemaStatusResult, error) {
 	s, err := openRaw(ctx, cfg)
 	if err != nil {
-		return MigrationStatusResult{}, err
+		return SchemaStatusResult{}, err
 	}
 	defer s.Close()
-	return s.migrate(ctx)
+	return s.upgradeSchema(ctx)
 }
 
 func openRaw(ctx context.Context, cfg Config) (*Store, error) {
@@ -142,63 +142,63 @@ PRAGMA busy_timeout = 5000;
 PRAGMA journal_mode = WAL;`)
 }
 
-func (s *Store) migrate(ctx context.Context) (MigrationStatusResult, error) {
-	if err := s.ensureMigrationTable(ctx); err != nil {
-		return MigrationStatusResult{}, err
+func (s *Store) upgradeSchema(ctx context.Context) (SchemaStatusResult, error) {
+	if err := s.ensureSchemaVersionTable(ctx); err != nil {
+		return SchemaStatusResult{}, err
 	}
-	current, err := s.currentMigrationVersion(ctx)
+	current, err := s.currentSchemaVersion(ctx)
 	if err != nil {
-		return MigrationStatusResult{}, err
+		return SchemaStatusResult{}, err
 	}
 
 	applied := 0
-	for _, migration := range migrations.All() {
-		if migration.Version <= current {
+	for _, change := range schema.All() {
+		if change.Version <= current {
 			continue
 		}
 		statement := fmt.Sprintf(`
 begin;
 %s
-insert into schema_migrations (version, name, applied_at)
+insert into schema_versions (version, name, applied_at)
 values (%d, %s, %s);
-commit;`, migration.SQL, migration.Version, sqlString(migration.Name), sqlString(encodeTime(utcNow())))
+commit;`, change.SQL, change.Version, sqlString(change.Name), sqlString(encodeTime(utcNow())))
 		if err := s.exec(ctx, statement); err != nil {
-			return MigrationStatusResult{}, fmt.Errorf("apply migration %d %q: %w", migration.Version, migration.Name, err)
+			return SchemaStatusResult{}, fmt.Errorf("apply schema change %d %q: %w", change.Version, change.Name, err)
 		}
 		applied++
 	}
-	return s.migrationStatus(ctx, applied)
+	return s.schemaStatus(ctx, applied)
 }
 
-func (s *Store) migrationStatus(ctx context.Context, applied int) (MigrationStatusResult, error) {
-	current, err := s.currentMigrationVersion(ctx)
+func (s *Store) schemaStatus(ctx context.Context, applied int) (SchemaStatusResult, error) {
+	current, err := s.currentSchemaVersion(ctx)
 	if err != nil {
-		return MigrationStatusResult{}, err
+		return SchemaStatusResult{}, err
 	}
-	return MigrationStatusResult{
+	return SchemaStatusResult{
 		Path:           s.path,
 		CurrentVersion: current,
-		TargetVersion:  migrations.CurrentVersion,
+		TargetVersion:  schema.CurrentVersion,
 		AppliedCount:   applied,
 	}, nil
 }
 
-func (s *Store) ensureMigrationTable(ctx context.Context) error {
+func (s *Store) ensureSchemaVersionTable(ctx context.Context) error {
 	return s.exec(ctx, `
-create table if not exists schema_migrations (
+create table if not exists schema_versions (
   version integer primary key,
   name text not null,
   applied_at text not null
 );`)
 }
 
-func (s *Store) currentMigrationVersion(ctx context.Context) (int, error) {
+func (s *Store) currentSchemaVersion(ctx context.Context) (int, error) {
 	var tableRows []struct {
 		Count int `json:"count"`
 	}
 	if err := s.query(ctx, `
 select count(*) as count from sqlite_master
-where type = 'table' and name = 'schema_migrations';`, &tableRows); err != nil {
+where type = 'table' and name = 'schema_versions';`, &tableRows); err != nil {
 		return 0, err
 	}
 	if len(tableRows) == 0 || tableRows[0].Count == 0 {
@@ -208,7 +208,7 @@ where type = 'table' and name = 'schema_migrations';`, &tableRows); err != nil {
 	var versionRows []struct {
 		Version int `json:"version"`
 	}
-	if err := s.query(ctx, `select coalesce(max(version), 0) as version from schema_migrations;`, &versionRows); err != nil {
+	if err := s.query(ctx, `select coalesce(max(version), 0) as version from schema_versions;`, &versionRows); err != nil {
 		return 0, err
 	}
 	if len(versionRows) == 0 {

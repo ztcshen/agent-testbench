@@ -111,7 +111,7 @@ func printHelp() {
 Usage:
   otsandbox version
   otsandbox store status [--store-url PATH]
-  otsandbox store migrate [--store-url PATH]
+  otsandbox store upgrade [--store-url PATH]
   otsandbox profile inspect --profile PATH
   otsandbox profile audit --profile PATH [--store-url PATH] [--json]
   otsandbox profile import --from PATH [--store-url PATH] [--json] [--audit]
@@ -146,17 +146,17 @@ func runStore(ctx context.Context, args []string) error {
 
 	switch args[0] {
 	case "status":
-		status, err := sqlite.MigrationStatus(ctx, cfg)
+		status, err := sqlite.SchemaStatus(ctx, cfg)
 		if err != nil {
 			return err
 		}
 		printStoreStatus(status)
-	case "migrate":
-		status, err := sqlite.Migrate(ctx, cfg)
+	case "upgrade":
+		status, err := sqlite.UpgradeSchema(ctx, cfg)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Migrated store to version %d\n", status.CurrentVersion)
+		fmt.Printf("Upgraded store schema to version %d\n", status.CurrentVersion)
 		fmt.Printf("Applied: %d\n", status.AppliedCount)
 		fmt.Printf("Path: %s\n", status.Path)
 	default:
@@ -165,7 +165,7 @@ func runStore(ctx context.Context, args []string) error {
 	return nil
 }
 
-func printStoreStatus(status sqlite.MigrationStatusResult) {
+func printStoreStatus(status sqlite.SchemaStatusResult) {
 	pending := status.TargetVersion - status.CurrentVersion
 	if pending < 0 {
 		pending = 0

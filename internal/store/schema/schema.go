@@ -1,6 +1,6 @@
-package migrations
+package schema
 
-type Migration struct {
+type Change struct {
 	Version int
 	Name    string
 	SQL     string
@@ -8,8 +8,8 @@ type Migration struct {
 
 const CurrentVersion = 1
 
-func All() []Migration {
-	return []Migration{
+func All() []Change {
+	return []Change{
 		{
 			Version: 1,
 			Name:    "create runtime store tables",

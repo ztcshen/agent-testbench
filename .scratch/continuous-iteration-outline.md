@@ -6,7 +6,7 @@ generic, profile-driven, and local-first.
 ## Completed
 
 - Store interface, SQLite backend, and contract tests.
-- Store migrations and CLI status/migrate commands.
+- Store schema upgrades and CLI status/upgrade commands.
 - Profile bundle loader, split asset directories, and empty profile.
 - Generic Control plane for loaded profiles.
 - External profile export fixture and profile import index.
@@ -129,6 +129,8 @@ generic, profile-driven, and local-first.
 - React-only static surface slice: legacy top-level `dashboard.js` and
   `workflows.js` are no longer served; dashboard/catalog pages use only the
   source-built React bundles.
+- Store schema terminology slice: SQLite Store version management now uses
+  neutral schema upgrade terms across package names, CLI, docs, and tests.
 
 ## Open Task Queue
 

@@ -17,7 +17,7 @@ import (
 	"open-test-sandbox/internal/store/sqlite"
 )
 
-func TestStoreMigrateAndStatusCommands(t *testing.T) {
+func TestStoreUpgradeAndStatusCommands(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
 
 	initial := runCLI(t, "store", "status", "--store-url", dbPath)
@@ -25,9 +25,9 @@ func TestStoreMigrateAndStatusCommands(t *testing.T) {
 		t.Fatalf("initial status output = %q", initial)
 	}
 
-	migrated := runCLI(t, "store", "migrate", "--store-url", dbPath)
-	if !strings.Contains(migrated, "Migrated store to version 1") {
-		t.Fatalf("migrate output = %q", migrated)
+	upgraded := runCLI(t, "store", "upgrade", "--store-url", dbPath)
+	if !strings.Contains(upgraded, "Upgraded store schema to version 1") {
+		t.Fatalf("upgrade output = %q", upgraded)
 	}
 
 	current := runCLI(t, "store", "status", "--store-url", dbPath)
