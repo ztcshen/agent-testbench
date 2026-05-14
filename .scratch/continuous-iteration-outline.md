@@ -103,6 +103,9 @@ generic, profile-driven, and local-first.
 - Interface node run history slice: `/api/interface-node` now hydrates case
   `latestRun`, node history, and evidence run indexes from Store API case run
   records.
+- Workflow catalog run state slice: `/api/catalog` now hydrates workflow
+  `runCount` and `latestRun` from Store runs, and the React workflow catalog
+  and detail pages render that state.
 
 ## Open Task Queue
 

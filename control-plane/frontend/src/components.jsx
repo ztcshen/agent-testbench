@@ -124,6 +124,14 @@ export function ServiceChips({ workflow, services }) {
 
 export function WorkflowCard({ workflow, services, compact = false }) {
   const kind = workflowKind(workflow);
+  const latestRun = workflow.latestRun || null;
+  const runCount = Number(workflow.runCount || 0);
+  const runStatus = latestRun?.status || (runCount ? "unknown" : "no runs");
+  const runTone = ["passed", "success", "ok"].includes(String(runStatus).toLowerCase())
+    ? "good"
+    : ["failed", "error"].includes(String(runStatus).toLowerCase())
+      ? "bad"
+      : "warn";
   return (
     <article className="react-card">
       <div className="react-card-top">
@@ -133,6 +141,14 @@ export function WorkflowCard({ workflow, services, compact = false }) {
         </span>
       </div>
       <p>{compactText(workflow.description, "按业务阶段查看请求、返回、日志和证据。")}</p>
+      <div className="react-service-chips">
+        <span className={classNames("react-pill", runTone)}>{`${runCount} runs · ${runStatus}`}</span>
+        {latestRun?.id ? (
+          <a className="react-chip" href={`/workflow-run.html?id=${encodeURIComponent(latestRun.id)}`}>
+            {latestRun.id}
+          </a>
+        ) : null}
+      </div>
       <ServiceChips workflow={workflow} services={services} />
       <div className="react-step-strip">
         {(workflow.steps || []).slice(0, compact ? 7 : 12).map((step) => (

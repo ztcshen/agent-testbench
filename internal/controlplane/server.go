@@ -71,7 +71,12 @@ func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, catalogPayloadFromBundle(profiles.Current()))
+		payload, err := catalogPayloadFromBundleWithStore(r.Context(), profiles.Current(), runtime)
+		if err != nil {
+			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, payload)
 	})
 	mux.HandleFunc("/api/workflow-audit", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -499,6 +504,8 @@ type catalogWorkflow struct {
 	Entrypoint   string                      `json:"entrypoint"`
 	Steps        []catalogWorkflowStep       `json:"steps"`
 	Presentation catalogWorkflowPresentation `json:"presentation"`
+	RunCount     int                         `json:"runCount"`
+	LatestRun    map[string]any              `json:"latestRun,omitempty"`
 }
 
 type catalogWorkflowStep struct {

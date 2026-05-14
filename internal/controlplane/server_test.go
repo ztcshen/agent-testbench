@@ -817,6 +817,68 @@ func TestServerExposesCatalogForReactShell(t *testing.T) {
 	}
 }
 
+func TestServerExposesCatalogWorkflowRunsFromStore(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	started := time.Date(2026, 5, 14, 9, 0, 0, 0, time.UTC)
+	for _, item := range []store.Run{
+		{
+			ID:           "run.alpha",
+			ProfileID:    "sample",
+			WorkflowID:   "workflow.alpha",
+			Status:       store.StatusPassed,
+			EvidenceRoot: ".runtime/evidence/run.alpha",
+			CreatedAt:    started,
+			UpdatedAt:    started,
+		},
+		{
+			ID:           "run.beta",
+			ProfileID:    "sample",
+			WorkflowID:   "workflow.alpha",
+			Status:       store.StatusFailed,
+			EvidenceRoot: ".runtime/evidence/run.beta",
+			CreatedAt:    started.Add(time.Minute),
+			UpdatedAt:    started.Add(time.Minute),
+		},
+	} {
+		if _, err := s.CreateRun(ctx, item); err != nil {
+			t.Fatalf("create run %s: %v", item.ID, err)
+		}
+	}
+	bundle := profile.Bundle{
+		ID:          "sample",
+		DisplayName: "Sample Profile",
+		Workflows: []profile.Workflow{
+			{ID: "workflow.alpha", DisplayName: "Workflow Alpha"},
+			{ID: "workflow.empty", DisplayName: "Workflow Empty"},
+		},
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/catalog", http.StatusOK)
+	workflows := payload["workflows"].([]any)
+	alpha := workflows[0].(map[string]any)
+	if alpha["id"] != "workflow.alpha" || alpha["runCount"] != float64(2) {
+		t.Fatalf("workflow run count = %#v", alpha)
+	}
+	latest := alpha["latestRun"].(map[string]any)
+	if latest["id"] != "run.beta" || latest["status"] != store.StatusFailed || latest["workflowId"] != "workflow.alpha" {
+		t.Fatalf("workflow latest run = %#v", latest)
+	}
+	empty := workflows[1].(map[string]any)
+	if empty["id"] != "workflow.empty" || empty["runCount"] != float64(0) {
+		t.Fatalf("empty workflow run state = %#v", empty)
+	}
+	if _, ok := empty["latestRun"]; ok {
+		t.Fatalf("empty workflow should not expose latestRun: %#v", empty)
+	}
+}
+
 func TestServerExposesDashboardSnapshotForReactShell(t *testing.T) {
 	bundle := profile.Bundle{
 		ID:          "sample",

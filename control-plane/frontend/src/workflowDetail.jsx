@@ -6,6 +6,13 @@ function serviceIds(workflow) {
   return [...new Set((workflow?.steps || []).map((step) => step.serviceId).filter(Boolean))];
 }
 
+function runStatusTone(status) {
+  const value = String(status || "").toLowerCase();
+  if (["passed", "success", "ok"].includes(value)) return "passed";
+  if (["failed", "error"].includes(value)) return "failed";
+  return "idle";
+}
+
 function WorkflowGraph({ workflow, services }) {
   const steps = workflow?.steps || [];
   return (
@@ -80,6 +87,8 @@ function WorkflowDetailApp() {
   const services = catalog?.services || [];
   const covered = useMemo(() => serviceIds(workflow), [workflow]);
   const warnings = catalog?.warnings || [];
+  const latestRun = workflow?.latestRun || null;
+  const latestStatus = latestRun?.status || (workflow?.runCount ? "unknown" : "no run");
 
   return (
     <main className="app workflow-detail-page workflow-detail-compact-density" data-template-id="TPL-WORKFLOW-LONG-CHAIN-V1">
@@ -102,7 +111,8 @@ function WorkflowDetailApp() {
         <div className="workflow-run-template-head">
           <article><span>workflow</span><strong>{workflow?.id || "-"}</strong></article>
           <article><span>steps</span><strong>{workflow?.steps?.length || 0}</strong></article>
-          <article><span>status</span><strong className="status-pill idle">ready</strong></article>
+          <article><span>runs</span><strong>{workflow?.runCount || 0}</strong></article>
+          <article><span>status</span><strong className={`status-pill ${runStatusTone(latestStatus)}`}>{latestStatus}</strong></article>
           <article><span>source</span><strong>{catalog?.source?.kind || "-"}</strong></article>
         </div>
       </section>
