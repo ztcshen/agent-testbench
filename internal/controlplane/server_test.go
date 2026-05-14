@@ -205,6 +205,8 @@ func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
 	}{
 		{path: "/index.html", want: "sandbox-workbench-page"},
 		{path: "/app.js", want: "/api/state"},
+		{path: "/dashboard.js", want: "/api/dashboard"},
+		{path: "/workflows.js", want: "/api/catalog"},
 		{path: "/agent-test.html", want: "agent-test-page"},
 		{path: "/agent-test.js", want: "/api/agent-test"},
 		{path: "/agent-run.html", want: "agent-run-detail-page"},

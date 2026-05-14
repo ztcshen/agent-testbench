@@ -58,6 +58,8 @@ generic, profile-driven, and local-first.
   profile-backed capability API and JSON run placeholder.
 - Frontend replay evidence slice: reference Replay Evidence page is served with
   a clean missing-trace recovery state.
+- Frontend legacy script asset slice: reference dashboard and workflow catalog
+  root scripts are served as neutral static assets.
 
 ## Open Task Queue
 

@@ -215,6 +215,8 @@ func New(bundle profile.Bundle) http.Handler {
 var staticFileNames = []string{
 	"index.html",
 	"app.js",
+	"dashboard.js",
+	"workflows.js",
 	"agent-test.html",
 	"agent-test.js",
 	"agent-run.html",
