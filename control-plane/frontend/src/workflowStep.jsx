@@ -5,6 +5,8 @@ import { Chip, fetchJSON, queryParam, selectedStep, selectedWorkflow, serviceNam
 function WorkflowStepApp() {
   const [catalog, setCatalog] = useState(null);
   const [dashboard, setDashboard] = useState(null);
+  const [stepRun, setStepRun] = useState(null);
+  const [stepRunMessage, setStepRunMessage] = useState("no run");
   const [message, setMessage] = useState("loading");
   const [workflowID, setWorkflowID] = useState(workflowIdFromURL());
   const [stepID, setStepID] = useState(queryParam("step"));
@@ -39,6 +41,30 @@ function WorkflowStepApp() {
     const items = (dashboard?.groups || []).flatMap((group) => group.items || []);
     return items.find((item) => item.id === step?.serviceId);
   }, [dashboard, step]);
+  const stepResult = stepRun?.summary?.steps?.[0] || null;
+
+  useEffect(() => {
+    async function loadStepRun() {
+      if (!workflow?.id || !step?.id) {
+        setStepRun(null);
+        setStepRunMessage("no run");
+        return;
+      }
+      const path = runID
+        ? `/api/workflow-runs/step?runId=${encodeURIComponent(runID)}&stepId=${encodeURIComponent(step.id)}`
+        : `/api/workflow-runs/latest-step?workflowId=${encodeURIComponent(workflow.id)}&stepId=${encodeURIComponent(step.id)}`;
+      setStepRunMessage("loading");
+      try {
+        const payload = await fetchJSON(path);
+        setStepRun(payload);
+        setStepRunMessage(payload.run?.status || "loaded");
+      } catch {
+        setStepRun(null);
+        setStepRunMessage("no run");
+      }
+    }
+    loadStepRun();
+  }, [workflow?.id, step?.id, runID]);
 
   return (
     <main className="app workflow-step-page workflow-step-compact-density" data-template-id="TPL-INTERFACE-STEP-DETAIL-V1">
@@ -82,7 +108,8 @@ function WorkflowStepApp() {
             {(catalog?.workflows || []).map((item) => <option value={item.id} key={item.id}>{item.displayName || item.id}</option>)}
           </select>
           <h2>运行证据</h2>
-          <code>{runID || "未绑定 run"}</code>
+          <code>{stepRun?.run?.id || runID || "未绑定 run"}</code>
+          <span className="workflow-step-status-pill" role="status">{stepRunMessage}</span>
           <h2>前后步骤</h2>
           <div className="workflow-step-nav">
             <a className={`button-link ${previous ? "" : "disabled-link"}`} href={previous ? `/workflow-step.html?workflow=${encodeURIComponent(workflow.id)}&step=${encodeURIComponent(previous.id)}` : "#"}>上一步</a>
@@ -103,6 +130,34 @@ function WorkflowStepApp() {
             <article className="workflow-step-card"><span>Action</span><strong>{step?.action || "-"}</strong></article>
             <article className="workflow-step-card"><span>Evidence</span><div className="workflow-detail-chips"><Chip>{runtime?.message || "catalog"}</Chip></div></article>
             <article className="workflow-step-card"><span>Service</span><div className="workflow-detail-chips"><Chip>{step?.serviceId || "-"}</Chip></div></article>
+            <article className="workflow-step-card"><span>Latest run</span><strong>{stepRun?.run?.status || "no run"}</strong></article>
+          </section>
+          <section className="workflow-step-detail-card">
+            <div className="section-head">
+              <h2>最近 Step Run</h2>
+              <span className="evidence-count">{stepRun?.run?.id || "no run"}</span>
+            </div>
+            {stepResult ? (
+              <div className="workflow-step-context-grid">
+                <article className="workflow-step-context-card">
+                  <strong>status</strong>
+                  <div className="workflow-detail-chips">
+                    <Chip>{stepResult.status || stepResult.ok || stepRun?.run?.status || "-"}</Chip>
+                    <Chip>{stepResult.stepId || step?.id || "-"}</Chip>
+                  </div>
+                </article>
+                <article className="workflow-step-context-card">
+                  <strong>request</strong>
+                  <pre>{JSON.stringify(stepResult.request || {}, null, 2)}</pre>
+                </article>
+                <article className="workflow-step-context-card">
+                  <strong>response</strong>
+                  <pre>{JSON.stringify(stepResult.response || {}, null, 2)}</pre>
+                </article>
+              </div>
+            ) : (
+              <p className="dashboard-empty">还没有这个 Step 的运行记录。</p>
+            )}
           </section>
           <section className="workflow-step-detail-card">
             <div className="section-head">

@@ -109,6 +109,8 @@ generic, profile-driven, and local-first.
 - API Case capability run state slice: `/api/cases/capabilities` now hydrates
   case `runCount` and `latestRun` from Store API case records, and the React
   API Case page renders the selected case run state.
+- Workflow step run evidence slice: `workflow-step.html` now reads the latest
+  Store-backed step run and renders status plus request/response summaries.
 
 ## Open Task Queue
 
