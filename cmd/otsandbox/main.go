@@ -55,6 +55,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
+	case "baseline":
+		if err := runBaseline(context.Background(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 	case "template":
 		if err := runTemplate(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -89,6 +94,8 @@ Usage:
   otsandbox evidence import --from PATH --profile ID [--store-url PATH]
   otsandbox evidence list [--store-url PATH] [--run ID] [--json]
   otsandbox workflow plan --profile PATH --workflow ID
+  otsandbox baseline get --profile ID --subject ID [--store-url PATH]
+  otsandbox baseline set --profile ID --subject ID --status STATUS [--required] [--store-url PATH]
   otsandbox template render --profile PATH --template ID [--fixture ID]
   otsandbox case run --case PATH [--base-url URL] [--dry-run] [--evidence-dir PATH]
   otsandbox serve [--profile PATH] [--host HOST] [--port PORT]
@@ -282,6 +289,95 @@ func findWorkflow(bundle profile.Bundle, id string) (profile.Workflow, bool) {
 		}
 	}
 	return profile.Workflow{}, false
+}
+
+func runBaseline(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing baseline command")
+	}
+	switch args[0] {
+	case "get":
+		return runBaselineGet(ctx, args[1:])
+	case "set":
+		return runBaselineSet(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown baseline command: %s", args[0])
+	}
+}
+
+func runBaselineGet(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("baseline get", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	profileID := flags.String("profile", "", "Profile id")
+	subjectID := flags.String("subject", "", "Subject id")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	s, err := openStore(ctx, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	gate, err := s.GetBaselineGate(ctx, *profileID, *subjectID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return fmt.Errorf("baseline gate not found: %s %s", *profileID, *subjectID)
+		}
+		return err
+	}
+	printBaselineGate(gate)
+	return nil
+}
+
+func runBaselineSet(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("baseline set", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	profileID := flags.String("profile", "", "Profile id")
+	subjectID := flags.String("subject", "", "Subject id")
+	status := flags.String("status", "", "Gate status")
+	required := flags.Bool("required", false, "Mark the gate as required")
+	summaryJSON := flags.String("summary-json", "{}", "Gate summary JSON")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	s, err := openStore(ctx, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	now := time.Now().UTC()
+	gate, err := s.UpsertBaselineGate(ctx, store.BaselineGate{
+		ProfileID:   *profileID,
+		SubjectID:   *subjectID,
+		Status:      *status,
+		Required:    *required,
+		SummaryJSON: *summaryJSON,
+		CheckedAt:   now,
+		UpdatedAt:   now,
+	})
+	if err != nil {
+		return err
+	}
+	printBaselineGate(gate)
+	return nil
+}
+
+func openStore(ctx context.Context, storeURL string) (*sqlite.Store, error) {
+	cfg, err := sqlite.ParseConfigFromURL(storeURL)
+	if err != nil {
+		return nil, err
+	}
+	return sqlite.Open(ctx, cfg)
+}
+
+func printBaselineGate(gate store.BaselineGate) {
+	fmt.Printf("Baseline Gate: %s %s\n", gate.ProfileID, gate.SubjectID)
+	fmt.Printf("Status: %s\n", gate.Status)
+	fmt.Printf("Required: %t\n", gate.Required)
 }
 
 func runTemplate(args []string) error {

@@ -72,6 +72,31 @@ func TestProfileImportCommandIndexesBundleInStore(t *testing.T) {
 	}
 }
 
+func TestBaselineGateCommandsSetAndGetState(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+
+	out := runCLI(t, "baseline", "set", "--store-url", storePath, "--profile", "sample", "--subject", "workflow.alpha", "--status", "passed", "--required")
+	if !strings.Contains(out, "Baseline Gate: sample workflow.alpha") || !strings.Contains(out, "Status: passed") {
+		t.Fatalf("baseline set output = %q", out)
+	}
+
+	out = runCLI(t, "baseline", "get", "--store-url", storePath, "--profile", "sample", "--subject", "workflow.alpha")
+	for _, want := range []string{"Baseline Gate: sample workflow.alpha", "Status: passed", "Required: true"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("baseline get output missing %q: %q", want, out)
+		}
+	}
+}
+
+func TestBaselineGetCommandRejectsMissingGate(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+
+	out := runCLIFails(t, "baseline", "get", "--store-url", storePath, "--profile", "sample", "--subject", "workflow.missing")
+	if !strings.Contains(out, "baseline gate not found") || !strings.Contains(out, "sample workflow.missing") {
+		t.Fatalf("missing baseline gate output = %q", out)
+	}
+}
+
 func TestWorkflowPlanCommandPrintsBoundSteps(t *testing.T) {
 	dir := t.TempDir()
 	writeWorkflowProfile(t, dir)

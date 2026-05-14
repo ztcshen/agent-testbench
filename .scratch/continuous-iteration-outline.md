@@ -22,22 +22,11 @@ generic, profile-driven, and local-first.
 - Workflow planning command.
 - Request template rendering preview.
 - Evidence query CLI.
+- Baseline gate CLI.
 
 ## Open Task Queue
 
-### Task 1: Baseline Gate CLI
-
-Status: open
-
-Goal:
-- Let users inspect and update baseline gate state for a profile subject.
-
-Acceptance:
-- Commands use the generic Store interface.
-- Gate state is profile-id and subject-id based.
-- No domain-specific subject names appear in core.
-
-### Task 2: Release Hygiene
+### Task 1: Release Hygiene
 
 Status: open
 
