@@ -9,58 +9,7 @@
     <link rel="stylesheet" href="/assets/react/controlPlane.css">
   </head>
   <body>
-    <main class="app interface-node-directory-page" data-template-id="TPL-INTERFACE-NODE-DIRECTORY-V1">
-      <div class="template-watermark" aria-label="模板编号">TPL-INTERFACE-NODE-DIRECTORY-V1</div>
-      <section class="topbar">
-        <div>
-          <h1>接口节点目录</h1>
-          <p id="interfaceNodeDirectorySummary">loading</p>
-        </div>
-        <div class="actions">
-          <span id="interfaceNodeDirectoryMessage" class="dashboard-status-pill" role="status">ready</span>
-          <a class="button-link" href="/">控制台</a>
-          <a class="button-link" href="/workflows.html">Workflow 目录</a>
-          <a class="button-link" href="/service-inventory.html">服务目录</a>
-          <button id="refreshInterfaceNodeDirectoryBtn" type="button" title="刷新">↻</button>
-        </div>
-      </section>
-
-      <section class="interface-node-directory" aria-label="接口节点目录工作台">
-        <div class="interface-node-directory-main">
-          <div class="dashboard-section-head interface-node-directory-head">
-            <div>
-              <h2>Interface Nodes</h2>
-              <p id="interfaceNodeDirectorySource">template-config SQLite</p>
-            </div>
-            <div class="interface-node-directory-filters">
-              <label>
-                <span>搜索</span>
-                <input id="interfaceNodeDirectoryFilter" type="search" placeholder="接口 / 服务 / operation" spellcheck="false">
-              </label>
-              <label>
-                <span>服务</span>
-                <select id="interfaceNodeServiceFilter">
-                  <option value="">全部服务</option>
-                </select>
-              </label>
-            </div>
-          </div>
-          <div id="interfaceNodeDirectoryList" class="interface-node-directory-list"></div>
-        </div>
-        <aside class="interface-node-directory-side" aria-label="接口节点汇总">
-          <div id="interfaceNodeDirectoryStats" class="interface-node-directory-summary"></div>
-          <div class="interface-node-directory-attention">
-            <div class="dashboard-section-head compact">
-              <div>
-                <h2>Attention</h2>
-                <p>failed / pending admission</p>
-              </div>
-            </div>
-            <div id="interfaceNodeDirectoryAttentionList" class="interface-node-directory-attention-list"></div>
-          </div>
-        </aside>
-      </section>
-    </main>
-    <script src="/interface-nodes.js"></script>
+    <div id="react-interface-nodes-root"></div>
+    <script type="module" src="/assets/react/interfaceNodes.js"></script>
   </body>
 </html>

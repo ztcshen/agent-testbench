@@ -17,6 +17,8 @@ await build({
     dashboard: resolve(root, "src/dashboard.jsx"),
     environmentNode: resolve(root, "src/environmentNode.jsx"),
     environmentNodes: resolve(root, "src/environmentNodes.jsx"),
+    interfaceNode: resolve(root, "src/interfaceNode.jsx"),
+    interfaceNodes: resolve(root, "src/interfaceNodes.jsx"),
     serviceInventory: resolve(root, "src/serviceInventory.jsx"),
     workflowDetail: resolve(root, "src/workflowDetail.jsx"),
     workflowBlueprintDemo: resolve(root, "src/workflowBlueprintDemo.jsx"),

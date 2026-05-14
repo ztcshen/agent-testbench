@@ -286,9 +286,7 @@ var staticFileNames = []string{
 	"workflow-blueprint-demo.html",
 	"workflow-blueprint-new.html",
 	"interface-nodes.html",
-	"interface-nodes.js",
 	"interface-node.html",
-	"interface-node.js",
 	"interface-node-history.html",
 	"interface-node-fields.html",
 	"environment-nodes.html",
@@ -298,7 +296,6 @@ var staticFileNames = []string{
 	"workflow-detail.html",
 	"workflow-step.html",
 	"topology-renderer.js",
-	"interface-run-template.js",
 	"styles.css",
 }
 
