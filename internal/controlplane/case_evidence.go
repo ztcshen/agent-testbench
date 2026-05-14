@@ -1,8 +1,10 @@
 package controlplane
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 
 	"open-test-sandbox/internal/store"
@@ -45,7 +47,7 @@ func handleCaseEvidence(w http.ResponseWriter, r *http.Request, runtime store.St
 }
 
 func caseEvidencePayload(run store.Run, item store.APICaseRun, records []store.EvidenceRecord) map[string]any {
-	request := jsonObject(item.RequestSummaryJSON)
+	request := caseEvidenceRequest(records, item.ID, jsonObject(item.RequestSummaryJSON))
 	assertions := jsonObject(item.AssertionSummaryJSON)
 	response := caseEvidenceResponse(records, item.ID)
 	operation := caseRunOperation(request, item.CaseID)
@@ -77,6 +79,23 @@ func caseEvidencePayload(run store.Run, item store.APICaseRun, records []store.E
 	}
 }
 
+func caseEvidenceRequest(records []store.EvidenceRecord, caseRunID string, fallback map[string]any) map[string]any {
+	request := copyMap(fallback)
+	for _, record := range records {
+		if record.CaseRunID != caseRunID || record.Kind != "request" {
+			continue
+		}
+		if body, ok := evidenceRecordObject(record); ok {
+			for key, value := range body {
+				request[key] = value
+			}
+		}
+		request["evidence_uri"] = record.URI
+		break
+	}
+	return request
+}
+
 func caseEvidenceResponse(records []store.EvidenceRecord, caseRunID string) map[string]any {
 	response := map[string]any{}
 	for _, record := range records {
@@ -90,10 +109,41 @@ func caseEvidenceResponse(records []store.EvidenceRecord, caseRunID string) map[
 		if bytes, ok := summary["bodyBytes"]; ok {
 			response["body_bytes"] = bytes
 		}
+		if body, ok := evidenceRecordObject(record); ok {
+			if code, ok := body["statusCode"]; ok {
+				response["http_code"] = code
+			}
+			if headers, ok := body["headers"]; ok {
+				response["headers"] = headers
+			}
+			if responseBody, ok := body["body"]; ok {
+				response["body"] = responseBody
+			}
+		}
 		response["evidence_uri"] = record.URI
 		break
 	}
 	return response
+}
+
+func evidenceRecordObject(record store.EvidenceRecord) (map[string]any, bool) {
+	raw, err := os.ReadFile(record.URI)
+	if err != nil {
+		return nil, false
+	}
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return nil, false
+	}
+	return body, true
+}
+
+func copyMap(values map[string]any) map[string]any {
+	out := make(map[string]any, len(values))
+	for key, value := range values {
+		out[key] = value
+	}
+	return out
 }
 
 func emptyFixtureEvidencePayload() map[string]any {

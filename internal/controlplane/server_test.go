@@ -990,12 +990,33 @@ func TestServerExposesCaseEvidenceFromStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("record api case run: %v", err)
 	}
+	evidenceDir := t.TempDir()
+	requestPath := filepath.Join(evidenceDir, "request.json")
+	if err := os.WriteFile(requestPath, []byte(`{"method":"POST","path":"/alpha","headers":{"Content-Type":"application/json"},"body":{"id":"item-001"}}`), 0o644); err != nil {
+		t.Fatalf("write request evidence: %v", err)
+	}
+	responsePath := filepath.Join(evidenceDir, "response.json")
+	if err := os.WriteFile(responsePath, []byte(`{"statusCode":200,"headers":{"Content-Type":"application/json"},"body":"{\"ok\":true}"}`), 0o644); err != nil {
+		t.Fatalf("write response evidence: %v", err)
+	}
+	_, err = s.RecordEvidence(ctx, store.EvidenceRecord{
+		ID:        "run.alpha.request",
+		RunID:     "run.alpha",
+		CaseRunID: "run.alpha.case",
+		Kind:      "request",
+		URI:       requestPath,
+		MediaType: "application/json",
+		Summary:   `{"method":"POST","path":"/alpha","hasBody":true}`,
+	})
+	if err != nil {
+		t.Fatalf("record request evidence: %v", err)
+	}
 	_, err = s.RecordEvidence(ctx, store.EvidenceRecord{
 		ID:        "run.alpha.response",
 		RunID:     "run.alpha",
 		CaseRunID: "run.alpha.case",
 		Kind:      "response",
-		URI:       ".runtime/evidence/run.alpha/response.json",
+		URI:       responsePath,
 		MediaType: "application/json",
 		Summary:   `{"statusCode":200,"bodyBytes":19}`,
 	})
@@ -1015,8 +1036,15 @@ func TestServerExposesCaseEvidenceFromStore(t *testing.T) {
 	if summary["case_id"] != "case.alpha" || request["method"] != "POST" || request["path"] != "/alpha" {
 		t.Fatalf("case evidence request = %#v", payload)
 	}
+	requestBody := request["body"].(map[string]any)
+	if requestBody["id"] != "item-001" {
+		t.Fatalf("case evidence request body = %#v", request)
+	}
 	if response["http_code"] != float64(200) || assertions["status"] != "passed" {
 		t.Fatalf("case evidence response/assertions = %#v", payload)
+	}
+	if response["body"] != `{"ok":true}` {
+		t.Fatalf("case evidence response body = %#v", response)
 	}
 }
 
