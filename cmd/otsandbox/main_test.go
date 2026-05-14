@@ -101,6 +101,28 @@ func TestWorkflowPlanCommandRejectsMissingWorkflow(t *testing.T) {
 	}
 }
 
+func TestTemplateRenderCommandPrintsRequestPreview(t *testing.T) {
+	dir := t.TempDir()
+	writeTemplateProfile(t, dir)
+
+	out := runCLI(t, "template", "render", "--profile", dir, "--template", "template.create", "--fixture", "fixture.item")
+
+	var rendered struct {
+		Method string         `json:"method"`
+		Path   string         `json:"path"`
+		Body   map[string]any `json:"body"`
+	}
+	if err := json.Unmarshal([]byte(out), &rendered); err != nil {
+		t.Fatalf("decode template render output: %v\n%s", err, out)
+	}
+	if rendered.Method != "POST" || rendered.Path != "/v1/items/item-001" {
+		t.Fatalf("rendered request identity = %#v", rendered)
+	}
+	if rendered.Body["id"] != "item-001" || rendered.Body["quantity"].(float64) != 3 {
+		t.Fatalf("rendered request body = %#v", rendered.Body)
+	}
+}
+
 func TestEvidenceImportCommandIndexesLegacyRuntime(t *testing.T) {
 	dir := t.TempDir()
 	sourcePath := filepath.Join(dir, "legacy.sqlite")
@@ -315,6 +337,33 @@ func writeWorkflowProfile(t *testing.T, dir string) {
 	writeFile(t, filepath.Join(dir, "interface-nodes", "node.json"), `{"id":"node.alpha","displayName":"Node Alpha"}`)
 	writeFile(t, filepath.Join(dir, "cases", "case.json"), `{"id":"case.alpha","displayName":"Case Alpha","nodeId":"node.alpha"}`)
 	writeFile(t, filepath.Join(dir, "workflow-bindings", "binding.json"), `{"workflowId":"workflow.alpha","stepId":"step.one","nodeId":"node.alpha","caseId":"case.alpha","required":true}`)
+}
+
+func writeTemplateProfile(t *testing.T, dir string) {
+	t.Helper()
+	writeFile(t, filepath.Join(dir, "profile.json"), `{
+  "id": "sample",
+  "displayName": "Sample Profile",
+  "services": [],
+  "workflows": [],
+  "interfaceNodes": [],
+  "apiCases": [],
+  "requestTemplates": [],
+  "caseDependencies": [],
+  "workflowBindings": [],
+  "fixtures": []
+}`)
+	writeFile(t, filepath.Join(dir, "request-templates", "template.json"), `{
+  "id": "template.create",
+  "method": "POST",
+  "path": "/v1/items/{{.itemId}}",
+  "templateJson": "{\"id\":\"{{.itemId}}\",\"quantity\":{{.quantity}}}"
+}`)
+	writeFile(t, filepath.Join(dir, "fixtures", "fixture.json"), `{
+  "id": "fixture.item",
+  "kind": "json",
+  "dataJson": "{\"itemId\":\"item-001\",\"quantity\":3}"
+}`)
 }
 
 func writeFile(t *testing.T, path string, body string) {

@@ -19,37 +19,12 @@ generic, profile-driven, and local-first.
 - API Case Store summaries for requests, assertions, and response Evidence.
 - Store backend URL boundary with SQLite as the default.
 - Machine-readable Evidence import report.
+- Workflow planning command.
+- Request template rendering preview.
 
 ## Open Task Queue
 
-### Task 1: Workflow Plan Command
-
-Status: open
-
-Goal:
-- Load a profile workflow and print its bound steps without executing runtime
-  actions.
-
-Acceptance:
-- A generic profile fixture can plan a workflow by id.
-- Missing workflow ids fail with actionable errors.
-- Output includes step id, node id, case id, and required flag.
-- `go test ./...` and the source-domain scan pass.
-
-### Task 2: Request Template Rendering
-
-Status: open
-
-Goal:
-- Render a request template with fixture data into a concrete API Case request
-  preview.
-
-Acceptance:
-- Template and fixture files remain profile-owned assets.
-- Core rendering stays generic JSON/path/method oriented.
-- Render output can be inspected without sending HTTP.
-
-### Task 3: Evidence Query CLI
+### Task 1: Evidence Query CLI
 
 Status: open
 
@@ -61,7 +36,7 @@ Acceptance:
 - Text output is useful for humans and can be requested as JSON.
 - Missing records return not-found errors without panics.
 
-### Task 4: Baseline Gate CLI
+### Task 2: Baseline Gate CLI
 
 Status: open
 
@@ -73,7 +48,7 @@ Acceptance:
 - Gate state is profile-id and subject-id based.
 - No domain-specific subject names appear in core.
 
-### Task 5: Release Hygiene
+### Task 3: Release Hygiene
 
 Status: open
 

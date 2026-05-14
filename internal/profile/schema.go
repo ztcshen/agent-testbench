@@ -66,6 +66,7 @@ type Fixture struct {
 	ID          string `json:"id"`
 	DisplayName string `json:"displayName,omitempty"`
 	Kind        string `json:"kind,omitempty"`
+	DataJSON    string `json:"dataJson,omitempty"`
 }
 
 type Counts struct {

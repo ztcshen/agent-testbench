@@ -17,6 +17,7 @@ import (
 	"open-test-sandbox/internal/controlplane"
 	"open-test-sandbox/internal/evidence"
 	"open-test-sandbox/internal/profile"
+	"open-test-sandbox/internal/requesttemplate"
 	"open-test-sandbox/internal/store"
 	"open-test-sandbox/internal/store/sqlite"
 )
@@ -54,6 +55,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
+	case "template":
+		if err := runTemplate(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 	case "case":
 		if err := runCase(context.Background(), os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -82,6 +88,7 @@ Usage:
   otsandbox profile import --from PATH [--store-url PATH]
   otsandbox evidence import --from PATH --profile ID [--store-url PATH]
   otsandbox workflow plan --profile PATH --workflow ID
+  otsandbox template render --profile PATH --template ID [--fixture ID]
   otsandbox case run --case PATH [--base-url URL] [--dry-run] [--evidence-dir PATH]
   otsandbox serve [--profile PATH] [--host HOST] [--port PORT]
   otsandbox help`)
@@ -274,6 +281,43 @@ func findWorkflow(bundle profile.Bundle, id string) (profile.Workflow, bool) {
 		}
 	}
 	return profile.Workflow{}, false
+}
+
+func runTemplate(args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing template command")
+	}
+	switch args[0] {
+	case "render":
+		return runTemplateRender(args[1:])
+	default:
+		return fmt.Errorf("unknown template command: %s", args[0])
+	}
+}
+
+func runTemplateRender(args []string) error {
+	flags := flag.NewFlagSet("template render", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path")
+	templateID := flags.String("template", "", "Request template id")
+	fixtureID := flags.String("fixture", "", "Fixture id")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	bundle, err := profile.Load(*profilePath)
+	if err != nil {
+		return err
+	}
+	rendered, err := requesttemplate.Render(bundle, requesttemplate.Options{
+		TemplateID: *templateID,
+		FixtureID:  *fixtureID,
+	})
+	if err != nil {
+		return err
+	}
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(rendered)
 }
 
 func runEvidence(ctx context.Context, args []string) error {

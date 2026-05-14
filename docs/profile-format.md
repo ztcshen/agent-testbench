@@ -31,7 +31,9 @@ bundle contains a `profile.json` manifest.
 - `requestTemplates`: reusable request rendering assets for API cases.
 - `caseDependencies`: fixture requirements and mappings for cases.
 - `workflowBindings`: links from workflow steps to interface nodes and cases.
-- `fixtures`: input or precondition data for cases and workflows.
+- `fixtures`: input or precondition data for cases and workflows. Fixtures can
+  include `dataJson` when a profile owns small JSON data needed for request
+  template rendering.
 
 Configuration remains file-first. Store records are generated runtime indexes,
 not the source of truth for profile assets.
