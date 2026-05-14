@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"open-test-sandbox/internal/controlplane"
 	"open-test-sandbox/internal/profile"
@@ -1003,6 +1004,67 @@ func TestServerExposesCaseEvidenceFromStore(t *testing.T) {
 	}
 	if response["http_code"] != float64(200) || assertions["status"] != "passed" {
 		t.Fatalf("case evidence response/assertions = %#v", payload)
+	}
+}
+
+func TestServerExposesCaseTimingFromStore(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+
+	started := time.Date(2026, 5, 14, 8, 0, 0, 0, time.UTC)
+	for _, item := range []struct {
+		runID    string
+		caseID   string
+		duration time.Duration
+	}{
+		{runID: "run.fast", caseID: "case.fast", duration: 150 * time.Millisecond},
+		{runID: "run.slow", caseID: "case.slow", duration: 1250 * time.Millisecond},
+	} {
+		_, err = s.CreateRun(ctx, store.Run{
+			ID:           item.runID,
+			ProfileID:    "sample",
+			Status:       store.StatusPassed,
+			EvidenceRoot: ".runtime/evidence/" + item.runID,
+			SummaryJSON:  "{}",
+			StartedAt:    started,
+			FinishedAt:   started.Add(item.duration),
+			CreatedAt:    started,
+			UpdatedAt:    started.Add(item.duration),
+		})
+		if err != nil {
+			t.Fatalf("create run %s: %v", item.runID, err)
+		}
+		_, err = s.RecordAPICaseRun(ctx, store.APICaseRun{
+			ID:                   item.runID + ".case",
+			RunID:                item.runID,
+			CaseID:               item.caseID,
+			Status:               store.StatusPassed,
+			RequestSummaryJSON:   `{"method":"GET","path":"/timing"}`,
+			AssertionSummaryJSON: `{"status":"passed","errorCount":0}`,
+			StartedAt:            started,
+			FinishedAt:           started.Add(item.duration),
+			CreatedAt:            started,
+		})
+		if err != nil {
+			t.Fatalf("record case run %s: %v", item.runID, err)
+		}
+	}
+
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample", DisplayName: "Sample Profile"}, s))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/case/timing?kind=case", http.StatusOK)
+	summary := payload["summary"].(map[string]any)
+	if summary["caseRunCount"] != float64(2) || summary["durationMeasuredCount"] != float64(2) || summary["maxDurationMs"] != float64(1250) {
+		t.Fatalf("case timing summary = %#v", summary)
+	}
+	slowest := summary["slowestRows"].(map[string]any)["caseRun"].(map[string]any)
+	if slowest["id"] != "run.slow.case" || slowest["caseId"] != "case.slow" || slowest["durationMs"] != float64(1250) {
+		t.Fatalf("slowest timing row = %#v", slowest)
 	}
 }
 

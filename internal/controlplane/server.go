@@ -142,19 +142,7 @@ func NewWithStore(bundle profile.Bundle, runtime store.Store) http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, map[string]any{
-			"ok": true,
-			"summary": map[string]any{
-				"caseRunCount":          0,
-				"candidateBatchCount":   0,
-				"durationMeasuredCount": 0,
-				"maxDurationMs":         0,
-				"speedup":               map[string]any{"available": false},
-				"slowestRows":           map[string]any{},
-			},
-			"warningDetails": []map[string]any{},
-			"warnings":       []string{},
-		})
+		handleCaseTiming(w, r, runtime)
 	})
 	mux.HandleFunc("/api/case/incomplete-batches", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
