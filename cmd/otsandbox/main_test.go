@@ -21,17 +21,17 @@ func TestStoreUpgradeAndStatusCommands(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
 
 	initial := runCLI(t, "store", "status", "--store-url", dbPath)
-	if !strings.Contains(initial, "Version: 0") || !strings.Contains(initial, "Pending: 1") {
+	if !strings.Contains(initial, "Version: 0") || !strings.Contains(initial, "Pending: 2") {
 		t.Fatalf("initial status output = %q", initial)
 	}
 
 	upgraded := runCLI(t, "store", "upgrade", "--store-url", dbPath)
-	if !strings.Contains(upgraded, "Upgraded store schema to version 1") {
+	if !strings.Contains(upgraded, "Upgraded store schema to version 2") {
 		t.Fatalf("upgrade output = %q", upgraded)
 	}
 
 	current := runCLI(t, "store", "status", "--store-url", dbPath)
-	if !strings.Contains(current, "Version: 1") || !strings.Contains(current, "Pending: 0") {
+	if !strings.Contains(current, "Version: 2") || !strings.Contains(current, "Pending: 0") {
 		t.Fatalf("current status output = %q", current)
 	}
 }

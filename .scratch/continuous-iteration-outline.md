@@ -131,6 +131,9 @@ generic, profile-driven, and local-first.
   source-built React bundles.
 - Store schema terminology slice: SQLite Store version management now uses
   neutral schema upgrade terms across package names, CLI, docs, and tests.
+- Template config schema slice: SQLite Store schema version 2 now includes the
+  generic template, node, workflow, interface-node, case, and fixture tables
+  from the reference control-plane database model.
 
 ## Open Task Queue
 
