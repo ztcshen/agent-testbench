@@ -42,6 +42,26 @@ the same facts to the CLI, Control plane APIs, React workbench, and reports.
 | Control plane workbench | A React workbench reads the same Store/read-models as CLI and API users. |
 | Open-source guardrails | Release checks prevent generated state and source-domain terms from entering the generic core. |
 
+## Who It Helps
+
+- **QA and platform teams** that need a repeatable local workbench for
+  integration cases, workflow regressions, and runtime Evidence.
+- **Agent builders** that want a clean discover-then-run contract instead of
+  prompts full of hidden ids.
+- **Backend teams** that need compact failure reports with request, response,
+  assertion, timing, log, and topology context.
+- **Organizations with many product teams** that want each team to own its
+  profile bundle while sharing one generic sandbox core.
+
+## Use Cases
+
+- Generate a regression report for every case attached to one interface node.
+- Run a workflow-shaped regression and keep per-step Evidence.
+- Let an agent discover available targets before choosing what to test.
+- Publish external profile bundles into a local Store for review and replay.
+- Inspect a failed case without re-running the whole workflow.
+- Keep team-specific test data out of the open-source core.
+
 ## Quick Start
 
 Install dependencies and verify the checkout:
@@ -145,6 +165,8 @@ Core packages stay generic:
 | --- | --- |
 | [Quick Start](docs/quickstart.md) | First local run, Store setup, profile install, and workbench launch. |
 | [Backend Capabilities](docs/backend-capabilities.md) | Store, profile publishing, discovery, execution, reports, Evidence, APIs, and release guardrails. |
+| [Share Kit](docs/share-kit.md) | Project tagline, short descriptions, demo script, and announcement snippets for sharing the project. |
+| [Roadmap](docs/roadmap.md) | Public development themes and contribution-friendly milestones. |
 | [Profile Authoring](docs/profile-authoring.md) | How to keep team-owned test assets outside the core repository. |
 | [Profile Format](docs/profile-format.md) | Manifest fields, split assets, audit, install, pack, import, and verify. |
 | [API Case Format](docs/api-case-format.md) | Runnable HTTP case JSON and Evidence output contract. |
