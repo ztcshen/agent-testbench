@@ -70,6 +70,12 @@ The API Case JSON format and Evidence output contract are documented in
 Store backend support is documented in
 [docs/store-backends.md](docs/store-backends.md).
 
+For a complete first-run guide, see [docs/quickstart.md](docs/quickstart.md).
+For profile bundle authoring, see
+[docs/profile-authoring.md](docs/profile-authoring.md). Agent and CI
+integration contracts are summarized in
+[docs/cli-api-contracts.md](docs/cli-api-contracts.md).
+
 ## Direction
 
 - Keep the default developer experience local and lightweight.
@@ -94,3 +100,18 @@ The project now has:
 - runtime Evidence import with text and JSON reports.
 
 Domain-specific data belongs in profile/config bundles, not in core source code.
+
+## Contributing and Release Gates
+
+Run the full local gate before publishing a change:
+
+```sh
+npm run release-check
+```
+
+The gate runs generated-state checks, source-domain guardrails, Go tests, the
+React build, and browser smoke tests. See [CONTRIBUTING.md](CONTRIBUTING.md)
+and [docs/release-checklist.md](docs/release-checklist.md) for the public
+workflow.
+
+Open Test Sandbox is licensed under the Apache License 2.0.
