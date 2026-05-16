@@ -1,9 +1,12 @@
 .DS_Store
 .env
+.env.*
+.idea/
 .runtime/
 node_modules/
 test-results/
 coverage/
+*.log
 *.db
 *.sqlite
 *.sqlite3

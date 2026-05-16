@@ -3,8 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "description": "Local-first integration test sandbox for template-driven workflows, API cases, fixtures, and evidence.",
+  "license": "Apache-2.0",
   "scripts": {
     "build:frontend": "node control-plane/frontend/build.mjs",
+    "demo:api-case": "node tools/examples/api-case-demo.mjs",
     "release-check": "bash tools/release-check.sh",
     "smoke:frontend": "node tools/smoke/control-plane-smoke.mjs",
     "test": "go test ./..."

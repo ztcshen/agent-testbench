@@ -1,0 +1,37 @@
+name: Bug Report
+description: Report a reproducible problem in the generic sandbox core.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What failed, and what did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Minimal commands, profile shape, or API calls needed to reproduce.
+      placeholder: |
+        1. Run ...
+        2. Open ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Paste redacted logs or report snippets. Do not attach private runtime Evidence.
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Version or Commit
+      placeholder: v0.1.0 or commit hash
+    validations:
+      required: false

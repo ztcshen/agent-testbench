@@ -41,6 +41,9 @@ tools/guardrails/check_no_source_domain_core.sh
 step "running Go tests"
 go test ./... -count=1
 
+step "running generic API case demo"
+OTSANDBOX_CLEAN_DEMO_OUTPUT=1 npm run demo:api-case
+
 step "building React workbench"
 npm run build:frontend
 

@@ -12,6 +12,7 @@ reproducible Evidence without baking any one business domain into the product.
 ```sh
 ./bin/otsandbox.sh version
 go test ./...
+npm run demo:api-case
 ```
 
 Run the default local Store schema upgrade:
@@ -71,6 +72,7 @@ Store backend support is documented in
 [docs/store-backends.md](docs/store-backends.md).
 
 For a complete first-run guide, see [docs/quickstart.md](docs/quickstart.md).
+The full documentation map is in [docs/index.md](docs/index.md).
 For profile bundle authoring, see
 [docs/profile-authoring.md](docs/profile-authoring.md). Agent and CI
 integration contracts are summarized in
