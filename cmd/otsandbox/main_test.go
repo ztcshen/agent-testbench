@@ -1208,6 +1208,66 @@ func TestProfileAuditCommandEmitsJSONWithStoreState(t *testing.T) {
 	}
 }
 
+func TestProfileAuditPlanCommandSuggestsRepairActions(t *testing.T) {
+	dir := t.TempDir()
+	profileDir := filepath.Join(dir, "profile")
+	writeFile(t, filepath.Join(profileDir, "profile.json"), `{
+  "id": "sample",
+  "displayName": "Sample Profile",
+  "services": [],
+  "workflows": [{"id":"workflow.alpha","displayName":"Workflow Alpha"}],
+  "interfaceNodes": [{"id":"node.alpha","displayName":"Node Alpha"}],
+  "apiCases": [{"id":"case.alpha","displayName":"Case Alpha","nodeId":"node.missing"}],
+  "requestTemplates": [],
+  "caseDependencies": [{"id":"dependency.alpha","caseId":"case.alpha","fixtureId":""}],
+  "workflowBindings": [{"workflowId":"workflow.alpha","stepId":"","nodeId":"node.alpha","caseId":"case.alpha","required":true}],
+  "fixtures": [{"id":"fixture.bad","kind":"json","dataJson":"{\"broken\":"}]
+}`)
+
+	out := runCLI(t, "profile", "audit-plan", "--profile", profileDir, "--json")
+	var report struct {
+		OK          bool   `json:"ok"`
+		ProfileID   string `json:"profileId"`
+		IssueCount  int    `json:"issueCount"`
+		ActionCount int    `json:"actionCount"`
+		Counts      struct {
+			UpdateReferenceOrAddAsset int `json:"updateReferenceOrAddAsset"`
+			FillRequiredField         int `json:"fillRequiredField"`
+			FixInvalidJSON            int `json:"fixInvalidJson"`
+		} `json:"counts"`
+		Actions []struct {
+			Type            string   `json:"type"`
+			IssueCode       string   `json:"issueCode"`
+			SubjectID       string   `json:"subjectId"`
+			Field           string   `json:"field"`
+			SuggestedChange string   `json:"suggestedChange"`
+			Command         []string `json:"command"`
+		} `json:"actions"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode profile audit plan json: %v\n%s", err, out)
+	}
+	if !report.OK || report.ProfileID != "sample" || report.IssueCount != 4 || report.ActionCount != 4 {
+		t.Fatalf("audit plan summary = %#v", report)
+	}
+	if report.Counts.UpdateReferenceOrAddAsset != 1 || report.Counts.FillRequiredField != 2 || report.Counts.FixInvalidJSON != 1 {
+		t.Fatalf("audit plan counts = %#v", report.Counts)
+	}
+	if len(report.Actions) != 4 || report.Actions[0].Type != "update-reference-or-add-asset" || report.Actions[0].IssueCode != "api-case-node-missing" || report.Actions[0].SubjectID != "case.alpha" || report.Actions[0].Field != "nodeId" {
+		t.Fatalf("audit plan actions = %#v", report.Actions)
+	}
+	if !strings.Contains(report.Actions[0].SuggestedChange, "Create the missing interface node") || strings.Join(report.Actions[0].Command, " ") != "profile audit --json" {
+		t.Fatalf("audit plan first action = %#v", report.Actions[0])
+	}
+
+	textOut := runCLI(t, "profile", "audit-plan", "--profile", profileDir)
+	for _, want := range []string{"Profile Audit Repair Plan: sample", "Actions: 4", "update-reference-or-add-asset", "api-case-node-missing", "fix-invalid-json"} {
+		if !strings.Contains(textOut, want) {
+			t.Fatalf("audit plan text missing %q:\n%s", want, textOut)
+		}
+	}
+}
+
 func TestBaselineGateCommandsSetAndGetState(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 

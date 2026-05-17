@@ -473,6 +473,35 @@ func TestServerCanRequireCleanProfileAuditBeforeImport(t *testing.T) {
 	}
 }
 
+func TestServerExposesProfileAuditRepairPlan(t *testing.T) {
+	profileDir := writeAuditSampleProfile(t)
+	server := httptest.NewServer(controlplane.New(loadEmptyProfile(t)))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/profile/audit-plan", `{"path":`+mustJSON(t, profileDir)+`}`, http.StatusOK)
+
+	if payload["ok"] != true || payload["profileId"] != "sample" || payload["actionCount"] != float64(2) {
+		t.Fatalf("profile audit plan payload = %#v", payload)
+	}
+	counts, ok := payload["counts"].(map[string]any)
+	if !ok || counts["updateReferenceOrAddAsset"] != float64(2) {
+		t.Fatalf("profile audit plan counts = %#v", payload["counts"])
+	}
+	actions, ok := payload["actions"].([]any)
+	if !ok || len(actions) != 2 {
+		t.Fatalf("profile audit plan actions = %#v", payload["actions"])
+	}
+	first := actions[0].(map[string]any)
+	if first["type"] != "update-reference-or-add-asset" || first["issueCode"] != "api-case-node-missing" || first["subjectId"] != "case.alpha" {
+		t.Fatalf("profile audit plan first action = %#v", first)
+	}
+
+	missing := postJSONResponse(t, server.URL+"/api/profile/audit-plan", `{}`, http.StatusBadRequest)
+	if missing["ok"] != false || !strings.Contains(fmt.Sprint(missing["error"]), "path is required") {
+		t.Fatalf("profile audit plan missing path = %#v", missing)
+	}
+}
+
 func TestServerVerifiesProfileBundleBeforeActivation(t *testing.T) {
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})

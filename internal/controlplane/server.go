@@ -55,6 +55,13 @@ func NewWithOptions(bundle profile.Bundle, options Options) http.Handler {
 		}
 		handleProfileVerify(w, r, runtime, profiles.Replace, options.ProfileHome)
 	})
+	mux.HandleFunc("/api/profile/audit-plan", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleProfileAuditPlan(w, r, runtime, options.ProfileHome)
+	})
 	mux.HandleFunc("/api/profile/install", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)

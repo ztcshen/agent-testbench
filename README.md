@@ -35,6 +35,7 @@ the same facts to the CLI, Control plane APIs, React workbench, and reports.
 | --- | --- |
 | Local-first Store | SQLite by default, with schema upgrades, run indexes, case run records, Evidence indexes, timing, logs, topology, and post-process task records. |
 | External profiles | Services, workflows, interface nodes, cases, request templates, fixtures, dependencies, and bindings live outside the core repository. |
+| Profile repair planning | Convert profile audit issues into stable repair actions so agents and profile authors know what to fix next. |
 | Agent-friendly discovery | Agents call `interface-node discover`, `workflow discover`, or `case discover` first, then run reports with exact returned ids. |
 | Case maintenance catalog | API cases can carry description, tags, priority, owner, status, runnable file presence, execution configuration, readiness issues, latest run state, stability, explainable priority ranking, one-call suite briefs, authoring quality checks, quality repair plans, and executable plans for review, assignment, and suite execution. Agents can draft and apply maintained cases into external profile bundles. |
 | API case execution | Run a single HTTP case, a maintained case suite, or only the failed/not-run part of a suite; render requests, assert responses, write Evidence, and optionally index results into Store. |
@@ -63,6 +64,8 @@ the same facts to the CLI, Control plane APIs, React workbench, and reports.
 - Run a maintained suite selected by tag, owner, priority, status, or node.
 - Generate a reviewable maintained-case draft for an interface node, then apply
   it to an external profile bundle.
+- Turn profile audit failures into stable repair actions before publishing a
+  bundle to the local Store.
 - Audit maintained case quality across a profile before asking another team to
   rely on the suite.
 - Turn quality gaps into stable authoring actions an agent can execute or hand
@@ -139,6 +142,10 @@ about target ids:
   --store-url "$store" \
   --tag smoke \
   --status active \
+  --json
+
+./bin/otsandbox.sh profile audit-plan \
+  --profile "$profile_dir" \
   --json
 
 ./bin/otsandbox.sh interface-node case draft \

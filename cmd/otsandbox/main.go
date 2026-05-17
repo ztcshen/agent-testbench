@@ -197,6 +197,7 @@ Usage:
   otsandbox profile list [--profile-home PATH] [--json]
   otsandbox profile inspect --profile PATH_OR_ID [--profile-home PATH]
   otsandbox profile audit --profile PATH_OR_ID [--profile-home PATH] [--store-url PATH] [--json] [--force]
+  otsandbox profile audit-plan --profile PATH_OR_ID [--profile-home PATH] [--store-url PATH] [--json] [--force]
   otsandbox profile verify --profile PATH_OR_ID [--profile-home PATH] [--store-url PATH] [--require-case-runs] [--require-workflow-runs] [--json] [--force]
   otsandbox profile import --from PATH_OR_ID [--profile-home PATH] [--store-url PATH] [--json] [--audit] [--require-audit-ok] [--force]
   otsandbox config publish --from PATH_OR_ID [--profile-home PATH] [--store-url PATH] [--json] [--audit] [--require-audit-ok] [--force]
@@ -305,6 +306,8 @@ func runProfile(args []string) error {
 		return runProfileInspect(args[1:])
 	case "audit":
 		return runProfileAudit(context.Background(), args[1:])
+	case "audit-plan":
+		return runProfileAuditPlan(context.Background(), args[1:])
 	case "import":
 		return runProfileImport(context.Background(), args[1:])
 	case "verify":
@@ -1130,6 +1133,56 @@ func runProfileAudit(ctx context.Context, args []string) error {
 	return nil
 }
 
+func runProfileAuditPlan(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("profile audit-plan", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	force := flags.Bool("force", false, "Replace an installed profile when --profile points to a packed archive")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	report, err := profileAuditRepairPlan(ctx, *profilePath, *profileHome, *storeURL, *force)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printProfileAuditRepairPlan(report)
+	return nil
+}
+
+func profileAuditRepairPlan(ctx context.Context, profilePath string, profileHome string, storeURL string, force bool) (profileaudit.RepairPlanReport, error) {
+	resolvedProfilePath, err := materializeProfileReference(profilePath, profileHome, force)
+	if err != nil {
+		return profileaudit.RepairPlanReport{}, err
+	}
+	bundle, err := profile.Load(resolvedProfilePath)
+	if err != nil {
+		return profileaudit.RepairPlanReport{}, err
+	}
+	options := profileaudit.Options{
+		Bundle:     bundle,
+		BundlePath: resolvedProfilePath,
+	}
+	if strings.TrimSpace(storeURL) != "" {
+		s, err := openStore(ctx, storeURL)
+		if err != nil {
+			return profileaudit.RepairPlanReport{}, err
+		}
+		defer s.Close()
+		options.Store = s
+	}
+	audit, err := profileaudit.Audit(ctx, options)
+	if err != nil {
+		return profileaudit.RepairPlanReport{}, err
+	}
+	return profileaudit.RepairPlan(audit), nil
+}
+
 func printProfileAudit(report profileaudit.Report) {
 	fmt.Printf("Profile Audit: %s\n", report.ProfileID)
 	fmt.Printf("OK: %t\n", report.OK)
@@ -1150,6 +1203,18 @@ func printProfileAudit(report profileaudit.Report) {
 			status = "not-run"
 		}
 		fmt.Printf("API Case: %s Status: %s Passed: %t\n", item.CaseID, status, item.HasPassed)
+	}
+}
+
+func printProfileAuditRepairPlan(report profileaudit.RepairPlanReport) {
+	fmt.Printf("Profile Audit Repair Plan: %s\n", report.ProfileID)
+	fmt.Printf("Issues: %d\n", report.IssueCount)
+	fmt.Printf("Actions: %d\n", report.ActionCount)
+	for _, item := range report.Actions {
+		fmt.Printf("- %s %s %s %s: %s\n", item.Type, item.IssueCode, item.SubjectType, item.SubjectID, item.SuggestedChange)
+	}
+	for _, warning := range report.Warnings {
+		fmt.Printf("Warning: %s\n", warning)
 	}
 }
 

@@ -54,6 +54,39 @@ type StoreReport struct {
 	APICases       []APICaseRunState `json:"apiCases"`
 }
 
+type RepairPlanReport struct {
+	OK          bool             `json:"ok"`
+	ProfileID   string           `json:"profileId"`
+	DisplayName string           `json:"displayName"`
+	IssueCount  int              `json:"issueCount"`
+	ActionCount int              `json:"actionCount"`
+	Counts      RepairPlanCounts `json:"counts"`
+	Actions     []RepairAction   `json:"actions"`
+	Audit       Report           `json:"audit"`
+	Warnings    []string         `json:"warnings,omitempty"`
+}
+
+type RepairPlanCounts struct {
+	Total                     int `json:"total"`
+	UpdateReferenceOrAddAsset int `json:"updateReferenceOrAddAsset"`
+	FillRequiredField         int `json:"fillRequiredField"`
+	FixInvalidJSON            int `json:"fixInvalidJson"`
+	RenameDuplicateID         int `json:"renameDuplicateId"`
+	Review                    int `json:"review"`
+}
+
+type RepairAction struct {
+	Type            string   `json:"type"`
+	IssueCode       string   `json:"issueCode"`
+	Severity        string   `json:"severity"`
+	SubjectType     string   `json:"subjectType"`
+	SubjectID       string   `json:"subjectId"`
+	Field           string   `json:"field"`
+	Message         string   `json:"message"`
+	SuggestedChange string   `json:"suggestedChange"`
+	Command         []string `json:"command,omitempty"`
+}
+
 type APICaseRunState struct {
 	CaseID       string `json:"caseId"`
 	HasPassed    bool   `json:"hasPassed"`
@@ -98,6 +131,92 @@ func Audit(ctx context.Context, options Options) (Report, error) {
 	report.IssueCount = len(report.Issues)
 	report.OK = report.IssueCount == 0
 	return report, nil
+}
+
+func RepairPlan(audit Report) RepairPlanReport {
+	report := RepairPlanReport{
+		OK:          true,
+		ProfileID:   audit.ProfileID,
+		DisplayName: audit.DisplayName,
+		IssueCount:  audit.IssueCount,
+		Actions:     []RepairAction{},
+		Audit:       audit,
+	}
+	for _, item := range audit.Issues {
+		action := repairActionForIssue(item)
+		report.Actions = append(report.Actions, action)
+		report.Counts.Total++
+		switch action.Type {
+		case "update-reference-or-add-asset":
+			report.Counts.UpdateReferenceOrAddAsset++
+		case "fill-required-field":
+			report.Counts.FillRequiredField++
+		case "fix-invalid-json":
+			report.Counts.FixInvalidJSON++
+		case "rename-duplicate-id":
+			report.Counts.RenameDuplicateID++
+		default:
+			report.Counts.Review++
+		}
+	}
+	report.ActionCount = len(report.Actions)
+	if audit.OK {
+		report.Warnings = append(report.Warnings, "profile audit is already clean")
+	}
+	return report
+}
+
+func repairActionForIssue(item Issue) RepairAction {
+	actionType := "review"
+	suggested := "Review " + item.SubjectType + " " + item.SubjectID + " field " + item.Field + " and update the external profile bundle."
+	switch {
+	case strings.HasSuffix(item.Code, "-missing"):
+		actionType = "update-reference-or-add-asset"
+		suggested = missingReferenceSuggestion(item)
+	case strings.HasSuffix(item.Code, "-required"):
+		actionType = "fill-required-field"
+		suggested = "Set " + item.SubjectType + " " + item.SubjectID + " field " + item.Field + " in the external profile bundle."
+	case strings.HasSuffix(item.Code, "-id-duplicate"):
+		actionType = "rename-duplicate-id"
+		suggested = "Rename duplicate " + item.SubjectType + " id " + item.SubjectID + " so it is unique within the profile section."
+	case item.Code == "fixture-data-json-invalid":
+		actionType = "fix-invalid-json"
+		suggested = "Replace fixture " + item.SubjectID + " field " + item.Field + " with valid JSON."
+	}
+	return RepairAction{
+		Type:            actionType,
+		IssueCode:       item.Code,
+		Severity:        item.Severity,
+		SubjectType:     item.SubjectType,
+		SubjectID:       item.SubjectID,
+		Field:           item.Field,
+		Message:         item.Message,
+		SuggestedChange: suggested,
+		Command:         []string{"profile", "audit", "--json"},
+	}
+}
+
+func missingReferenceSuggestion(item Issue) string {
+	target := referenceTargetName(item)
+	if target == "" {
+		target = "asset"
+	}
+	return "Create the missing " + target + " or update " + item.SubjectType + " " + item.SubjectID + " field " + item.Field + " to an existing id."
+}
+
+func referenceTargetName(item Issue) string {
+	switch item.Field {
+	case "nodeId":
+		return "interface node"
+	case "caseId":
+		return "API case"
+	case "fixtureId":
+		return "fixture"
+	case "workflowId":
+		return "workflow"
+	default:
+		return strings.TrimSuffix(strings.TrimPrefix(item.Code, item.SubjectType+"-"), "-missing")
+	}
 }
 
 type referenceAuditor struct {

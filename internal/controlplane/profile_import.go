@@ -30,6 +30,11 @@ type profileInstallRequest struct {
 	Force bool   `json:"force"`
 }
 
+type profileAuditPlanRequest struct {
+	Path  string `json:"path"`
+	Force bool   `json:"force"`
+}
+
 type profileImportResponse struct {
 	ProfileID     string                     `json:"profileId"`
 	BundlePath    string                     `json:"bundlePath"`
@@ -193,6 +198,46 @@ func handleProfileVerify(w http.ResponseWriter, r *http.Request, runtime store.S
 		activate(bundle)
 	}
 	writeJSON(w, report)
+}
+
+func handleProfileAuditPlan(w http.ResponseWriter, r *http.Request, runtime store.Store, profileHome string) {
+	var req profileAuditPlanRequest
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json"})
+		return
+	}
+	req.Path = strings.TrimSpace(req.Path)
+	if req.Path == "" {
+		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "path is required"})
+		return
+	}
+	resolvedPath, err := profilehome.ResolveReference(req.Path, profileHome)
+	if err != nil {
+		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	resolvedPath, err = materializeImportProfilePath(resolvedPath, profileHome, req.Force)
+	if err != nil {
+		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	bundle, err := profile.Load(resolvedPath)
+	if err != nil {
+		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	audit, err := profileaudit.Audit(r.Context(), profileaudit.Options{
+		Bundle:     bundle,
+		BundlePath: resolvedPath,
+		Store:      runtime,
+	})
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, profileaudit.RepairPlan(audit))
 }
 
 func materializeImportProfilePath(path string, profileHome string, force bool) (string, error) {

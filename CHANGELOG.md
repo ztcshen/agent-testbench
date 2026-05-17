@@ -11,6 +11,8 @@ should be called out in this file and in the relevant docs.
   Control plane foundations.
 - Added external profile installation, audit, verification, packing, and
   Store/read-model publishing.
+- Added `profile audit-plan` and `/api/profile/audit-plan` to turn profile
+  audit issues into stable repair actions for agents and profile authors.
 - Added API case run Evidence, asynchronous batch reports, workflow reports,
   and synchronous failed case Evidence lookup.
 - Added source-domain guardrails to keep core code generic.

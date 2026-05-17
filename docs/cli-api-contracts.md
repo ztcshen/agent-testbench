@@ -69,6 +69,31 @@ case metadata and execution config, while runnable case JSON files are written
 under the profile bundle. It does not write Store records; publish or verify
 the profile afterward when the caller wants indexed read-models.
 
+## Profile Audit Repair Plan
+
+Before publishing a profile bundle, an agent can turn audit failures into
+stable repair actions:
+
+```sh
+otsandbox profile audit-plan \
+  --profile /path/to/profile-bundle \
+  --store-url .runtime/store.sqlite \
+  --json
+```
+
+```http
+POST /api/profile/audit-plan
+Content-Type: application/json
+
+{"path":"/path/to/profile-bundle"}
+```
+
+The response includes the original audit report plus `actions` grouped by type:
+`update-reference-or-add-asset`, `fill-required-field`, `fix-invalid-json`,
+`rename-duplicate-id`, and `review`. The command is read-only; it gives profile
+authors and agents a deterministic checklist without writing profile files or
+Store rows.
+
 ## Maintained Case Suite Quality
 
 ```sh
