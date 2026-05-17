@@ -42,3 +42,5 @@ should be called out in this file and in the relevant docs.
   detail, and case Evidence artifacts for archival automation.
 - Added asynchronous batch failure summaries so agents can fetch only failed
   cases with detail links, Evidence paths, elapsed time, and assertion errors.
+- Added `case suite impact` and `/api/case/suite-impact` so change-aware
+  agents can turn changed paths or target hints into a runnable case batch plan.

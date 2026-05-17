@@ -130,6 +130,35 @@ The Control plane exposes the same planning contract:
 GET /api/case/suite-plan?tag=smoke&status=active&action=run&action=rerun&requestId=change-001
 ```
 
+## Maintained Case Suite Impact
+
+```sh
+otsandbox case suite impact \
+  --profile PATH_OR_ID \
+  --store-url .runtime/store.sqlite \
+  --signal "/api/items" \
+  --change "changed/module/path" \
+  --status active \
+  --action run \
+  --action rerun \
+  --request-id change-002 \
+  --base-url http://127.0.0.1:8080 \
+  --json
+```
+
+The impact command maps change signals to interface nodes, workflow bindings,
+and maintained API cases, then reuses the suite planning rules to return
+selected ready cases, blocked cases, explanation reasons, and a `batchRequest`
+that can be posted to `/api/cases/batch-runs`. Signals are generic strings and
+can be changed paths, route paths, operation text, workflow names, tags, or
+case text.
+
+The Control plane exposes the same impact planning contract:
+
+```http
+GET /api/case/suite-impact?signal=/api/items&change=module/path&status=active&action=run&action=rerun&requestId=change-002
+```
+
 ## Single Interface Report
 
 ```sh

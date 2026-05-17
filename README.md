@@ -39,6 +39,7 @@ the same facts to the CLI, Control plane APIs, React workbench, and reports.
 | Case maintenance catalog | API cases can carry description, tags, priority, owner, status, runnable file presence, execution configuration, readiness issues, latest run state, and executable plans for review, assignment, and suite execution. |
 | API case execution | Run a single HTTP case, a maintained case suite, or only the failed/not-run part of a suite; render requests, assert responses, write Evidence, and optionally index results into Store. |
 | Suite coverage audit | Check passed, failed, and not-run status for a maintained case suite through CLI or Control plane API without re-running requests. |
+| Impact planning | Convert changed paths, interface hints, workflow hints, tags, or case text into an explainable case selection and batch request. |
 | Interface and workflow reports | Run all cases attached to an interface node or ordered workflow steps, then produce JSON plus temporary HTML reports; maintained suite and batch runs also expose JUnit XML and failure summaries for CI/agent triage. |
 | Evidence detail APIs | Query request, response, assertions, precondition context, stored topology, persisted logs, artifact manifests, failure summaries, status, and elapsed time by run or case run id. |
 | Control plane workbench | A React workbench reads the same Store/read-models as CLI and API users. |
@@ -61,6 +62,8 @@ the same facts to the CLI, Control plane APIs, React workbench, and reports.
 - Run a maintained suite selected by tag, owner, priority, status, or node.
 - Audit the latest Store coverage for a maintained suite before deciding what
   to rerun.
+- Turn a change hint into an explainable case plan and asynchronous batch
+  request.
 - Run a workflow-shaped regression and keep per-step Evidence.
 - Let an agent discover available targets before choosing what to test.
 - Publish external profile bundles into a local Store for review and replay.
@@ -159,6 +162,16 @@ about target ids:
   --action run \
   --action rerun \
   --request-id change-001 \
+  --json
+
+./bin/otsandbox.sh case suite impact \
+  --profile sample \
+  --store-url "$store" \
+  --signal "/api/items" \
+  --status active \
+  --action run \
+  --action rerun \
+  --request-id change-002 \
   --json
 
 ./bin/otsandbox.sh interface-node case report \

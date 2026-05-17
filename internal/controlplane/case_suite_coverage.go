@@ -42,6 +42,16 @@ func handleCaseSuitePlan(w http.ResponseWriter, r *http.Request, bundle profile.
 	writeJSON(w, report)
 }
 
+func handleCaseSuiteImpact(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store) {
+	filter := caseSuiteCoverageFilterFromRequest(r)
+	report, err := casesuite.Impact(r.Context(), bundle, runtime, filter, caseSuiteImpactOptionsFromRequest(r))
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, report)
+}
+
 func caseSuiteCoverageFilterFromRequest(r *http.Request) casesuite.Filter {
 	query := r.URL.Query()
 	return casesuite.NormalizeFilter(casesuite.Filter{
@@ -62,6 +72,14 @@ func caseSuitePlanOptionsFromRequest(r *http.Request) casesuite.PlanOptions {
 		BaseURL:        query.Get("baseUrl"),
 		EvidenceDir:    query.Get("evidenceDir"),
 		TimeoutSeconds: queryIntValue(query.Get("timeoutSeconds")),
+	}
+}
+
+func caseSuiteImpactOptionsFromRequest(r *http.Request) casesuite.ImpactOptions {
+	query := r.URL.Query()
+	return casesuite.ImpactOptions{
+		Signals: queryStringList(query["signal"], query["signals"], query["change"], query["changes"], query["changedPath"], query["changedPaths"]),
+		Plan:    caseSuitePlanOptionsFromRequest(r),
 	}
 }
 

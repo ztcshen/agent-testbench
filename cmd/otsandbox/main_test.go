@@ -2081,6 +2081,76 @@ func TestCaseSuitePlanBuildsExecutableBatchRequest(t *testing.T) {
 	}
 }
 
+func TestCaseSuiteImpactBuildsExecutableBatchRequest(t *testing.T) {
+	ctx := context.Background()
+	profileDir := writeCaseSuiteCoverageProfile(t)
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	base := mustParseTime(t, "2026-05-16T01:00:00Z")
+	recordCaseRunForCoverage(t, ctx, s, "run.default.latest", "case.default", store.StatusPassed, base)
+	recordCaseRunForCoverage(t, ctx, s, "run.variant.latest", "case.variant", store.StatusFailed, base.Add(time.Minute))
+	if err := s.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	out := runCLI(t,
+		"case", "suite", "impact",
+		"--profile", profileDir,
+		"--store-url", storePath,
+		"--signal", "/alpha",
+		"--status", "active",
+		"--action", "run",
+		"--action", "rerun",
+		"--request-id", "change-002",
+		"--base-url", "http://127.0.0.1:8080",
+		"--json",
+	)
+
+	var report struct {
+		OK     bool `json:"ok"`
+		Counts struct {
+			Signals  int `json:"signals"`
+			Nodes    int `json:"nodes"`
+			Cases    int `json:"cases"`
+			Selected int `json:"selected"`
+			Blocked  int `json:"blocked"`
+		} `json:"counts"`
+		BatchRequest struct {
+			RequestID string   `json:"requestId"`
+			CaseIDs   []string `json:"caseIds"`
+			BaseURL   string   `json:"baseUrl"`
+		} `json:"batchRequest"`
+		Cases []struct {
+			CaseID  string   `json:"caseId"`
+			Reasons []string `json:"reasons"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode suite impact json: %v\n%s", err, out)
+	}
+	if !report.OK || report.Counts.Signals != 1 || report.Counts.Nodes != 1 || report.Counts.Cases != 3 || report.Counts.Selected != 1 || report.Counts.Blocked != 1 {
+		t.Fatalf("suite impact report = %#v", report)
+	}
+	if report.BatchRequest.RequestID != "change-002" || strings.Join(report.BatchRequest.CaseIDs, ",") != "case.variant" || report.BatchRequest.BaseURL != "http://127.0.0.1:8080" {
+		t.Fatalf("impact batch request = %#v", report.BatchRequest)
+	}
+	if len(report.Cases) != 3 || len(report.Cases[0].Reasons) == 0 {
+		t.Fatalf("impact cases = %#v", report.Cases)
+	}
+
+	textOut := runCLI(t, "case", "suite", "impact", "--profile", profileDir, "--store-url", storePath, "--signal", "/alpha", "--action", "rerun")
+	for _, want := range []string{"Case Suite Impact", "Selected: 1", "case.variant"} {
+		if !strings.Contains(textOut, want) {
+			t.Fatalf("impact text missing %q:\n%s", want, textOut)
+		}
+	}
+}
+
 func TestWorkflowReportWritesReportWhenStepFails(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

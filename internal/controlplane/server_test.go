@@ -3846,6 +3846,58 @@ func TestServerExposesCaseSuitePlanByMaintenanceFilters(t *testing.T) {
 	}
 }
 
+func TestServerExposesCaseSuiteImpactPlan(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.create", DisplayName: "Create Item", ServiceID: "service.alpha", Operation: "Create", Method: "POST", Path: "/v1/items"},
+			{ID: "node.other", DisplayName: "Other", ServiceID: "service.beta", Operation: "Other", Method: "GET", Path: "/v1/other"},
+		},
+		Workflows: []profile.Workflow{
+			{ID: "workflow.item", DisplayName: "Item Flow"},
+		},
+		WorkflowBindings: []profile.WorkflowBinding{
+			{WorkflowID: "workflow.item", StepID: "create", NodeID: "node.create", CaseID: "case.create", SortOrder: 1},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.create", DisplayName: "Create default", NodeID: "node.create", CasePath: "cases/create.json", Tags: []string{"regression"}, Status: "active", SortOrder: 1},
+			{ID: "case.other", DisplayName: "Other default", NodeID: "node.other", CasePath: "cases/other.json", Tags: []string{"regression"}, Status: "active", SortOrder: 2},
+		},
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
+	defer server.Close()
+
+	endpoint := server.URL + "/api/case/suite-impact?signal=/v1/items&status=active&action=run&requestId=change-001&baseUrl=http://127.0.0.1:8080"
+	payload := decodeJSONResponse(t, endpoint, http.StatusOK)
+	if payload["ok"] != true {
+		t.Fatalf("suite impact ok = %#v", payload)
+	}
+	counts := payload["counts"].(map[string]any)
+	if counts["signals"] != float64(1) || counts["nodes"] != float64(1) || counts["workflows"] != float64(1) || counts["cases"] != float64(1) || counts["selected"] != float64(1) {
+		t.Fatalf("suite impact counts = %#v", counts)
+	}
+	batch := payload["batchRequest"].(map[string]any)
+	caseIDs := batch["caseIds"].([]any)
+	if len(caseIDs) != 1 || caseIDs[0] != "case.create" || batch["requestId"] != "change-001" || batch["baseUrl"] != "http://127.0.0.1:8080" {
+		t.Fatalf("suite impact batch request = %#v", batch)
+	}
+	cases := payload["cases"].([]any)
+	if len(cases) != 1 {
+		t.Fatalf("suite impact cases = %#v", cases)
+	}
+	impacted := cases[0].(map[string]any)
+	if impacted["caseId"] != "case.create" || len(impacted["reasons"].([]any)) == 0 {
+		t.Fatalf("suite impact case = %#v", impacted)
+	}
+}
+
 func TestServerExposesCaseRunsFromStore(t *testing.T) {
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})

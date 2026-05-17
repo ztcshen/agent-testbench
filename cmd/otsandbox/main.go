@@ -218,6 +218,7 @@ Usage:
   otsandbox case suite coverage [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
   otsandbox case suite inspect [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
   otsandbox case suite plan [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
+  otsandbox case suite impact [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
   otsandbox case run --case PATH --base-url URL [--override KEY=VALUE] [--evidence-dir PATH]
   otsandbox case incomplete-batches --profile PATH [--store-url PATH] [--json]
   otsandbox serve [--profile PATH_OR_ID] [--profile-home PATH] [--host HOST] [--port PORT] [--store-url PATH]
@@ -3132,6 +3133,8 @@ func runCaseSuite(ctx context.Context, args []string) error {
 		return runCaseSuiteInspect(ctx, args[1:])
 	case "plan":
 		return runCaseSuitePlan(ctx, args[1:])
+	case "impact":
+		return runCaseSuiteImpact(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown case suite command: %s", args[0])
 	}
@@ -3434,6 +3437,85 @@ func printCaseSuitePlan(report casesuite.PlanReport) {
 	}
 	for _, item := range report.Blocked {
 		fmt.Printf("- blocked %s action=%s\n", item.CaseID, item.SuggestedAction)
+	}
+	for _, warning := range report.Warnings {
+		fmt.Printf("Warning: %s\n", warning)
+	}
+}
+
+func runCaseSuiteImpact(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("case suite impact", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	filter := flags.String("filter", "", "Additional case selector filter")
+	nodeID := flags.String("node", "", "Only include cases attached to this interface node id")
+	status := flags.String("status", "active", "Only include cases with this status")
+	owner := flags.String("owner", "", "Only include cases owned by this value")
+	priority := flags.String("priority", "", "Only include cases with this priority")
+	requestID := flags.String("request-id", "", "Request id for the generated batch request")
+	baseURL := flags.String("base-url", "", "Base URL for the generated batch request")
+	evidenceDir := flags.String("evidence-dir", "", "Evidence directory for the generated batch request")
+	timeoutSeconds := flags.Int("timeout-seconds", 0, "Timeout seconds for the generated batch request")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	var tags stringListFlag
+	var actions stringListFlag
+	var signals stringListFlag
+	var changes stringListFlag
+	flags.Var(&tags, "tag", "Only include cases with this tag; repeat for multiple tags")
+	flags.Var(&actions, "action", "Only select ready cases with this suggested action; repeat for multiple actions")
+	flags.Var(&signals, "signal", "Changed path, interface text, workflow text, tag, or case text; repeat for multiple signals")
+	flags.Var(&changes, "change", "Alias for --signal; repeat for multiple changes")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *timeoutSeconds < 0 {
+		return errors.New("--timeout-seconds cannot be negative")
+	}
+	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	filterValue := caseListFilter{
+		Filter:   *filter,
+		NodeID:   *nodeID,
+		Tags:     tags.Values(),
+		Status:   *status,
+		Owner:    *owner,
+		Priority: *priority,
+	}
+	impactSignals := append(signals.Values(), changes.Values()...)
+	report, err := casesuite.Impact(ctx, bundle, sourceStore, caseSuiteFilter(filterValue), casesuite.ImpactOptions{
+		Signals: impactSignals,
+		Plan: casesuite.PlanOptions{
+			RequestID:      *requestID,
+			Actions:        actions.Values(),
+			BaseURL:        *baseURL,
+			EvidenceDir:    *evidenceDir,
+			TimeoutSeconds: *timeoutSeconds,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printCaseSuiteImpact(report)
+	return nil
+}
+
+func printCaseSuiteImpact(report casesuite.ImpactReport) {
+	fmt.Println("Case Suite Impact")
+	fmt.Printf("OK: %t\n", report.OK)
+	fmt.Printf("Signals: %d Nodes: %d Workflows: %d Cases: %d Selected: %d Blocked: %d\n", report.Counts.Signals, report.Counts.Nodes, report.Counts.Workflows, report.Counts.Cases, report.Counts.Selected, report.Counts.Blocked)
+	for _, item := range report.Cases {
+		fmt.Printf("- %s action=%s latest=%s\n", item.CaseID, item.SuggestedAction, item.LatestStatus)
+		for _, reason := range item.Reasons {
+			fmt.Printf("  reason: %s\n", reason)
+		}
 	}
 	for _, warning := range report.Warnings {
 		fmt.Printf("Warning: %s\n", warning)

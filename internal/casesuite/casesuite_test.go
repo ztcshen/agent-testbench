@@ -176,6 +176,60 @@ func TestPlanSelectsReadyCasesAndBuildsBatchRequest(t *testing.T) {
 	}
 }
 
+func TestImpactPlansCasesFromChangedSignals(t *testing.T) {
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.create", DisplayName: "Create Item", ServiceID: "service.alpha", Operation: "Create", Method: "POST", Path: "/v1/items", Tags: []string{"items"}, SortOrder: 1},
+			{ID: "node.search", DisplayName: "Search Item", ServiceID: "service.alpha", Operation: "Search", Method: "GET", Path: "/v1/items/search", Tags: []string{"items"}, SortOrder: 2},
+			{ID: "node.other", DisplayName: "Other", ServiceID: "service.beta", Operation: "Other", Method: "GET", Path: "/v1/other", SortOrder: 3},
+		},
+		Workflows: []profile.Workflow{
+			{ID: "workflow.item", DisplayName: "Item Happy Path"},
+		},
+		WorkflowBindings: []profile.WorkflowBinding{
+			{WorkflowID: "workflow.item", StepID: "create", NodeID: "node.create", CaseID: "case.create", SortOrder: 1},
+			{WorkflowID: "workflow.item", StepID: "search", NodeID: "node.search", CaseID: "case.search", SortOrder: 2},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.create", DisplayName: "Create default", NodeID: "node.create", CasePath: "cases/create.json", Tags: []string{"regression"}, Status: "active", SortOrder: 1},
+			{ID: "case.search", DisplayName: "Search default", NodeID: "node.search", CasePath: "cases/search.json", Tags: []string{"regression"}, Status: "active", SortOrder: 2},
+			{ID: "case.other", DisplayName: "Other default", NodeID: "node.other", CasePath: "cases/other.json", Tags: []string{"regression"}, Status: "active", SortOrder: 3},
+		},
+	}
+
+	report, err := Impact(context.Background(), bundle, recordStore{}, Filter{Status: "active"}, ImpactOptions{
+		Signals: []string{"/v1/items"},
+		Plan: PlanOptions{
+			RequestID: "change-001",
+			Actions:   []string{"run"},
+			BaseURL:   "http://127.0.0.1:8080",
+		},
+	})
+	if err != nil {
+		t.Fatalf("impact: %v", err)
+	}
+	if !report.OK || report.Counts.Nodes != 2 || report.Counts.Workflows != 1 || report.Plan.Counts.Selected != 2 {
+		t.Fatalf("impact counts = %#v plan=%#v", report.Counts, report.Plan.Counts)
+	}
+	if got := strings.Join(report.Plan.CaseIDs, ","); got != "case.create,case.search" {
+		t.Fatalf("impact case ids = %q", got)
+	}
+	if got := strings.Join(report.BatchRequest.CaseIDs, ","); got != "case.create,case.search" {
+		t.Fatalf("impact batch case ids = %q", got)
+	}
+	if report.BatchRequest.RequestID != "change-001" || report.BatchRequest.BaseURL != "http://127.0.0.1:8080" {
+		t.Fatalf("impact batch request = %#v", report.BatchRequest)
+	}
+	reasons := map[string][]string{}
+	for _, item := range report.Cases {
+		reasons[item.CaseID] = item.Reasons
+	}
+	if len(reasons["case.create"]) == 0 || len(reasons["case.search"]) == 0 || len(reasons["case.other"]) != 0 {
+		t.Fatalf("impact reasons = %#v", reasons)
+	}
+}
+
 type recordStore struct {
 	records []store.APICaseRunRecord
 }
