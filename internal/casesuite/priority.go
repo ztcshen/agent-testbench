@@ -59,6 +59,12 @@ func Priority(ctx context.Context, bundle profile.Bundle, runtime RecordStore, f
 	if err != nil {
 		return PriorityReport{}, err
 	}
+	return priorityFromParts(bundle, filter, inspection, stability, options), nil
+}
+
+func priorityFromParts(bundle profile.Bundle, filter Filter, inspection InspectionReport, stability StabilityReport, options PriorityOptions) PriorityReport {
+	filter = NormalizeFilter(filter)
+	options.Signals = NormalizeStringList(options.Signals)
 	impact := collectImpact(bundle, options.Signals)
 	stabilityByCase := map[string]StabilityItem{}
 	for _, item := range stability.Items {
@@ -71,8 +77,9 @@ func Priority(ctx context.Context, bundle profile.Bundle, runtime RecordStore, f
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		Filters:     filter,
 		Options:     options,
-		Warnings:    append([]string(nil), inspection.Warnings...),
+		Warnings:    appendUniqueStrings(nil, inspection.Warnings...),
 	}
+	report.Warnings = appendUniqueStrings(report.Warnings, stability.Warnings...)
 	for _, item := range inspection.Items {
 		row := PriorityItem{InspectionItem: item}
 		row.Score, row.Reasons = priorityScore(item, stabilityByCase[item.CaseID], impact.caseReasons[item.CaseID])
@@ -121,7 +128,7 @@ func Priority(ctx context.Context, bundle profile.Bundle, runtime RecordStore, f
 		report.OK = false
 		report.Warnings = append(report.Warnings, "no ready cases selected for prioritized execution")
 	}
-	return report, nil
+	return report
 }
 
 func priorityScore(item InspectionItem, stability StabilityItem, impactReasons []string) (int, []string) {

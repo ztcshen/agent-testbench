@@ -36,7 +36,7 @@ the same facts to the CLI, Control plane APIs, React workbench, and reports.
 | Local-first Store | SQLite by default, with schema upgrades, run indexes, case run records, Evidence indexes, timing, logs, topology, and post-process task records. |
 | External profiles | Services, workflows, interface nodes, cases, request templates, fixtures, dependencies, and bindings live outside the core repository. |
 | Agent-friendly discovery | Agents call `interface-node discover`, `workflow discover`, or `case discover` first, then run reports with exact returned ids. |
-| Case maintenance catalog | API cases can carry description, tags, priority, owner, status, runnable file presence, execution configuration, readiness issues, latest run state, explainable priority ranking, and executable plans for review, assignment, and suite execution. |
+| Case maintenance catalog | API cases can carry description, tags, priority, owner, status, runnable file presence, execution configuration, readiness issues, latest run state, stability, explainable priority ranking, one-call suite briefs, and executable plans for review, assignment, and suite execution. |
 | API case execution | Run a single HTTP case, a maintained case suite, or only the failed/not-run part of a suite; render requests, assert responses, write Evidence, and optionally index results into Store. |
 | Suite coverage audit | Check passed, failed, and not-run status for a maintained case suite through CLI or Control plane API without re-running requests. |
 | Stability analysis | Review recent case-run history to find maintained cases that alternate between pass and fail. |
@@ -66,6 +66,8 @@ the same facts to the CLI, Control plane APIs, React workbench, and reports.
 - Identify unstable maintained cases before promoting a suite as reliable.
 - Turn a change hint into an explainable case plan, priority-ranked candidate
   list, and asynchronous batch request.
+- Ask for one suite brief that combines coverage, readiness, stability, and
+  execution recommendations before spending time running cases.
 - Run a workflow-shaped regression and keep per-step Evidence.
 - Let an agent discover available targets before choosing what to test.
 - Publish external profile bundles into a local Store for review and replay.
@@ -188,6 +190,17 @@ about target ids:
   --profile sample \
   --store-url "$store" \
   --signal "/api/items" \
+  --status active \
+  --limit 20 \
+  --request-id change-002 \
+  --base-url http://127.0.0.1:8080 \
+  --json
+
+./bin/otsandbox.sh case suite brief \
+  --profile sample \
+  --store-url "$store" \
+  --signal "/api/items" \
+  --tag smoke \
   --status active \
   --limit 20 \
   --request-id change-002 \

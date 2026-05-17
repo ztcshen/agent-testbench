@@ -2234,6 +2234,76 @@ func TestCaseSuitePriorityBuildsRankedBatchRequest(t *testing.T) {
 	}
 }
 
+func TestCaseSuiteBriefSummarizesMaintainedSuiteForAgents(t *testing.T) {
+	ctx := context.Background()
+	profileDir := writeCaseSuiteCoverageProfile(t)
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	base := mustParseTime(t, "2026-05-16T01:00:00Z")
+	recordCaseRunForCoverage(t, ctx, s, "run.default.1", "case.default", store.StatusPassed, base)
+	recordCaseRunForCoverage(t, ctx, s, "run.variant.1", "case.variant", store.StatusPassed, base.Add(time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, "run.variant.2", "case.variant", store.StatusFailed, base.Add(2*time.Minute))
+	if err := s.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	out := runCLI(t,
+		"case", "suite", "brief",
+		"--profile", profileDir,
+		"--store-url", storePath,
+		"--tag", "regression",
+		"--status", "active",
+		"--signal", "Variant",
+		"--limit", "2",
+		"--request-id", "change-012",
+		"--base-url", "http://127.0.0.1:8080",
+		"--json",
+	)
+	var report struct {
+		OK     bool `json:"ok"`
+		Counts struct {
+			Total            int `json:"total"`
+			Ready            int `json:"ready"`
+			Blocked          int `json:"blocked"`
+			Failed           int `json:"failed"`
+			PrioritySelected int `json:"prioritySelected"`
+		} `json:"counts"`
+		Recommended []struct {
+			CaseID string `json:"caseId"`
+			Score  int    `json:"score"`
+		} `json:"recommended"`
+		BatchRequest struct {
+			RequestID string   `json:"requestId"`
+			CaseIDs   []string `json:"caseIds"`
+			BaseURL   string   `json:"baseUrl"`
+		} `json:"batchRequest"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode suite brief json: %v\n%s", err, out)
+	}
+	if !report.OK || report.Counts.Total != 3 || report.Counts.Ready != 2 || report.Counts.Blocked != 1 || report.Counts.Failed != 1 || report.Counts.PrioritySelected != 2 {
+		t.Fatalf("suite brief report = %#v", report)
+	}
+	if len(report.Recommended) != 2 || report.Recommended[0].CaseID != "case.variant" || report.Recommended[0].Score <= report.Recommended[1].Score {
+		t.Fatalf("suite brief recommended = %#v", report.Recommended)
+	}
+	if report.BatchRequest.RequestID != "change-012" || strings.Join(report.BatchRequest.CaseIDs, ",") != "case.variant,case.default" || report.BatchRequest.BaseURL != "http://127.0.0.1:8080" {
+		t.Fatalf("suite brief batch = %#v", report.BatchRequest)
+	}
+
+	textOut := runCLI(t, "case", "suite", "brief", "--profile", profileDir, "--store-url", storePath, "--tag", "regression", "--signal", "Variant")
+	for _, want := range []string{"Case Suite Brief", "Ready: 2", "Recommended: 2", "case.variant"} {
+		if !strings.Contains(textOut, want) {
+			t.Fatalf("brief text missing %q:\n%s", want, textOut)
+		}
+	}
+}
+
 func TestCaseSuiteImpactBuildsExecutableBatchRequest(t *testing.T) {
 	ctx := context.Background()
 	profileDir := writeCaseSuiteCoverageProfile(t)

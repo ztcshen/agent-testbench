@@ -134,6 +134,33 @@ The Control plane exposes the same ranking contract:
 GET /api/case/suite-priority?signal=/api/items&tag=smoke&status=active&limit=20&requestId=change-005
 ```
 
+## Maintained Case Suite Brief
+
+```sh
+otsandbox case suite brief \
+  --profile PATH_OR_ID \
+  --store-url .runtime/store.sqlite \
+  --signal "/api/items" \
+  --tag smoke \
+  --status active \
+  --limit 20 \
+  --request-id change-006 \
+  --base-url http://127.0.0.1:8080 \
+  --json
+```
+
+The brief command is the one-call triage surface for agents and CI. It returns
+latest coverage, readiness issues, recent stability, ranked recommendations,
+blocked cases, and a `batchRequest` payload. Failed, not-run, or unstable cases
+remain normal report content; the command only fails on transport or Store
+errors.
+
+The Control plane exposes the same brief contract:
+
+```http
+GET /api/case/suite-brief?signal=/api/items&tag=smoke&status=active&limit=20&requestId=change-006
+```
+
 ## Maintained Case Suite Inspection
 
 ```sh

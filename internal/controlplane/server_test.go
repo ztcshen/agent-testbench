@@ -4001,6 +4001,68 @@ func TestServerExposesCaseSuitePriorityBySignals(t *testing.T) {
 	}
 }
 
+func TestServerExposesCaseSuiteBriefForAgentTriage(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+
+	base := mustParseTime(t, "2026-05-16T01:00:00Z")
+	for _, item := range []struct {
+		runID  string
+		caseID string
+		status string
+		at     time.Time
+	}{
+		{runID: "run.impacted.1", caseID: "case.impacted", status: store.StatusPassed, at: base},
+		{runID: "run.impacted.2", caseID: "case.impacted", status: store.StatusFailed, at: base.Add(time.Minute)},
+		{runID: "run.failed.1", caseID: "case.failed", status: store.StatusFailed, at: base.Add(2 * time.Minute)},
+	} {
+		_, err := s.CreateRun(ctx, store.Run{ID: item.runID, ProfileID: "sample", Status: item.status, StartedAt: item.at, FinishedAt: item.at.Add(time.Second), CreatedAt: item.at, UpdatedAt: item.at.Add(time.Second)})
+		if err != nil {
+			t.Fatalf("create run %s: %v", item.runID, err)
+		}
+		_, err = s.RecordAPICaseRun(ctx, store.APICaseRun{ID: item.runID + ".case", RunID: item.runID, CaseID: item.caseID, Status: item.status, StartedAt: item.at, FinishedAt: item.at.Add(time.Second), CreatedAt: item.at})
+		if err != nil {
+			t.Fatalf("record case run %s: %v", item.runID, err)
+		}
+	}
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.create", DisplayName: "Create Item", Operation: "Create", Path: "/v1/items"},
+			{ID: "node.search", DisplayName: "Search Item", Operation: "Search", Path: "/v1/items/search"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.impacted", DisplayName: "Impacted Case", NodeID: "node.create", CasePath: "cases/impacted.json", Tags: []string{"regression"}, Priority: "p1", Status: "active", SortOrder: 1},
+			{ID: "case.failed", DisplayName: "Failed Case", NodeID: "node.search", CasePath: "cases/failed.json", Tags: []string{"regression"}, Priority: "p0", Status: "active", SortOrder: 2},
+			{ID: "case.blocked", DisplayName: "Blocked Case", NodeID: "node.search", Tags: []string{"regression"}, Priority: "p2", Status: "active", SortOrder: 3},
+		},
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/case/suite-brief?signal=Create&tag=regression&status=active&limit=2&requestId=change-012&baseUrl=http://127.0.0.1:8080", http.StatusOK)
+	if payload["ok"] != true {
+		t.Fatalf("suite brief ok = %#v", payload)
+	}
+	counts := payload["counts"].(map[string]any)
+	if counts["total"] != float64(3) || counts["ready"] != float64(2) || counts["blocked"] != float64(1) || counts["prioritySelected"] != float64(2) {
+		t.Fatalf("suite brief counts = %#v", counts)
+	}
+	recommended := payload["recommended"].([]any)
+	first := recommended[0].(map[string]any)
+	if first["caseId"] != "case.impacted" || first["score"].(float64) <= 0 {
+		t.Fatalf("suite brief first = %#v", first)
+	}
+	batch := payload["batchRequest"].(map[string]any)
+	if batch["requestId"] != "change-012" || batch["baseUrl"] != "http://127.0.0.1:8080" {
+		t.Fatalf("suite brief batch = %#v", batch)
+	}
+}
+
 func TestServerExposesCaseSuiteImpactPlan(t *testing.T) {
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})

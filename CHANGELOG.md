@@ -51,3 +51,6 @@ should be called out in this file and in the relevant docs.
 - Added `case suite priority` and `/api/case/suite-priority` to rank maintained
   cases by impact signals, latest Store status, stability, and case priority
   before building a batch request.
+- Added `case suite brief` and `/api/case/suite-brief` so agents can fetch
+  coverage, readiness, stability, ranked recommendations, and a batch request
+  in one call before deciding what to execute.

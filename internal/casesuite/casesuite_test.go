@@ -331,6 +331,56 @@ func TestPriorityRanksImpactedUnstableAndFailedCases(t *testing.T) {
 	}
 }
 
+func TestBriefCombinesCoverageReadinessStabilityAndPriority(t *testing.T) {
+	base := mustParseTime(t, "2026-05-16T01:00:00Z")
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha", Operation: "Create", Path: "/v1/items"},
+			{ID: "node.beta", DisplayName: "Node Beta", Operation: "Search", Path: "/v1/items/search"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.impacted", DisplayName: "Impacted Case", NodeID: "node.alpha", CasePath: "cases/impacted.json", Tags: []string{"regression"}, Priority: "p1", SortOrder: 1},
+			{ID: "case.failed", DisplayName: "Failed Case", NodeID: "node.beta", CasePath: "cases/failed.json", Tags: []string{"regression"}, Priority: "p0", SortOrder: 2},
+			{ID: "case.blocked", DisplayName: "Blocked Case", NodeID: "node.beta", Tags: []string{"regression"}, Priority: "p0", SortOrder: 3},
+		},
+	}
+	records := []store.APICaseRunRecord{
+		record("run.impacted.1", "case.impacted", store.StatusPassed, base),
+		record("run.impacted.2", "case.impacted", store.StatusFailed, base.Add(time.Minute)),
+		record("run.impacted.3", "case.impacted", store.StatusPassed, base.Add(2*time.Minute)),
+		record("run.failed.1", "case.failed", store.StatusFailed, base.Add(3*time.Minute)),
+	}
+	cases := SelectCases(bundle, Filter{Tags: []string{"regression"}, Status: "active"})
+
+	report, err := Brief(context.Background(), bundle, recordStore{records: records}, Filter{Tags: []string{"regression"}, Status: "active"}, cases, BriefOptions{
+		Signals:        []string{"Create"},
+		Limit:          2,
+		RequestID:      "change-012",
+		BaseURL:        "http://127.0.0.1:8080",
+		TimeoutSeconds: 6,
+		StabilityLimit: 3,
+	})
+	if err != nil {
+		t.Fatalf("brief: %v", err)
+	}
+	if !report.OK || report.Counts.Total != 3 || report.Counts.Ready != 2 || report.Counts.Blocked != 1 || report.Counts.Failed != 1 || report.Counts.Unstable != 1 || report.Counts.PrioritySelected != 2 {
+		t.Fatalf("brief counts = %#v", report.Counts)
+	}
+	if got := strings.Join(report.BatchRequest.CaseIDs, ","); got != "case.impacted,case.failed" {
+		t.Fatalf("brief batch ids = %q", got)
+	}
+	if len(report.Recommended) != 2 || report.Recommended[0].CaseID != "case.impacted" || !containsString(report.Recommended[0].Reasons, "impacted") {
+		t.Fatalf("brief recommended = %#v", report.Recommended)
+	}
+	if len(report.Readiness) != 3 || len(report.Coverage) != 3 || len(report.Stability) != 3 {
+		t.Fatalf("brief sections readiness=%d coverage=%d stability=%d", len(report.Readiness), len(report.Coverage), len(report.Stability))
+	}
+	if len(report.Blocked) != 1 || report.Blocked[0].CaseID != "case.blocked" {
+		t.Fatalf("brief blocked = %#v", report.Blocked)
+	}
+}
+
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if strings.Contains(value, want) {

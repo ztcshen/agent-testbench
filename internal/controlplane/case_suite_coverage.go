@@ -64,6 +64,17 @@ func handleCaseSuitePriority(w http.ResponseWriter, r *http.Request, bundle prof
 	writeJSON(w, report)
 }
 
+func handleCaseSuiteBrief(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store) {
+	filter := caseSuiteCoverageFilterFromRequest(r)
+	items := casesuite.SelectCases(bundle, filter)
+	report, err := casesuite.Brief(r.Context(), bundle, runtime, filter, items, caseSuiteBriefOptionsFromRequest(r))
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, report)
+}
+
 func handleCaseSuiteImpact(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store) {
 	filter := caseSuiteCoverageFilterFromRequest(r)
 	report, err := casesuite.Impact(r.Context(), bundle, runtime, filter, caseSuiteImpactOptionsFromRequest(r))
@@ -166,6 +177,19 @@ func caseSuitePriorityOptionsFromRequest(r *http.Request) casesuite.PriorityOpti
 	return casesuite.PriorityOptions{
 		Signals:        queryStringList(query["signal"], query["signals"], query["change"], query["changes"], query["changedPath"], query["changedPaths"]),
 		Limit:          queryIntValue(query.Get("limit")),
+		RequestID:      query.Get("requestId"),
+		BaseURL:        query.Get("baseUrl"),
+		EvidenceDir:    query.Get("evidenceDir"),
+		TimeoutSeconds: queryIntValue(query.Get("timeoutSeconds")),
+	}
+}
+
+func caseSuiteBriefOptionsFromRequest(r *http.Request) casesuite.BriefOptions {
+	query := r.URL.Query()
+	return casesuite.BriefOptions{
+		Signals:        queryStringList(query["signal"], query["signals"], query["change"], query["changes"], query["changedPath"], query["changedPaths"]),
+		Limit:          queryIntValue(query.Get("limit")),
+		StabilityLimit: queryIntValue(query.Get("stabilityLimit")),
 		RequestID:      query.Get("requestId"),
 		BaseURL:        query.Get("baseUrl"),
 		EvidenceDir:    query.Get("evidenceDir"),
