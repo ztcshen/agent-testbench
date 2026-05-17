@@ -61,3 +61,5 @@ should be called out in this file and in the relevant docs.
 - Added `case suite quality` and `/api/case/suite-quality` to audit maintained
   case authoring quality, including uncovered interface nodes, missing metadata,
   missing runnable sources, and missing execution config.
+- Added `case suite quality-plan` and `/api/case/suite-quality-plan` to turn
+  maintained-case quality gaps into stable authoring actions for agents.

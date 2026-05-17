@@ -2458,6 +2458,53 @@ func TestCaseSuiteQualityAuditsMaintainedCaseMetadata(t *testing.T) {
 	}
 }
 
+func TestCaseSuiteQualityPlanSuggestsAuthoringActions(t *testing.T) {
+	profileDir := writeCaseSuiteQualityProfile(t)
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+
+	out := runCLI(t,
+		"case", "suite", "quality-plan",
+		"--profile", profileDir,
+		"--store-url", storePath,
+		"--status", "active",
+		"--json",
+	)
+	var report struct {
+		OK     bool `json:"ok"`
+		Counts struct {
+			Total            int `json:"total"`
+			DraftCase        int `json:"draftCase"`
+			CompleteMetadata int `json:"completeMetadata"`
+			AddRunnable      int `json:"addRunnable"`
+			AddExecution     int `json:"addExecution"`
+		} `json:"counts"`
+		Actions []struct {
+			Type            string   `json:"type"`
+			NodeID          string   `json:"nodeId"`
+			CaseID          string   `json:"caseId"`
+			SuggestedCaseID string   `json:"suggestedCaseId"`
+			Fields          []string `json:"fields"`
+			Command         []string `json:"command"`
+		} `json:"actions"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode suite quality plan json: %v\n%s", err, out)
+	}
+	if !report.OK || report.Counts.Total != 4 || report.Counts.DraftCase != 1 || report.Counts.CompleteMetadata != 1 || report.Counts.AddRunnable != 1 || report.Counts.AddExecution != 1 {
+		t.Fatalf("suite quality plan report = %#v", report)
+	}
+	if len(report.Actions) != 4 || report.Actions[0].Type != "draft-case" || report.Actions[0].NodeID != "node.empty" || report.Actions[0].SuggestedCaseID != "case.node-empty.default" {
+		t.Fatalf("suite quality plan actions = %#v", report.Actions)
+	}
+	textOut := runCLI(t, "case", "suite", "quality-plan", "--profile", profileDir, "--store-url", storePath, "--status", "active")
+	for _, want := range []string{"Case Suite Quality Plan", "Draft Case: 1", "case.node-empty.default", "case.gaps"} {
+		if !strings.Contains(textOut, want) {
+			t.Fatalf("quality plan text missing %q:\n%s", want, textOut)
+		}
+	}
+}
+
 func TestCaseSuiteImpactBuildsExecutableBatchRequest(t *testing.T) {
 	ctx := context.Background()
 	profileDir := writeCaseSuiteCoverageProfile(t)

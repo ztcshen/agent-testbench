@@ -4099,6 +4099,39 @@ func TestServerExposesCaseSuiteQuality(t *testing.T) {
 	}
 }
 
+func TestServerExposesCaseSuiteQualityPlan(t *testing.T) {
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha"},
+			{ID: "node.empty", DisplayName: "Node Empty"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.complete", DisplayName: "Complete Case", Description: "Ready.", NodeID: "node.alpha", CasePath: "cases/complete.json", Tags: []string{"regression"}, Priority: "p0", Owner: "team-a", Status: "active"},
+			{ID: "case.gaps", DisplayName: "Gap Case", NodeID: "node.alpha", Status: "active"},
+		},
+		TemplateConfigs: []profile.TemplateConfig{
+			{ID: "cfg.case.complete", ScopeType: "case", ScopeID: "case.complete", Status: "active", ConfigJSON: `{"caseId":"case.complete","caseExecution":{"method":"GET","path":"/items"}}`},
+		},
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, nil))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/case/suite-quality-plan?status=active", http.StatusOK)
+	if payload["ok"] != true {
+		t.Fatalf("suite quality plan ok = %#v", payload)
+	}
+	counts := payload["counts"].(map[string]any)
+	if counts["total"] != float64(4) || counts["draftCase"] != float64(1) || counts["completeMetadata"] != float64(1) {
+		t.Fatalf("suite quality plan counts = %#v", counts)
+	}
+	actions := payload["actions"].([]any)
+	first := actions[0].(map[string]any)
+	if first["type"] != "draft-case" || first["nodeId"] != "node.empty" || first["suggestedCaseId"] != "case.node-empty.default" {
+		t.Fatalf("suite quality plan first = %#v", first)
+	}
+}
+
 func TestServerExposesCaseSuiteImpactPlan(t *testing.T) {
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})

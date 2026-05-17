@@ -91,6 +91,25 @@ The Control plane exposes the same quality contract:
 GET /api/case/suite-quality?status=active
 ```
 
+Use the quality plan when an automation needs next actions instead of raw gaps:
+
+```sh
+otsandbox case suite quality-plan \
+  --profile PATH_OR_ID \
+  --store-url .runtime/store.sqlite \
+  --status active \
+  --json
+```
+
+The plan returns stable actions such as `draft-case`,
+`complete-case-metadata`, `add-runnable-source`, and `add-execution-config`.
+For uncovered interface nodes, the action includes a suggested case id and an
+`interface-node case draft` command fragment.
+
+```http
+GET /api/case/suite-quality-plan?status=active
+```
+
 ## Maintained Case Suite Report
 
 ```sh

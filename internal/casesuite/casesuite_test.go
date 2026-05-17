@@ -424,6 +424,48 @@ func TestQualityAuditsMaintainedCaseAuthoringGaps(t *testing.T) {
 	}
 }
 
+func TestQualityPlanBuildsActionableAuthoringSteps(t *testing.T) {
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha"},
+			{ID: "node.empty", DisplayName: "Node Empty"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.complete", DisplayName: "Complete Case", Description: "Covers the main path.", NodeID: "node.alpha", CasePath: "cases/complete.json", Tags: []string{"regression"}, Priority: "p0", Owner: "team-a", Status: "active", SortOrder: 1},
+			{ID: "case.gaps", DisplayName: "Gap Case", NodeID: "node.alpha", Status: "active", SortOrder: 2},
+		},
+		TemplateConfigs: []profile.TemplateConfig{
+			{ID: "cfg.case.complete", ScopeType: "case", ScopeID: "case.complete", Status: "active", ConfigJSON: `{"caseId":"case.complete","caseExecution":{"method":"GET","path":"/items"}}`},
+		},
+	}
+	cases := SelectCases(bundle, Filter{Status: "active"})
+
+	report, err := QualityPlan(context.Background(), bundle, recordStore{}, Filter{Status: "active"}, cases)
+	if err != nil {
+		t.Fatalf("quality plan: %v", err)
+	}
+	if !report.OK || report.Counts.Total != 4 || report.Counts.DraftCase != 1 || report.Counts.CompleteMetadata != 1 || report.Counts.AddRunnable != 1 || report.Counts.AddExecution != 1 {
+		t.Fatalf("quality plan counts = %#v", report.Counts)
+	}
+	actionsByType := map[string]QualityPlanAction{}
+	for _, action := range report.Actions {
+		actionsByType[action.Type] = action
+	}
+	if actionsByType["draft-case"].NodeID != "node.empty" || actionsByType["draft-case"].SuggestedCaseID != "case.node-empty.default" || !containsString(actionsByType["draft-case"].Command, "draft") {
+		t.Fatalf("draft action = %#v", actionsByType["draft-case"])
+	}
+	if actionsByType["complete-case-metadata"].CaseID != "case.gaps" || !containsString(actionsByType["complete-case-metadata"].Fields, "owner") {
+		t.Fatalf("metadata action = %#v", actionsByType["complete-case-metadata"])
+	}
+	if actionsByType["add-runnable-source"].CaseID != "case.gaps" {
+		t.Fatalf("runnable action = %#v", actionsByType["add-runnable-source"])
+	}
+	if actionsByType["add-execution-config"].CaseID != "case.gaps" {
+		t.Fatalf("execution action = %#v", actionsByType["add-execution-config"])
+	}
+}
+
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if strings.Contains(value, want) {
