@@ -75,6 +75,12 @@ the latest status for each selected case, plus passed, failed, and not-run
 counts. Failed and latest-run cases include `caseRunId` and `detailUrl` so a
 caller can jump directly to Evidence.
 
+The Control plane exposes the same read-only coverage contract:
+
+```http
+GET /api/case/suite-coverage?tag=smoke&owner=team-a&status=active
+```
+
 ## Single Interface Report
 
 ```sh

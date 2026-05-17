@@ -25,3 +25,5 @@ should be called out in this file and in the relevant docs.
   owner, priority, status, node, or text filter.
 - Added `case suite coverage` for latest passed, failed, and not-run status
   across maintained case sets without re-running requests.
+- Added `/api/case/suite-coverage` so agents, CI, and the workbench can read
+  maintained suite coverage through the Control plane.

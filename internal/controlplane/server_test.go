@@ -3589,6 +3589,100 @@ func TestServerExposesIncompleteAPICasesFromStore(t *testing.T) {
 	}
 }
 
+func TestServerExposesCaseSuiteCoverageByMaintenanceFilters(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+
+	base := mustParseTime(t, "2026-05-16T01:00:00Z")
+	for _, item := range []struct {
+		runID  string
+		caseID string
+		status string
+		at     time.Time
+	}{
+		{runID: "run.default.old", caseID: "case.default", status: store.StatusFailed, at: base},
+		{runID: "run.default.latest", caseID: "case.default", status: store.StatusPassed, at: base.Add(time.Minute)},
+		{runID: "run.variant.latest", caseID: "case.variant", status: store.StatusFailed, at: base.Add(2 * time.Minute)},
+	} {
+		_, err = s.CreateRun(ctx, store.Run{
+			ID:         item.runID,
+			ProfileID:  "sample",
+			WorkflowID: item.caseID,
+			Status:     item.status,
+			StartedAt:  item.at,
+			FinishedAt: item.at.Add(time.Second),
+			CreatedAt:  item.at,
+			UpdatedAt:  item.at.Add(time.Second),
+		})
+		if err != nil {
+			t.Fatalf("create run %s: %v", item.runID, err)
+		}
+		_, err = s.RecordAPICaseRun(ctx, store.APICaseRun{
+			ID:                   item.runID + ".case",
+			RunID:                item.runID,
+			CaseID:               item.caseID,
+			Status:               item.status,
+			AssertionSummaryJSON: `{"status":"` + item.status + `","errorCount":1}`,
+			StartedAt:            item.at,
+			FinishedAt:           item.at.Add(time.Second),
+			CreatedAt:            item.at,
+		})
+		if err != nil {
+			t.Fatalf("record case run %s: %v", item.runID, err)
+		}
+	}
+
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha", Operation: "Alpha"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.default", DisplayName: "Default Case", NodeID: "node.alpha", Tags: []string{"regression", "smoke"}, Priority: "p0", Owner: "team-a", SortOrder: 1},
+			{ID: "case.variant", DisplayName: "Variant Case", NodeID: "node.alpha", Tags: []string{"regression"}, Priority: "p1", Owner: "team-a", SortOrder: 2},
+			{ID: "case.unrun", DisplayName: "Unrun Case", NodeID: "node.alpha", Tags: []string{"regression"}, Priority: "p2", Owner: "team-b", SortOrder: 3},
+			{ID: "case.other", DisplayName: "Other Case", NodeID: "node.alpha", Tags: []string{"smoke"}, Priority: "p2", Owner: "team-c", SortOrder: 4},
+		},
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
+	defer server.Close()
+
+	endpoint := server.URL + "/api/case/suite-coverage?tag=regression&status=active"
+	payload := decodeJSONResponse(t, endpoint, http.StatusOK)
+	if payload["ok"] != false {
+		t.Fatalf("suite coverage ok = %#v", payload)
+	}
+	counts := payload["counts"].(map[string]any)
+	if counts["total"] != float64(3) || counts["passed"] != float64(1) || counts["failed"] != float64(1) || counts["notRun"] != float64(1) {
+		t.Fatalf("suite coverage counts = %#v", counts)
+	}
+	items := payload["items"].([]any)
+	if len(items) != 3 {
+		t.Fatalf("suite coverage items = %#v", items)
+	}
+	byCase := map[string]map[string]any{}
+	for _, raw := range items {
+		item := raw.(map[string]any)
+		byCase[item["caseId"].(string)] = item
+	}
+	if byCase["case.default"]["latestStatus"] != store.StatusPassed || byCase["case.default"]["latestRunId"] != "run.default.latest" || byCase["case.default"]["hasPassed"] != true {
+		t.Fatalf("default coverage = %#v", byCase["case.default"])
+	}
+	if byCase["case.variant"]["latestStatus"] != store.StatusFailed || byCase["case.variant"]["caseRunId"] != "run.variant.latest.case" || byCase["case.variant"]["detailUrl"] != "/api/case-run/evidence?caseRunId="+url.QueryEscape("run.variant.latest.case") {
+		t.Fatalf("variant coverage = %#v", byCase["case.variant"])
+	}
+	if byCase["case.unrun"]["latestStatus"] != "not-run" || byCase["case.unrun"]["reason"] != "no run recorded in Store" {
+		t.Fatalf("unrun coverage = %#v", byCase["case.unrun"])
+	}
+	if _, ok := byCase["case.other"]; ok {
+		t.Fatalf("suite coverage should not include non-matching case: %#v", byCase["case.other"])
+	}
+}
+
 func TestServerExposesCaseRunsFromStore(t *testing.T) {
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
