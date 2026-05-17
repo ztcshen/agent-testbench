@@ -27,3 +27,5 @@ should be called out in this file and in the relevant docs.
   across maintained case sets without re-running requests.
 - Added `/api/case/suite-coverage` so agents, CI, and the workbench can read
   maintained suite coverage through the Control plane.
+- Added maintained suite selectors to `/api/cases/batch-runs`, including
+  `runStates` for rerunning only failed or not-run cases.

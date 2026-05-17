@@ -140,6 +140,25 @@ Run a workflow-shaped regression:
 }
 ```
 
+Run a maintained suite and only rerun cases whose latest Store state is failed
+or not-run:
+
+```json
+{
+  "requestId": "suite-rerun-001",
+  "suite": {
+    "tags": ["regression"],
+    "status": "active",
+    "runStates": ["failed", "not-run"]
+  },
+  "baseUrl": "http://127.0.0.1:8080"
+}
+```
+
+The `suite` selector accepts `filter`, `nodeId`, `tags`, `status`, `owner`,
+`priority`, and `runStates`. Omit `runStates` to run every case matched by the
+maintenance selector.
+
 The API returns `202 Accepted` with a batch run id, JSON report URL, and HTML
 report URL. Poll the JSON report URL until the status is terminal.
 

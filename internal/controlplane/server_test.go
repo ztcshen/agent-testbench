@@ -4943,6 +4943,109 @@ func TestServerStartsAsyncAPICaseBatchRunForAllNodeCases(t *testing.T) {
 	}
 }
 
+func TestServerStartsAsyncAPICaseBatchRunForMaintainedSuiteRunStates(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/suite/variant", "/v1/suite/unrun":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		case "/v1/suite/passed":
+			t.Fatalf("already passed case should not be rerun")
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer target.Close()
+
+	dir := t.TempDir()
+	casePath := func(id string, path string) string {
+		t.Helper()
+		out := filepath.Join(dir, id+".json")
+		if err := os.WriteFile(out, []byte(fmt.Sprintf(`{
+  "id": %q,
+  "title": %q,
+  "request": {"method": "GET", "path": %q},
+  "assertions": {"expectedStatusCodes": [200], "responseContains": ["ok"]}
+}`, id, id, path)), 0o644); err != nil {
+			t.Fatalf("write api case %s: %v", id, err)
+		}
+		return out
+	}
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha", Operation: "Suite", Method: "GET", Path: "/v1/suite"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.passed", DisplayName: "Passed Case", NodeID: "node.alpha", Tags: []string{"regression"}, Owner: "team-a", Priority: "p0", CasePath: casePath("case.passed", "/v1/suite/passed"), BaseURL: target.URL, EvidenceDir: filepath.Join(dir, "evidence"), SortOrder: 1},
+			{ID: "case.variant", DisplayName: "Variant Case", NodeID: "node.alpha", Tags: []string{"regression"}, Owner: "team-a", Priority: "p1", CasePath: casePath("case.variant", "/v1/suite/variant"), BaseURL: target.URL, EvidenceDir: filepath.Join(dir, "evidence"), SortOrder: 2},
+			{ID: "case.unrun", DisplayName: "Unrun Case", NodeID: "node.alpha", Tags: []string{"regression"}, Owner: "team-b", Priority: "p2", CasePath: casePath("case.unrun", "/v1/suite/unrun"), BaseURL: target.URL, EvidenceDir: filepath.Join(dir, "evidence"), SortOrder: 3},
+			{ID: "case.other", DisplayName: "Other Case", NodeID: "node.alpha", Tags: []string{"smoke"}, Owner: "team-a", Priority: "p2", CasePath: casePath("case.other", "/v1/suite/other"), BaseURL: target.URL, EvidenceDir: filepath.Join(dir, "evidence"), SortOrder: 4},
+		},
+	}
+	base := mustParseTime(t, "2026-05-16T01:00:00Z")
+	for _, item := range []struct {
+		runID  string
+		caseID string
+		status string
+		at     time.Time
+	}{
+		{runID: "run.passed.latest", caseID: "case.passed", status: store.StatusPassed, at: base},
+		{runID: "run.variant.latest", caseID: "case.variant", status: store.StatusFailed, at: base.Add(time.Minute)},
+	} {
+		_, err = s.CreateRun(ctx, store.Run{ID: item.runID, ProfileID: "sample", WorkflowID: item.caseID, Status: item.status, StartedAt: item.at, FinishedAt: item.at.Add(time.Second), CreatedAt: item.at, UpdatedAt: item.at.Add(time.Second)})
+		if err != nil {
+			t.Fatalf("create run %s: %v", item.runID, err)
+		}
+		_, err = s.RecordAPICaseRun(ctx, store.APICaseRun{ID: item.runID + ".case", RunID: item.runID, CaseID: item.caseID, Status: item.status, StartedAt: item.at, FinishedAt: item.at.Add(time.Second), CreatedAt: item.at})
+		if err != nil {
+			t.Fatalf("record case run %s: %v", item.runID, err)
+		}
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
+	defer server.Close()
+
+	body := `{"requestId":"suite-rerun-001","suite":{"tags":["regression"],"status":"active","runStates":["failed","not-run"]}}`
+	resp, err := http.Post(server.URL+"/api/cases/batch-runs", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post suite batch run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("suite batch status = %d body=%s", resp.StatusCode, raw)
+	}
+	var created struct {
+		ReportURL string `json:"reportUrl"`
+		Total     int    `json:"total"`
+		Suite     struct {
+			Tags      []string `json:"tags"`
+			RunStates []string `json:"runStates"`
+		} `json:"suite"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode suite batch response: %v", err)
+	}
+	if created.Total != 2 || strings.Join(created.Suite.Tags, ",") != "regression" || strings.Join(created.Suite.RunStates, ",") != "failed,not-run" {
+		t.Fatalf("suite batch response = %#v", created)
+	}
+	report := waitAPICaseBatchReport(t, server.URL+created.ReportURL)
+	if !report.OK || report.Completed != 2 || report.Passed != 2 || len(report.Cases) != 2 {
+		t.Fatalf("suite batch report = %#v", report)
+	}
+	gotCases := []string{report.Cases[0].CaseID, report.Cases[1].CaseID}
+	if strings.Join(gotCases, ",") != "case.variant,case.unrun" {
+		t.Fatalf("suite rerun cases = %#v", gotCases)
+	}
+}
+
 func TestServerStartsAsyncAPICaseBatchRunForWorkflow(t *testing.T) {
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})

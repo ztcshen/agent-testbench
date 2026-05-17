@@ -37,7 +37,7 @@ the same facts to the CLI, Control plane APIs, React workbench, and reports.
 | External profiles | Services, workflows, interface nodes, cases, request templates, fixtures, dependencies, and bindings live outside the core repository. |
 | Agent-friendly discovery | Agents call `interface-node discover`, `workflow discover`, or `case discover` first, then run reports with exact returned ids. |
 | Case maintenance catalog | API cases can carry description, tags, priority, owner, status, runnable file presence, and execution configuration for review, assignment, and suite execution. |
-| API case execution | Run a single HTTP case or a maintained case suite, render requests, assert responses, write Evidence, and optionally index results into Store. |
+| API case execution | Run a single HTTP case, a maintained case suite, or only the failed/not-run part of a suite; render requests, assert responses, write Evidence, and optionally index results into Store. |
 | Suite coverage audit | Check passed, failed, and not-run status for a maintained case suite through CLI or Control plane API without re-running requests. |
 | Interface and workflow reports | Run all cases attached to an interface node or ordered workflow steps, then produce JSON plus temporary HTML reports. |
 | Evidence detail APIs | Query request, response, assertions, precondition context, stored topology, persisted logs, status, and elapsed time by run or case run id. |

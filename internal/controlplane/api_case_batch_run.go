@@ -20,13 +20,24 @@ import (
 )
 
 type apiCaseBatchRunRequest struct {
-	RequestID      string         `json:"requestId"`
-	NodeIDs        []string       `json:"nodeIds"`
-	WorkflowID     string         `json:"workflowId"`
-	BaseURL        string         `json:"baseUrl"`
-	EvidenceDir    string         `json:"evidenceDir"`
-	TimeoutSeconds int            `json:"timeoutSeconds"`
-	Overrides      map[string]any `json:"overrides"`
+	RequestID      string                    `json:"requestId"`
+	NodeIDs        []string                  `json:"nodeIds"`
+	WorkflowID     string                    `json:"workflowId"`
+	Suite          apiCaseBatchSuiteSelector `json:"suite,omitempty"`
+	BaseURL        string                    `json:"baseUrl"`
+	EvidenceDir    string                    `json:"evidenceDir"`
+	TimeoutSeconds int                       `json:"timeoutSeconds"`
+	Overrides      map[string]any            `json:"overrides"`
+}
+
+type apiCaseBatchSuiteSelector struct {
+	Filter    string   `json:"filter,omitempty"`
+	NodeID    string   `json:"nodeId,omitempty"`
+	Tags      []string `json:"tags,omitempty"`
+	Status    string   `json:"status,omitempty"`
+	Owner     string   `json:"owner,omitempty"`
+	Priority  string   `json:"priority,omitempty"`
+	RunStates []string `json:"runStates,omitempty"`
 }
 
 type apiCaseBatchCasePlan struct {
@@ -77,26 +88,27 @@ type apiCaseBatchNodeReport struct {
 }
 
 type apiCaseBatchRunReport struct {
-	OK             bool                     `json:"ok"`
-	BatchRunID     string                   `json:"batchRunId"`
-	RequestID      string                   `json:"requestId"`
-	ProfileID      string                   `json:"profileId"`
-	NodeIDs        []string                 `json:"nodeIds"`
-	WorkflowID     string                   `json:"workflowId,omitempty"`
-	Status         string                   `json:"status"`
-	Total          int                      `json:"total"`
-	Completed      int                      `json:"completed"`
-	Passed         int                      `json:"passed"`
-	Failed         int                      `json:"failed"`
-	Skipped        int                      `json:"skipped"`
-	ReportURL      string                   `json:"reportUrl,omitempty"`
-	StartedAt      string                   `json:"startedAt"`
-	FinishedAt     string                   `json:"finishedAt,omitempty"`
-	Nodes          []apiCaseBatchNodeReport `json:"nodes,omitempty"`
-	Cases          []apiCaseBatchCaseReport `json:"cases"`
-	Error          string                   `json:"error,omitempty"`
-	HTMLReportPath string                   `json:"htmlReportPath,omitempty"`
-	HTMLReportURL  string                   `json:"htmlReportUrl,omitempty"`
+	OK             bool                       `json:"ok"`
+	BatchRunID     string                     `json:"batchRunId"`
+	RequestID      string                     `json:"requestId"`
+	ProfileID      string                     `json:"profileId"`
+	NodeIDs        []string                   `json:"nodeIds"`
+	WorkflowID     string                     `json:"workflowId,omitempty"`
+	Suite          *apiCaseBatchSuiteSelector `json:"suite,omitempty"`
+	Status         string                     `json:"status"`
+	Total          int                        `json:"total"`
+	Completed      int                        `json:"completed"`
+	Passed         int                        `json:"passed"`
+	Failed         int                        `json:"failed"`
+	Skipped        int                        `json:"skipped"`
+	ReportURL      string                     `json:"reportUrl,omitempty"`
+	StartedAt      string                     `json:"startedAt"`
+	FinishedAt     string                     `json:"finishedAt,omitempty"`
+	Nodes          []apiCaseBatchNodeReport   `json:"nodes,omitempty"`
+	Cases          []apiCaseBatchCaseReport   `json:"cases"`
+	Error          string                     `json:"error,omitempty"`
+	HTMLReportPath string                     `json:"htmlReportPath,omitempty"`
+	HTMLReportURL  string                     `json:"htmlReportUrl,omitempty"`
 }
 
 //go:embed templates/api_case_batch_report.html
@@ -123,6 +135,7 @@ func handleAPICaseBatchRunStart(w http.ResponseWriter, r *http.Request, bundle p
 		RequestID:      strings.TrimSpace(valueString(payload["requestId"])),
 		NodeIDs:        stringListValue(payload["nodeIds"]),
 		WorkflowID:     strings.TrimSpace(valueString(payload["workflowId"])),
+		Suite:          apiCaseBatchSuiteSelectorValue(payload["suite"]),
 		BaseURL:        strings.TrimSpace(valueString(payload["baseUrl"])),
 		EvidenceDir:    strings.TrimSpace(valueString(payload["evidenceDir"])),
 		TimeoutSeconds: intValue(payload["timeoutSeconds"]),
@@ -133,11 +146,16 @@ func handleAPICaseBatchRunStart(w http.ResponseWriter, r *http.Request, bundle p
 		return
 	}
 	request.NodeIDs = compactUniqueStringList(request.NodeIDs)
-	if len(request.NodeIDs) == 0 && request.WorkflowID == "" {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "nodeIds or workflowId is required"})
+	request.Suite = normalizeAPICaseBatchSuiteSelector(request.Suite)
+	if len(request.NodeIDs) == 0 && request.WorkflowID == "" && !request.Suite.configured() {
+		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "nodeIds, workflowId, or suite is required"})
 		return
 	}
-	plans := apiCaseBatchPlans(bundle, request)
+	plans, err := apiCaseBatchPlans(r.Context(), bundle, runtime, request)
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
 	if len(plans) == 0 {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "no api cases matched selector"})
 		return
@@ -160,6 +178,10 @@ func handleAPICaseBatchRunStart(w http.ResponseWriter, r *http.Request, bundle p
 		Cases:          make([]apiCaseBatchCaseReport, 0, len(plans)),
 		HTMLReportPath: filepath.Join(apiCaseBatchReportDir(request, plans), batchRunID, "report.html"),
 		HTMLReportURL:  "/api/cases/batch-runs/" + url.PathEscape(batchRunID) + "/report.html",
+	}
+	if request.Suite.configured() {
+		suite := request.Suite
+		report.Suite = &suite
 	}
 	for _, plan := range plans {
 		report.Cases = append(report.Cases, apiCaseBatchCaseReport{
@@ -317,10 +339,17 @@ func writeAPICaseBatchHTMLReport(report apiCaseBatchRunReport) error {
 	return os.WriteFile(report.HTMLReportPath, rendered.Bytes(), 0o644)
 }
 
-func apiCaseBatchPlans(bundle profile.Bundle, request apiCaseBatchRunRequest) []apiCaseBatchCasePlan {
+func apiCaseBatchPlans(ctx context.Context, bundle profile.Bundle, runtime store.Store, request apiCaseBatchRunRequest) ([]apiCaseBatchCasePlan, error) {
 	if strings.TrimSpace(request.WorkflowID) != "" {
-		return apiCaseBatchWorkflowPlans(bundle, request)
+		return apiCaseBatchWorkflowPlans(bundle, request), nil
 	}
+	if request.Suite.configured() {
+		return apiCaseBatchSuitePlans(ctx, bundle, runtime, request)
+	}
+	return apiCaseBatchNodePlans(bundle, request), nil
+}
+
+func apiCaseBatchNodePlans(bundle profile.Bundle, request apiCaseBatchRunRequest) []apiCaseBatchCasePlan {
 	nodesByID := apiCaseBatchNodesByID(bundle)
 	nodeSet := map[string]bool{}
 	for _, id := range request.NodeIDs {
@@ -331,6 +360,64 @@ func apiCaseBatchPlans(bundle profile.Bundle, request apiCaseBatchRunRequest) []
 		if !nodeSet[strings.TrimSpace(item.NodeID)] {
 			continue
 		}
+		casePath := strings.TrimSpace(item.CasePath)
+		if casePath == "" {
+			continue
+		}
+		node := nodesByID[item.NodeID]
+		out = append(out, apiCaseBatchCasePlan{
+			ID:              item.ID,
+			DisplayName:     item.DisplayName,
+			Scenario:        item.Scenario,
+			NodeID:          item.NodeID,
+			NodeDisplayName: node.DisplayName,
+			Operation:       node.Operation,
+			Method:          node.Method,
+			Path:            node.Path,
+			CasePath:        resolveBundleFilePath(bundle.BaseDir, casePath),
+			BaseURL:         firstNonEmpty(request.BaseURL, item.BaseURL),
+			EvidenceDir:     firstNonEmpty(request.EvidenceDir, item.EvidenceDir, filepath.Join(".runtime", "case-batches")),
+			TimeoutSeconds:  firstPositive(request.TimeoutSeconds, item.TimeoutSeconds),
+			Overrides:       mergeStringAnyMaps(item.DefaultOverrides, request.Overrides),
+		})
+	}
+	return out
+}
+
+func apiCaseBatchSuitePlans(ctx context.Context, bundle profile.Bundle, runtime store.Store, request apiCaseBatchRunRequest) ([]apiCaseBatchCasePlan, error) {
+	filter := caseSuiteCoverageFilter{
+		Filter:   request.Suite.Filter,
+		NodeID:   request.Suite.NodeID,
+		Tags:     request.Suite.Tags,
+		Status:   request.Suite.Status,
+		Owner:    request.Suite.Owner,
+		Priority: request.Suite.Priority,
+	}
+	cases := selectedSuiteCoverageCases(bundle, filter)
+	if len(request.Suite.RunStates) > 0 {
+		report, err := suiteCoverageReport(ctx, bundle, runtime, filter, cases)
+		if err != nil {
+			return nil, err
+		}
+		stateSet := apiCaseBatchRunStateSet(request.Suite.RunStates)
+		filtered := make([]profile.APICase, 0, len(cases))
+		for _, item := range report.Items {
+			if !stateSet[apiCaseBatchNormalizedRunState(item.LatestStatus)] {
+				continue
+			}
+			if apiCase, ok := findAPICase(bundle.APICases, item.CaseID); ok {
+				filtered = append(filtered, apiCase)
+			}
+		}
+		cases = filtered
+	}
+	return apiCaseBatchPlansFromCases(bundle, request, cases), nil
+}
+
+func apiCaseBatchPlansFromCases(bundle profile.Bundle, request apiCaseBatchRunRequest, cases []profile.APICase) []apiCaseBatchCasePlan {
+	nodesByID := apiCaseBatchNodesByID(bundle)
+	out := make([]apiCaseBatchCasePlan, 0, len(cases))
+	for _, item := range cases {
 		casePath := strings.TrimSpace(item.CasePath)
 		if casePath == "" {
 			continue
@@ -466,6 +553,12 @@ func refreshAPICaseBatchCounts(report *apiCaseBatchRunReport) {
 
 func cloneAPICaseBatchReport(report apiCaseBatchRunReport) apiCaseBatchRunReport {
 	report.NodeIDs = append([]string(nil), report.NodeIDs...)
+	if report.Suite != nil {
+		suite := *report.Suite
+		suite.Tags = append([]string(nil), report.Suite.Tags...)
+		suite.RunStates = append([]string(nil), report.Suite.RunStates...)
+		report.Suite = &suite
+	}
 	report.Nodes = append([]apiCaseBatchNodeReport(nil), report.Nodes...)
 	report.Cases = append([]apiCaseBatchCaseReport(nil), report.Cases...)
 	return report
@@ -474,6 +567,9 @@ func cloneAPICaseBatchReport(report apiCaseBatchRunReport) apiCaseBatchRunReport
 func stringListValue(value any) []string {
 	items, ok := value.([]any)
 	if !ok {
+		if raw := strings.TrimSpace(valueString(value)); raw != "" {
+			return normalizeQueryStringList([]string{raw})
+		}
 		return nil
 	}
 	out := make([]string, 0, len(items))
@@ -482,7 +578,81 @@ func stringListValue(value any) []string {
 			out = append(out, value)
 		}
 	}
+	return normalizeQueryStringList(out)
+}
+
+func apiCaseBatchSuiteSelectorValue(value any) apiCaseBatchSuiteSelector {
+	raw := mapValue(value)
+	if len(raw) == 0 {
+		return apiCaseBatchSuiteSelector{}
+	}
+	return normalizeAPICaseBatchSuiteSelector(apiCaseBatchSuiteSelector{
+		Filter:    strings.TrimSpace(valueString(raw["filter"])),
+		NodeID:    firstNonEmpty(valueString(raw["nodeId"]), valueString(raw["node"])),
+		Tags:      firstNonNilStringList(raw["tags"], raw["tag"]),
+		Status:    strings.TrimSpace(valueString(raw["status"])),
+		Owner:     strings.TrimSpace(valueString(raw["owner"])),
+		Priority:  strings.TrimSpace(valueString(raw["priority"])),
+		RunStates: firstNonNilStringList(raw["runStates"], raw["runState"]),
+	})
+}
+
+func normalizeAPICaseBatchSuiteSelector(selector apiCaseBatchSuiteSelector) apiCaseBatchSuiteSelector {
+	selector.Filter = strings.TrimSpace(selector.Filter)
+	selector.NodeID = strings.TrimSpace(selector.NodeID)
+	selector.Tags = normalizeQueryStringList(selector.Tags)
+	selector.Status = strings.TrimSpace(selector.Status)
+	if selector.Status == "" && selector.configuredWithoutStatus() {
+		selector.Status = "active"
+	}
+	selector.Owner = strings.TrimSpace(selector.Owner)
+	selector.Priority = strings.TrimSpace(selector.Priority)
+	selector.RunStates = normalizeQueryStringList(selector.RunStates)
+	for index, value := range selector.RunStates {
+		selector.RunStates[index] = apiCaseBatchNormalizedRunState(value)
+	}
+	return selector
+}
+
+func (s apiCaseBatchSuiteSelector) configured() bool {
+	return s.configuredWithoutStatus() || strings.TrimSpace(s.Status) != ""
+}
+
+func (s apiCaseBatchSuiteSelector) configuredWithoutStatus() bool {
+	return strings.TrimSpace(s.Filter) != "" || strings.TrimSpace(s.NodeID) != "" || len(s.Tags) > 0 || strings.TrimSpace(s.Owner) != "" || strings.TrimSpace(s.Priority) != "" || len(s.RunStates) > 0
+}
+
+func firstNonNilStringList(values ...any) []string {
+	for _, value := range values {
+		if out := stringListValue(value); len(out) > 0 {
+			return out
+		}
+	}
+	return nil
+}
+
+func apiCaseBatchRunStateSet(values []string) map[string]bool {
+	out := map[string]bool{}
+	for _, value := range values {
+		if normalized := apiCaseBatchNormalizedRunState(value); normalized != "" {
+			out[normalized] = true
+		}
+	}
 	return out
+}
+
+func apiCaseBatchNormalizedRunState(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	switch value {
+	case "notrun", "not-run", "missing", "never-run":
+		return "not-run"
+	case "pass", "passed", "success", "ok":
+		return store.StatusPassed
+	case "fail", "failed", "error":
+		return store.StatusFailed
+	default:
+		return value
+	}
 }
 
 func compactUniqueStringList(values []string) []string {
