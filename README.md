@@ -39,7 +39,7 @@ the same facts to the CLI, Control plane APIs, React workbench, and reports.
 | Case maintenance catalog | API cases can carry description, tags, priority, owner, status, runnable file presence, execution configuration, readiness issues, latest run state, and executable plans for review, assignment, and suite execution. |
 | API case execution | Run a single HTTP case, a maintained case suite, or only the failed/not-run part of a suite; render requests, assert responses, write Evidence, and optionally index results into Store. |
 | Suite coverage audit | Check passed, failed, and not-run status for a maintained case suite through CLI or Control plane API without re-running requests. |
-| Impact planning | Convert changed paths, interface hints, workflow hints, tags, or case text into an explainable case selection and batch request. |
+| Impact planning and execution | Convert changed paths, interface hints, workflow hints, tags, or case text into an explainable case selection, batch request, synchronous report, or asynchronous batch run. |
 | Interface and workflow reports | Run all cases attached to an interface node or ordered workflow steps, then produce JSON plus temporary HTML reports; maintained suite and batch runs also expose JUnit XML and failure summaries for CI/agent triage. |
 | Evidence detail APIs | Query request, response, assertions, precondition context, stored topology, persisted logs, artifact manifests, failure summaries, status, and elapsed time by run or case run id. |
 | Control plane workbench | A React workbench reads the same Store/read-models as CLI and API users. |
@@ -172,6 +172,18 @@ about target ids:
   --action run \
   --action rerun \
   --request-id change-002 \
+  --json
+
+./bin/otsandbox.sh case suite impact-report \
+  --profile sample \
+  --store-url "$store" \
+  --signal "/api/items" \
+  --status active \
+  --action run \
+  --action rerun \
+  --request-id change-003 \
+  --base-url http://127.0.0.1:8080 \
+  --output-dir "$tmpdir/reports/impact" \
   --json
 
 ./bin/otsandbox.sh interface-node case report \

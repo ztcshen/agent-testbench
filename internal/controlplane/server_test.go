@@ -3898,6 +3898,77 @@ func TestServerExposesCaseSuiteImpactPlan(t *testing.T) {
 	}
 }
 
+func TestServerStartsCaseSuiteImpactBatchRun(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/items" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer target.Close()
+	dir := t.TempDir()
+	casePath := filepath.Join(dir, "case-create.json")
+	if err := os.WriteFile(casePath, []byte(`{
+  "id": "case.create",
+  "title": "Create default",
+  "request": {"method": "GET", "path": "/v1/items"},
+  "assertions": {"expectedStatusCodes": [200], "responseContains": ["ok"]}
+}`), 0o644); err != nil {
+		t.Fatalf("write case: %v", err)
+	}
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.create", DisplayName: "Create Item", ServiceID: "service.alpha", Operation: "Create", Method: "GET", Path: "/v1/items"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.create", DisplayName: "Create default", NodeID: "node.create", CasePath: casePath, BaseURL: target.URL, EvidenceDir: filepath.Join(dir, "evidence"), Tags: []string{"regression"}, Status: "active", SortOrder: 1},
+		},
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
+	defer server.Close()
+
+	body := `{"requestId":"change-004","signals":["/v1/items"],"status":"active","actions":["run"],"baseUrl":"` + target.URL + `"}`
+	resp, err := http.Post(server.URL+"/api/case/suite-impact-runs", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post suite impact run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("suite impact run status = %d body=%s", resp.StatusCode, raw)
+	}
+	var created struct {
+		OK         bool   `json:"ok"`
+		BatchRunID string `json:"batchRunId"`
+		ReportURL  string `json:"reportUrl"`
+		Impact     struct {
+			BatchRequest struct {
+				CaseIDs []string `json:"caseIds"`
+			} `json:"batchRequest"`
+		} `json:"impact"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode suite impact run: %v", err)
+	}
+	if !created.OK || created.BatchRunID == "" || created.ReportURL == "" || strings.Join(created.Impact.BatchRequest.CaseIDs, ",") != "case.create" {
+		t.Fatalf("suite impact run response = %#v", created)
+	}
+	report := waitAPICaseBatchReport(t, server.URL+created.ReportURL)
+	if !report.OK || report.Status != store.StatusPassed || report.Passed != 1 || report.Failed != 0 || len(report.Cases) != 1 {
+		t.Fatalf("suite impact batch report = %#v", report)
+	}
+}
+
 func TestServerExposesCaseRunsFromStore(t *testing.T) {
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})

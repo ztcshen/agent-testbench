@@ -251,6 +251,13 @@ func NewWithOptions(bundle profile.Bundle, options Options) http.Handler {
 		}
 		handleCaseSuiteImpact(w, r, profiles.Current(), runtime)
 	})
+	mux.HandleFunc("/api/case/suite-impact-runs", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleCaseSuiteImpactRun(w, r, profiles.Current(), runtime, caseBatchRunner)
+	})
 	mux.HandleFunc("/api/replay/evidence", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)

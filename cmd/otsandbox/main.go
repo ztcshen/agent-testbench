@@ -219,6 +219,7 @@ Usage:
   otsandbox case suite inspect [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
   otsandbox case suite plan [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
   otsandbox case suite impact [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
+  otsandbox case suite impact-report [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
   otsandbox case run --case PATH --base-url URL [--override KEY=VALUE] [--evidence-dir PATH]
   otsandbox case incomplete-batches --profile PATH [--store-url PATH] [--json]
   otsandbox serve [--profile PATH_OR_ID] [--profile-home PATH] [--host HOST] [--port PORT] [--store-url PATH]
@@ -3135,6 +3136,8 @@ func runCaseSuite(ctx context.Context, args []string) error {
 		return runCaseSuitePlan(ctx, args[1:])
 	case "impact":
 		return runCaseSuiteImpact(ctx, args[1:])
+	case "impact-report":
+		return runCaseSuiteImpactReport(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown case suite command: %s", args[0])
 	}
@@ -3519,6 +3522,127 @@ func printCaseSuiteImpact(report casesuite.ImpactReport) {
 	}
 	for _, warning := range report.Warnings {
 		fmt.Printf("Warning: %s\n", warning)
+	}
+}
+
+type caseSuiteImpactExecutionReport struct {
+	OK        bool                   `json:"ok"`
+	Impact    casesuite.ImpactReport `json:"impact"`
+	Report    caseSuiteReport        `json:"report"`
+	ElapsedMs int64                  `json:"elapsedMs"`
+}
+
+func runCaseSuiteImpactReport(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("case suite impact-report", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	filter := flags.String("filter", "", "Additional case selector filter")
+	nodeID := flags.String("node", "", "Only include cases attached to this interface node id")
+	status := flags.String("status", "active", "Only include cases with this status")
+	owner := flags.String("owner", "", "Only include cases owned by this value")
+	priority := flags.String("priority", "", "Only include cases with this priority")
+	requestID := flags.String("request-id", "", "Request id for the generated batch request")
+	baseURL := flags.String("base-url", "", "Base URL for live request execution")
+	outputDir := flags.String("output-dir", "", "Report output directory")
+	timeoutSeconds := flags.Int("timeout-seconds", 3, "Timeout per API Case")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	var tags stringListFlag
+	var actions stringListFlag
+	var signals stringListFlag
+	var changes stringListFlag
+	flags.Var(&tags, "tag", "Only include cases with this tag; repeat for multiple tags")
+	flags.Var(&actions, "action", "Only select ready cases with this suggested action; repeat for multiple actions")
+	flags.Var(&signals, "signal", "Changed path, interface text, workflow text, tag, or case text; repeat for multiple signals")
+	flags.Var(&changes, "change", "Alias for --signal; repeat for multiple changes")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *timeoutSeconds <= 0 {
+		return errors.New("--timeout-seconds must be greater than zero")
+	}
+	started := time.Now()
+	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	filters := caseListFilter{
+		Filter:   *filter,
+		NodeID:   *nodeID,
+		Tags:     tags.Values(),
+		Status:   *status,
+		Owner:    *owner,
+		Priority: *priority,
+	}
+	impactSignals := append(signals.Values(), changes.Values()...)
+	impact, err := casesuite.Impact(ctx, bundle, sourceStore, caseSuiteFilter(filters), casesuite.ImpactOptions{
+		Signals: impactSignals,
+		Plan: casesuite.PlanOptions{
+			RequestID:      *requestID,
+			Actions:        actions.Values(),
+			BaseURL:        *baseURL,
+			TimeoutSeconds: *timeoutSeconds,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	cases := apiCasesByIDs(bundle.APICases, impact.BatchRequest.CaseIDs)
+	if len(cases) == 0 {
+		return errors.New("no ready impacted API cases selected for execution")
+	}
+	derived := deriveCaseSuiteConfigs(bundle, cases)
+	bundle.TemplateConfigs = mergeTemplateConfigs(bundle.TemplateConfigs, derived)
+	if strings.TrimSpace(*outputDir) == "" {
+		*outputDir = filepath.Join(".runtime", "reports", "case-suite-impact."+safeReportID(strings.Join(impact.Signals, "-"))+"."+time.Now().UTC().Format("20060102T150405.000000000Z"))
+	}
+	absOutputDir, err := filepath.Abs(*outputDir)
+	if err != nil {
+		return err
+	}
+	report, err := executeCaseSuiteReport(ctx, bundle, cases, derived, sourceStore, *storeURL, filters, *baseURL, absOutputDir, *timeoutSeconds)
+	if err != nil {
+		return err
+	}
+	out := caseSuiteImpactExecutionReport{
+		OK:        impact.OK && report.OK,
+		Impact:    impact,
+		Report:    report,
+		ElapsedMs: time.Since(started).Milliseconds(),
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(out)
+	}
+	printCaseSuiteImpactExecutionReport(out)
+	return nil
+}
+
+func apiCasesByIDs(cases []profile.APICase, ids []string) []profile.APICase {
+	byID := map[string]profile.APICase{}
+	for _, item := range cases {
+		byID[item.ID] = item
+	}
+	out := make([]profile.APICase, 0, len(ids))
+	for _, id := range ids {
+		if item, ok := byID[id]; ok {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func printCaseSuiteImpactExecutionReport(report caseSuiteImpactExecutionReport) {
+	fmt.Println("Case Suite Impact Report")
+	fmt.Printf("OK: %t\n", report.OK)
+	fmt.Printf("Selected: %d Passed: %d Failed: %d\n", report.Impact.Counts.Selected, report.Report.Counts.Passed, report.Report.Counts.Failed)
+	for _, item := range report.Report.Results {
+		fmt.Printf("- %s [%s]", item.CaseID, item.Status)
+		if item.CaseRunID != "" {
+			fmt.Printf(" %s", item.CaseRunID)
+		}
+		fmt.Println()
 	}
 }
 

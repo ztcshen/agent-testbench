@@ -2151,6 +2151,75 @@ func TestCaseSuiteImpactBuildsExecutableBatchRequest(t *testing.T) {
 	}
 }
 
+func TestCaseSuiteImpactReportRunsImpactedCases(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/lookup" || r.URL.Query().Get("mode") != "ok" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"status":"accepted"}`)
+	}))
+	defer server.Close()
+	profileDir := writeInterfaceNodeBatchReportProfile(t)
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+
+	outputDir := filepath.Join(t.TempDir(), "impact-report")
+	out := runCLI(t,
+		"case", "suite", "impact-report",
+		"--profile", profileDir,
+		"--store-url", storePath,
+		"--signal", "/lookup",
+		"--tag", "smoke",
+		"--status", "active",
+		"--action", "run",
+		"--request-id", "change-003",
+		"--base-url", server.URL,
+		"--output-dir", outputDir,
+		"--json",
+	)
+
+	var report struct {
+		OK     bool `json:"ok"`
+		Impact struct {
+			BatchRequest struct {
+				RequestID string   `json:"requestId"`
+				CaseIDs   []string `json:"caseIds"`
+			} `json:"batchRequest"`
+		} `json:"impact"`
+		Report struct {
+			OK        bool   `json:"ok"`
+			ReportURL string `json:"reportUrl"`
+			Counts    struct {
+				Total  int `json:"total"`
+				Passed int `json:"passed"`
+				Failed int `json:"failed"`
+			} `json:"counts"`
+			Results []struct {
+				CaseID    string `json:"caseId"`
+				CaseRunID string `json:"caseRunId"`
+				Status    string `json:"status"`
+			} `json:"results"`
+		} `json:"report"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode impact report json: %v\n%s", err, out)
+	}
+	if !report.OK || report.Impact.BatchRequest.RequestID != "change-003" || strings.Join(report.Impact.BatchRequest.CaseIDs, ",") != "case.alpha.default" {
+		t.Fatalf("impact report selection = %#v", report)
+	}
+	if !report.Report.OK || report.Report.Counts.Total != 1 || report.Report.Counts.Passed != 1 || report.Report.Counts.Failed != 0 || len(report.Report.Results) != 1 {
+		t.Fatalf("impact execution report = %#v", report.Report)
+	}
+	if report.Report.Results[0].CaseID != "case.alpha.default" || report.Report.Results[0].CaseRunID == "" || report.Report.Results[0].Status != store.StatusPassed {
+		t.Fatalf("impact execution item = %#v", report.Report.Results[0])
+	}
+	if _, err := os.Stat(filepath.Join(outputDir, "report.html")); err != nil {
+		t.Fatalf("impact report html missing: %v", err)
+	}
+}
+
 func TestWorkflowReportWritesReportWhenStepFails(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

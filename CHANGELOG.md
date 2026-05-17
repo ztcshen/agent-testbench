@@ -44,3 +44,5 @@ should be called out in this file and in the relevant docs.
   cases with detail links, Evidence paths, elapsed time, and assertion errors.
 - Added `case suite impact` and `/api/case/suite-impact` so change-aware
   agents can turn changed paths or target hints into a runnable case batch plan.
+- Added `case suite impact-report` and `/api/case/suite-impact-runs` for
+  one-step impact selection plus report or asynchronous batch execution.

@@ -159,6 +159,46 @@ The Control plane exposes the same impact planning contract:
 GET /api/case/suite-impact?signal=/api/items&change=module/path&status=active&action=run&action=rerun&requestId=change-002
 ```
 
+Use `impact-report` when an automation wants the same selection and execution
+in one synchronous CLI call:
+
+```sh
+otsandbox case suite impact-report \
+  --profile PATH_OR_ID \
+  --store-url .runtime/store.sqlite \
+  --signal "/api/items" \
+  --status active \
+  --action run \
+  --action rerun \
+  --request-id change-003 \
+  --base-url http://127.0.0.1:8080 \
+  --output-dir .runtime/reports/impact-change-003 \
+  --json
+```
+
+The JSON response contains both the `impact` selection and the executed
+`report`. The report still preserves failed cases instead of treating them as
+transport failures.
+
+Use the asynchronous Control plane endpoint when a caller should receive
+report URLs immediately:
+
+```http
+POST /api/case/suite-impact-runs
+Content-Type: application/json
+
+{
+  "requestId": "change-004",
+  "signals": ["/api/items"],
+  "status": "active",
+  "actions": ["run", "rerun"],
+  "baseUrl": "http://127.0.0.1:8080"
+}
+```
+
+The response is `202 Accepted` with the `impact` selection, `batchRunId`,
+`reportUrl`, and the same batch report fields as `/api/cases/batch-runs`.
+
 ## Single Interface Report
 
 ```sh

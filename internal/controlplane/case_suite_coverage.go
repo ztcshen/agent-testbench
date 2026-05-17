@@ -52,6 +52,55 @@ func handleCaseSuiteImpact(w http.ResponseWriter, r *http.Request, bundle profil
 	writeJSON(w, report)
 }
 
+type caseSuiteImpactRunResponse struct {
+	OK         bool                   `json:"ok"`
+	Impact     casesuite.ImpactReport `json:"impact"`
+	BatchRun   apiCaseBatchRunReport  `json:"batchRun"`
+	BatchRunID string                 `json:"batchRunId"`
+	ReportURL  string                 `json:"reportUrl"`
+	Status     string                 `json:"status"`
+}
+
+func handleCaseSuiteImpactRun(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store, runner *apiCaseBatchRunner) {
+	payload, err := readJSONPayload(r)
+	if err != nil {
+		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json"})
+		return
+	}
+	filter := caseSuiteCoverageFilterFromPayload(payload)
+	options := caseSuiteImpactOptionsFromPayload(payload)
+	impact, err := casesuite.Impact(r.Context(), bundle, runtime, filter, options)
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	if len(impact.BatchRequest.CaseIDs) == 0 {
+		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "no ready impacted cases selected for execution", "impact": impact})
+		return
+	}
+	batchRequest := apiCaseBatchRunRequest{
+		RequestID:      impact.BatchRequest.RequestID,
+		CaseIDs:        impact.BatchRequest.CaseIDs,
+		BaseURL:        impact.BatchRequest.BaseURL,
+		EvidenceDir:    impact.BatchRequest.EvidenceDir,
+		TimeoutSeconds: impact.BatchRequest.TimeoutSeconds,
+		Overrides:      mapValue(payload["overrides"]),
+	}
+	report, status, err := startAPICaseBatchRun(r.Context(), bundle, runtime, runner, batchRequest)
+	if err != nil {
+		writeJSONStatus(w, status, map[string]any{"ok": false, "error": err.Error(), "impact": impact})
+		return
+	}
+	writeJSONStatus(w, http.StatusAccepted, caseSuiteImpactRunResponse{
+		OK:         true,
+		Impact:     impact,
+		BatchRun:   report,
+		BatchRunID: report.BatchRunID,
+		ReportURL:  report.ReportURL,
+		Status:     report.Status,
+	})
+}
+
 func caseSuiteCoverageFilterFromRequest(r *http.Request) casesuite.Filter {
 	query := r.URL.Query()
 	return casesuite.NormalizeFilter(casesuite.Filter{
@@ -61,6 +110,17 @@ func caseSuiteCoverageFilterFromRequest(r *http.Request) casesuite.Filter {
 		Status:   firstNonEmpty(query.Get("status"), "active"),
 		Owner:    query.Get("owner"),
 		Priority: query.Get("priority"),
+	})
+}
+
+func caseSuiteCoverageFilterFromPayload(payload map[string]any) casesuite.Filter {
+	return casesuite.NormalizeFilter(casesuite.Filter{
+		Filter:   valueString(payload["filter"]),
+		NodeID:   firstNonEmpty(valueString(payload["node"]), valueString(payload["nodeId"])),
+		Tags:     stringListValue(firstNonNil(payload["tag"], payload["tags"])),
+		Status:   firstNonEmpty(valueString(payload["status"]), "active"),
+		Owner:    valueString(payload["owner"]),
+		Priority: valueString(payload["priority"]),
 	})
 }
 
@@ -75,12 +135,38 @@ func caseSuitePlanOptionsFromRequest(r *http.Request) casesuite.PlanOptions {
 	}
 }
 
+func caseSuitePlanOptionsFromPayload(payload map[string]any) casesuite.PlanOptions {
+	return casesuite.PlanOptions{
+		RequestID:      valueString(payload["requestId"]),
+		Actions:        stringListValue(firstNonNil(payload["action"], payload["actions"])),
+		BaseURL:        valueString(payload["baseUrl"]),
+		EvidenceDir:    valueString(payload["evidenceDir"]),
+		TimeoutSeconds: intValue(payload["timeoutSeconds"]),
+	}
+}
+
 func caseSuiteImpactOptionsFromRequest(r *http.Request) casesuite.ImpactOptions {
 	query := r.URL.Query()
 	return casesuite.ImpactOptions{
 		Signals: queryStringList(query["signal"], query["signals"], query["change"], query["changes"], query["changedPath"], query["changedPaths"]),
 		Plan:    caseSuitePlanOptionsFromRequest(r),
 	}
+}
+
+func caseSuiteImpactOptionsFromPayload(payload map[string]any) casesuite.ImpactOptions {
+	return casesuite.ImpactOptions{
+		Signals: stringListValue(firstNonNil(payload["signal"], payload["signals"], payload["change"], payload["changes"], payload["changedPath"], payload["changedPaths"])),
+		Plan:    caseSuitePlanOptionsFromPayload(payload),
+	}
+}
+
+func firstNonNil(values ...any) any {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
 }
 
 func queryIntValue(value string) int {

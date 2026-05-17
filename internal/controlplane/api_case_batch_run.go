@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -183,25 +184,30 @@ func handleAPICaseBatchRunStart(w http.ResponseWriter, r *http.Request, bundle p
 		TimeoutSeconds: intValue(payload["timeoutSeconds"]),
 		Overrides:      mapValue(payload["overrides"]),
 	}
-	if request.RequestID == "" {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "requestId is required"})
+	report, status, err := startAPICaseBatchRun(r.Context(), bundle, runtime, runner, request)
+	if err != nil {
+		writeJSONStatus(w, status, map[string]any{"ok": false, "error": err.Error()})
 		return
+	}
+	writeJSONStatus(w, http.StatusAccepted, report)
+}
+
+func startAPICaseBatchRun(ctx context.Context, bundle profile.Bundle, runtime store.Store, runner *apiCaseBatchRunner, request apiCaseBatchRunRequest) (apiCaseBatchRunReport, int, error) {
+	if request.RequestID == "" {
+		return apiCaseBatchRunReport{}, http.StatusBadRequest, errors.New("requestId is required")
 	}
 	request.CaseIDs = compactUniqueStringListPreserveOrder(request.CaseIDs)
 	request.NodeIDs = compactUniqueStringList(request.NodeIDs)
 	request.Suite = normalizeAPICaseBatchSuiteSelector(request.Suite)
 	if len(request.CaseIDs) == 0 && len(request.NodeIDs) == 0 && request.WorkflowID == "" && !request.Suite.configured() {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "caseIds, nodeIds, workflowId, or suite is required"})
-		return
+		return apiCaseBatchRunReport{}, http.StatusBadRequest, errors.New("caseIds, nodeIds, workflowId, or suite is required")
 	}
-	plans, err := apiCaseBatchPlans(r.Context(), bundle, runtime, request)
+	plans, err := apiCaseBatchPlans(ctx, bundle, runtime, request)
 	if err != nil {
-		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
-		return
+		return apiCaseBatchRunReport{}, http.StatusInternalServerError, err
 	}
 	if len(plans) == 0 {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "no api cases matched selector"})
-		return
+		return apiCaseBatchRunReport{}, http.StatusBadRequest, errors.New("no api cases matched selector")
 	}
 
 	batchRunID := newAPICaseBatchRunID(request.RequestID)
@@ -248,25 +254,21 @@ func handleAPICaseBatchRunStart(w http.ResponseWriter, r *http.Request, bundle p
 		})
 	}
 	if err := writeAPICaseBatchHTMLReport(report); err != nil {
-		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
-		return
+		return apiCaseBatchRunReport{}, http.StatusInternalServerError, err
 	}
 	if err := writeAPICaseBatchJUnitReport(report); err != nil {
-		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
-		return
+		return apiCaseBatchRunReport{}, http.StatusInternalServerError, err
 	}
 	if err := writeAPICaseBatchArtifactManifest(report); err != nil {
-		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
-		return
+		return apiCaseBatchRunReport{}, http.StatusInternalServerError, err
 	}
 	if err := writeAPICaseBatchFailureSummary(report); err != nil {
-		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
-		return
+		return apiCaseBatchRunReport{}, http.StatusInternalServerError, err
 	}
 	runner.save(report)
 
 	go runner.run(context.Background(), batchRunID, bundle.ID, plans, runtime)
-	writeJSONStatus(w, http.StatusAccepted, report)
+	return report, http.StatusAccepted, nil
 }
 
 func handleAPICaseBatchRunReport(w http.ResponseWriter, r *http.Request, runner *apiCaseBatchRunner) {
