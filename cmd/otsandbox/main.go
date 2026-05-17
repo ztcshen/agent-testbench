@@ -216,6 +216,7 @@ Usage:
   otsandbox case discover [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
   otsandbox case suite report [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
   otsandbox case suite coverage [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
+  otsandbox case suite stability [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--json]
   otsandbox case suite inspect [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
   otsandbox case suite plan [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
   otsandbox case suite impact [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
@@ -3130,6 +3131,8 @@ func runCaseSuite(ctx context.Context, args []string) error {
 		return runCaseSuiteReport(ctx, args[1:])
 	case "coverage":
 		return runCaseSuiteCoverage(ctx, args[1:])
+	case "stability":
+		return runCaseSuiteStability(ctx, args[1:])
 	case "inspect":
 		return runCaseSuiteInspect(ctx, args[1:])
 	case "plan":
@@ -3311,6 +3314,67 @@ func printCaseSuiteCoverage(report caseSuiteCoverageReport) {
 			fmt.Printf(" %s", item.Reason)
 		}
 		fmt.Println()
+	}
+	for _, warning := range report.Warnings {
+		fmt.Printf("Warning: %s\n", warning)
+	}
+}
+
+func runCaseSuiteStability(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("case suite stability", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	filter := flags.String("filter", "", "Filter by id, display name, scenario, description, tag, owner, or priority")
+	nodeID := flags.String("node", "", "Only include cases attached to this interface node id")
+	status := flags.String("status", "active", "Only include cases with this status")
+	owner := flags.String("owner", "", "Only include cases owned by this value")
+	priority := flags.String("priority", "", "Only include cases with this priority")
+	limit := flags.Int("limit", 10, "Recent runs per case to analyze")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	var tags stringListFlag
+	flags.Var(&tags, "tag", "Only include cases with this tag; repeat for multiple tags")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *limit <= 0 {
+		return errors.New("--limit must be greater than zero")
+	}
+	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	filterValue := caseListFilter{
+		Filter:   *filter,
+		NodeID:   *nodeID,
+		Tags:     tags.Values(),
+		Status:   *status,
+		Owner:    *owner,
+		Priority: *priority,
+	}
+	cases := selectedCaseSuiteCases(bundle, filterValue)
+	report, err := casesuite.Stability(ctx, bundle, sourceStore, caseSuiteFilter(filterValue), cases, casesuite.StabilityOptions{Limit: *limit})
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printCaseSuiteStability(report)
+	return nil
+}
+
+func printCaseSuiteStability(report casesuite.StabilityReport) {
+	fmt.Println("Case Suite Stability")
+	fmt.Printf("OK: %t\n", report.OK)
+	fmt.Printf("Total: %d Stable: %d Unstable: %d Not Run: %d\n", report.Counts.Total, report.Counts.Stable, report.Counts.Unstable, report.Counts.NotRun)
+	for _, item := range report.Items {
+		fmt.Printf("- %s latest=%s transitions=%d unstable=%t\n", item.CaseID, item.LatestStatus, item.Transitions, item.Unstable)
+		if item.Reason != "" {
+			fmt.Printf("  reason: %s\n", item.Reason)
+		}
 	}
 	for _, warning := range report.Warnings {
 		fmt.Printf("Warning: %s\n", warning)

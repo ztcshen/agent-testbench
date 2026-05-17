@@ -2081,6 +2081,88 @@ func TestCaseSuitePlanBuildsExecutableBatchRequest(t *testing.T) {
 	}
 }
 
+func TestCaseSuiteStabilityReportsTransitions(t *testing.T) {
+	ctx := context.Background()
+	profileDir := writeCaseSuiteCoverageProfile(t)
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	base := mustParseTime(t, "2026-05-16T01:00:00Z")
+	recordCaseRunForCoverage(t, ctx, s, "run.variant.1", "case.variant", store.StatusPassed, base)
+	recordCaseRunForCoverage(t, ctx, s, "run.variant.2", "case.variant", store.StatusFailed, base.Add(time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, "run.variant.3", "case.variant", store.StatusPassed, base.Add(2*time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, "run.default.1", "case.default", store.StatusPassed, base.Add(3*time.Minute))
+	if err := s.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	out := runCLI(t,
+		"case", "suite", "stability",
+		"--profile", profileDir,
+		"--store-url", storePath,
+		"--tag", "regression",
+		"--status", "active",
+		"--limit", "3",
+		"--json",
+	)
+	var report struct {
+		OK     bool `json:"ok"`
+		Counts struct {
+			Total    int `json:"total"`
+			Stable   int `json:"stable"`
+			Unstable int `json:"unstable"`
+			NotRun   int `json:"notRun"`
+		} `json:"counts"`
+		Items []struct {
+			CaseID       string `json:"caseId"`
+			LatestStatus string `json:"latestStatus"`
+			Transitions  int    `json:"transitions"`
+			Unstable     bool   `json:"unstable"`
+			Recent       []struct {
+				RunID string `json:"runId"`
+			} `json:"recent"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode suite stability json: %v\n%s", err, out)
+	}
+	if report.OK || report.Counts.Total != 3 || report.Counts.Unstable != 1 || report.Counts.Stable != 1 || report.Counts.NotRun != 1 {
+		t.Fatalf("suite stability report = %#v", report)
+	}
+	byCase := map[string]struct {
+		LatestStatus string
+		Transitions  int
+		Unstable     bool
+		Recent       []struct {
+			RunID string `json:"runId"`
+		}
+	}{}
+	for _, item := range report.Items {
+		byCase[item.CaseID] = struct {
+			LatestStatus string
+			Transitions  int
+			Unstable     bool
+			Recent       []struct {
+				RunID string `json:"runId"`
+			}
+		}{item.LatestStatus, item.Transitions, item.Unstable, item.Recent}
+	}
+	if !byCase["case.variant"].Unstable || byCase["case.variant"].Transitions != 2 || byCase["case.variant"].LatestStatus != store.StatusPassed || byCase["case.variant"].Recent[0].RunID != "run.variant.3" {
+		t.Fatalf("variant stability = %#v", byCase["case.variant"])
+	}
+
+	textOut := runCLI(t, "case", "suite", "stability", "--profile", profileDir, "--store-url", storePath, "--tag", "regression", "--limit", "3")
+	for _, want := range []string{"Case Suite Stability", "Unstable: 1", "case.variant"} {
+		if !strings.Contains(textOut, want) {
+			t.Fatalf("stability text missing %q:\n%s", want, textOut)
+		}
+	}
+}
+
 func TestCaseSuiteImpactBuildsExecutableBatchRequest(t *testing.T) {
 	ctx := context.Background()
 	profileDir := writeCaseSuiteCoverageProfile(t)

@@ -230,6 +230,53 @@ func TestImpactPlansCasesFromChangedSignals(t *testing.T) {
 	}
 }
 
+func TestStabilityReportsRecentStatusTransitions(t *testing.T) {
+	base := mustParseTime(t, "2026-05-16T01:00:00Z")
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.flaky", DisplayName: "Flaky Case", NodeID: "node.alpha", Tags: []string{"regression"}, SortOrder: 1},
+			{ID: "case.stable", DisplayName: "Stable Case", NodeID: "node.alpha", Tags: []string{"regression"}, SortOrder: 2},
+			{ID: "case.unrun", DisplayName: "Unrun Case", NodeID: "node.alpha", Tags: []string{"regression"}, SortOrder: 3},
+		},
+	}
+	records := []store.APICaseRunRecord{
+		record("run.flaky.1", "case.flaky", store.StatusPassed, base),
+		record("run.flaky.2", "case.flaky", store.StatusFailed, base.Add(time.Minute)),
+		record("run.flaky.3", "case.flaky", store.StatusPassed, base.Add(2*time.Minute)),
+		record("run.stable.1", "case.stable", store.StatusFailed, base.Add(3*time.Minute)),
+		record("run.stable.2", "case.stable", store.StatusFailed, base.Add(4*time.Minute)),
+	}
+	cases := SelectCases(bundle, Filter{Tags: []string{"regression"}, Status: "active"})
+
+	report, err := Stability(context.Background(), bundle, recordStore{records: records}, Filter{Tags: []string{"regression"}, Status: "active"}, cases, StabilityOptions{Limit: 3})
+	if err != nil {
+		t.Fatalf("stability: %v", err)
+	}
+	if report.OK || report.Counts.Total != 3 || report.Counts.Unstable != 1 || report.Counts.Stable != 1 || report.Counts.NotRun != 1 {
+		t.Fatalf("stability counts = %#v", report.Counts)
+	}
+	byCase := map[string]StabilityItem{}
+	for _, item := range report.Items {
+		byCase[item.CaseID] = item
+	}
+	if !byCase["case.flaky"].Unstable || byCase["case.flaky"].Transitions != 2 || byCase["case.flaky"].Passed != 2 || byCase["case.flaky"].Failed != 1 || byCase["case.flaky"].LatestStatus != store.StatusPassed {
+		t.Fatalf("flaky item = %#v", byCase["case.flaky"])
+	}
+	if len(byCase["case.flaky"].Recent) != 3 || byCase["case.flaky"].Recent[0].RunID != "run.flaky.3" || byCase["case.flaky"].Recent[0].DetailURL == "" {
+		t.Fatalf("flaky recent = %#v", byCase["case.flaky"].Recent)
+	}
+	if byCase["case.stable"].Unstable || byCase["case.stable"].Transitions != 0 || byCase["case.stable"].LatestStatus != store.StatusFailed {
+		t.Fatalf("stable item = %#v", byCase["case.stable"])
+	}
+	if byCase["case.unrun"].LatestStatus != "not-run" || byCase["case.unrun"].Reason != "no run recorded in Store" {
+		t.Fatalf("unrun item = %#v", byCase["case.unrun"])
+	}
+}
+
 type recordStore struct {
 	records []store.APICaseRunRecord
 }

@@ -82,6 +82,31 @@ The Control plane exposes the same read-only coverage contract:
 GET /api/case/suite-coverage?tag=smoke&owner=team-a&status=active
 ```
 
+## Maintained Case Suite Stability
+
+```sh
+otsandbox case suite stability \
+  --profile PATH_OR_ID \
+  --store-url .runtime/store.sqlite \
+  --tag smoke \
+  --owner team-a \
+  --status active \
+  --limit 10 \
+  --json
+```
+
+The command uses the same maintenance selector, reads recent Store case-run
+history, and reports pass/fail counts, latest status, status transitions,
+recent run ids, and detail URLs. A case is marked `unstable` when the selected
+history contains both passed and failed runs with at least one status
+transition.
+
+The Control plane exposes the same stability contract:
+
+```http
+GET /api/case/suite-stability?tag=smoke&owner=team-a&status=active&limit=10
+```
+
 ## Maintained Case Suite Inspection
 
 ```sh

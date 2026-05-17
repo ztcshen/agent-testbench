@@ -39,6 +39,7 @@ the same facts to the CLI, Control plane APIs, React workbench, and reports.
 | Case maintenance catalog | API cases can carry description, tags, priority, owner, status, runnable file presence, execution configuration, readiness issues, latest run state, and executable plans for review, assignment, and suite execution. |
 | API case execution | Run a single HTTP case, a maintained case suite, or only the failed/not-run part of a suite; render requests, assert responses, write Evidence, and optionally index results into Store. |
 | Suite coverage audit | Check passed, failed, and not-run status for a maintained case suite through CLI or Control plane API without re-running requests. |
+| Stability analysis | Review recent case-run history to find maintained cases that alternate between pass and fail. |
 | Impact planning and execution | Convert changed paths, interface hints, workflow hints, tags, or case text into an explainable case selection, batch request, synchronous report, or asynchronous batch run. |
 | Interface and workflow reports | Run all cases attached to an interface node or ordered workflow steps, then produce JSON plus temporary HTML reports; maintained suite and batch runs also expose JUnit XML and failure summaries for CI/agent triage. |
 | Evidence detail APIs | Query request, response, assertions, precondition context, stored topology, persisted logs, artifact manifests, failure summaries, status, and elapsed time by run or case run id. |
@@ -62,6 +63,7 @@ the same facts to the CLI, Control plane APIs, React workbench, and reports.
 - Run a maintained suite selected by tag, owner, priority, status, or node.
 - Audit the latest Store coverage for a maintained suite before deciding what
   to rerun.
+- Identify unstable maintained cases before promoting a suite as reliable.
 - Turn a change hint into an explainable case plan and asynchronous batch
   request.
 - Run a workflow-shaped regression and keep per-step Evidence.
@@ -145,6 +147,14 @@ about target ids:
   --store-url "$store" \
   --tag smoke \
   --status active \
+  --json
+
+./bin/otsandbox.sh case suite stability \
+  --profile sample \
+  --store-url "$store" \
+  --tag smoke \
+  --status active \
+  --limit 10 \
   --json
 
 ./bin/otsandbox.sh case suite inspect \

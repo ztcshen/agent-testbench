@@ -42,6 +42,17 @@ func handleCaseSuitePlan(w http.ResponseWriter, r *http.Request, bundle profile.
 	writeJSON(w, report)
 }
 
+func handleCaseSuiteStability(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store) {
+	filter := caseSuiteCoverageFilterFromRequest(r)
+	items := casesuite.SelectCases(bundle, filter)
+	report, err := casesuite.Stability(r.Context(), bundle, runtime, filter, items, caseSuiteStabilityOptionsFromRequest(r))
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, report)
+}
+
 func handleCaseSuiteImpact(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store) {
 	filter := caseSuiteCoverageFilterFromRequest(r)
 	report, err := casesuite.Impact(r.Context(), bundle, runtime, filter, caseSuiteImpactOptionsFromRequest(r))
@@ -133,6 +144,10 @@ func caseSuitePlanOptionsFromRequest(r *http.Request) casesuite.PlanOptions {
 		EvidenceDir:    query.Get("evidenceDir"),
 		TimeoutSeconds: queryIntValue(query.Get("timeoutSeconds")),
 	}
+}
+
+func caseSuiteStabilityOptionsFromRequest(r *http.Request) casesuite.StabilityOptions {
+	return casesuite.StabilityOptions{Limit: queryIntValue(r.URL.Query().Get("limit"))}
 }
 
 func caseSuitePlanOptionsFromPayload(payload map[string]any) casesuite.PlanOptions {

@@ -3846,6 +3846,94 @@ func TestServerExposesCaseSuitePlanByMaintenanceFilters(t *testing.T) {
 	}
 }
 
+func TestServerExposesCaseSuiteStabilityByMaintenanceFilters(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+
+	base := mustParseTime(t, "2026-05-16T01:00:00Z")
+	for _, item := range []struct {
+		runID  string
+		caseID string
+		status string
+		at     time.Time
+	}{
+		{runID: "run.variant.1", caseID: "case.variant", status: store.StatusPassed, at: base},
+		{runID: "run.variant.2", caseID: "case.variant", status: store.StatusFailed, at: base.Add(time.Minute)},
+		{runID: "run.variant.3", caseID: "case.variant", status: store.StatusPassed, at: base.Add(2 * time.Minute)},
+		{runID: "run.default.1", caseID: "case.default", status: store.StatusPassed, at: base.Add(3 * time.Minute)},
+		{runID: "run.default.2", caseID: "case.default", status: store.StatusPassed, at: base.Add(4 * time.Minute)},
+	} {
+		_, err := s.CreateRun(ctx, store.Run{
+			ID:         item.runID,
+			ProfileID:  "sample",
+			WorkflowID: item.caseID,
+			Status:     item.status,
+			StartedAt:  item.at,
+			FinishedAt: item.at.Add(time.Second),
+			CreatedAt:  item.at,
+			UpdatedAt:  item.at.Add(time.Second),
+		})
+		if err != nil {
+			t.Fatalf("create run %s: %v", item.runID, err)
+		}
+		_, err = s.RecordAPICaseRun(ctx, store.APICaseRun{
+			ID:         item.runID + ".case",
+			RunID:      item.runID,
+			CaseID:     item.caseID,
+			Status:     item.status,
+			StartedAt:  item.at,
+			FinishedAt: item.at.Add(time.Second),
+			CreatedAt:  item.at,
+		})
+		if err != nil {
+			t.Fatalf("record case run %s: %v", item.runID, err)
+		}
+	}
+
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha", Operation: "Alpha"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.default", DisplayName: "Default Case", NodeID: "node.alpha", CasePath: "cases/default.json", Tags: []string{"regression"}, Priority: "p0", Owner: "team-a", SortOrder: 1},
+			{ID: "case.variant", DisplayName: "Variant Case", NodeID: "node.alpha", CasePath: "cases/variant.json", Tags: []string{"regression"}, Priority: "p1", Owner: "team-a", SortOrder: 2},
+			{ID: "case.unrun", DisplayName: "Unrun Case", NodeID: "node.alpha", Tags: []string{"regression"}, Priority: "p2", Owner: "team-b", SortOrder: 3},
+		},
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/case/suite-stability?tag=regression&status=active&limit=3", http.StatusOK)
+	if payload["ok"] != false {
+		t.Fatalf("suite stability ok = %#v", payload)
+	}
+	counts := payload["counts"].(map[string]any)
+	if counts["total"] != float64(3) || counts["unstable"] != float64(1) || counts["stable"] != float64(1) || counts["notRun"] != float64(1) {
+		t.Fatalf("suite stability counts = %#v", counts)
+	}
+	items := payload["items"].([]any)
+	byCase := map[string]map[string]any{}
+	for _, raw := range items {
+		item := raw.(map[string]any)
+		byCase[item["caseId"].(string)] = item
+	}
+	if byCase["case.variant"]["unstable"] != true || byCase["case.variant"]["transitions"] != float64(2) || byCase["case.variant"]["latestStatus"] != store.StatusPassed {
+		t.Fatalf("variant stability = %#v", byCase["case.variant"])
+	}
+	recent := byCase["case.variant"]["recent"].([]any)
+	if len(recent) != 3 || recent[0].(map[string]any)["runId"] != "run.variant.3" {
+		t.Fatalf("variant recent = %#v", recent)
+	}
+	if byCase["case.unrun"]["latestStatus"] != "not-run" || byCase["case.unrun"]["reason"] != "no run recorded in Store" {
+		t.Fatalf("unrun stability = %#v", byCase["case.unrun"])
+	}
+}
+
 func TestServerExposesCaseSuiteImpactPlan(t *testing.T) {
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
