@@ -167,6 +167,13 @@ about target ids:
   --status active \
   --json
 
+./bin/otsandbox.sh case suite quality-report \
+  --profile sample \
+  --store-url "$store" \
+  --status active \
+  --output-dir "$tmpdir/reports/case-quality" \
+  --json
+
 ./bin/otsandbox.sh case suite report \
   --profile sample \
   --store-url "$store" \

@@ -110,6 +110,23 @@ For uncovered interface nodes, the action includes a suggested case id and an
 GET /api/case/suite-quality-plan?status=active
 ```
 
+When the caller needs a shareable artifact instead of a raw plan, generate a
+compact JSON and HTML report:
+
+```sh
+otsandbox case suite quality-report \
+  --profile PATH_OR_ID \
+  --store-url .runtime/store.sqlite \
+  --status active \
+  --output-dir .runtime/reports/case-quality \
+  --json
+```
+
+The command writes `report.json` and `report.html`. The JSON keeps the full
+quality plan under `qualityPlan`; the HTML presents a compact action table for
+review, assignment, or agent handoff. This report is read-only and does not
+execute API requests.
+
 ## Maintained Case Suite Report
 
 ```sh

@@ -2505,6 +2505,76 @@ func TestCaseSuiteQualityPlanSuggestsAuthoringActions(t *testing.T) {
 	}
 }
 
+func TestCaseSuiteQualityReportWritesJSONAndHTML(t *testing.T) {
+	profileDir := writeCaseSuiteQualityProfile(t)
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	outputDir := filepath.Join(t.TempDir(), "quality-report")
+	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+
+	out := runCLI(t,
+		"case", "suite", "quality-report",
+		"--profile", profileDir,
+		"--store-url", storePath,
+		"--status", "active",
+		"--output-dir", outputDir,
+		"--json",
+	)
+	var report struct {
+		OK            bool   `json:"ok"`
+		ProfileID     string `json:"profileId"`
+		ReportURL     string `json:"reportUrl"`
+		JSONReportURL string `json:"jsonReportUrl"`
+		QualityPlan   struct {
+			Counts struct {
+				Total            int `json:"total"`
+				DraftCase        int `json:"draftCase"`
+				CompleteMetadata int `json:"completeMetadata"`
+				AddRunnable      int `json:"addRunnable"`
+				AddExecution     int `json:"addExecution"`
+			} `json:"counts"`
+			Actions []struct {
+				Type            string `json:"type"`
+				CaseID          string `json:"caseId"`
+				SuggestedCaseID string `json:"suggestedCaseId"`
+			} `json:"actions"`
+		} `json:"qualityPlan"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode suite quality report json: %v\n%s", err, out)
+	}
+	if !report.OK || report.ProfileID != "sample" || report.QualityPlan.Counts.Total != 4 || report.QualityPlan.Counts.DraftCase != 1 || report.QualityPlan.Counts.CompleteMetadata != 1 || report.QualityPlan.Counts.AddRunnable != 1 || report.QualityPlan.Counts.AddExecution != 1 {
+		t.Fatalf("suite quality report = %#v", report)
+	}
+	if report.ReportURL != filepath.Join(outputDir, "report.html") || report.JSONReportURL != filepath.Join(outputDir, "report.json") {
+		t.Fatalf("suite quality report paths = %#v", report)
+	}
+	jsonReportRaw, err := os.ReadFile(filepath.Join(outputDir, "report.json"))
+	if err != nil {
+		t.Fatalf("read quality json report: %v", err)
+	}
+	htmlReportRaw, err := os.ReadFile(filepath.Join(outputDir, "report.html"))
+	if err != nil {
+		t.Fatalf("read quality html report: %v", err)
+	}
+	jsonReport := string(jsonReportRaw)
+	htmlReport := string(htmlReportRaw)
+	for _, want := range []string{"Case Suite Quality Report", "case.node-empty.default", "case.gaps", "complete-case-metadata", "add-execution-config"} {
+		if !strings.Contains(htmlReport, want) {
+			t.Fatalf("quality html missing %q:\n%s", want, htmlReport)
+		}
+	}
+	if !strings.Contains(jsonReport, `"qualityPlan"`) || !strings.Contains(jsonReport, `"case.node-empty.default"`) {
+		t.Fatalf("quality json report missing expected content:\n%s", jsonReport)
+	}
+
+	textOut := runCLI(t, "case", "suite", "quality-report", "--profile", profileDir, "--store-url", storePath, "--status", "active", "--output-dir", filepath.Join(t.TempDir(), "text-quality-report"))
+	for _, want := range []string{"Case Suite Quality Report", "Total Actions: 4", "Report:"} {
+		if !strings.Contains(textOut, want) {
+			t.Fatalf("quality report text missing %q:\n%s", want, textOut)
+		}
+	}
+}
+
 func TestCaseSuiteImpactBuildsExecutableBatchRequest(t *testing.T) {
 	ctx := context.Background()
 	profileDir := writeCaseSuiteCoverageProfile(t)

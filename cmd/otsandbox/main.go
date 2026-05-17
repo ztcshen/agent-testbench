@@ -222,6 +222,7 @@ Usage:
   otsandbox case suite brief [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--stability-limit N] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
   otsandbox case suite quality [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
   otsandbox case suite quality-plan [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
+  otsandbox case suite quality-report [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--output-dir PATH] [--json]
   otsandbox case suite inspect [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
   otsandbox case suite plan [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
   otsandbox case suite impact [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
@@ -3527,6 +3528,8 @@ func runCaseSuite(ctx context.Context, args []string) error {
 		return runCaseSuiteQuality(ctx, args[1:])
 	case "quality-plan":
 		return runCaseSuiteQualityPlan(ctx, args[1:])
+	case "quality-report":
+		return runCaseSuiteQualityReport(ctx, args[1:])
 	case "inspect":
 		return runCaseSuiteInspect(ctx, args[1:])
 	case "plan":
@@ -4078,6 +4081,170 @@ func printCaseSuiteQualityPlan(report casesuite.QualityPlanReport) {
 	for _, warning := range report.Warnings {
 		fmt.Printf("Warning: %s\n", warning)
 	}
+}
+
+type caseSuiteQualityReport struct {
+	OK             bool                        `json:"ok"`
+	ProfileID      string                      `json:"profileId"`
+	Title          string                      `json:"title"`
+	ReportURL      string                      `json:"reportUrl"`
+	JSONReportURL  string                      `json:"jsonReportUrl"`
+	ElapsedMs      int64                       `json:"elapsedMs"`
+	GeneratedAt    time.Time                   `json:"generatedAt"`
+	Filters        caseListFilter              `json:"filters"`
+	Counts         casesuite.QualityPlanCounts `json:"counts"`
+	QualityPlan    casesuite.QualityPlanReport `json:"qualityPlan"`
+	Warnings       []string                    `json:"warnings,omitempty"`
+	SourceStoreURL string                      `json:"sourceStoreUrl,omitempty"`
+}
+
+func runCaseSuiteQualityReport(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("case suite quality-report", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	filter := flags.String("filter", "", "Filter by id, display name, scenario, description, tag, owner, or priority")
+	nodeID := flags.String("node", "", "Only include cases attached to this interface node id")
+	status := flags.String("status", "active", "Only include cases with this status")
+	owner := flags.String("owner", "", "Only include cases owned by this value")
+	priority := flags.String("priority", "", "Only include cases with this priority")
+	outputDir := flags.String("output-dir", "", "Report output directory")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	var tags stringListFlag
+	flags.Var(&tags, "tag", "Only include cases with this tag; repeat for multiple tags")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	filterValue := caseListFilter{
+		Filter:   *filter,
+		NodeID:   *nodeID,
+		Tags:     tags.Values(),
+		Status:   *status,
+		Owner:    *owner,
+		Priority: *priority,
+	}
+	cases := selectedCaseSuiteCases(bundle, filterValue)
+	if strings.TrimSpace(*outputDir) == "" {
+		*outputDir = filepath.Join(".runtime", "reports", "case-suite-quality."+safeReportID(caseSuiteFilterSlug(filterValue))+"."+time.Now().UTC().Format("20060102T150405.000000000Z"))
+	}
+	absOutputDir, err := filepath.Abs(*outputDir)
+	if err != nil {
+		return err
+	}
+	report, err := executeCaseSuiteQualityReport(ctx, bundle, sourceStore, *storeURL, filterValue, cases, absOutputDir)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printCaseSuiteQualityReport(report)
+	return nil
+}
+
+func executeCaseSuiteQualityReport(ctx context.Context, bundle profile.Bundle, sourceStore *sqlite.Store, sourceStoreURL string, filters caseListFilter, cases []profile.APICase, outputDir string) (caseSuiteQualityReport, error) {
+	started := time.Now()
+	plan, err := casesuite.QualityPlan(ctx, bundle, sourceStore, caseSuiteFilter(filters), cases)
+	if err != nil {
+		return caseSuiteQualityReport{}, err
+	}
+	report := caseSuiteQualityReport{
+		OK:             true,
+		ProfileID:      bundle.ID,
+		Title:          "Case Suite Quality Report",
+		ElapsedMs:      time.Since(started).Milliseconds(),
+		GeneratedAt:    time.Now().UTC(),
+		Filters:        normalizeCaseListFilter(filters),
+		Counts:         plan.Counts,
+		QualityPlan:    plan,
+		Warnings:       append([]string(nil), plan.Warnings...),
+		SourceStoreURL: sourceStoreURL,
+	}
+	if sourceStore == nil {
+		report.Warnings = append(report.Warnings, "source Store was not available; report used profile bundle only")
+	}
+	if err := writeCaseSuiteQualityReportFiles(outputDir, &report); err != nil {
+		return caseSuiteQualityReport{}, err
+	}
+	return report, nil
+}
+
+func writeCaseSuiteQualityReportFiles(outputDir string, report *caseSuiteQualityReport) error {
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return err
+	}
+	jsonPath := filepath.Join(outputDir, "report.json")
+	htmlPath := filepath.Join(outputDir, "report.html")
+	report.JSONReportURL = jsonPath
+	report.ReportURL = htmlPath
+	raw, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(jsonPath, append(raw, '\n'), 0o644); err != nil {
+		return err
+	}
+	return os.WriteFile(htmlPath, []byte(renderCaseSuiteQualityReportHTML(*report)), 0o644)
+}
+
+func renderCaseSuiteQualityReportHTML(report caseSuiteQualityReport) string {
+	var b strings.Builder
+	b.WriteString(`<!doctype html><html><head><meta charset="utf-8"><title>Case Suite Quality Report</title><style>`)
+	b.WriteString(`body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:24px;color:#111827;background:#f8fafc}main{max-width:1280px;margin:auto}h1{font-size:24px;margin:0 0 4px}.meta{color:#4b5563;margin-bottom:16px}.summary{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.pill{border:1px solid #d1d5db;background:white;border-radius:6px;padding:6px 10px;font-size:13px}table{width:100%;border-collapse:collapse;background:white;border:1px solid #d1d5db}th,td{border-bottom:1px solid #e5e7eb;text-align:left;vertical-align:top;padding:7px 8px;font-size:13px}th{background:#f3f4f6;color:#374151}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}.wrap{word-break:break-all}.small{font-size:12px;color:#6b7280}.ok{color:#047857}.bad{color:#b91c1c}`)
+	b.WriteString(`</style></head><body><main>`)
+	b.WriteString(`<h1>Case Suite Quality Report</h1>`)
+	b.WriteString(`<div class="meta">` + html.EscapeString(report.ProfileID) + `</div><div class="summary">`)
+	b.WriteString(reportPill("status", statusText(report.QualityPlan.Quality.OK)))
+	b.WriteString(reportPill("actions", strconv.Itoa(report.Counts.Total)))
+	b.WriteString(reportPill("draft", strconv.Itoa(report.Counts.DraftCase)))
+	b.WriteString(reportPill("metadata", strconv.Itoa(report.Counts.CompleteMetadata)))
+	b.WriteString(reportPill("runnable", strconv.Itoa(report.Counts.AddRunnable)))
+	b.WriteString(reportPill("execution", strconv.Itoa(report.Counts.AddExecution)))
+	b.WriteString(reportPill("elapsed", fmt.Sprintf("%d ms", report.ElapsedMs)))
+	if len(report.Filters.Tags) > 0 {
+		b.WriteString(reportPill("tags", strings.Join(report.Filters.Tags, ",")))
+	}
+	if report.Filters.Owner != "" {
+		b.WriteString(reportPill("owner", report.Filters.Owner))
+	}
+	if report.Filters.Priority != "" {
+		b.WriteString(reportPill("priority", report.Filters.Priority))
+	}
+	b.WriteString(`</div><table><thead><tr><th>#</th><th>Action</th><th>Target</th><th>Fields</th><th>Issues</th><th>Reason</th><th>Command</th></tr></thead><tbody>`)
+	for index, item := range report.QualityPlan.Actions {
+		target := firstNonEmpty(item.CaseID, item.SuggestedCaseID, item.NodeID)
+		b.WriteString(`<tr><td class="mono">` + strconv.Itoa(index+1) + `</td>`)
+		b.WriteString(`<td><div>` + html.EscapeString(item.Type) + `</div></td>`)
+		b.WriteString(`<td><div class="mono wrap">` + html.EscapeString(target) + `</div>`)
+		if item.NodeID != "" {
+			b.WriteString(`<div class="small">node: ` + html.EscapeString(item.NodeID) + `</div>`)
+		}
+		if item.NodeName != "" {
+			b.WriteString(`<div class="small">` + html.EscapeString(item.NodeName) + `</div>`)
+		}
+		b.WriteString(`</td>`)
+		b.WriteString(`<td class="wrap">` + html.EscapeString(strings.Join(item.Fields, ", ")) + `</td>`)
+		b.WriteString(`<td class="wrap">` + html.EscapeString(strings.Join(item.Issues, ", ")) + `</td>`)
+		b.WriteString(`<td class="wrap">` + html.EscapeString(item.Reason) + `</td>`)
+		b.WriteString(`<td class="mono wrap">` + html.EscapeString(strings.Join(item.Command, " ")) + `</td></tr>`)
+	}
+	b.WriteString(`</tbody></table></main></body></html>`)
+	return b.String()
+}
+
+func printCaseSuiteQualityReport(report caseSuiteQualityReport) {
+	fmt.Println("Case Suite Quality Report")
+	fmt.Printf("OK: %t\n", report.OK)
+	fmt.Printf("Total Actions: %d Draft Case: %d Complete Metadata: %d Add Runnable: %d Add Execution: %d\n", report.Counts.Total, report.Counts.DraftCase, report.Counts.CompleteMetadata, report.Counts.AddRunnable, report.Counts.AddExecution)
+	fmt.Printf("Elapsed: %d ms\n", report.ElapsedMs)
+	fmt.Printf("Report: %s\n", report.ReportURL)
+	fmt.Printf("JSON: %s\n", report.JSONReportURL)
 }
 
 func runCaseSuiteInspect(ctx context.Context, args []string) error {
