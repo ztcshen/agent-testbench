@@ -38,6 +38,7 @@ the same facts to the CLI, Control plane APIs, React workbench, and reports.
 | Agent-friendly discovery | Agents call `interface-node discover`, `workflow discover`, or `case discover` first, then run reports with exact returned ids. |
 | Case maintenance catalog | API cases can carry description, tags, priority, owner, status, runnable file presence, and execution configuration for review, assignment, and suite execution. |
 | API case execution | Run a single HTTP case or a maintained case suite, render requests, assert responses, write Evidence, and optionally index results into Store. |
+| Suite coverage audit | Check passed, failed, and not-run status for a maintained case suite without re-running requests. |
 | Interface and workflow reports | Run all cases attached to an interface node or ordered workflow steps, then produce JSON plus temporary HTML reports. |
 | Evidence detail APIs | Query request, response, assertions, precondition context, stored topology, persisted logs, status, and elapsed time by run or case run id. |
 | Control plane workbench | A React workbench reads the same Store/read-models as CLI and API users. |
@@ -58,6 +59,8 @@ the same facts to the CLI, Control plane APIs, React workbench, and reports.
 
 - Generate a regression report for every case attached to one interface node.
 - Run a maintained suite selected by tag, owner, priority, status, or node.
+- Audit the latest Store coverage for a maintained suite before deciding what
+  to rerun.
 - Run a workflow-shaped regression and keep per-step Evidence.
 - Let an agent discover available targets before choosing what to test.
 - Publish external profile bundles into a local Store for review and replay.
@@ -132,6 +135,13 @@ about target ids:
   --status active \
   --base-url http://127.0.0.1:8080 \
   --output-dir "$tmpdir/reports/smoke-suite" \
+  --json
+
+./bin/otsandbox.sh case suite coverage \
+  --profile sample \
+  --store-url "$store" \
+  --tag smoke \
+  --status active \
   --json
 
 ./bin/otsandbox.sh interface-node case report \
@@ -209,7 +219,7 @@ The project is pre-1.0 but already has a complete local loop:
 
 - profile lifecycle: init, install, pack, audit, verify, import, publish;
 - Store lifecycle: status, upgrade, runtime indexes, contract tests;
-- maintenance: API case metadata and searchable case catalog;
+- maintenance: API case metadata, searchable case catalog, and suite coverage;
 - execution: single API case, maintained case suites, interface-node reports,
   workflow reports;
 - Evidence: request, response, assertions, summaries, logs, topology, timing;

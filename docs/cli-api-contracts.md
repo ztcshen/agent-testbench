@@ -57,6 +57,24 @@ the selected cases; and writes `report.json` plus a compact `report.html`.
 The report keeps case title, node id, tags, priority, owner, elapsed time,
 status, and failed-case Evidence links.
 
+## Maintained Case Suite Coverage
+
+```sh
+otsandbox case suite coverage \
+  --profile PATH_OR_ID \
+  --store-url .runtime/store.sqlite \
+  --tag smoke \
+  --owner team-a \
+  --status active \
+  --json
+```
+
+The command uses the same maintenance selector as `case suite report`, but it
+does not run any HTTP requests. It reads Store case-run records and returns
+the latest status for each selected case, plus passed, failed, and not-run
+counts. Failed and latest-run cases include `caseRunId` and `detailUrl` so a
+caller can jump directly to Evidence.
+
 ## Single Interface Report
 
 ```sh

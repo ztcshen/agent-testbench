@@ -1823,6 +1823,95 @@ func TestCaseSuiteReportRunsCasesByMaintenanceFilters(t *testing.T) {
 	}
 }
 
+func TestCaseSuiteCoverageReportsLatestRunStatusByMaintenanceFilters(t *testing.T) {
+	ctx := context.Background()
+	profileDir := writeCaseSuiteCoverageProfile(t)
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	base := mustParseTime(t, "2026-05-16T01:00:00Z")
+	recordCaseRunForCoverage(t, ctx, s, "run.default.old", "case.default", store.StatusFailed, base)
+	recordCaseRunForCoverage(t, ctx, s, "run.default.latest", "case.default", store.StatusPassed, base.Add(time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, "run.variant.latest", "case.variant", store.StatusFailed, base.Add(2*time.Minute))
+	if err := s.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	out := runCLI(t,
+		"case", "suite", "coverage",
+		"--profile", profileDir,
+		"--store-url", storePath,
+		"--tag", "regression",
+		"--status", "active",
+		"--json",
+	)
+
+	var report struct {
+		OK     bool `json:"ok"`
+		Counts struct {
+			Total  int `json:"total"`
+			Passed int `json:"passed"`
+			Failed int `json:"failed"`
+			NotRun int `json:"notRun"`
+		} `json:"counts"`
+		Items []struct {
+			CaseID       string `json:"caseId"`
+			Title        string `json:"title"`
+			NodeID       string `json:"nodeId"`
+			LatestStatus string `json:"latestStatus"`
+			LatestRunID  string `json:"latestRunId"`
+			CaseRunID    string `json:"caseRunId"`
+			DetailURL    string `json:"detailUrl"`
+			HasPassed    bool   `json:"hasPassed"`
+			Reason       string `json:"reason"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode suite coverage json: %v\n%s", err, out)
+	}
+	if report.OK || report.Counts.Total != 3 || report.Counts.Passed != 1 || report.Counts.Failed != 1 || report.Counts.NotRun != 1 {
+		t.Fatalf("suite coverage report = %#v", report)
+	}
+	byCase := map[string]struct {
+		LatestStatus string
+		LatestRunID  string
+		CaseRunID    string
+		DetailURL    string
+		HasPassed    bool
+		Reason       string
+	}{}
+	for _, item := range report.Items {
+		byCase[item.CaseID] = struct {
+			LatestStatus string
+			LatestRunID  string
+			CaseRunID    string
+			DetailURL    string
+			HasPassed    bool
+			Reason       string
+		}{item.LatestStatus, item.LatestRunID, item.CaseRunID, item.DetailURL, item.HasPassed, item.Reason}
+	}
+	if byCase["case.default"].LatestStatus != store.StatusPassed || byCase["case.default"].LatestRunID != "run.default.latest" || !byCase["case.default"].HasPassed {
+		t.Fatalf("default coverage = %#v", byCase["case.default"])
+	}
+	if byCase["case.variant"].LatestStatus != store.StatusFailed || byCase["case.variant"].CaseRunID != "run.variant.latest.case" || byCase["case.variant"].DetailURL == "" || byCase["case.variant"].HasPassed {
+		t.Fatalf("variant coverage = %#v", byCase["case.variant"])
+	}
+	if byCase["case.unrun"].LatestStatus != "not-run" || byCase["case.unrun"].Reason != "no run recorded in Store" {
+		t.Fatalf("unrun coverage = %#v", byCase["case.unrun"])
+	}
+
+	textOut := runCLI(t, "case", "suite", "coverage", "--profile", profileDir, "--store-url", storePath, "--tag", "regression")
+	for _, want := range []string{"Case Suite Coverage", "Total: 3 Passed: 1 Failed: 1 Not Run: 1", "case.variant", "run.variant.latest.case"} {
+		if !strings.Contains(textOut, want) {
+			t.Fatalf("coverage text missing %q:\n%s", want, textOut)
+		}
+	}
+}
+
 func TestWorkflowReportWritesReportWhenStepFails(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -2478,6 +2567,55 @@ func writeInterfaceNodeBatchReportProfile(t *testing.T) string {
   ]
 }`)
 	return dir
+}
+
+func writeCaseSuiteCoverageProfile(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "profile.json"), `{
+  "id": "sample",
+  "displayName": "Sample Profile",
+  "services": [{"id":"service.alpha","displayName":"Service Alpha"}],
+  "workflows": [],
+  "interfaceNodes": [{"id":"node.alpha","displayName":"Node Alpha","serviceId":"service.alpha","operation":"Alpha","method":"GET","path":"/alpha"}],
+  "apiCases": [
+    {"id":"case.default","displayName":"Default Case","nodeId":"node.alpha","sortOrder":1,"tags":["regression","smoke"],"priority":"p0","owner":"team-a","description":"Default maintained case."},
+    {"id":"case.variant","displayName":"Variant Case","nodeId":"node.alpha","sortOrder":2,"tags":["regression"],"priority":"p1","owner":"team-a","description":"Variant maintained case."},
+    {"id":"case.unrun","displayName":"Unrun Case","nodeId":"node.alpha","sortOrder":3,"tags":["regression"],"priority":"p2","owner":"team-b","description":"Unrun maintained case."}
+  ],
+  "requestTemplates": [],
+  "caseDependencies": [],
+  "workflowBindings": [],
+  "fixtures": []
+}`)
+	return dir
+}
+
+func recordCaseRunForCoverage(t *testing.T, ctx context.Context, s store.Store, runID string, caseID string, status string, at time.Time) {
+	t.Helper()
+	if _, err := s.CreateRun(ctx, store.Run{
+		ID:         runID,
+		ProfileID:  "sample",
+		WorkflowID: caseID,
+		Status:     status,
+		StartedAt:  at,
+		FinishedAt: at.Add(time.Second),
+		CreatedAt:  at,
+		UpdatedAt:  at.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("create coverage run %s: %v", runID, err)
+	}
+	if _, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
+		ID:         runID + ".case",
+		RunID:      runID,
+		CaseID:     caseID,
+		Status:     status,
+		StartedAt:  at,
+		FinishedAt: at.Add(time.Second),
+		CreatedAt:  at,
+	}); err != nil {
+		t.Fatalf("record coverage case run %s: %v", runID, err)
+	}
 }
 
 func writeWorkflowBatchReportProfile(t *testing.T) string {

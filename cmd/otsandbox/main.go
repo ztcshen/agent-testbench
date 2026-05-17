@@ -9,6 +9,7 @@ import (
 	"html"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -213,6 +214,7 @@ Usage:
   otsandbox interface-node case report --node ID [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
   otsandbox case discover [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
   otsandbox case suite report [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
+  otsandbox case suite coverage [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
   otsandbox case run --case PATH --base-url URL [--override KEY=VALUE] [--evidence-dir PATH]
   otsandbox case incomplete-batches --profile PATH [--store-url PATH] [--json]
   otsandbox serve [--profile PATH_OR_ID] [--profile-home PATH] [--host HOST] [--port PORT] [--store-url PATH]
@@ -3121,6 +3123,8 @@ func runCaseSuite(ctx context.Context, args []string) error {
 	switch args[0] {
 	case "report":
 		return runCaseSuiteReport(ctx, args[1:])
+	case "coverage":
+		return runCaseSuiteCoverage(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown case suite command: %s", args[0])
 	}
@@ -3197,6 +3201,274 @@ func runCaseDiscover(ctx context.Context, args []string) error {
 		fmt.Printf("%s\t%s\t%s\t%s\t%s\t%s\n", item.ID, item.DisplayName, item.NodeID, item.Status, item.Priority, strings.Join(item.Tags, ","))
 	}
 	return nil
+}
+
+type caseSuiteCoverageReport struct {
+	OK             bool                    `json:"ok"`
+	ProfileID      string                  `json:"profileId"`
+	GeneratedAt    time.Time               `json:"generatedAt"`
+	Filters        caseListFilter          `json:"filters"`
+	Counts         caseSuiteCoverageCounts `json:"counts"`
+	Items          []caseSuiteCoverageItem `json:"items"`
+	Warnings       []string                `json:"warnings,omitempty"`
+	SourceStoreURL string                  `json:"sourceStoreUrl,omitempty"`
+}
+
+type caseSuiteCoverageCounts struct {
+	Total  int `json:"total"`
+	Passed int `json:"passed"`
+	Failed int `json:"failed"`
+	NotRun int `json:"notRun"`
+}
+
+type caseSuiteCoverageItem struct {
+	CaseID       string   `json:"caseId"`
+	Title        string   `json:"title"`
+	Description  string   `json:"description,omitempty"`
+	NodeID       string   `json:"nodeId,omitempty"`
+	NodeName     string   `json:"nodeName,omitempty"`
+	Tags         []string `json:"tags,omitempty"`
+	Priority     string   `json:"priority,omitempty"`
+	Owner        string   `json:"owner,omitempty"`
+	LatestStatus string   `json:"latestStatus"`
+	LatestRunID  string   `json:"latestRunId,omitempty"`
+	CaseRunID    string   `json:"caseRunId,omitempty"`
+	DetailURL    string   `json:"detailUrl,omitempty"`
+	ElapsedMs    int64    `json:"elapsedMs,omitempty"`
+	HasPassed    bool     `json:"hasPassed"`
+	Reason       string   `json:"reason,omitempty"`
+}
+
+func runCaseSuiteCoverage(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("case suite coverage", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	filter := flags.String("filter", "", "Filter by id, display name, scenario, description, tag, owner, or priority")
+	nodeID := flags.String("node", "", "Only include cases attached to this interface node id")
+	status := flags.String("status", "active", "Only include cases with this status")
+	owner := flags.String("owner", "", "Only include cases owned by this value")
+	priority := flags.String("priority", "", "Only include cases with this priority")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	var tags stringListFlag
+	flags.Var(&tags, "tag", "Only include cases with this tag; repeat for multiple tags")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	filters := caseListFilter{
+		Filter:   *filter,
+		NodeID:   *nodeID,
+		Tags:     tags.Values(),
+		Status:   *status,
+		Owner:    *owner,
+		Priority: *priority,
+	}
+	cases := selectedCaseSuiteCases(bundle, filters)
+	report, err := caseSuiteCoverage(ctx, bundle, sourceStore, *storeURL, filters, cases)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printCaseSuiteCoverage(report)
+	return nil
+}
+
+func caseSuiteCoverage(ctx context.Context, bundle profile.Bundle, runtime store.Store, sourceStoreURL string, filters caseListFilter, cases []profile.APICase) (caseSuiteCoverageReport, error) {
+	report := caseSuiteCoverageReport{
+		OK:             true,
+		ProfileID:      bundle.ID,
+		GeneratedAt:    time.Now().UTC(),
+		Filters:        normalizeCaseListFilter(filters),
+		SourceStoreURL: sourceStoreURL,
+		Counts: caseSuiteCoverageCounts{
+			Total: len(cases),
+		},
+	}
+	if runtime == nil {
+		report.OK = len(cases) == 0
+		report.Counts.NotRun = len(cases)
+		report.Warnings = append(report.Warnings, "source Store was not available; every selected case is treated as not-run")
+	}
+	records, err := caseRunRecordsForCaseIDs(ctx, runtime, caseIDsFromAPICases(cases))
+	if err != nil {
+		return caseSuiteCoverageReport{}, err
+	}
+	stateByCase := caseSuiteCoverageStateByCase(records)
+	nodesByID := make(map[string]profile.InterfaceNode, len(bundle.InterfaceNodes))
+	for _, node := range bundle.InterfaceNodes {
+		nodesByID[node.ID] = node
+	}
+	for _, item := range cases {
+		state := stateByCase[item.ID]
+		node := nodesByID[item.NodeID]
+		coverageItem := caseSuiteCoverageItem{
+			CaseID:      item.ID,
+			Title:       firstNonEmpty(item.DisplayName, item.ID),
+			Description: item.Description,
+			NodeID:      item.NodeID,
+			NodeName:    firstNonEmpty(node.DisplayName, item.NodeID),
+			Tags:        append([]string(nil), item.Tags...),
+			Priority:    item.Priority,
+			Owner:       item.Owner,
+			HasPassed:   state.HasPassed,
+		}
+		if state.Latest.CaseRun.ID == "" {
+			coverageItem.LatestStatus = "not-run"
+			coverageItem.Reason = "no run recorded in Store"
+			report.Counts.NotRun++
+			report.OK = false
+		} else {
+			coverageItem.LatestStatus = state.Latest.CaseRun.Status
+			coverageItem.LatestRunID = state.Latest.Run.ID
+			coverageItem.CaseRunID = state.Latest.CaseRun.ID
+			coverageItem.DetailURL = caseRunEvidenceDetailURL(state.Latest.CaseRun.ID)
+			coverageItem.ElapsedMs = elapsedMsBetween(state.Latest.CaseRun.StartedAt, state.Latest.CaseRun.FinishedAt)
+			if isPassedStatus(state.Latest.CaseRun.Status) {
+				report.Counts.Passed++
+			} else {
+				report.Counts.Failed++
+				report.OK = false
+				coverageItem.Reason = firstNonEmpty(assertionFailureReason(state.Latest.CaseRun.AssertionSummaryJSON), "latest run is "+state.Latest.CaseRun.Status)
+			}
+		}
+		report.Items = append(report.Items, coverageItem)
+	}
+	return report, nil
+}
+
+type caseSuiteCoverageState struct {
+	Latest    store.APICaseRunRecord
+	HasPassed bool
+}
+
+func caseSuiteCoverageStateByCase(records []store.APICaseRunRecord) map[string]caseSuiteCoverageState {
+	out := map[string]caseSuiteCoverageState{}
+	for _, record := range records {
+		caseID := record.CaseRun.CaseID
+		state := out[caseID]
+		if isPassedStatus(record.CaseRun.Status) {
+			state.HasPassed = true
+		}
+		if state.Latest.CaseRun.ID == "" || caseRunRecordNewer(record, state.Latest) {
+			state.Latest = record
+		}
+		out[caseID] = state
+	}
+	return out
+}
+
+func caseRunRecordNewer(left store.APICaseRunRecord, right store.APICaseRunRecord) bool {
+	if left.CaseRun.CreatedAt.After(right.CaseRun.CreatedAt) {
+		return true
+	}
+	if left.CaseRun.CreatedAt.Equal(right.CaseRun.CreatedAt) && left.CaseRun.ID > right.CaseRun.ID {
+		return true
+	}
+	return false
+}
+
+func caseRunRecordsForCaseIDs(ctx context.Context, runtime store.Store, caseIDs []string) ([]store.APICaseRunRecord, error) {
+	if runtime == nil || len(caseIDs) == 0 {
+		return []store.APICaseRunRecord{}, nil
+	}
+	if fast, ok := runtime.(interface {
+		ListAPICaseRunRecordsForCaseIDs(context.Context, []string) ([]store.APICaseRunRecord, error)
+	}); ok {
+		return fast.ListAPICaseRunRecordsForCaseIDs(ctx, caseIDs)
+	}
+	caseSet := map[string]bool{}
+	for _, id := range caseIDs {
+		caseSet[id] = true
+	}
+	runs, err := runtime.ListRuns(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]store.APICaseRunRecord, 0)
+	for _, run := range runs {
+		caseRuns, err := runtime.ListAPICaseRuns(ctx, run.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, caseRun := range caseRuns {
+			if caseSet[caseRun.CaseID] {
+				out = append(out, store.APICaseRunRecord{Run: run, CaseRun: caseRun})
+			}
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return caseRunRecordNewer(out[i], out[j])
+	})
+	return out, nil
+}
+
+func caseIDsFromAPICases(cases []profile.APICase) []string {
+	out := make([]string, 0, len(cases))
+	for _, item := range cases {
+		if strings.TrimSpace(item.ID) != "" {
+			out = append(out, item.ID)
+		}
+	}
+	return out
+}
+
+func caseRunEvidenceDetailURL(caseRunID string) string {
+	if strings.TrimSpace(caseRunID) == "" {
+		return ""
+	}
+	return "/api/case-run/evidence?caseRunId=" + url.QueryEscape(caseRunID)
+}
+
+func assertionFailureReason(summaryJSON string) string {
+	var payload struct {
+		Status        string `json:"status"`
+		FailureReason string `json:"failureReason"`
+		ErrorCount    int    `json:"errorCount"`
+	}
+	if json.Unmarshal([]byte(summaryJSON), &payload) != nil {
+		return ""
+	}
+	if strings.TrimSpace(payload.FailureReason) != "" {
+		return payload.FailureReason
+	}
+	if payload.ErrorCount > 0 {
+		return fmt.Sprintf("assertion errors: %d", payload.ErrorCount)
+	}
+	return ""
+}
+
+func elapsedMsBetween(started time.Time, finished time.Time) int64 {
+	if started.IsZero() || finished.IsZero() || finished.Before(started) {
+		return 0
+	}
+	return finished.Sub(started).Milliseconds()
+}
+
+func printCaseSuiteCoverage(report caseSuiteCoverageReport) {
+	fmt.Println("Case Suite Coverage")
+	fmt.Printf("OK: %t\n", report.OK)
+	fmt.Printf("Total: %d Passed: %d Failed: %d Not Run: %d\n", report.Counts.Total, report.Counts.Passed, report.Counts.Failed, report.Counts.NotRun)
+	for _, item := range report.Items {
+		fmt.Printf("- %s [%s]", item.CaseID, item.LatestStatus)
+		if item.CaseRunID != "" {
+			fmt.Printf(" %s", item.CaseRunID)
+		}
+		if item.Reason != "" {
+			fmt.Printf(" %s", item.Reason)
+		}
+		fmt.Println()
+	}
+	for _, warning := range report.Warnings {
+		fmt.Printf("Warning: %s\n", warning)
+	}
 }
 
 type caseSuiteReport struct {

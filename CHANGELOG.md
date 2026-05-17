@@ -23,3 +23,5 @@ should be called out in this file and in the relevant docs.
   catalogs.
 - Added `case suite report` for running maintained case sets selected by tag,
   owner, priority, status, node, or text filter.
+- Added `case suite coverage` for latest passed, failed, and not-run status
+  across maintained case sets without re-running requests.
