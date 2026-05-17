@@ -35,7 +35,8 @@ the same facts to the CLI, Control plane APIs, React workbench, and reports.
 | --- | --- |
 | Local-first Store | SQLite by default, with schema upgrades, run indexes, case run records, Evidence indexes, timing, logs, topology, and post-process task records. |
 | External profiles | Services, workflows, interface nodes, cases, request templates, fixtures, dependencies, and bindings live outside the core repository. |
-| Agent-friendly discovery | Agents call `interface-node discover` or `workflow discover` first, then run reports with exact returned ids. |
+| Agent-friendly discovery | Agents call `interface-node discover`, `workflow discover`, or `case discover` first, then run reports with exact returned ids. |
+| Case maintenance catalog | API cases can carry description, tags, priority, owner, status, runnable file presence, and execution configuration for review and assignment. |
 | API case execution | Run a single HTTP case, render requests, assert responses, write Evidence, and optionally index results into Store. |
 | Interface and workflow reports | Run all cases attached to an interface node or ordered workflow steps, then produce JSON plus temporary HTML reports. |
 | Evidence detail APIs | Query request, response, assertions, precondition context, stored topology, persisted logs, status, and elapsed time by run or case run id. |
@@ -116,6 +117,13 @@ about target ids:
   --filter "query" \
   --json
 
+./bin/otsandbox.sh case discover \
+  --profile sample \
+  --store-url "$store" \
+  --tag smoke \
+  --status active \
+  --json
+
 ./bin/otsandbox.sh interface-node case report \
   --node NODE_ID \
   --profile sample \
@@ -191,6 +199,7 @@ The project is pre-1.0 but already has a complete local loop:
 
 - profile lifecycle: init, install, pack, audit, verify, import, publish;
 - Store lifecycle: status, upgrade, runtime indexes, contract tests;
+- maintenance: API case metadata and searchable case catalog;
 - execution: single API case, interface-node reports, workflow reports;
 - Evidence: request, response, assertions, summaries, logs, topology, timing;
 - workbench: local React pages backed by Control plane APIs;

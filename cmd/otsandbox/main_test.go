@@ -1651,6 +1651,63 @@ func TestInterfaceNodeCaseReportRunsAllCasesByTargetName(t *testing.T) {
 	}
 }
 
+func TestCaseDiscoverFiltersByMaintenanceMetadata(t *testing.T) {
+	profileDir := writeInterfaceNodeBatchReportProfile(t)
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+
+	out := runCLI(t,
+		"case", "discover",
+		"--store-url", storePath,
+		"--tag", "smoke",
+		"--status", "active",
+		"--owner", "team-a",
+		"--json",
+	)
+
+	var report struct {
+		OK    bool `json:"ok"`
+		Count int  `json:"count"`
+		Items []struct {
+			ID          string   `json:"id"`
+			DisplayName string   `json:"displayName"`
+			NodeID      string   `json:"nodeId"`
+			Tags        []string `json:"tags"`
+			Priority    string   `json:"priority"`
+			Owner       string   `json:"owner"`
+			Description string   `json:"description"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode case discover json: %v\n%s", err, out)
+	}
+	if !report.OK || report.Count != 1 || len(report.Items) != 1 {
+		t.Fatalf("case discover report = %#v", report)
+	}
+	item := report.Items[0]
+	if item.ID != "case.alpha.default" || item.NodeID != "node.alpha" || item.Priority != "p0" || item.Owner != "team-a" {
+		t.Fatalf("case discover item = %#v", item)
+	}
+	if strings.Join(item.Tags, ",") != "smoke,regression" || item.Description == "" {
+		t.Fatalf("case discover metadata = %#v", item)
+	}
+
+	filtered := runCLI(t, "case", "discover", "--store-url", storePath, "--filter", "variant", "--json")
+	var filteredReport struct {
+		Items []struct {
+			ID    string   `json:"id"`
+			Tags  []string `json:"tags"`
+			Owner string   `json:"owner"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(filtered), &filteredReport); err != nil {
+		t.Fatalf("decode filtered case discover json: %v\n%s", err, filtered)
+	}
+	if len(filteredReport.Items) != 1 || filteredReport.Items[0].ID != "case.alpha.variant" || filteredReport.Items[0].Owner != "team-b" {
+		t.Fatalf("filtered case discover = %#v", filteredReport.Items)
+	}
+}
+
 func TestWorkflowReportWritesReportWhenStepFails(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -2281,8 +2338,8 @@ func writeInterfaceNodeBatchReportProfile(t *testing.T) string {
   "workflows": [],
   "interfaceNodes": [{"id":"node.alpha","displayName":"Result Lookup","serviceId":"service.alpha","operation":"Result Lookup","method":"GET","path":"/lookup"}],
   "apiCases": [
-    {"id":"case.alpha.default","displayName":"Case Alpha Default","nodeId":"node.alpha","payloadTemplateJson":"{\"mode\":\"ok\"}","expectedJson":"{\"expectedHttpCodes\":[200]}","sortOrder":1},
-    {"id":"case.alpha.variant","displayName":"Case Alpha Variant","nodeId":"node.alpha","payloadTemplateJson":"{\"mode\":\"bad\"}","expectedJson":"{\"expectedHttpCodes\":[400]}","sortOrder":2}
+    {"id":"case.alpha.default","displayName":"Case Alpha Default","nodeId":"node.alpha","payloadTemplateJson":"{\"mode\":\"ok\"}","expectedJson":"{\"expectedHttpCodes\":[200]}","sortOrder":1,"tags":["smoke","regression"],"priority":"p0","owner":"team-a","description":"Default maintained smoke case."},
+    {"id":"case.alpha.variant","displayName":"Case Alpha Variant","nodeId":"node.alpha","payloadTemplateJson":"{\"mode\":\"bad\"}","expectedJson":"{\"expectedHttpCodes\":[400]}","sortOrder":2,"tags":["negative"],"priority":"p1","owner":"team-b","description":"Negative maintained variant."}
   ],
   "requestTemplates": [],
   "caseDependencies": [],

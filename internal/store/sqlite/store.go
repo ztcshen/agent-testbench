@@ -843,9 +843,10 @@ values (%s, %s, %s, 'interface_node', %s, %s, %s, 'active', %d);`, sqlString(con
 	}
 	for index, item := range catalog.APICases {
 		statements = append(statements, fmt.Sprintf(`
-	insert into interface_node_case (id, node_id, title, case_type, scenario, payload_template_json, request_template_id, patch_json, render_mode, expected_json, required_for_admission, status, sort_order, created_at, updated_at, case_path, base_url, evidence_dir, timeout_seconds, default_overrides_json)
-	values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %d, %s, %d, %s, %s, %s, %s, %s, %d, %s);`,
-			sqlString(item.ID), sqlString(item.NodeID), sqlString(item.DisplayName), sqlString(stringDefault(item.CaseType, "api")), sqlString(item.Scenario),
+	insert into interface_node_case (id, node_id, title, description, case_type, scenario, tags_json, priority, owner, payload_template_json, request_template_id, patch_json, render_mode, expected_json, required_for_admission, status, sort_order, created_at, updated_at, case_path, base_url, evidence_dir, timeout_seconds, default_overrides_json)
+	values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %d, %s, %d, %s, %s, %s, %s, %s, %d, %s);`,
+			sqlString(item.ID), sqlString(item.NodeID), sqlString(item.DisplayName), sqlString(item.Description), sqlString(stringDefault(item.CaseType, "api")), sqlString(item.Scenario),
+			sqlString(jsonString(item.Tags, "[]")), sqlString(item.Priority), sqlString(item.Owner),
 			sqlString(stringDefault(item.PayloadTemplateJSON, "{}")), sqlString(item.RequestTemplateID), sqlString(stringDefault(item.PatchJSON, "[]")),
 			sqlString(stringDefault(item.RenderMode, "legacy_payload")), sqlString(stringDefault(item.ExpectedJSON, "{}")), boolInt(item.RequiredForAdmission),
 			sqlString(stringDefault(item.Status, "active")), firstNonZero(item.SortOrder, index), sqlString(indexedAt), sqlString(indexedAt),
@@ -973,12 +974,13 @@ func (s *Store) GetProfileCatalog(ctx context.Context) (store.ProfileCatalog, er
 	}
 
 	var cases []catalogAPICaseRow
-	if err := s.query(ctx, `select id, node_id, title, case_type, scenario, payload_template_json, request_template_id, patch_json, render_mode, expected_json, required_for_admission, status, sort_order, case_path, base_url, evidence_dir, timeout_seconds, default_overrides_json from interface_node_case order by node_id, sort_order, id;`, &cases); err != nil {
+	if err := s.query(ctx, `select id, node_id, title, description, case_type, scenario, tags_json, priority, owner, payload_template_json, request_template_id, patch_json, render_mode, expected_json, required_for_admission, status, sort_order, case_path, base_url, evidence_dir, timeout_seconds, default_overrides_json from interface_node_case order by node_id, sort_order, id;`, &cases); err != nil {
 		return store.ProfileCatalog{}, err
 	}
 	for _, row := range cases {
 		catalog.APICases = append(catalog.APICases, store.CatalogAPICase{
-			ID: row.ID, DisplayName: row.Title, NodeID: row.NodeID, CaseType: row.CaseType, Scenario: row.Scenario,
+			ID: row.ID, DisplayName: row.Title, Description: row.Description, NodeID: row.NodeID, CaseType: row.CaseType, Scenario: row.Scenario,
+			Tags: stringSliceFromJSON(row.TagsJSON), Priority: row.Priority, Owner: row.Owner,
 			PayloadTemplateJSON: row.PayloadTemplateJSON, RequestTemplateID: row.RequestTemplateID, PatchJSON: row.PatchJSON,
 			RenderMode: row.RenderMode, ExpectedJSON: row.ExpectedJSON, RequiredForAdmission: row.RequiredForAdmission != 0,
 			Status: row.Status, SortOrder: row.SortOrder, CasePath: row.CasePath, BaseURL: row.BaseURL, EvidenceDir: row.EvidenceDir,
@@ -1211,8 +1213,12 @@ type catalogAPICaseRow struct {
 	ID                   string `json:"id"`
 	NodeID               string `json:"node_id"`
 	Title                string `json:"title"`
+	Description          string `json:"description"`
 	CaseType             string `json:"case_type"`
 	Scenario             string `json:"scenario"`
+	TagsJSON             string `json:"tags_json"`
+	Priority             string `json:"priority"`
+	Owner                string `json:"owner"`
 	PayloadTemplateJSON  string `json:"payload_template_json"`
 	RequestTemplateID    string `json:"request_template_id"`
 	PatchJSON            string `json:"patch_json"`

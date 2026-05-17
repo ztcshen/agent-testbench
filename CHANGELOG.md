@@ -19,3 +19,5 @@ should be called out in this file and in the relevant docs.
 - Expanded the repository homepage with English and Chinese introductions,
   capability summaries, architecture notes, and agent workflow guidance.
 - Added public exposure materials with use cases, a share kit, and a roadmap.
+- Added API case maintenance metadata and `case discover` for searchable case
+  catalogs.

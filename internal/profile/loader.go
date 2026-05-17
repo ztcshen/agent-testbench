@@ -379,6 +379,9 @@ func mergeAPICase(base APICase, next APICase) APICase {
 	if next.DisplayName != "" {
 		base.DisplayName = next.DisplayName
 	}
+	if next.Description != "" {
+		base.Description = next.Description
+	}
 	if next.NodeID != "" {
 		base.NodeID = next.NodeID
 	}
@@ -387,6 +390,15 @@ func mergeAPICase(base APICase, next APICase) APICase {
 	}
 	if next.Scenario != "" {
 		base.Scenario = next.Scenario
+	}
+	if next.Tags != nil {
+		base.Tags = next.Tags
+	}
+	if next.Priority != "" {
+		base.Priority = next.Priority
+	}
+	if next.Owner != "" {
+		base.Owner = next.Owner
 	}
 	if next.PayloadTemplateJSON != "" {
 		base.PayloadTemplateJSON = next.PayloadTemplateJSON

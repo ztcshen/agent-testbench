@@ -175,13 +175,18 @@ declared directly in the manifest.
 ## API Case Run Fields
 
 API Case assets can optionally declare local run settings used by the control
-plane workbench:
+plane workbench. They can also carry maintenance metadata so teams can search,
+review, and assign case suites without editing the core repository:
 
 ```json
 {
   "id": "case.alpha",
   "displayName": "Create Item",
+  "description": "Creates an item with the default valid payload.",
   "nodeId": "node.alpha",
+  "tags": ["smoke", "regression"],
+  "priority": "p0",
+  "owner": "team-a",
   "casePath": "cases/case.alpha.json",
   "baseUrl": "http://127.0.0.1:18080",
   "evidenceDir": ".runtime/cases",
@@ -192,8 +197,17 @@ plane workbench:
 }
 ```
 
+- `description`: optional case purpose or review note.
+- `tags`: optional searchable labels for suites such as smoke, regression, or
+  negative.
+- `priority`: optional team-defined priority such as p0, p1, or p2.
+- `owner`: optional team, service, or person responsible for maintaining the
+  case.
 - `casePath`: path to the runnable API Case JSON file.
 - `baseUrl`: default target URL for live runs.
 - `evidenceDir`: optional runtime Evidence output directory.
 - `timeoutSeconds`: optional request timeout for the control plane run API.
 - `defaultOverrides`: optional profile-owned defaults passed to the page.
+
+Use `otsandbox case discover` to query this metadata after publishing the
+profile into a Store.

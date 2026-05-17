@@ -211,6 +211,7 @@ Usage:
   otsandbox interface-node case audit --profile PATH --node ID [--json]
   otsandbox interface-node case apply --profile PATH --file PATH [--json]
   otsandbox interface-node case report --node ID [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
+  otsandbox case discover [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
   otsandbox case run --case PATH --base-url URL [--override KEY=VALUE] [--evidence-dir PATH]
   otsandbox case incomplete-batches --profile PATH [--store-url PATH] [--json]
   otsandbox serve [--profile PATH_OR_ID] [--profile-home PATH] [--host HOST] [--port PORT] [--store-url PATH]
@@ -3099,6 +3100,8 @@ func runCase(ctx context.Context, args []string) error {
 		return errors.New("missing case command")
 	}
 	switch args[0] {
+	case "discover":
+		return runCaseDiscover(ctx, args[1:])
 	case "run":
 		return runCaseRun(ctx, args[1:])
 	case "incomplete-batches":
@@ -3106,6 +3109,196 @@ func runCase(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown case command: %s", args[0])
 	}
+}
+
+type caseListReport struct {
+	OK        bool           `json:"ok"`
+	ProfileID string         `json:"profileId"`
+	Count     int            `json:"count"`
+	Filters   caseListFilter `json:"filters"`
+	Items     []caseListItem `json:"items"`
+}
+
+type caseListFilter struct {
+	Filter   string   `json:"filter,omitempty"`
+	NodeID   string   `json:"nodeId,omitempty"`
+	Tags     []string `json:"tags,omitempty"`
+	Status   string   `json:"status,omitempty"`
+	Owner    string   `json:"owner,omitempty"`
+	Priority string   `json:"priority,omitempty"`
+}
+
+type caseListItem struct {
+	ID                   string   `json:"id"`
+	DisplayName          string   `json:"displayName,omitempty"`
+	Description          string   `json:"description,omitempty"`
+	NodeID               string   `json:"nodeId,omitempty"`
+	CaseType             string   `json:"caseType,omitempty"`
+	Scenario             string   `json:"scenario,omitempty"`
+	Tags                 []string `json:"tags,omitempty"`
+	Priority             string   `json:"priority,omitempty"`
+	Owner                string   `json:"owner,omitempty"`
+	Status               string   `json:"status,omitempty"`
+	RequiredForAdmission bool     `json:"requiredForAdmission"`
+	SortOrder            int      `json:"sortOrder,omitempty"`
+	HasRunnableFile      bool     `json:"hasRunnableFile"`
+	HasExecutionConfig   bool     `json:"hasExecutionConfig"`
+}
+
+func runCaseDiscover(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("case discover", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	filter := flags.String("filter", "", "Filter by id, display name, scenario, description, tag, owner, or priority")
+	nodeID := flags.String("node", "", "Only include cases attached to this interface node id")
+	status := flags.String("status", "", "Only include cases with this status")
+	owner := flags.String("owner", "", "Only include cases owned by this value")
+	priority := flags.String("priority", "", "Only include cases with this priority")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	var tags stringListFlag
+	flags.Var(&tags, "tag", "Only include cases with this tag; repeat for multiple tags")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	report := caseList(ctx, bundle, sourceStore, caseListFilter{
+		Filter:   *filter,
+		NodeID:   *nodeID,
+		Tags:     tags.Values(),
+		Status:   *status,
+		Owner:    *owner,
+		Priority: *priority,
+	})
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	for _, item := range report.Items {
+		fmt.Printf("%s\t%s\t%s\t%s\t%s\t%s\n", item.ID, item.DisplayName, item.NodeID, item.Status, item.Priority, strings.Join(item.Tags, ","))
+	}
+	return nil
+}
+
+func caseList(ctx context.Context, bundle profile.Bundle, runtime store.Store, filters caseListFilter) caseListReport {
+	cases := append([]profile.APICase(nil), bundle.APICases...)
+	sort.SliceStable(cases, func(i, j int) bool {
+		if cases[i].NodeID != cases[j].NodeID {
+			return cases[i].NodeID < cases[j].NodeID
+		}
+		if cases[i].SortOrder != cases[j].SortOrder {
+			return cases[i].SortOrder < cases[j].SortOrder
+		}
+		return cases[i].ID < cases[j].ID
+	})
+	executionConfigs := caseExecutionConfigSet(ctx, runtime)
+	report := caseListReport{OK: true, ProfileID: bundle.ID, Filters: normalizeCaseListFilter(filters)}
+	for _, item := range cases {
+		if !matchesCaseFilters(item, filters) {
+			continue
+		}
+		report.Items = append(report.Items, caseListItem{
+			ID:                   item.ID,
+			DisplayName:          item.DisplayName,
+			Description:          item.Description,
+			NodeID:               item.NodeID,
+			CaseType:             item.CaseType,
+			Scenario:             item.Scenario,
+			Tags:                 append([]string(nil), item.Tags...),
+			Priority:             item.Priority,
+			Owner:                item.Owner,
+			Status:               effectiveCaseStatus(item),
+			RequiredForAdmission: item.RequiredForAdmission,
+			SortOrder:            item.SortOrder,
+			HasRunnableFile:      strings.TrimSpace(item.CasePath) != "",
+			HasExecutionConfig:   executionConfigs[item.ID],
+		})
+	}
+	report.Count = len(report.Items)
+	return report
+}
+
+func normalizeCaseListFilter(filters caseListFilter) caseListFilter {
+	filters.Filter = strings.TrimSpace(filters.Filter)
+	filters.NodeID = strings.TrimSpace(filters.NodeID)
+	filters.Status = strings.TrimSpace(filters.Status)
+	filters.Owner = strings.TrimSpace(filters.Owner)
+	filters.Priority = strings.TrimSpace(filters.Priority)
+	filters.Tags = normalizeStringList(filters.Tags)
+	return filters
+}
+
+func matchesCaseFilters(item profile.APICase, filters caseListFilter) bool {
+	filters = normalizeCaseListFilter(filters)
+	if filters.NodeID != "" && item.NodeID != filters.NodeID {
+		return false
+	}
+	if filters.Status != "" && !strings.EqualFold(effectiveCaseStatus(item), filters.Status) {
+		return false
+	}
+	if filters.Owner != "" && !strings.EqualFold(strings.TrimSpace(item.Owner), filters.Owner) {
+		return false
+	}
+	if filters.Priority != "" && !strings.EqualFold(strings.TrimSpace(item.Priority), filters.Priority) {
+		return false
+	}
+	if len(filters.Tags) > 0 && !caseHasAllTags(item.Tags, filters.Tags) {
+		return false
+	}
+	return matchesDiscoveryFilter(filters.Filter, item.ID, item.DisplayName, item.Scenario, item.Description, item.Owner, item.Priority, strings.Join(item.Tags, " "))
+}
+
+func effectiveCaseStatus(item profile.APICase) string {
+	status := strings.TrimSpace(item.Status)
+	if status == "" {
+		return "active"
+	}
+	return status
+}
+
+func caseHasAllTags(actual []string, required []string) bool {
+	actualSet := map[string]bool{}
+	for _, tag := range actual {
+		normalized := normalizedDiscoveryText(tag)
+		if normalized != "" {
+			actualSet[normalized] = true
+		}
+	}
+	for _, tag := range required {
+		normalized := normalizedDiscoveryText(tag)
+		if normalized != "" && !actualSet[normalized] {
+			return false
+		}
+	}
+	return true
+}
+
+func caseExecutionConfigSet(ctx context.Context, runtime store.Store) map[string]bool {
+	out := map[string]bool{}
+	if runtime == nil {
+		return out
+	}
+	catalog, err := runtime.GetProfileCatalog(ctx)
+	if err != nil {
+		return out
+	}
+	for _, config := range catalog.TemplateConfigs {
+		if config.ScopeType == "case" && strings.TrimSpace(config.ScopeID) != "" {
+			out[strings.TrimSpace(config.ScopeID)] = true
+			continue
+		}
+		var payload struct {
+			CaseID string `json:"caseId"`
+		}
+		if json.Unmarshal([]byte(config.ConfigJSON), &payload) == nil && strings.TrimSpace(payload.CaseID) != "" {
+			out[strings.TrimSpace(payload.CaseID)] = true
+		}
+	}
+	return out
 }
 
 func runCaseIncompleteBatches(ctx context.Context, args []string) error {
@@ -3314,6 +3507,46 @@ func (m mapFlag) Values() map[string]any {
 	out := make(map[string]any, len(m))
 	for key, value := range m {
 		out[key] = value
+	}
+	return out
+}
+
+type stringListFlag []string
+
+func (s *stringListFlag) String() string {
+	if s == nil {
+		return ""
+	}
+	return strings.Join(*s, ",")
+}
+
+func (s *stringListFlag) Set(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	*s = append(*s, value)
+	return nil
+}
+
+func (s stringListFlag) Values() []string {
+	return normalizeStringList([]string(s))
+}
+
+func normalizeStringList(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		key := strings.ToLower(value)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, value)
 	}
 	return out
 }

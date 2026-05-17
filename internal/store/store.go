@@ -258,9 +258,13 @@ type CatalogInterfaceNodeField struct {
 type CatalogAPICase struct {
 	ID                   string
 	DisplayName          string
+	Description          string
 	NodeID               string
 	CaseType             string
 	Scenario             string
+	Tags                 []string
+	Priority             string
+	Owner                string
 	PayloadTemplateJSON  string
 	RequestTemplateID    string
 	PatchJSON            string

@@ -73,9 +73,13 @@ type InterfaceNode struct {
 type APICase struct {
 	ID                   string         `json:"id"`
 	DisplayName          string         `json:"displayName,omitempty"`
+	Description          string         `json:"description,omitempty"`
 	NodeID               string         `json:"nodeId,omitempty"`
 	CaseType             string         `json:"caseType,omitempty"`
 	Scenario             string         `json:"scenario,omitempty"`
+	Tags                 []string       `json:"tags,omitempty"`
+	Priority             string         `json:"priority,omitempty"`
+	Owner                string         `json:"owner,omitempty"`
 	PayloadTemplateJSON  string         `json:"payloadTemplateJson,omitempty"`
 	RequestTemplateID    string         `json:"requestTemplateId,omitempty"`
 	PatchJSON            string         `json:"patchJson,omitempty"`

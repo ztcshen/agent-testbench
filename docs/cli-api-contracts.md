@@ -20,9 +20,22 @@ otsandbox workflow discover \
   --store-url .runtime/store.sqlite \
   --filter "happy path" \
   --json
+
+otsandbox case discover \
+  --profile PATH_OR_ID \
+  --store-url .runtime/store.sqlite \
+  --filter "create item" \
+  --tag smoke \
+  --status active \
+  --owner team-a \
+  --priority p0 \
+  --json
 ```
 
 The returned ids are the only ids an agent should pass to report commands.
+`case discover` searches API case id, display name, description, owner, tags,
+and interface node id. Its JSON output includes maintenance metadata plus
+whether the case has a runnable file and execution configuration.
 
 ## Single Interface Report
 
