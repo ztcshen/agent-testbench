@@ -113,20 +113,40 @@ func recordAPICaseRun(ctx context.Context, runtime store.Store, profileID string
 			return err
 		}
 		if _, err := runtime.RecordEvidence(ctx, store.EvidenceRecord{
-			ID:        result.RunID + "." + name,
-			RunID:     result.RunID,
-			CaseRunID: caseRunID,
-			Kind:      kind,
-			URI:       path,
-			MediaType: "application/json",
-			SizeBytes: info.Size(),
-			Summary:   summary,
+			ID:         result.RunID + "." + name,
+			RunID:      result.RunID,
+			CaseRunID:  caseRunID,
+			Kind:       kind,
+			URI:        path,
+			MediaType:  "application/json",
+			SizeBytes:  info.Size(),
+			Summary:    summary,
+			Category:   apiCaseEvidenceCategory(kind),
+			Visibility: "public",
+			LabelsJSON: compactJSON(map[string]any{
+				"caseId": result.CaseID,
+				"kind":   kind,
+				"runId":  result.RunID,
+			}),
 			CreatedAt: finishedAt,
 		}); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func apiCaseEvidenceCategory(kind string) string {
+	switch kind {
+	case "request", "response":
+		return "http-exchange"
+	case "assertions":
+		return "assertion-result"
+	case "summary":
+		return "run-summary"
+	default:
+		return "runtime-attachment"
+	}
 }
 
 func apiCaseEvidenceSummaries(result apicase.RunResult) (string, string, error) {

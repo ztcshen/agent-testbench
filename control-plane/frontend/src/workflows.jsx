@@ -2,8 +2,30 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./control-plane-react.css";
 import { fetchJSON } from "./api.js";
+import { buildWorkflowDiscovery, workflowDiscoveryRow } from "./workflowDiscoveryModel.mjs";
 import { dashboardStatusById, filterWorkflows, workflowKind, workflowRuntimeImpact } from "./workflowModel.js";
 import { ButtonLink, Hero, IconButton, Icons, Panel, Shell, WorkflowCard } from "./components.jsx";
+
+function targetConfig(catalog) {
+  const params = new URLSearchParams(window.location.search);
+  const configuredTarget = catalog?.presentation?.workflowFinder || catalog?.presentation?.targetWorkflow || {};
+  return {
+    targetStepCount: Number(params.get("targetStepCount") || configuredTarget.targetStepCount || configuredTarget.stepCount || 0),
+    targetInterfaceCount: Number(params.get("targetInterfaceCount") || configuredTarget.targetInterfaceCount || configuredTarget.interfaceCount || 0),
+    targetLabel: params.get("targetLabel") || configuredTarget.targetLabel || configuredTarget.label || "Configured workflow target",
+  };
+}
+
+function WorkflowDiscoveryBadge({ workflow }) {
+  const row = workflowDiscoveryRow(workflow);
+  return (
+    <div className="workflow-discovery-badge">
+      <span>{`${row.stepCount} steps`}</span>
+      <span>{`${row.interfaceCount} interfaces`}</span>
+      <span>{`${row.caseCount} cases`}</span>
+    </div>
+  );
+}
 
 function WorkflowSection({ title, summary, workflows, services, statusById, onRuntimeImpactClick }) {
   if (!workflows.length) return null;
@@ -18,16 +40,97 @@ function WorkflowSection({ title, summary, workflows, services, statusById, onRu
       </div>
       <div className="react-workflow-list">
         {workflows.map((workflow) => (
-          <WorkflowCard
-            workflow={workflow}
-            services={services}
-            runtimeImpact={workflowRuntimeImpact(workflow, statusById)}
-            onRuntimeImpactClick={onRuntimeImpactClick}
-            key={workflow.id}
-          />
+          <div className="workflow-discovery-card" key={workflow.id}>
+            <WorkflowDiscoveryBadge workflow={workflow} />
+            <WorkflowCard
+              workflow={workflow}
+              services={services}
+              runtimeImpact={workflowRuntimeImpact(workflow, statusById)}
+              onRuntimeImpactClick={onRuntimeImpactClick}
+            />
+          </div>
         ))}
       </div>
     </section>
+  );
+}
+
+function TargetWorkflowFocus({ discovery, onFocus }) {
+  const { target, targetWorkflows, targetChecklist } = discovery;
+  const checklistByWorkflow = new Map((targetChecklist || []).map((item) => [item.workflowId, item]));
+  return (
+    <Panel
+      title={target.label}
+      label="Configured finder"
+      summary={target.enabled ? `${target.stepCount} configured steps · ${target.interfaceCount} configured interfaces` : "Set targetStepCount and targetInterfaceCount in Store presentation or URL parameters."}
+      action={target.enabled ? <IconButton icon={Icons.Search} title="Show configured target" onClick={() => onFocus(String(target.stepCount))}>Show target</IconButton> : null}
+    >
+      <div className="target-workflow-list">
+        {targetWorkflows.length ? targetWorkflows.map((row) => (
+          <article className="target-workflow-item" key={row.id}>
+            <div className="target-workflow-head">
+              <div>
+                <strong>{row.title || row.id}</strong>
+                <p>{row.coverageLabel}</p>
+              </div>
+              <TargetChecklistSummary checklist={checklistByWorkflow.get(row.id)} />
+            </div>
+            <div className="target-interface-strip">
+              {row.stepLabels.map((step) => (
+                <a href={`/workflow-step.html?workflow=${encodeURIComponent(row.id)}&step=${encodeURIComponent(step.id)}`} key={step.id}>
+                  <span>{String(step.index).padStart(2, "0")}</span>
+                  <strong>{step.interfaceId || step.id}</strong>
+                  <code>{step.caseId || "no case"}</code>
+                </a>
+              ))}
+            </div>
+            <TargetChecklistTable checklist={checklistByWorkflow.get(row.id)} />
+            <div className="react-card-actions">
+              <ButtonLink href={`/workflow-detail.html?id=${encodeURIComponent(row.id)}`}>View workflow detail</ButtonLink>
+              <ButtonLink href={`/api-cases.html?workflow=${encodeURIComponent(row.id)}`} primary icon={Icons.ArrowUpRight}>查看接口用例</ButtonLink>
+            </div>
+          </article>
+        )) : (
+          <div className="react-empty">No workflow matches the configured step/interface target.</div>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+function TargetChecklistSummary({ checklist }) {
+  if (!checklist) return null;
+  const { summary } = checklist;
+  const blocked = summary.missingInterface + summary.missingCase;
+  return (
+    <div className="target-checklist-summary">
+      <span>{`${summary.ready}/${summary.total} ready`}</span>
+      <span className={blocked ? "warn" : "good"}>{blocked ? `${blocked} gaps` : "complete"}</span>
+    </div>
+  );
+}
+
+function TargetChecklistTable({ checklist }) {
+  if (!checklist?.rows?.length) return null;
+  return (
+    <div className="target-checklist-table" role="table" aria-label="Configured workflow target checklist">
+      <div className="target-checklist-row target-checklist-head" role="row">
+        <span role="columnheader">Step</span>
+        <span role="columnheader">Interface</span>
+        <span role="columnheader">Case</span>
+        <span role="columnheader">State</span>
+        <span role="columnheader">Actions</span>
+      </div>
+      {checklist.rows.map((row) => (
+        <div className={`target-checklist-row ${row.status}`} role="row" key={`${row.sequence}-${row.stepId}`}>
+          <a href={row.stepHref} role="cell">{`${String(row.sequence).padStart(2, "0")} ${row.title || row.stepId}`}</a>
+          <span role="cell">{row.interfaceHref ? <a href={row.interfaceHref}>{row.interfaceId}</a> : "missing"}</span>
+          <span role="cell">{row.caseHref ? <a href={row.caseHref}>{row.caseId}</a> : "missing"}</span>
+          <span role="cell"><span className={`target-state-pill ${row.status}`}>{row.status}</span></span>
+          <span role="cell">{row.runsHref ? <a href={row.runsHref}>Runs</a> : "-"}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -62,6 +165,8 @@ function WorkflowCatalogStudio() {
   const workflows = catalog?.workflows || [];
   const services = catalog?.services || [];
   const statusById = useMemo(() => dashboardStatusById(dashboard), [dashboard]);
+  const finderTarget = useMemo(() => targetConfig(catalog), [catalog]);
+  const discovery = useMemo(() => buildWorkflowDiscovery(workflows, { query, ...finderTarget }), [workflows, query, finderTarget]);
   const visible = useMemo(() => filterWorkflows(workflows, services, query, statusById), [workflows, services, query, statusById]);
   const businessFlows = visible.filter((workflow) => workflowKind(workflow) === "businessFlow");
   const toolEntries = visible.filter((workflow) => workflowKind(workflow) !== "businessFlow");
@@ -83,13 +188,15 @@ function WorkflowCatalogStudio() {
         }
         stats={[
           { label: "Business", value: businessFlows.length },
-          { label: "Tools", value: toolEntries.length },
-          { label: "Services", value: services.length },
-          { label: "Catalog", value: catalog?.schemaVersion || "-" },
+          { label: "Target", value: discovery.summary.targetExact },
+          { label: "Max steps", value: discovery.summary.maxStepCount },
+          { label: "Interfaces", value: discovery.summary.maxInterfaceCount },
         ]}
       />
 
       {error ? <div className="react-error">{error}</div> : null}
+
+      <TargetWorkflowFocus discovery={discovery} onFocus={applyFilter} />
 
       <Panel
         title="Catalog routing"

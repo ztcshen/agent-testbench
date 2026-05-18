@@ -12,8 +12,8 @@ step "checking whitespace"
 git diff --check
 
 step "checking generated state is not tracked"
-if [[ -d profiles ]]; then
-  echo "root profiles directory is not allowed in the core repository" >&2
+if [[ -d team-configs ]]; then
+  echo "root team-configs directory is not allowed in the core repository" >&2
   exit 1
 fi
 
@@ -22,7 +22,7 @@ tracked_generated=$(git ls-files \
   'cmd/otsandbox/.runtime' \
   'internal/controlplane/.runtime' \
   'node_modules' \
-  'profiles' \
+  'team-configs' \
   'test-results' \
   'coverage' \
   '*.db' \

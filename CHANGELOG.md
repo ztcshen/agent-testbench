@@ -7,12 +7,12 @@ should be called out in this file and in the relevant docs.
 
 ## Unreleased
 
-- Added local-first Store, profile, workflow, API case, Evidence, report, and
+- Added local-first Store, configuration, workflow, API case, Evidence, report, and
   Control plane foundations.
-- Added external profile installation, audit, verification, packing, and
+- Added external configuration installation, audit, verification, packing, and
   Store/read-model publishing.
-- Added `profile audit-plan` and `/api/profile/audit-plan` to turn profile
-  audit issues into stable repair actions for agents and profile authors.
+- Added compatibility audit planning APIs to turn configuration audit issues
+  into stable repair actions for agents and authors.
 - Added report-preview redaction for common sensitive JSON keys and URL query
   parameters before rendering interface and maintained-suite reports.
 - Added API case run Evidence, asynchronous batch reports, workflow reports,
@@ -64,7 +64,7 @@ should be called out in this file and in the relevant docs.
   in one call before deciding what to execute.
 - Added `interface-node case draft` and expanded `interface-node case apply`
   so agents can generate reviewable maintained-case bundles, then apply API
-  case metadata, execution config, and runnable case files to external profile
+  case metadata, execution config, and runnable case files to external configuration
   bundles without touching the Store directly.
 - Added `case suite quality` and `/api/case/suite-quality` to audit maintained
   case authoring quality, including uncovered interface nodes, missing metadata,

@@ -53,7 +53,7 @@ function RelatedRuns({ run, runs }) {
   if (!related.length) return null;
   return (
     <article className="agent-run-detail-item agent-run-related-runs">
-      <span>same profile recent runs</span>
+      <span>same sandbox recent runs</span>
       <div className="agent-run-related-list">
         {related.map((candidate) => (
           <a className="agent-run-related-link" href={`/agent-run.html?runId=${encodeURIComponent(candidate.runId || "")}`} key={candidate.runId}>
@@ -79,7 +79,7 @@ function Summary({ run, missing, requestedID, runs }) {
     <section className="agent-run-detail-summary" aria-label="Agent run summary">
       <KV label="status" value={run.status} />
       <KV label="failureKind" value={run.failureKind || "none"} />
-      <KV label="profile" value={run.profileId} />
+      <KV label="sandbox" value={run.profileId} />
       <KV label="service" value={run.resolvedServiceId} />
       <KV label="ref" value={run.ref} />
       <KV label="commit" value={run.commitId} />

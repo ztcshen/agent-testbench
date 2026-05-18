@@ -6,12 +6,13 @@ import (
 	"strings"
 	"time"
 
+	"open-test-sandbox/internal/profile"
 	"open-test-sandbox/internal/store"
 )
 
-func handleCaseRuns(w http.ResponseWriter, r *http.Request, runtime store.Store) {
+func handleCaseRuns(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store) {
 	if runtime == nil {
-		writeJSON(w, emptyCaseRunsPayload())
+		writeJSON(w, emptyCaseRunsPayload(bundle))
 		return
 	}
 	runs, err := runtime.ListRuns(r.Context())
@@ -34,35 +35,40 @@ func handleCaseRuns(w http.ResponseWriter, r *http.Request, runtime store.Store)
 			return
 		}
 		for j := len(caseRuns) - 1; j >= 0; j-- {
-			items = append(items, caseRunItem(run, caseRuns[j], evidence))
+			items = append(items, caseRunItem(run, caseRuns[j], evidence, bundle.FailureCategories))
 		}
 	}
 	writeJSON(w, map[string]any{
-		"ok":       true,
-		"caseRuns": items,
-		"warnings": []string{},
+		"ok":                true,
+		"caseRuns":          items,
+		"failureCategories": caseRunFailureCategoryRulesPayload(bundle.FailureCategories),
+		"warnings":          []string{},
 	})
 }
 
-func emptyCaseRunsPayload() map[string]any {
+func emptyCaseRunsPayload(bundle profile.Bundle) map[string]any {
 	return map[string]any{
-		"ok":       true,
-		"caseRuns": []map[string]any{},
-		"warnings": []string{},
+		"ok":                true,
+		"caseRuns":          []map[string]any{},
+		"failureCategories": caseRunFailureCategoryRulesPayload(bundle.FailureCategories),
+		"warnings":          []string{},
 	}
 }
 
-func caseRunItem(run store.Run, item store.APICaseRun, evidence []store.EvidenceRecord) map[string]any {
+func caseRunItem(run store.Run, item store.APICaseRun, evidence []store.EvidenceRecord, rules []profile.FailureCategoryRule) map[string]any {
 	request := jsonObject(item.RequestSummaryJSON)
 	assertion := jsonObject(item.AssertionSummaryJSON)
 	operation := caseRunOperation(request, item.CaseID)
+	failureReason := caseRunFailureReason(assertion)
+	defaultFailureCategory := caseRunDefaultFailureCategory(item.Status, assertion)
+	failureCategory := apiCaseBatchApplyFailureCategoryRules(rules, item.Status, defaultFailureCategory, failureReason)
 	evidenceCount := 0
 	for _, record := range evidence {
 		if record.CaseRunID == item.ID {
 			evidenceCount++
 		}
 	}
-	return map[string]any{
+	out := map[string]any{
 		"id":            item.ID,
 		"runId":         item.RunID,
 		"caseId":        item.CaseID,
@@ -71,8 +77,17 @@ func caseRunItem(run store.Run, item store.APICaseRun, evidence []store.Evidence
 		"evidencePath":  run.EvidenceRoot,
 		"evidenceCount": evidenceCount,
 		"updatedAt":     latestTime(item.CreatedAt, run.UpdatedAt, run.CreatedAt),
-		"failureReason": caseRunFailureReason(assertion),
 	}
+	if failureReason != "" {
+		out["failureReason"] = failureReason
+	}
+	if defaultFailureCategory != "" {
+		out["defaultFailureCategory"] = defaultFailureCategory
+	}
+	if failureCategory != "" {
+		out["failureCategory"] = failureCategory
+	}
+	return out
 }
 
 func jsonObject(raw string) map[string]any {
@@ -107,6 +122,41 @@ func caseRunFailureReason(assertion map[string]any) string {
 		return "assertion errors: " + count
 	}
 	return "assertion status: " + status
+}
+
+func caseRunDefaultFailureCategory(status string, assertion map[string]any) string {
+	if strings.EqualFold(status, store.StatusPassed) {
+		return ""
+	}
+	if category := strings.TrimSpace(valueString(assertion["failureCategory"])); category != "" {
+		return category
+	}
+	assertionStatus := strings.ToLower(valueString(assertion["status"]))
+	errorCount := valueString(assertion["errorCount"])
+	if assertionStatus == store.StatusFailed || (errorCount != "" && errorCount != "0") {
+		return "assertion-mismatch"
+	}
+	if strings.EqualFold(status, store.StatusFailed) {
+		return "case-failure"
+	}
+	return ""
+}
+
+func caseRunFailureCategoryRulesPayload(rules []profile.FailureCategoryRule) []map[string]any {
+	out := make([]map[string]any, 0, len(rules))
+	for _, rule := range rules {
+		item := map[string]any{
+			"name":     rule.Name,
+			"category": rule.Category,
+			"matchers": map[string]any{
+				"statuses":          append([]string(nil), rule.Matchers.Statuses...),
+				"failureCategories": append([]string(nil), rule.Matchers.FailureCategories...),
+				"messageContains":   append([]string(nil), rule.Matchers.MessageContains...),
+			},
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func latestTime(values ...time.Time) time.Time {

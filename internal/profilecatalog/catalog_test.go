@@ -36,6 +36,30 @@ func TestFromBundleResolvesServiceSourcePathFromRuntimeConfig(t *testing.T) {
 	}
 }
 
+func TestCatalogRoundTripPreservesExternalAPICaseSource(t *testing.T) {
+	bundle := profile.Bundle{
+		ID: "sample",
+		APICases: []profile.APICase{
+			{
+				ID:         "case.karate",
+				NodeID:     "node.alpha",
+				SourceKind: "karate",
+				SourcePath: "tests/api.feature",
+				ExecutorID: "executor.karate",
+			},
+		},
+	}
+
+	catalog := FromBundle(bundle, time.Now().UTC())
+	if len(catalog.APICases) != 1 || catalog.APICases[0].SourceKind != "karate" || catalog.APICases[0].SourcePath != "tests/api.feature" || catalog.APICases[0].ExecutorID != "executor.karate" {
+		t.Fatalf("catalog api case source = %#v", catalog.APICases)
+	}
+	roundTrip := ToBundle(catalog)
+	if len(roundTrip.APICases) != 1 || roundTrip.APICases[0].SourceKind != "karate" || roundTrip.APICases[0].SourcePath != "tests/api.feature" || roundTrip.APICases[0].ExecutorID != "executor.karate" {
+		t.Fatalf("round trip api case source = %#v", roundTrip.APICases)
+	}
+}
+
 func TestInterfaceNodesReadModelMaterializesStaticDirectoryPayload(t *testing.T) {
 	catalog := store.ProfileCatalog{
 		ProfileID: "sample",

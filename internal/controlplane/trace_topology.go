@@ -36,6 +36,7 @@ type traceRef struct {
 }
 
 type traceTopology struct {
+	Provider        string         `json:"provider"`
 	Status          string         `json:"status"`
 	StepID          string         `json:"stepId,omitempty"`
 	CaseID          string         `json:"caseId,omitempty"`
@@ -69,6 +70,7 @@ type topologyExit struct {
 
 func buildTraceTopology(stepID, caseID, requestID string, trace traceData) traceTopology {
 	topology := traceTopology{
+		Provider:        "skywalking",
 		Status:          "unavailable",
 		StepID:          strings.TrimSpace(stepID),
 		CaseID:          strings.TrimSpace(caseID),

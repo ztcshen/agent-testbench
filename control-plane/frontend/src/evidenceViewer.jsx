@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { fetchJSON } from "./api.js";
+import { buildEvidenceArtifacts, buildEvidenceNavigation, buildEvidenceReproduction, buildEvidenceTimeline } from "./evidenceTimelineModel.mjs";
 import { TopologyDiagram, topologyEdges } from "./topologyView.jsx";
 
 const STORAGE_PREFIX = "open-test-sandbox-evidence:";
@@ -12,6 +13,7 @@ function query() {
     caseRun: params.get("caseRun") || params.get("runId") || "",
     caseId: params.get("caseId") || "",
     stepId: params.get("stepId") || params.get("step") || "",
+    workflowId: params.get("workflow") || params.get("workflowId") || "",
   };
 }
 
@@ -370,7 +372,102 @@ function LogCard({ system }) {
   );
 }
 
-function EmptyViewer({ subtitle }) {
+function TimelineTone({ tone }) {
+  return <code className={`viewer-timeline-tone ${tone || "neutral"}`}>{tone || "neutral"}</code>;
+}
+
+function EvidenceTimelineCard({ timeline, query, type, onQuery, onType, onSelect }) {
+  if (!timeline.items.length) return null;
+  const selected = timeline.selectedItem;
+  return (
+    <Card title="Evidence Timeline" meta={`${timeline.summary.visible}/${timeline.summary.total} sections`} className="viewer-timeline-card">
+      <div className="viewer-timeline-toolbar">
+        <div className="viewer-timeline-facets">
+          <button className={`detail-tab ${type ? "" : "active"}`.trim()} type="button" onClick={() => onType("")}>
+            All
+          </button>
+          {timeline.facets.map((facet) => (
+            <button className={`detail-tab ${type === facet.key ? "active" : ""}`.trim()} type="button" key={facet.key} onClick={() => onType(facet.key)}>
+              {`${facet.label} ${facet.count}`}
+            </button>
+          ))}
+        </div>
+        <label className="workflow-filter viewer-timeline-search">
+          <span>Search</span>
+          <input type="search" value={query} placeholder="request / log / status" spellCheck="false" onChange={(event) => onQuery(event.target.value)} />
+        </label>
+      </div>
+      <div className="viewer-timeline-workbench">
+        <div className="viewer-timeline-list" aria-label="Evidence timeline sections">
+          {timeline.visibleItems.length ? timeline.visibleItems.map((item) => (
+            <button className={`viewer-timeline-item ${selected?.id === item.id ? "selected" : ""}`.trim()} type="button" key={item.id} onClick={() => onSelect(item.id)}>
+              <span>{item.type}</span>
+              <strong>{item.title}</strong>
+              <p>{item.detail || item.status || "-"}</p>
+              <div>
+                <TimelineTone tone={item.tone} />
+                <code>{item.status || item.meta || "-"}</code>
+              </div>
+            </button>
+          )) : <p className="viewer-code-hint-empty">当前筛选下没有 Evidence section。</p>}
+        </div>
+        <article className="viewer-timeline-detail">
+          {selected ? (
+            <>
+              <div className="viewer-card-head">
+                <h3>{selected.title}</h3>
+                <span>{selected.meta || selected.status || selected.type}</span>
+              </div>
+              <pre className="viewer-pre">{selected.preview || prettyJSON(selected.payload)}</pre>
+            </>
+          ) : <p className="viewer-code-hint-empty">没有可展示的 Evidence section。</p>}
+        </article>
+      </div>
+    </Card>
+  );
+}
+
+function EvidenceArtifactsCard({ artifacts }) {
+  if (!artifacts.length) return null;
+  return (
+    <Card title="Evidence Artifacts" meta={`${artifacts.length} linked artifacts`} className="viewer-artifacts-card">
+      <div className="viewer-artifact-list">
+        {artifacts.map((artifact) => {
+          const body = (
+            <>
+              <span>{artifact.kind || "artifact"}</span>
+              <strong>{artifact.label || artifact.path}</strong>
+              <code>{artifact.path}</code>
+            </>
+          );
+          return artifact.href ? (
+            <a className="viewer-artifact-item" href={artifact.href} key={artifact.id}>
+              {body}
+            </a>
+          ) : (
+            <article className="viewer-artifact-item" key={artifact.id}>
+              {body}
+            </article>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+function ReproductionCommandCard({ reproduction }) {
+  if (!reproduction?.available) return null;
+  return (
+    <Card title="Reproduction Command" meta={`${reproduction.method} · ${reproduction.status}`} className="viewer-reproduction-card">
+      <div className="viewer-diagnostic-grid">
+        <Diagnostic label="TARGET" value={reproduction.url} detail={reproduction.failure || "request evidence captured"} />
+      </div>
+      <pre className="viewer-pre">{reproduction.command}</pre>
+    </Card>
+  );
+}
+
+function EmptyViewer({ subtitle, navigation = buildEvidenceNavigation({}) }) {
   return (
     <main className="app viewer-app">
       <section className="viewer-topbar">
@@ -383,7 +480,8 @@ function EmptyViewer({ subtitle }) {
           <span className="detail-phase">阶段</span>
           <span className="viewer-case">-</span>
           <nav className="viewer-actions" aria-label="Evidence navigation">
-            <a className="button-link" href="/case-runs.html">API Case Evidence</a>
+            {navigation.workflowCaseSetHref ? <a className="button-link" href={navigation.workflowCaseSetHref}>Workflow case set</a> : null}
+            <a className="button-link" href={navigation.caseRunsHref}>API Case Evidence</a>
             <a className="button-link" href="/">控制台</a>
           </nav>
         </div>
@@ -397,9 +495,14 @@ function EmptyViewer({ subtitle }) {
 }
 
 function EvidenceViewerApp() {
+  const queryContext = useMemo(() => query(), []);
+  const navigation = useMemo(() => buildEvidenceNavigation(queryContext), [queryContext]);
   const [payload, setPayload] = useState(null);
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const [timelineQuery, setTimelineQuery] = useState("");
+  const [timelineType, setTimelineType] = useState("");
+  const [selectedEvidenceId, setSelectedEvidenceId] = useState("");
 
   useEffect(() => {
     loadPayload()
@@ -412,8 +515,14 @@ function EvidenceViewerApp() {
   const codeHints = useMemo(() => extractCodeHints(step?.systems || []), [step]);
   const continuity = step ? deriveTraceContinuity(step) || {} : {};
   const systems = (step?.systems || []).filter((system) => system.found);
-  if (!loaded) return <EmptyViewer subtitle="Evidence loading" />;
-  if (error || !payload || !step) return <EmptyViewer subtitle={error} />;
+  const timeline = useMemo(
+    () => buildEvidenceTimeline(payload || {}, { query: timelineQuery, type: timelineType, selectedId: selectedEvidenceId }),
+    [payload, timelineQuery, timelineType, selectedEvidenceId],
+  );
+  const artifacts = useMemo(() => buildEvidenceArtifacts(payload || {}), [payload]);
+  const reproduction = useMemo(() => buildEvidenceReproduction(payload || {}), [payload]);
+  if (!loaded) return <EmptyViewer subtitle="Evidence loading" navigation={navigation} />;
+  if (error || !payload || !step) return <EmptyViewer subtitle={error} navigation={navigation} />;
   return (
     <main className="app viewer-app">
       <section className="viewer-topbar">
@@ -426,7 +535,8 @@ function EvidenceViewerApp() {
           <span className="detail-phase">{step.stageTitle || "阶段"}</span>
           <span className="viewer-case">{step.caseId || "-"}</span>
           <nav className="viewer-actions" aria-label="Evidence navigation">
-            <a className="button-link" href="/case-runs.html">API Case Evidence</a>
+            {navigation.workflowCaseSetHref ? <a className="button-link" href={navigation.workflowCaseSetHref}>Workflow case set</a> : null}
+            <a className="button-link" href={navigation.caseRunsHref}>API Case Evidence</a>
             <a className="button-link" href="/">控制台</a>
           </nav>
         </div>
@@ -439,6 +549,19 @@ function EvidenceViewerApp() {
         <article className="summary-card"><span>代码位点</span><strong>{codeHints.length ? `${codeHints.length} 个定位提示` : "0 个定位提示"}</strong></article>
       </section>
       <section className="viewer-grid">
+        <EvidenceTimelineCard
+          timeline={timeline}
+          query={timelineQuery}
+          type={timelineType}
+          onQuery={setTimelineQuery}
+          onType={(nextType) => {
+            setTimelineType(nextType);
+            setSelectedEvidenceId("");
+          }}
+          onSelect={setSelectedEvidenceId}
+        />
+        <EvidenceArtifactsCard artifacts={artifacts} />
+        <ReproductionCommandCard reproduction={reproduction} />
         <SignalCard step={step} codeHints={codeHints} />
         <FixtureEvidence fixture={payload.caseDiagnostics?.fixture || emptyFixtureEvidence()} />
         <TopologyCard topology={step.topology || payload.caseDiagnostics?.topology} />

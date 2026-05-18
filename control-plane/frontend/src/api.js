@@ -1,5 +1,6 @@
 export async function fetchJSON(path) {
   const response = await fetch(path, {
+    cache: "no-store",
     headers: { Accept: "application/json" },
   });
   const body = await response.json();

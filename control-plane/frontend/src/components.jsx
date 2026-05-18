@@ -176,6 +176,7 @@ export function WorkflowCard({ workflow, services, compact = false, runtimeImpac
       </div>
       <div className="react-card-actions">
         <ButtonLink href={`/workflow-detail.html?id=${encodeURIComponent(workflow.id || "")}`}>查看定义</ButtonLink>
+        <ButtonLink href={`/api-cases.html?workflow=${encodeURIComponent(workflow.id || "")}`}>查看接口用例</ButtonLink>
         <ButtonLink href={workflowEntrypointHref(workflow)} primary icon={ArrowUpRight}>
           {workflowActionLabel(workflow)}
         </ButtonLink>

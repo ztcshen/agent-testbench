@@ -8,9 +8,9 @@ This file defines the shared language for the project.
 A local or hosted environment where tests can run against real or simulated
 services while preserving reproducible Evidence.
 
-**Profile**:
-A bundle of services, Workflows, API Cases, fixtures, and runner settings for
-one domain or system under test.
+**Current State**:
+The active services, Workflows, API Cases, fixtures, runner settings, runtime
+facts, and execution records known to the sandbox.
 
 **Workflow**:
 A template-driven sequence of testable Steps.
@@ -30,17 +30,20 @@ The request, response, logs, database facts, screenshots, and other records that
 explain what happened during a run.
 
 **Store**:
-The database backend used for runtime indexes, run records, imported profile
-indexes, and baseline gate state.
+The database backend used for current state, runtime indexes, run records,
+catalog read-models, and baseline gate state.
 
-**Bundle**:
-A reviewable file representation of configuration assets.
+**Template Package**:
+An optional reviewable file representation used only for import, export,
+sharing, or migration.
 
 ## Relationships
 
-- A Sandbox loads one or more Profiles.
-- A Profile contains Workflows, API Cases, fixtures, and service metadata.
+- A Sandbox exposes current state through APIs and UI.
+- Current State contains Workflows, API Cases, fixtures, service metadata, and
+  runtime facts.
 - A Workflow contains Steps.
 - A Step may run or reference an API Case.
 - Runs write Evidence and Store records.
-- Bundles are source assets; Store records are generated or imported indexes.
+- Template Packages are optional transfer artifacts; Store records are the
+  active local facts.

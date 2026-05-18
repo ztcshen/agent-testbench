@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { buildCaseCoverageBoard, buildCaseManagement, buildWorkflowCaseContext } from "./apiCasesModel.mjs";
 
 async function requestJSON(path, options = undefined) {
   const response = await fetch(path, {
@@ -8,6 +9,15 @@ async function requestJSON(path, options = undefined) {
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok || body.ok === false) {
+    throw new Error(body.error || response.statusText);
+  }
+  return body;
+}
+
+async function requestReportJSON(path) {
+  const response = await fetch(path, { headers: { Accept: "application/json" } });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
     throw new Error(body.error || response.statusText);
   }
   return body;
@@ -35,6 +45,17 @@ function selectedCaseFromPayload(payload, preferredID = "") {
   return cases.find((caseDef) => caseDef.id === preferredID) || cases.find((caseDef) => caseDef.id === requested) || cases[0] || null;
 }
 
+function selectedCaseForWorkflow(payload, workflowContext, preferredID = "") {
+  const cases = payload?.cases || [];
+  const requested = new URLSearchParams(window.location.search).get("case");
+  return (
+    cases.find((caseDef) => caseDef.id === preferredID && (!workflowContext.enabled || workflowContext.caseIds.includes(caseDef.id))) ||
+    cases.find((caseDef) => caseDef.id === requested && (!workflowContext.enabled || workflowContext.caseIds.includes(caseDef.id))) ||
+    cases.find((caseDef) => workflowContext.enabled && workflowContext.caseIds.includes(caseDef.id)) ||
+    selectedCaseFromPayload(payload, preferredID)
+  );
+}
+
 function caseRunPayload(caseDef) {
   return {
     casePath: caseDef.casePath || "",
@@ -43,6 +64,13 @@ function caseRunPayload(caseDef) {
     timeoutSeconds: caseDef.timeoutSeconds || 90,
     overrides: caseDef.defaultOverrides || {},
   };
+}
+
+function formatDuration(ms) {
+  const value = Number(ms || 0);
+  if (!Number.isFinite(value) || value <= 0) return "-";
+  if (value < 1000) return `${Math.round(value)} ms`;
+  return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)} s`;
 }
 
 function KeyValue({ label, value, href }) {
@@ -62,22 +90,107 @@ function KeyValue({ label, value, href }) {
   return <article className="api-case-kv">{body}</article>;
 }
 
-function CaseSelector({ cases, selectedCase, onSelect }) {
-  if (!cases.length) {
-    return <p>Catalog 暂未声明 API Case。</p>;
-  }
+function MetricStrip({ management }) {
+  const metrics = [
+    ["Total", management.summary.total, "catalog cases"],
+    ["Ready", management.summary.ready, "executable-ready"],
+    ["Review", management.summary.needsReview, "metadata or source gaps"],
+    ["Latest failed", management.summary.failedLatest, "needs attention"],
+    ["Never run", management.summary.neverRun, "not yet exercised"],
+  ];
   return (
-    <div className="api-case-list">
-      {cases.map((caseDef) => (
+    <section className="api-case-management-metrics" aria-label="API case management metrics">
+      {metrics.map(([label, value, detail]) => (
+        <article className="api-case-management-metric" key={label}>
+          <span>{label}</span>
+          <strong>{value}</strong>
+          <p>{detail}</p>
+        </article>
+      ))}
+    </section>
+  );
+}
+
+function WorkflowCaseSet({ context }) {
+  if (!context.enabled) return null;
+  return (
+    <section className="api-case-workflow-context" aria-label="Workflow case set">
+      <div>
+        <span>Workflow case set</span>
+        <strong>{context.title || context.workflowId}</strong>
+      </div>
+      <div className="api-case-workflow-context-stats">
+        <span>{`${context.summary.steps} steps`}</span>
+        <span>{`${context.summary.interfaces} interfaces`}</span>
+        <span>{`${context.summary.cases} cases`}</span>
+      </div>
+      <a className="button-link" href={`/workflow-detail.html?id=${encodeURIComponent(context.workflowId)}`}>View workflow</a>
+    </section>
+  );
+}
+
+function WorkflowCaseSequence({ context, selectedCase, onSelect }) {
+  if (!context.enabled) return null;
+  const caseRunsHref = (caseId) => {
+    const params = new URLSearchParams({ case: caseId || "" });
+    if (context.workflowId) params.set("workflow", context.workflowId);
+    return `/case-runs.html?${params.toString()}`;
+  };
+  return (
+    <section className="api-case-management-panel api-case-workflow-sequence">
+      <div className="section-head compact-head">
+        <h3>Workflow case sequence</h3>
+        <p>{`${context.summary.latestFailed} latest failed · ${context.summary.sequenceIssues} issues`}</p>
+      </div>
+      <div className="api-case-workflow-sequence-list">
+        {context.steps.length ? context.steps.map((step) => {
+          const selected = selectedCase?.id && selectedCase.id === step.caseId;
+          return (
+            <article className={`api-case-workflow-step ${step.state} ${selected ? "selected" : ""}`.trim()} key={`${step.sequence}-${step.id}`}>
+              <div>
+                <span>{String(step.sequence).padStart(2, "0")}</span>
+                <strong>{step.title || step.id}</strong>
+                {step.interfaceHref ? <a className="api-case-workflow-interface-link" href={step.interfaceHref}>{step.interfaceId}</a> : <code>missing interface</code>}
+              </div>
+              <div>
+                <button type="button" disabled={!step.caseId} onClick={() => onSelect(step.caseId)}>
+                  {step.caseTitle || step.caseId || "No case mapped"}
+                </button>
+                <small>{`${step.readiness} · ${step.latestStatus}`}</small>
+              </div>
+              <div className="api-case-workflow-step-actions">
+                {step.caseId ? <a className="button-link" href={caseRunsHref(step.caseId)}>Runs</a> : null}
+                {step.latestEvidenceHref ? <a className="button-link" href={step.latestEvidenceHref}>Evidence</a> : null}
+              </div>
+            </article>
+          );
+        }) : <p className="api-case-muted">No workflow steps.</p>}
+      </div>
+    </section>
+  );
+}
+
+function FacetBar({ management, filters, onFilter, onReset }) {
+  const facetSets = [
+    ["status", "Lifecycle"],
+    ["owner", "Owner"],
+    ["priority", "Priority"],
+    ["tag", "Tags"],
+    ["runState", "Latest"],
+  ];
+  return (
+    <div className="api-case-facet-bar">
+      <button type="button" className="agent-chip" onClick={onReset}>{`${management.summary.visible}/${management.summary.total} visible`}</button>
+      {facetSets.flatMap(([field, label]) => management.facets[field].slice(0, 4).map((facet) => (
         <button
           type="button"
-          className={`api-case-select ${caseDef.id === selectedCase?.id ? "selected" : ""}`}
-          key={caseDef.id}
-          onClick={() => onSelect(caseDef)}
+          className={`agent-chip api-case-facet ${filters[field] === facet.key ? "active" : ""}`.trim()}
+          key={`${field}-${facet.key}`}
+          onClick={() => onFilter(field, facet.key)}
         >
-          {caseDef.title || caseDef.id}
+          {`${label} ${facet.label}: ${facet.count}`}
         </button>
-      ))}
+      )))}
     </div>
   );
 }
@@ -115,6 +228,132 @@ function LatestRunSummary({ caseDef }) {
       <KeyValue label="case run" value={latestRun?.caseRunId || "-"} />
       <KeyValue label="elapsed" value={latestRun?.elapsedMs ? `${latestRun.elapsedMs}ms` : "-"} />
     </div>
+  );
+}
+
+function ReadinessGroups({ groups, onFilter }) {
+  return (
+    <section className="api-case-management-panel">
+      <div className="section-head compact-head">
+        <h3>Readiness groups</h3>
+        <p>{`${groups.length} groups`}</p>
+      </div>
+      <div className="api-case-readiness-list">
+        {groups.map((group) => (
+          <button type="button" key={group.key} onClick={() => onFilter("readiness", group.key)}>
+            <strong>{group.label}</strong>
+            <span>{`${group.count} cases`}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CoverageMatrix({ board, onSelect }) {
+  const metrics = [
+    ["Passed", board.summary.passed, `${board.summary.passRate}% pass rate`],
+    ["Gaps", board.summary.gaps, "failed or not-run"],
+    ["Not run", board.summary.notRun, "missing execution"],
+    ["Covered", board.summary.covered, `${board.summary.total} catalog cases`],
+  ];
+  return (
+    <section className="api-case-coverage-matrix" aria-label="Coverage matrix">
+      <div className="section-head compact-head">
+        <div>
+          <h3>Coverage matrix</h3>
+          <p>{`${board.groups.length} interfaces · ${board.summary.total} cases`}</p>
+        </div>
+      </div>
+      <div className="api-case-coverage-metrics">
+        {metrics.map(([label, value, detail]) => (
+          <article key={label}>
+            <span>{label}</span>
+            <strong>{value}</strong>
+            <p>{detail}</p>
+          </article>
+        ))}
+      </div>
+      <div className="api-case-coverage-group-list">
+        {board.groups.length ? board.groups.map((group) => (
+          <article className="api-case-coverage-group" key={group.nodeId || group.nodeName}>
+            <div className="api-case-coverage-group-head">
+              <div>
+                <strong>{group.nodeName || group.nodeId || "Unmapped interface"}</strong>
+                <span>{`${group.total} cases · ${group.gapCount} gaps`}</span>
+              </div>
+              <code>{[group.passed, group.failed, group.notRun].join("/")}</code>
+            </div>
+            <div className="api-case-coverage-row-list">
+              {group.rows.map((row) => (
+                <div className={`api-case-coverage-row ${row.latestStatus}`} key={row.caseId}>
+                  <button type="button" onClick={() => onSelect(row.caseId)}>
+                    <strong>{row.title || row.caseId}</strong>
+                    <span>{row.reason || row.caseId}</span>
+                  </button>
+                  <span className={`agent-status ${row.latestStatus}`}>{row.latestStatus}</span>
+                  <a className="button-link" href={row.caseRunsHref}>Runs</a>
+                  {row.latestEvidenceHref ? <a className="button-link" href={row.latestEvidenceHref}>Evidence</a> : null}
+                </div>
+              ))}
+            </div>
+          </article>
+        )) : <p className="api-case-muted">No cases matched coverage scope.</p>}
+      </div>
+    </section>
+  );
+}
+
+function CaseManagementTable({ management, selectedCase, onSelect }) {
+  return (
+    <section className="api-case-management-panel api-case-management-table-panel">
+      <div className="section-head compact-head">
+        <h3>Case Management Search</h3>
+        <p>Lifecycle, owner, priority, latest result, and runnable source</p>
+      </div>
+      <div className="api-case-management-table-wrap">
+        <table className="api-case-management-table">
+          <thead>
+            <tr>
+              <th>Case</th>
+              <th>Lifecycle</th>
+              <th>Owner</th>
+              <th>Priority</th>
+              <th>Tags</th>
+              <th>Latest</th>
+              <th>Readiness</th>
+              <th>Evidence</th>
+            </tr>
+          </thead>
+          <tbody>
+            {management.rows.length ? management.rows.map((row) => (
+              <tr className={row.id === selectedCase?.id ? "selected" : ""} key={row.id}>
+                <td>
+                  <button type="button" className="api-case-row-select" onClick={() => onSelect(row.caseDef)}>
+                    <strong>{row.title || row.id}</strong>
+                    <span>{row.operation || row.id}</span>
+                  </button>
+                </td>
+                <td><span className="agent-chip">{row.status}</span></td>
+                <td>{row.owner}</td>
+                <td>{row.priority}</td>
+                <td><div className="api-case-tag-list">{row.tags.length ? row.tags.map((tag) => <code key={tag}>{tag}</code>) : <code>untagged</code>}</div></td>
+                <td>
+                  <span className={`agent-status ${row.latestStatus}`}>{row.latestStatus}</span>
+                  <code>{row.latestElapsedMs ? formatDuration(row.latestElapsedMs) : `${row.runCount} runs`}</code>
+                </td>
+                <td><span className={`api-case-readiness ${row.readiness}`}>{row.readiness}</span></td>
+                <td>{row.latestEvidenceHref ? <a className="button-link api-case-evidence-link" href={row.latestEvidenceHref}>Evidence</a> : <span className="api-case-muted">-</span>}</td>
+              </tr>
+            )) : (
+              <tr>
+                <td className="api-case-table-empty" colSpan="8">No matching API cases.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -180,16 +419,28 @@ function CaseBoundary({ caseDef }) {
 
 function ApiCasesApp() {
   const [capabilities, setCapabilities] = useState(null);
+  const [catalog, setCatalog] = useState(null);
+  const [coverage, setCoverage] = useState(null);
   const [selectedCase, setSelectedCase] = useState(null);
   const [result, setResult] = useState(null);
   const [status, setStatus] = useState("loading");
+  const [query, setQuery] = useState("");
+  const [filters, setFilters] = useState({ status: "", owner: "", priority: "", tag: "", runState: "", readiness: "" });
+  const [sort, setSort] = useState("readiness");
 
   async function loadCapabilities(preferredCaseID = "", nextStatus = "ready") {
     setStatus("loading...");
     try {
-      const payload = await requestJSON("/api/cases/capabilities");
+      const [payload, catalogPayload, coveragePayload] = await Promise.all([
+        requestJSON("/api/cases/capabilities"),
+        requestJSON("/api/catalog"),
+        requestReportJSON("/api/case/suite-coverage"),
+      ]);
+      const workflowContext = buildWorkflowCaseContext(catalogPayload, new URLSearchParams(window.location.search).get("workflow") || "", payload.cases || []);
       setCapabilities(payload);
-      setSelectedCase(selectedCaseFromPayload(payload, preferredCaseID));
+      setCatalog(catalogPayload);
+      setCoverage(coveragePayload);
+      setSelectedCase(selectedCaseForWorkflow(payload, workflowContext, preferredCaseID));
       setStatus(nextStatus);
     } catch (error) {
       setStatus(error.message);
@@ -219,8 +470,34 @@ function ApiCasesApp() {
 
   const cases = capabilities?.cases || [];
   const graph = selectedCase?.graph || { nodes: [], edges: [] };
+  const workflowContext = useMemo(() => buildWorkflowCaseContext(catalog, new URLSearchParams(window.location.search).get("workflow") || "", cases), [catalog, cases]);
+  const management = useMemo(() => {
+    const base = buildCaseManagement(cases, { ...filters, query, sort, caseIds: workflowContext.caseIds, caseIdsFilterEnabled: workflowContext.enabled });
+    if (!filters.readiness) return base;
+    return { ...base, rows: base.rows.filter((row) => row.readiness === filters.readiness), summary: { ...base.summary, visible: base.rows.filter((row) => row.readiness === filters.readiness).length } };
+  }, [cases, filters, query, sort, workflowContext.caseIds]);
+  const coverageBoard = useMemo(
+    () => buildCaseCoverageBoard(coverage || { items: [] }, workflowContext.enabled ? { workflowId: workflowContext.workflowId, caseIds: workflowContext.caseIds } : {}),
+    [coverage, workflowContext.enabled, workflowContext.workflowId, workflowContext.caseIds],
+  );
   const caseMeta = useMemo(() => [selectedCase?.id, selectedCase?.operation].filter(Boolean).join(" · "), [selectedCase]);
-  const pageSummary = selectedCase?.workflow?.displayName || selectedCase?.workflowId || "API Case";
+  const pageSummary = `${management.summary.visible}/${management.summary.total} cases · ${management.summary.ready} ready · ${management.summary.failedLatest} latest failed`;
+
+  function updateFilter(field, value) {
+    setFilters((current) => ({ ...current, [field]: current[field] === value ? "" : value }));
+  }
+
+  function selectCase(caseDef) {
+    setSelectedCase(caseDef);
+    setResult(null);
+  }
+
+  function selectCaseByID(caseID) {
+    const next = cases.find((caseDef) => caseDef.id === caseID);
+    if (next) {
+      selectCase(next);
+    }
+  }
 
   return (
     <main className="app api-case-page">
@@ -245,18 +522,51 @@ function ApiCasesApp() {
         </div>
       </section>
 
-      <section className="api-case-shell">
-        <section className="api-case-panel api-case-control-panel">
+      <MetricStrip management={management} />
+      <WorkflowCaseSet context={workflowContext} />
+      <CoverageMatrix board={coverageBoard} onSelect={selectCaseByID} />
+
+      <section className="api-case-management-toolbar">
+        <label className="workflow-filter">
+          <span>Search</span>
+          <input type="search" placeholder="case / owner / tag / latest" spellCheck="false" value={query} onChange={(event) => setQuery(event.target.value)} />
+        </label>
+        <label className="workflow-filter">
+          <span>Sort</span>
+          <select value={sort} onChange={(event) => setSort(event.target.value)}>
+            <option value="readiness">Readiness</option>
+            <option value="priority_desc">Priority</option>
+            <option value="latest_failed">Latest failed</option>
+            <option value="owner_asc">Owner</option>
+            <option value="case_asc">Case ID</option>
+          </select>
+        </label>
+        <FacetBar
+          management={management}
+          filters={filters}
+          onFilter={updateFilter}
+          onReset={() => {
+            setQuery("");
+            setFilters({ status: "", owner: "", priority: "", tag: "", runState: "", readiness: "" });
+          }}
+        />
+      </section>
+
+      <section className="api-case-management-shell">
+        <section className="api-case-management-main">
+          <CaseManagementTable management={management} selectedCase={selectedCase} onSelect={selectCase} />
+        </section>
+
+        <aside className="api-case-management-side">
+          <WorkflowCaseSequence context={workflowContext} selectedCase={selectedCase} onSelect={selectCaseByID} />
+          <ReadinessGroups groups={management.readinessGroups} onFilter={updateFilter} />
+          <section className="api-case-panel api-case-control-panel">
           <div className="section-head">
             <div>
               <h2>{selectedCase?.title || selectedCase?.id || "API Case"}</h2>
               <p>{caseMeta || "loading"}</p>
             </div>
           </div>
-          <CaseSelector cases={cases} selectedCase={selectedCase} onSelect={(caseDef) => {
-            setSelectedCase(caseDef);
-            setResult(null);
-          }} />
           <LatestRunSummary caseDef={selectedCase} />
           <div className="api-case-trigger">
             <p>使用 Catalog 中声明的 case 文件、网关地址、默认参数和证据目录运行；页面不暴露请求参数。</p>
@@ -265,8 +575,11 @@ function ApiCasesApp() {
             </button>
           </div>
           <CaseResult result={result} />
-        </section>
+          </section>
+        </aside>
+      </section>
 
+      <section className="api-case-shell">
         <section className="api-case-panel">
           <div className="section-head">
             <div>

@@ -50,6 +50,95 @@ func TestStoreCommandsRejectUnsupportedBackendURLs(t *testing.T) {
 	}
 }
 
+func TestSandboxStartCommandRunsStartupCommandsFromStore(t *testing.T) {
+	dir := t.TempDir()
+	storePath := filepath.Join(dir, "store.sqlite")
+	startedPath := filepath.Join(dir, "started.txt")
+	platformStartedPath := filepath.Join(dir, "platform-started.txt")
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "sandbox",
+		IndexedAt: time.Now().UTC(),
+		Services: []store.CatalogService{
+			{
+				ID:             "entry-service",
+				DisplayName:    "Entry Service",
+				Kind:           "app",
+				StartupCommand: fmt.Sprintf("printf entry-service > %q", startedPath),
+				Status:         "active",
+			},
+			{
+				ID:             "platform-service",
+				DisplayName:    "Platform Service",
+				Kind:           "platform",
+				StartupCommand: fmt.Sprintf("printf platform-service > %q", platformStartedPath),
+				Status:         "active",
+			},
+			{
+				ID:          "documented-service",
+				DisplayName: "Documented Service",
+				Kind:        "external",
+				Status:      "active",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("replace catalog: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	out := runCLI(t, "sandbox", "start", "--store-url", storePath, "--json")
+
+	var report struct {
+		OK       bool `json:"ok"`
+		Services []struct {
+			ID       string `json:"id"`
+			ExitCode int    `json:"exitCode"`
+		Skipped  bool   `json:"skipped"`
+	} `json:"services"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode sandbox start report: %v\n%s", err, out)
+	}
+	if !report.OK || len(report.Services) != 3 {
+		t.Fatalf("sandbox start report = %#v", report)
+	}
+	byID := map[string]int{}
+	skippedByID := map[string]bool{}
+	for _, service := range report.Services {
+		byID[service.ID] = service.ExitCode
+		skippedByID[service.ID] = service.Skipped
+	}
+	if byID["entry-service"] != 0 || skippedByID["entry-service"] {
+		t.Fatalf("entry-service result exit=%d skipped=%t", byID["entry-service"], skippedByID["entry-service"])
+	}
+	if byID["platform-service"] != 0 || skippedByID["platform-service"] {
+		t.Fatalf("platform-service result exit=%d skipped=%t", byID["platform-service"], skippedByID["platform-service"])
+	}
+	if !skippedByID["documented-service"] {
+		t.Fatalf("documented-service should be skipped without a startup command")
+	}
+	started, err := os.ReadFile(startedPath)
+	if err != nil {
+		t.Fatalf("read startup side effect: %v", err)
+	}
+	if string(started) != "entry-service" {
+		t.Fatalf("startup command wrote %q", started)
+	}
+	platformStarted, err := os.ReadFile(platformStartedPath)
+	if err != nil {
+		t.Fatalf("read platform startup side effect: %v", err)
+	}
+	if string(platformStarted) != "platform-service" {
+		t.Fatalf("platform startup command wrote %q", platformStarted)
+	}
+}
+
 func TestProfileInitCommandWritesExternalBundle(t *testing.T) {
 	profileDir := filepath.Join(t.TempDir(), "external-profile")
 
@@ -1264,6 +1353,356 @@ func TestProfileAuditPlanCommandSuggestsRepairActions(t *testing.T) {
 	for _, want := range []string{"Profile Audit Repair Plan: sample", "Actions: 4", "update-reference-or-add-asset", "api-case-node-missing", "fix-invalid-json"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("audit plan text missing %q:\n%s", want, textOut)
+		}
+	}
+}
+
+func TestProfileImportPlanOpenAPICommand(t *testing.T) {
+	specPath := filepath.Join(t.TempDir(), "catalog-openapi.json")
+	writeFile(t, specPath, `{
+  "openapi": "3.0.3",
+  "info": {"title": "Catalog API"},
+  "paths": {
+    "/items": {
+      "get": {
+        "operationId": "listItems",
+        "summary": "List items",
+        "tags": ["catalog"],
+        "responses": {"200": {"description": "OK"}}
+      },
+      "post": {
+        "operationId": "createItem",
+        "summary": "Create item",
+        "tags": ["catalog", "write"],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {"id": "item-001", "name": "Example Item"}
+            }
+          }
+        },
+        "responses": {"201": {"description": "Created"}}
+      }
+    }
+  }
+}`)
+
+	out := runCLI(t, "profile", "import-plan", "openapi", "--from", specPath, "--service-id", "service.catalog", "--evidence-dir", ".runtime/openapi", "--json")
+	var report struct {
+		Kind       string `json:"kind"`
+		SourcePath string `json:"sourcePath"`
+		Plan       struct {
+			Service struct {
+				ID          string `json:"id"`
+				DisplayName string `json:"displayName"`
+				Status      string `json:"status"`
+			} `json:"service"`
+			InterfaceNodes []struct {
+				ID     string `json:"id"`
+				Method string `json:"method"`
+				Path   string `json:"path"`
+				Status string `json:"status"`
+			} `json:"interfaceNodes"`
+			APICases []struct {
+				ID          string   `json:"id"`
+				CasePath    string   `json:"casePath"`
+				Status      string   `json:"status"`
+				EvidenceDir string   `json:"evidenceDir"`
+				Tags        []string `json:"tags"`
+			} `json:"apiCases"`
+			CaseFiles []struct {
+				Path string          `json:"path"`
+				Body json.RawMessage `json:"body"`
+			} `json:"caseFiles"`
+			WrittenFiles []string `json:"writtenFiles"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode profile import plan json: %v\n%s", err, out)
+	}
+	if report.Kind != "openapi" || report.SourcePath != specPath || report.Plan.Service.ID != "service.catalog" || report.Plan.Service.Status != "draft" {
+		t.Fatalf("import plan summary = %#v", report)
+	}
+	if len(report.Plan.InterfaceNodes) != 2 || len(report.Plan.APICases) != 2 || len(report.Plan.CaseFiles) != 2 {
+		t.Fatalf("import plan counts = nodes:%d cases:%d files:%d", len(report.Plan.InterfaceNodes), len(report.Plan.APICases), len(report.Plan.CaseFiles))
+	}
+	if report.Plan.InterfaceNodes[0].ID != "node.service.catalog.list-items" || report.Plan.InterfaceNodes[0].Method != "GET" || report.Plan.InterfaceNodes[0].Path != "/items" || report.Plan.InterfaceNodes[0].Status != "draft" {
+		t.Fatalf("first interface node = %#v", report.Plan.InterfaceNodes[0])
+	}
+	if report.Plan.APICases[1].ID != "case.service.catalog.create-item" || report.Plan.APICases[1].CasePath != "api-cases/case.service.catalog.create-item.json" || report.Plan.APICases[1].EvidenceDir != ".runtime/openapi" || strings.Join(report.Plan.APICases[1].Tags, ",") != "openapi,catalog,write" {
+		t.Fatalf("second api case = %#v", report.Plan.APICases[1])
+	}
+	var runnable struct {
+		Request struct {
+			Method string         `json:"method"`
+			Path   string         `json:"path"`
+			Body   map[string]any `json:"body"`
+		} `json:"request"`
+		Assertions struct {
+			ExpectedStatusCodes []int `json:"expectedStatusCodes"`
+		} `json:"assertions"`
+	}
+	if err := json.Unmarshal(report.Plan.CaseFiles[1].Body, &runnable); err != nil {
+		t.Fatalf("decode generated case body: %v\n%s", err, string(report.Plan.CaseFiles[1].Body))
+	}
+	if runnable.Request.Method != "POST" || runnable.Request.Path != "/items" || runnable.Request.Body["id"] != "item-001" || len(runnable.Assertions.ExpectedStatusCodes) != 1 || runnable.Assertions.ExpectedStatusCodes[0] != 201 {
+		t.Fatalf("generated runnable case = %#v", runnable)
+	}
+
+	textOut := runCLI(t, "profile", "import-plan", "openapi", "--from", specPath, "--service-id", "service.catalog")
+	for _, want := range []string{"OpenAPI Import Plan", "Source: " + specPath, "Service: service.catalog", "Interface Nodes: 2", "API Cases: 2", "Case Files: 2"} {
+		if !strings.Contains(textOut, want) {
+			t.Fatalf("import plan text missing %q:\n%s", want, textOut)
+		}
+	}
+
+	outputDir := filepath.Join(t.TempDir(), "review-plan")
+	textOut = runCLI(t, "profile", "import-plan", "openapi", "--from", specPath, "--service-id", "service.catalog", "--evidence-dir", ".runtime/openapi", "--output-dir", outputDir)
+	if !strings.Contains(textOut, "Output Dir: "+outputDir) {
+		t.Fatalf("import plan output-dir text = %q", textOut)
+	}
+	for _, path := range []string{
+		"import-plan.json",
+		filepath.Join("services", "service.catalog.json"),
+		filepath.Join("interface-nodes", "node.service.catalog.list-items.json"),
+		filepath.Join("request-templates", "template.service.catalog.create-item.json"),
+		filepath.Join("cases", "case.service.catalog.create-item.json"),
+		filepath.Join("api-cases", "case.service.catalog.create-item.json"),
+	} {
+		if _, err := os.Stat(filepath.Join(outputDir, path)); err != nil {
+			t.Fatalf("expected import plan output %s: %v", path, err)
+		}
+	}
+	var metadataCase struct {
+		ID       string `json:"id"`
+		CasePath string `json:"casePath"`
+		Status   string `json:"status"`
+	}
+	readTestJSONFile(t, filepath.Join(outputDir, "cases", "case.service.catalog.create-item.json"), &metadataCase)
+	if metadataCase.ID != "case.service.catalog.create-item" || metadataCase.CasePath != "api-cases/case.service.catalog.create-item.json" || metadataCase.Status != "draft" {
+		t.Fatalf("written metadata case = %#v", metadataCase)
+	}
+	readTestJSONFile(t, filepath.Join(outputDir, "api-cases", "case.service.catalog.create-item.json"), &runnable)
+	if runnable.Request.Method != "POST" || runnable.Request.Path != "/items" || runnable.Request.Body["id"] != "item-001" {
+		t.Fatalf("written runnable case = %#v", runnable)
+	}
+}
+
+func TestProfileImportPlanHTTPCaptureCommand(t *testing.T) {
+	capturePath := filepath.Join(t.TempDir(), "traffic.json")
+	writeFile(t, capturePath, `{
+  "name": "Catalog Traffic",
+  "captures": [
+    {
+      "id": "createItem",
+      "name": "Create item from traffic",
+      "request": {
+        "method": "POST",
+        "path": "/items",
+        "headers": {"Content-Type": "application/json"},
+        "body": {"id": "item-001", "name": "Example"}
+      },
+      "response": {"status": 201, "body": {"id": "item-001"}}
+    }
+  ]
+}`)
+
+	out := runCLI(t, "profile", "import-plan", "http-capture", "--from", capturePath, "--service-id", "service.catalog", "--evidence-dir", ".runtime/replay", "--json")
+	var report struct {
+		Kind       string `json:"kind"`
+		SourcePath string `json:"sourcePath"`
+		Plan       struct {
+			Service struct {
+				ID     string `json:"id"`
+				Status string `json:"status"`
+			} `json:"service"`
+			InterfaceNodes []struct {
+				ID     string `json:"id"`
+				Method string `json:"method"`
+				Path   string `json:"path"`
+			} `json:"interfaceNodes"`
+			APICases []struct {
+				ID          string   `json:"id"`
+				CasePath    string   `json:"casePath"`
+				EvidenceDir string   `json:"evidenceDir"`
+				Tags        []string `json:"tags"`
+			} `json:"apiCases"`
+			CaseFiles []struct {
+				Path string          `json:"path"`
+				Body json.RawMessage `json:"body"`
+			} `json:"caseFiles"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode http capture import plan json: %v\n%s", err, out)
+	}
+	if report.Kind != "http-capture" || report.SourcePath != capturePath || report.Plan.Service.ID != "service.catalog" || report.Plan.Service.Status != "draft" {
+		t.Fatalf("http capture plan summary = %#v", report)
+	}
+	if len(report.Plan.InterfaceNodes) != 1 || len(report.Plan.APICases) != 1 || len(report.Plan.CaseFiles) != 1 {
+		t.Fatalf("http capture plan counts = nodes:%d cases:%d files:%d", len(report.Plan.InterfaceNodes), len(report.Plan.APICases), len(report.Plan.CaseFiles))
+	}
+	if report.Plan.InterfaceNodes[0].ID != "node.service.catalog.create-item" || report.Plan.InterfaceNodes[0].Method != "POST" || report.Plan.InterfaceNodes[0].Path != "/items" {
+		t.Fatalf("http capture node = %#v", report.Plan.InterfaceNodes[0])
+	}
+	if report.Plan.APICases[0].ID != "case.service.catalog.create-item" || report.Plan.APICases[0].CasePath != "api-cases/case.service.catalog.create-item.json" || report.Plan.APICases[0].EvidenceDir != ".runtime/replay" || strings.Join(report.Plan.APICases[0].Tags, ",") != "recorded,replay" {
+		t.Fatalf("http capture case = %#v", report.Plan.APICases[0])
+	}
+
+	outputDir := filepath.Join(t.TempDir(), "capture-plan")
+	textOut := runCLI(t, "profile", "import-plan", "http-capture", "--from", capturePath, "--service-id", "service.catalog", "--output-dir", outputDir)
+	for _, want := range []string{"HTTP Capture Import Plan", "Source: " + capturePath, "Output Dir: " + outputDir, "API Cases: 1"} {
+		if !strings.Contains(textOut, want) {
+			t.Fatalf("http capture text missing %q:\n%s", want, textOut)
+		}
+	}
+	for _, path := range []string{
+		"import-plan.json",
+		filepath.Join("services", "service.catalog.json"),
+		filepath.Join("interface-nodes", "node.service.catalog.create-item.json"),
+		filepath.Join("cases", "case.service.catalog.create-item.json"),
+		filepath.Join("api-cases", "case.service.catalog.create-item.json"),
+	} {
+		if _, err := os.Stat(filepath.Join(outputDir, path)); err != nil {
+			t.Fatalf("expected http capture output %s: %v", path, err)
+		}
+	}
+}
+
+func TestProfileGenerationPlanOpenAPICommand(t *testing.T) {
+	specPath := filepath.Join(t.TempDir(), "catalog-openapi.json")
+	writeFile(t, specPath, `{
+  "openapi": "3.0.3",
+  "info": {"title": "Catalog API"},
+  "paths": {
+    "/items": {
+      "post": {
+        "operationId": "createItem",
+        "summary": "Create item",
+        "tags": ["catalog"],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                  "id": {"type": "string", "example": "item-001"},
+                  "name": {"type": "string", "example": "Example Item"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {"description": "Created"},
+          "400": {"description": "Bad request"}
+        }
+      }
+    }
+  }
+}`)
+
+	out := runCLI(t, "profile", "generation-plan", "openapi", "--from", specPath, "--service-id", "service.catalog", "--evidence-dir", ".runtime/generated", "--json")
+	var report struct {
+		Kind       string `json:"kind"`
+		SourcePath string `json:"sourcePath"`
+		Plan       struct {
+			OK         bool `json:"ok"`
+			Candidates []struct {
+				ID     string `json:"id"`
+				Kind   string `json:"kind"`
+				Field  string `json:"field"`
+				CaseID string `json:"caseId"`
+			} `json:"candidates"`
+			APICases []struct {
+				ID       string   `json:"id"`
+				Status   string   `json:"status"`
+				CasePath string   `json:"casePath"`
+				Tags     []string `json:"tags"`
+			} `json:"apiCases"`
+			CaseFiles []struct {
+				Path string          `json:"path"`
+				Body json.RawMessage `json:"body"`
+			} `json:"caseFiles"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode generation plan json: %v\n%s", err, out)
+	}
+	if report.Kind != "openapi" || report.SourcePath != specPath || !report.Plan.OK || len(report.Plan.Candidates) != 1 || len(report.Plan.APICases) != 1 {
+		t.Fatalf("generation plan summary = %#v", report)
+	}
+	if report.Plan.Candidates[0].Kind != "missing-required-field" || report.Plan.Candidates[0].Field != "id" || report.Plan.Candidates[0].CaseID != "case.service.catalog.create-item.missing-id" {
+		t.Fatalf("generation candidate = %#v", report.Plan.Candidates[0])
+	}
+	if report.Plan.APICases[0].Status != "draft" || strings.Join(report.Plan.APICases[0].Tags, ",") != "generated,schema,negative,catalog" {
+		t.Fatalf("generated api case = %#v", report.Plan.APICases[0])
+	}
+
+	outputDir := filepath.Join(t.TempDir(), "generation-plan")
+	textOut := runCLI(t, "profile", "generation-plan", "openapi", "--from", specPath, "--service-id", "service.catalog", "--output-dir", outputDir)
+	for _, want := range []string{"OpenAPI Generation Plan", "Source: " + specPath, "Candidates: 1", "Output Dir: " + outputDir} {
+		if !strings.Contains(textOut, want) {
+			t.Fatalf("generation plan text missing %q:\n%s", want, textOut)
+		}
+	}
+	for _, path := range []string{
+		"generation-plan.json",
+		filepath.Join("cases", "case.service.catalog.create-item.missing-id.json"),
+		filepath.Join("api-cases", "case.service.catalog.create-item.missing-id.json"),
+	} {
+		if _, err := os.Stat(filepath.Join(outputDir, path)); err != nil {
+			t.Fatalf("expected generation plan output %s: %v", path, err)
+		}
+	}
+}
+
+func TestExecutorPlanCommandReportsProfileDescriptors(t *testing.T) {
+	profileDir := filepath.Join(t.TempDir(), "profile")
+	writeFile(t, filepath.Join(profileDir, "profile.json"), `{
+  "id": "sample",
+  "displayName": "Sample Profile",
+  "executors": [
+    {"id":"executor.command","displayName":"No-op command","kind":"custom-command","command":"true","status":"active"},
+    {"id":"executor.pytest","displayName":"Pytest suite","kind":"pytest","status":"active"}
+  ]
+}`)
+
+	out := runCLI(t, "executor", "plan", "--profile", profileDir, "--json")
+	var report struct {
+		OK        bool   `json:"ok"`
+		ProfileID string `json:"profileId"`
+		Counts    struct {
+			Total   int `json:"total"`
+			Ready   int `json:"ready"`
+			Blocked int `json:"blocked"`
+		} `json:"counts"`
+		Items []struct {
+			ID      string   `json:"id"`
+			Kind    string   `json:"kind"`
+			Ready   bool     `json:"ready"`
+			RunMode string   `json:"runMode"`
+			Issues  []string `json:"issues"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode executor plan json: %v\n%s", err, out)
+	}
+	if report.OK || report.ProfileID != "sample" || report.Counts.Total != 2 || report.Counts.Ready != 1 || report.Counts.Blocked != 1 {
+		t.Fatalf("executor plan summary = %#v", report)
+	}
+	if report.Items[0].ID != "executor.command" || !report.Items[0].Ready || report.Items[0].RunMode != "dry-run" {
+		t.Fatalf("ready executor item = %#v", report.Items[0])
+	}
+	if report.Items[1].ID != "executor.pytest" || report.Items[1].Ready || !containsString(report.Items[1].Issues, "missing-source-path") {
+		t.Fatalf("blocked executor item = %#v", report.Items[1])
+	}
+
+	textOut := runCLI(t, "executor", "plan", "--profile", profileDir)
+	for _, want := range []string{"Executor Plan", "Profile: sample", "Ready: 1", "Blocked: 1", "missing-source-path"} {
+		if !strings.Contains(textOut, want) {
+			t.Fatalf("executor plan text missing %q:\n%s", want, textOut)
 		}
 	}
 }
@@ -3708,6 +4147,17 @@ func writeFile(t *testing.T, path string, body string) {
 	}
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func readTestJSONFile(t *testing.T, path string, target any) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read json file %s: %v", path, err)
+	}
+	if err := json.Unmarshal(raw, target); err != nil {
+		t.Fatalf("decode json file %s: %v\n%s", path, err, raw)
 	}
 }
 

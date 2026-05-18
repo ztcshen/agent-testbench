@@ -2,7 +2,7 @@
 
 Open Test Sandbox is a local-first workbench that can store requests,
 responses, logs, and runtime Evidence. Treat those files as sensitive unless a
-profile explicitly proves otherwise.
+synthetic fixture explicitly proves otherwise.
 
 ## Supported Versions
 
@@ -25,8 +25,8 @@ private maintainer channel rather than a public issue. Include:
 - Prefer synthetic examples in public issues and pull requests.
 - Redact secrets, tokens, cookies, account numbers, and personal data before
   sharing Evidence outside a trusted environment.
-- Keep profile bundles in a separate repository or profile home when they
-  contain team-owned endpoints or data.
+- Keep team-owned endpoints or data out of public issues and out of the
+  open-source core.
 
 ## Dependency Review
 

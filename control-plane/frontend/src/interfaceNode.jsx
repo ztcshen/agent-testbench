@@ -10,11 +10,21 @@ function queryParam(name) {
 function queryContextParams() {
   const current = new URLSearchParams(window.location.search);
   const params = new URLSearchParams();
-  ["id", "runId", "flowId", "workflowRunId", "workflowId", "workflow", "stepId", "step"].forEach((key) => {
+  ["id", "runId", "flowId", "workflowRunId", "workflowId", "workflow", "case", "caseId", "stepId", "step"].forEach((key) => {
     const value = current.get(key);
     if (value) params.set(key, value);
   });
   return params;
+}
+
+function workflowCaseSetHref() {
+  const params = queryContextParams();
+  const workflowID = params.get("workflow") || params.get("workflowId") || "";
+  if (!workflowID) return "";
+  const caseID = params.get("case") || "";
+  const out = new URLSearchParams({ workflow: workflowID });
+  if (caseID) out.set("case", caseID);
+  return `/api-cases.html?${out.toString()}`;
 }
 
 function pageMode() {
@@ -594,6 +604,7 @@ function InterfaceNodeApp() {
         ? copyText(payload, "fieldsPageTitle", "接口节点字段契约")
         : node.displayName || node.id || copyText(payload, "mainPageTitle", "接口节点");
   const contentClass = mode === "history" ? "interface-node-layout interface-node-history-layout" : mode === "fields" ? "interface-node-layout interface-node-field-layout" : "interface-node-layout";
+  const workflowCaseHref = workflowCaseSetHref();
 
   return (
     <main className={`app interface-node-page ${pageClass}`} data-template-id={mode === "history" ? "TPL-INTERFACE-NODE-RUN-HISTORY-V1" : mode === "fields" ? "TPL-INTERFACE-NODE-FIELD-CONTRACT-V1" : "TPL-INTERFACE-NODE-CASE-LIST-V1"} data-interface-node-mode={mode}>
@@ -614,6 +625,7 @@ function InterfaceNodeApp() {
         </div>
         <div className="actions">
           <span className="environment-status-pill" role="status">{message}</span>
+          {workflowCaseHref ? <a className="button-link" href={workflowCaseHref}>Workflow case set</a> : null}
           <a className="button-link" href={node.serviceId ? `/environment-node.html?id=${encodeURIComponent(node.serviceId)}` : "/environment-nodes.html"}>{node.serviceId ? copyText(payload, "serviceNodeLink", "服务节点") : copyText(payload, "environmentNodesLink", "环境节点")}</a>
           <a className={`button-link ${mode === "main" ? "disabled-link" : ""}`} href={nodeID ? modeParams("main") : "/interface-node.html"}>{copyText(payload, "mainNav", "用例概览")}</a>
           <a className={`button-link ${mode === "history" ? "disabled-link" : ""}`} href={nodeID ? modeParams("history") : "/interface-node-history.html"}>{copyText(payload, "historyNav", "运行历史")}</a>

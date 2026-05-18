@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -61,11 +63,13 @@ func collectTraceTopology(ctx context.Context, runtime store.Store, collector tr
 	if endpoint == "" && traceID == "" {
 		return store.TraceTopology{}, traceTopology{}, fmt.Errorf("endpoint is required")
 	}
-	startedAt := timeFromPayload(payload["startedAt"], run.StartedAt, run.CreatedAt).Add(-30 * time.Second)
-	finishedAt := timeFromPayload(payload["finishedAt"], run.FinishedAt, run.UpdatedAt, run.CreatedAt).Add(90 * time.Second)
+	startedAt := timeFromPayload(payload["startedAt"], run.StartedAt, run.CreatedAt)
+	finishedAt := timeFromPayload(payload["finishedAt"], run.FinishedAt, run.UpdatedAt, run.CreatedAt)
 	if finishedAt.Before(startedAt) {
 		finishedAt = startedAt.Add(2 * time.Minute)
 	}
+	queryStartedAt := startedAt.Add(-30 * time.Second)
+	queryFinishedAt := finishedAt.Add(90 * time.Second)
 	provider := graphQLTraceProvider{URL: collector.GraphQLURL}
 	var topology traceTopology
 	if traceID != "" {
@@ -75,10 +79,11 @@ func collectTraceTopology(ctx context.Context, runtime store.Store, collector tr
 		}
 		topology = buildTraceTopology(stepID, caseID, requestID, trace)
 	} else {
-		candidates, err := provider.FindCandidates(ctx, endpoint, startedAt, finishedAt)
+		candidates, err := provider.FindCandidates(ctx, endpoint, queryStartedAt, queryFinishedAt)
 		if err != nil {
 			return store.TraceTopology{}, traceTopology{}, err
 		}
+		sortTraceCandidatesByRunWindow(candidates, startedAt, finishedAt)
 		var lastErr error
 		for _, candidate := range candidates {
 			trace, err := provider.QueryTrace(ctx, candidate.TraceID)
@@ -119,6 +124,52 @@ func collectTraceTopology(ctx context.Context, runtime store.Store, collector tr
 		return store.TraceTopology{}, traceTopology{}, err
 	}
 	return row, topology, nil
+}
+
+func sortTraceCandidatesByRunWindow(candidates []traceCandidate, startedAt, finishedAt time.Time) {
+	if len(candidates) < 2 || startedAt.IsZero() || finishedAt.IsZero() {
+		return
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return traceCandidateDistance(candidates[i], startedAt, finishedAt) < traceCandidateDistance(candidates[j], startedAt, finishedAt)
+	})
+}
+
+func traceCandidateDistance(candidate traceCandidate, startedAt, finishedAt time.Time) time.Duration {
+	start, ok := parseTraceCandidateStart(candidate.Start)
+	if !ok {
+		return 1<<63 - 1
+	}
+	if start.Before(startedAt) {
+		return startedAt.Sub(start)
+	}
+	if start.After(finishedAt) {
+		return start.Sub(finishedAt)
+	}
+	return 0
+}
+
+func parseTraceCandidateStart(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false
+	}
+	if millis, err := strconv.ParseInt(value, 10, 64); err == nil {
+		switch {
+		case millis > 1_000_000_000_000_000:
+			return time.UnixMicro(millis).UTC(), true
+		case millis > 1_000_000_000_000:
+			return time.UnixMilli(millis).UTC(), true
+		default:
+			return time.Unix(millis, 0).UTC(), true
+		}
+	}
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 1504"} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed.UTC(), true
+		}
+	}
+	return time.Time{}, false
 }
 
 func timeFromPayload(value any, fallbacks ...time.Time) time.Time {

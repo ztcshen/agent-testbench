@@ -11,18 +11,20 @@ import (
 )
 
 type QualityCounts struct {
-	Nodes              int `json:"nodes"`
-	NodesWithoutCases  int `json:"nodesWithoutCases"`
-	Cases              int `json:"cases"`
-	CompleteCases      int `json:"completeCases"`
-	IncompleteCases    int `json:"incompleteCases"`
-	MissingDescription int `json:"missingDescription"`
-	MissingTags        int `json:"missingTags"`
-	MissingPriority    int `json:"missingPriority"`
-	MissingOwner       int `json:"missingOwner"`
-	MissingRunnable    int `json:"missingRunnable"`
-	MissingExecution   int `json:"missingExecution"`
-	Inactive           int `json:"inactive"`
+	Nodes                  int `json:"nodes"`
+	NodesWithoutCases      int `json:"nodesWithoutCases"`
+	Cases                  int `json:"cases"`
+	CompleteCases          int `json:"completeCases"`
+	IncompleteCases        int `json:"incompleteCases"`
+	MissingDescription     int `json:"missingDescription"`
+	MissingTags            int `json:"missingTags"`
+	MissingPriority        int `json:"missingPriority"`
+	MissingOwner           int `json:"missingOwner"`
+	MissingRunnable        int `json:"missingRunnable"`
+	MissingExecution       int `json:"missingExecution"`
+	Inactive               int `json:"inactive"`
+	NonExecutableLifecycle int `json:"nonExecutableLifecycle"`
+	InvalidStatus          int `json:"invalidStatus"`
 }
 
 type QualityCase struct {
@@ -31,6 +33,7 @@ type QualityCase struct {
 	NodeID             string   `json:"nodeId,omitempty"`
 	NodeName           string   `json:"nodeName,omitempty"`
 	Status             string   `json:"status"`
+	Lifecycle          string   `json:"lifecycle"`
 	Tags               []string `json:"tags,omitempty"`
 	Priority           string   `json:"priority,omitempty"`
 	Owner              string   `json:"owner,omitempty"`
@@ -69,6 +72,7 @@ type QualityPlanCounts struct {
 	CompleteMetadata int `json:"completeMetadata"`
 	AddRunnable      int `json:"addRunnable"`
 	AddExecution     int `json:"addExecution"`
+	ReviewLifecycle  int `json:"reviewLifecycle"`
 }
 
 type QualityPlanAction struct {
@@ -98,6 +102,7 @@ type QualityPlanReport struct {
 func Quality(ctx context.Context, bundle profile.Bundle, runtime RecordStore, filter Filter, cases []profile.APICase) (QualityReport, error) {
 	filter = NormalizeFilter(filter)
 	configs := ExecutionConfigSet(ctx, bundle, runtime)
+	executorRefs := executorReferenceSet(bundle)
 	nodesByID := map[string]profile.InterfaceNode{}
 	for _, node := range bundle.InterfaceNodes {
 		nodesByID[node.ID] = node
@@ -124,16 +129,26 @@ func Quality(ctx context.Context, bundle profile.Bundle, runtime RecordStore, fi
 			NodeID:             item.NodeID,
 			NodeName:           firstNonEmpty(node.DisplayName, item.NodeID),
 			Status:             CaseStatus(item),
+			Lifecycle:          CaseStatus(item),
 			Tags:               append([]string(nil), item.Tags...),
 			Priority:           item.Priority,
 			Owner:              item.Owner,
 			HasDescription:     strings.TrimSpace(item.Description) != "",
-			HasRunnableFile:    strings.TrimSpace(item.CasePath) != "",
-			HasExecutionConfig: configs[item.ID],
+			HasRunnableFile:    hasRunnableSource(item),
+			HasExecutionConfig: configs[item.ID] || hasUsableExecutorReference(item, executorRefs),
 		}
-		if !strings.EqualFold(row.Status, "active") {
+		if hasExternalSource(item) && !hasUsableExecutorReference(item, executorRefs) {
+			row.Issues = append(row.Issues, "missing-executor")
+		}
+		if row.Lifecycle == CaseLifecycleInvalid {
+			row.Issues = append(row.Issues, "invalid-status")
+			report.Counts.InvalidStatus++
+		}
+		if !IsExecutableCaseLifecycle(row.Lifecycle) {
 			row.Issues = append(row.Issues, "inactive")
+			row.Issues = append(row.Issues, "non-executable-lifecycle")
 			report.Counts.Inactive++
+			report.Counts.NonExecutableLifecycle++
 		}
 		if !row.HasDescription {
 			row.Issues = append(row.Issues, "missing-description")
@@ -227,6 +242,17 @@ func QualityPlan(ctx context.Context, bundle profile.Bundle, runtime RecordStore
 		if item.Complete {
 			continue
 		}
+		if lifecycleIssues := caseLifecycleIssues(item.Issues); len(lifecycleIssues) > 0 {
+			report.Actions = append(report.Actions, QualityPlanAction{
+				Type:      "review-case-lifecycle",
+				CaseID:    item.CaseID,
+				CaseTitle: item.Title,
+				NodeID:    item.NodeID,
+				Issues:    lifecycleIssues,
+				Reason:    "case lifecycle status is not executable",
+			})
+			report.Counts.ReviewLifecycle++
+		}
 		fields := missingMetadataFields(item)
 		if len(fields) > 0 {
 			report.Actions = append(report.Actions, QualityPlanAction{
@@ -311,6 +337,55 @@ func metadataIssues(issues []string) []string {
 	return out
 }
 
+func caseLifecycleIssues(issues []string) []string {
+	out := []string{}
+	for _, issue := range issues {
+		switch issue {
+		case "invalid-status", "non-executable-lifecycle":
+			out = append(out, issue)
+		}
+	}
+	return out
+}
+
+func hasRunnableSource(item profile.APICase) bool {
+	return strings.TrimSpace(item.CasePath) != "" || hasExternalSource(item)
+}
+
+func hasExternalSource(item profile.APICase) bool {
+	return strings.TrimSpace(item.SourcePath) != "" || strings.TrimSpace(item.SourceKind) != "" || strings.TrimSpace(item.ExecutorID) != ""
+}
+
+func executorReferenceSet(bundle profile.Bundle) map[string]profile.ExecutorDescriptor {
+	refs := map[string]profile.ExecutorDescriptor{}
+	for _, item := range bundle.Executors {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			continue
+		}
+		refs[id] = item
+	}
+	return refs
+}
+
+func hasUsableExecutorReference(item profile.APICase, refs map[string]profile.ExecutorDescriptor) bool {
+	executorID := strings.TrimSpace(item.ExecutorID)
+	if executorID == "" || strings.TrimSpace(item.SourcePath) == "" {
+		return false
+	}
+	executor, ok := refs[executorID]
+	if !ok {
+		return false
+	}
+	status := strings.TrimSpace(strings.ToLower(executor.Status))
+	if status != "" && status != "active" {
+		return false
+	}
+	sourceKind := strings.TrimSpace(strings.ToLower(item.SourceKind))
+	executorKind := strings.TrimSpace(strings.ToLower(executor.Kind))
+	return sourceKind == "" || executorKind == "" || sourceKind == executorKind
+}
+
 func suggestedCaseID(nodeID string) string {
 	return "case." + slugValue(nodeID) + ".default"
 }
@@ -343,10 +418,12 @@ func actionRank(actionType string) int {
 		return 0
 	case "complete-case-metadata":
 		return 1
-	case "add-runnable-source":
+	case "review-case-lifecycle":
 		return 2
-	case "add-execution-config":
+	case "add-runnable-source":
 		return 3
+	case "add-execution-config":
+		return 4
 	default:
 		return 99
 	}

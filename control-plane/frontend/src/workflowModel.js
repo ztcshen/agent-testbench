@@ -37,6 +37,18 @@ export function workflowServiceIds(workflow) {
   return unique((workflow?.steps || []).map((step) => step.serviceId));
 }
 
+export function workflowEntryServiceIds(workflow) {
+  const declared = workflow?.presentation?.entryServiceIds || workflow?.entryServiceIds || [];
+  const normalized = unique((declared || []).filter(Boolean));
+  if (normalized.length) return normalized;
+  const first = (workflow?.steps || []).map((step) => step.serviceId).find(Boolean) || "";
+  return first ? [first] : [];
+}
+
+export function workflowEntryServiceId(workflow) {
+  return workflowEntryServiceIds(workflow)[0] || "";
+}
+
 export function dashboardStatusById(dashboard) {
   const byId = new Map();
   (dashboard?.groups || []).forEach((group) => {
@@ -56,12 +68,15 @@ export function workflowServiceSearchText(workflow, services) {
 }
 
 export function workflowRuntimeImpact(workflow, statusById = new Map()) {
-  const runtimeItems = workflowServiceIds(workflow).map((serviceId) => statusById.get(serviceId)).filter(Boolean);
-  const badCount = runtimeItems.filter((item) => !item.ok).length;
-  if (!runtimeItems.length) {
-    return { text: "运行态未覆盖", tone: "unknown" };
+  const steps = workflow?.steps || [];
+  if (!steps.length) {
+    return { text: "未登记接口", tone: "unknown" };
   }
-  return badCount ? { text: `${badCount} 异常服务`, tone: "bad" } : { text: "服务正常", tone: "ok" };
+  const available = steps.filter((step) => step.executable !== false && step.caseId && (step.interfaceId || step.nodeId || step.serviceId)).length;
+  if (available !== steps.length) {
+    return { text: `${available}/${steps.length} 接口可用`, tone: "bad" };
+  }
+  return { text: `${available}/${steps.length} 接口可用`, tone: "ok" };
 }
 
 export function filterWorkflows(workflows, services, query, statusById = new Map()) {

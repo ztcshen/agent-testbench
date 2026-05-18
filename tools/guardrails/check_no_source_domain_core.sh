@@ -6,8 +6,8 @@ cd "$ROOT_DIR"
 
 DENYLIST="tools/guardrails/source-domain-terms.txt"
 
-if [[ -e profiles ]]; then
-  echo "core repo must not contain a bundled profile directory; keep profile bundles outside this repository" >&2
+if [[ -e team-configs ]]; then
+  echo "core repo must not contain bundled team configuration; keep team data outside this repository" >&2
   exit 1
 fi
 
@@ -37,7 +37,7 @@ if [[ ${#existing[@]} -eq 0 ]]; then
 fi
 
 if rg -n -i -f "$DENYLIST" "${existing[@]}"; then
-  echo "core contains source-domain terms; move them behind a profile or config bundle" >&2
+  echo "core contains source-domain terms; move them into private validation data" >&2
   exit 1
 fi
 

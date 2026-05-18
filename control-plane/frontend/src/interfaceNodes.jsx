@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { RefreshCw } from "lucide-react";
 import { fetchJSON } from "./api.js";
+import { buildInterfaceNodeDirectoryContext, interfaceNodeDetailHref } from "./interfaceNodesModel.mjs";
 
 function text(value, fallback = "-") {
   const out = String(value ?? "").trim();
@@ -56,14 +57,14 @@ function Stats({ items, payload }) {
   );
 }
 
-function Attention({ items, payload }) {
+function Attention({ items, payload, directoryContext }) {
   const attention = items
     .filter((item) => item.admissionStatus !== "passed" || item.validationStatus === "invalid")
     .slice(0, 8);
   return (
     <div className="interface-node-directory-attention-list">
       {attention.length ? attention.map((item) => (
-        <a className="interface-node-directory-attention-item" href={item.href || `/interface-node.html?id=${encodeURIComponent(item.id || "")}`} key={item.id}>
+        <a className="interface-node-directory-attention-item" href={interfaceNodeDetailHref(item, directoryContext) || item.href || `/interface-node.html?id=${encodeURIComponent(item.id || "")}`} key={item.id}>
           <strong>{item.displayName || item.id || copyText(payload, "fallbackNodeName", "接口节点")}</strong>
           <span>{[item.admissionStatus || "pending", item.validationStatus === "invalid" ? `${item.validationIssueCount ?? 0} validation` : "", item.serviceId].filter(Boolean).join(" · ")}</span>
         </a>
@@ -72,9 +73,9 @@ function Attention({ items, payload }) {
   );
 }
 
-function NodeCard({ item, payload }) {
+function NodeCard({ item, payload, directoryContext }) {
   return (
-    <a className="interface-node-directory-card" href={item.href || `/interface-node.html?id=${encodeURIComponent(item.id || "")}`}>
+    <a className="interface-node-directory-card" href={interfaceNodeDetailHref(item, directoryContext) || item.href || `/interface-node.html?id=${encodeURIComponent(item.id || "")}`}>
       <div className="interface-node-directory-card-top">
         <strong>{item.displayName || item.id || copyText(payload, "fallbackNodeName", "接口节点")}</strong>
         <span className={`react-pill ${statusClass(item)}`}>{item.admissionStatus || "pending"}</span>
@@ -93,9 +94,10 @@ function NodeCard({ item, payload }) {
 }
 
 function InterfaceNodesApp() {
+  const directoryContext = useMemo(() => buildInterfaceNodeDirectoryContext(new URLSearchParams(window.location.search)), []);
   const [payload, setPayload] = useState({ items: [], source: {} });
   const [query, setQuery] = useState("");
-  const [serviceID, setServiceID] = useState("");
+  const [serviceID, setServiceID] = useState(directoryContext.serviceId || "");
   const [message, setMessage] = useState("loading");
 
   async function refresh() {
@@ -142,6 +144,7 @@ function InterfaceNodesApp() {
         </div>
         <div className="actions">
           <span className="dashboard-status-pill" role="status">{message}</span>
+          {directoryContext.workflowCaseSetHref ? <a className="button-link" href={directoryContext.workflowCaseSetHref}>Workflow case set</a> : null}
           <a className="button-link" href="/">{copyText(payload, "consoleLink", "控制台")}</a>
           <a className="button-link" href="/workflows.html">{copyText(payload, "workflowDirectoryLink", "Workflow 目录")}</a>
           <a className="button-link" href="/service-inventory.html">{copyText(payload, "serviceDirectoryLink", "服务目录")}</a>
@@ -156,7 +159,7 @@ function InterfaceNodesApp() {
           <div className="dashboard-section-head interface-node-directory-head">
             <div>
               <h2>{copyText(payload, "directoryPanelTitle", "Interface Nodes")}</h2>
-              <p>{`${source.kind || "profile"}${source.path ? ` · ${source.path}` : ""}`}</p>
+              <p>{`${source.kind || "store"}${source.path ? ` · ${source.path}` : ""}`}</p>
             </div>
             <div className="interface-node-directory-filters">
               <label>
@@ -173,7 +176,7 @@ function InterfaceNodesApp() {
             </div>
           </div>
           <div className="interface-node-directory-list">
-            {visible.length ? visible.map((item) => <NodeCard item={item} payload={payload} key={item.id} />) : <p className="dashboard-empty">{copyText(payload, "emptyFilterResult", "没有匹配的接口节点。")}</p>}
+            {visible.length ? visible.map((item) => <NodeCard item={item} payload={payload} directoryContext={directoryContext} key={item.id} />) : <p className="dashboard-empty">{copyText(payload, "emptyFilterResult", "没有匹配的接口节点。")}</p>}
           </div>
         </div>
         <aside className="interface-node-directory-side" aria-label={copyText(payload, "directorySummaryAriaLabel", "接口节点汇总")}>
@@ -185,7 +188,7 @@ function InterfaceNodesApp() {
                 <p>{copyText(payload, "attentionSubtitle", "failed / pending admission")}</p>
               </div>
             </div>
-            <Attention items={items} payload={payload} />
+            <Attention items={items} payload={payload} directoryContext={directoryContext} />
           </div>
         </aside>
       </section>

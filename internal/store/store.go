@@ -77,16 +77,19 @@ type APICaseRunRecord struct {
 }
 
 type EvidenceRecord struct {
-	ID        string
-	RunID     string
-	CaseRunID string
-	Kind      string
-	URI       string
-	MediaType string
-	SHA256    string
-	SizeBytes int64
-	Summary   string
-	CreatedAt time.Time
+	ID         string
+	RunID      string
+	CaseRunID  string
+	Kind       string
+	URI        string
+	MediaType  string
+	SHA256     string
+	SizeBytes  int64
+	Summary    string
+	Category   string
+	Visibility string
+	LabelsJSON string
+	CreatedAt  time.Time
 }
 
 type TraceTopology struct {
@@ -274,6 +277,9 @@ type CatalogAPICase struct {
 	Status               string
 	SortOrder            int
 	CasePath             string
+	SourceKind           string
+	SourcePath           string
+	ExecutorID           string
 	BaseURL              string
 	EvidenceDir          string
 	TimeoutSeconds       int

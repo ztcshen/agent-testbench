@@ -11,7 +11,7 @@ npm run release-check
 
 The gate verifies:
 
-- no root `profiles/` directory exists;
+- no root `import bundles/` directory exists;
 - runtime and dependency output are not tracked;
 - source-domain guardrails pass;
 - `git diff --check` passes;
@@ -23,7 +23,7 @@ The gate verifies:
 
 - `README.md` points to the current quick start and public docs.
 - `CHANGELOG.md` describes notable changes.
-- New CLI, API, Store, report, or profile contracts are documented.
+- New CLI, API, Store, report, or import bundle contracts are documented.
 - Generated runtime output remains outside git.
 - Public examples use synthetic data only.
 - Third-party dependency licenses are reviewed.
@@ -36,7 +36,7 @@ For each public release, include:
 - any breaking contract changes;
 - minimum Go and Node versions;
 - known limitations;
-- migration notes for profile authors.
+- migration notes for import bundle authors.
 
 ## Packaging
 

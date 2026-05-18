@@ -71,6 +71,9 @@ func TestServerExposesProfileAssetLists(t *testing.T) {
 				DisplayName:    "Case Alpha",
 				NodeID:         "node.alpha",
 				CasePath:       "cases/case.alpha.json",
+				SourceKind:     "karate",
+				SourcePath:     "tests/api.feature",
+				ExecutorID:     "executor.karate",
 				BaseURL:        "http://127.0.0.1:18080",
 				EvidenceDir:    ".runtime/cases",
 				TimeoutSeconds: 30,
@@ -245,6 +248,148 @@ func TestServerProfileImportSwitchesActiveProfile(t *testing.T) {
 		if got := sqliteCountRows(t, dbPath, table); got != want {
 			t.Fatalf("%s count = %d, want %d", table, got, want)
 		}
+	}
+}
+
+func TestServerRegistersServiceIntoSandboxStoreWithoutProfileImport(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "sandbox.sqlite")
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: dbPath})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	server := httptest.NewServer(controlplane.NewWithStore(loadEmptyProfile(t), s))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/sandbox/services", `{
+		"id":"service.gateway",
+		"displayName":"Gateway",
+		"kind":"http",
+		"servicePort":18181,
+		"healthUrl":"http://127.0.0.1:18181/health",
+		"status":"active"
+	}`, http.StatusOK)
+
+	if payload["ok"] != true {
+		t.Fatalf("service registration payload = %#v", payload)
+	}
+	service, ok := payload["service"].(map[string]any)
+	if !ok || service["id"] != "service.gateway" || service["servicePort"] != float64(18181) {
+		t.Fatalf("registered service payload = %#v", payload["service"])
+	}
+	if payload["storeId"] != "current" {
+		t.Fatalf("store identity should be current, got %#v", payload["storeId"])
+	}
+
+	catalog, err := s.GetProfileCatalog(ctx)
+	if err != nil {
+		t.Fatalf("get store catalog: %v", err)
+	}
+	if catalog.ProfileID != "current" || len(catalog.Services) != 1 {
+		t.Fatalf("catalog after service registration = %#v", catalog)
+	}
+	if catalog.Services[0].ID != "service.gateway" || catalog.Services[0].HealthURL != "http://127.0.0.1:18181/health" {
+		t.Fatalf("registered catalog service = %#v", catalog.Services[0])
+	}
+
+	catalogPayload := decodeJSONResponse(t, server.URL+"/api/catalog", http.StatusOK)
+	services, ok := catalogPayload["services"].([]any)
+	if !ok || len(services) != 1 {
+		t.Fatalf("catalog payload services = %#v", catalogPayload["services"])
+	}
+	first, ok := services[0].(map[string]any)
+	if !ok || first["id"] != "service.gateway" {
+		t.Fatalf("catalog payload first service = %#v", services[0])
+	}
+}
+
+func TestServerRegistersInterfaceIntoSandboxStoreWithoutProfileImport(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "sandbox.sqlite")
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: dbPath})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "current",
+		Services: []store.CatalogService{
+			{ID: "service.gateway", DisplayName: "Gateway", Kind: "http", ServicePort: 18181, Status: "active"},
+		},
+	}); err != nil {
+		t.Fatalf("seed catalog: %v", err)
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(loadEmptyProfile(t), s))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/sandbox/interfaces", `{
+		"id":"interface.create",
+		"displayName":"Create API",
+		"serviceId":"service.gateway",
+		"operation":"item.create",
+		"method":"POST",
+		"path":"/v1/items",
+		"timeoutMs":1200,
+		"requestTemplate":{"id":"template.create","templateJson":{"body":{"name":"{{override:name|demo}}"}}},
+		"case":{
+			"id":"case.create.default",
+			"displayName":"Create default",
+			"caseType":"success",
+			"requiredForAdmission":true,
+			"expectedJson":{"ok":true},
+			"timeoutSeconds":5
+		},
+		"caseExecution":{
+			"method":"POST",
+			"path":"/v1/items",
+			"body":{"name":"{{override:name|demo}}"},
+			"expectedHttpCodes":[200]
+		}
+	}`, http.StatusOK)
+
+	if payload["ok"] != true || payload["storeId"] != "current" {
+		t.Fatalf("interface registration payload = %#v", payload)
+	}
+	view := payload["interface"].(map[string]any)
+	if view["id"] != "interface.create" || view["serviceId"] != "service.gateway" || view["caseId"] != "case.create.default" {
+		t.Fatalf("interface registration view = %#v", view)
+	}
+
+	catalog, err := s.GetProfileCatalog(ctx)
+	if err != nil {
+		t.Fatalf("get catalog: %v", err)
+	}
+	if len(catalog.Services) != 1 || catalog.Services[0].ID != "service.gateway" {
+		t.Fatalf("service registration should be preserved: %#v", catalog.Services)
+	}
+	if len(catalog.InterfaceNodes) != 1 || catalog.InterfaceNodes[0].ID != "interface.create" || catalog.InterfaceNodes[0].ServiceID != "service.gateway" {
+		t.Fatalf("registered interface node = %#v", catalog.InterfaceNodes)
+	}
+	if len(catalog.RequestTemplates) != 1 || catalog.RequestTemplates[0].ID != "template.create" || catalog.RequestTemplates[0].NodeID != "interface.create" {
+		t.Fatalf("registered request templates = %#v", catalog.RequestTemplates)
+	}
+	if len(catalog.APICases) != 1 || catalog.APICases[0].ID != "case.create.default" || catalog.APICases[0].NodeID != "interface.create" || !catalog.APICases[0].RequiredForAdmission {
+		t.Fatalf("registered api cases = %#v", catalog.APICases)
+	}
+	executionConfigFound := false
+	for _, config := range catalog.TemplateConfigs {
+		if config.WorkflowID == "" && config.ScopeType == "case" && config.ScopeID == "case.create.default" && strings.Contains(config.ConfigJSON, `"caseExecution"`) {
+			executionConfigFound = true
+		}
+	}
+	if !executionConfigFound {
+		t.Fatalf("registered execution config = %#v", catalog.TemplateConfigs)
+	}
+
+	catalogPayload := decodeJSONResponse(t, server.URL+"/api/catalog", http.StatusOK)
+	cases, ok := catalogPayload["apiCases"].([]any)
+	if !ok || len(cases) != 1 || cases[0].(map[string]any)["id"] != "case.create.default" {
+		t.Fatalf("catalog payload cases = %#v", catalogPayload["apiCases"])
+	}
+	detail := decodeJSONResponse(t, server.URL+"/api/interface-node?id=interface.create", http.StatusOK)
+	if detail["ok"] != true || detail["requested"] != "interface.create" {
+		t.Fatalf("interface detail payload = %#v", detail)
 	}
 }
 
@@ -1299,7 +1444,7 @@ func TestServerExposesInterfaceNodeRunHistoryFromStore(t *testing.T) {
 		RequestID:     "request.alpha",
 		TraceID:       "trace.alpha",
 		Status:        "complete",
-		TopologyJSON:  `{"status":"complete","requestId":"request.alpha","traceId":"trace.alpha","spanCount":2,"confirmedEdges":[{"source":"service.entry","target":"service.worker"}],"externalExits":[],"unresolvedExits":[],"observedNodes":["service.entry","service.worker"]}`,
+		TopologyJSON:  `{"provider":"skywalking","status":"complete","requestId":"request.alpha","traceId":"trace.alpha","spanCount":2,"confirmedEdges":[{"source":"service.entry","target":"service.worker"}],"externalExits":[],"unresolvedExits":[],"observedNodes":["service.entry","service.worker"]}`,
 		TextTopology:  "service.entry -> service.worker",
 		CreatedAt:     started.Add(time.Second),
 	}); err != nil {
@@ -1415,7 +1560,7 @@ func TestServerScopesInterfaceNodeRunsToWorkflowStepContext(t *testing.T) {
 		RequestID:     "request.alpha",
 		TraceID:       "trace.alpha",
 		Status:        "complete",
-		TopologyJSON:  `{"status":"complete","requestId":"request.alpha","traceId":"trace.alpha","spanCount":2,"confirmedEdges":[{"source":"service.entry","target":"service.worker"}],"externalExits":[],"unresolvedExits":[],"observedNodes":["service.entry","service.worker"]}`,
+		TopologyJSON:  `{"provider":"skywalking","status":"complete","requestId":"request.alpha","traceId":"trace.alpha","spanCount":2,"confirmedEdges":[{"source":"service.entry","target":"service.worker"}],"externalExits":[],"unresolvedExits":[],"observedNodes":["service.entry","service.worker"]}`,
 		TextTopology:  "service.entry -> service.worker",
 		CreatedAt:     started.Add(time.Second),
 	}); err != nil {
@@ -1451,7 +1596,7 @@ func TestServerScopesInterfaceNodeRunsToWorkflowStepContext(t *testing.T) {
 		t.Fatalf("scoped interface node latest run = %#v", latest)
 	}
 	topology := latest["topology"].(map[string]any)
-	if topology["traceId"] != "trace.alpha" || topology["requestId"] != "request.alpha" || topology["status"] != "complete" {
+	if topology["traceId"] != "trace.alpha" || topology["requestId"] != "request.alpha" || topology["status"] != "complete" || topology["provider"] != "skywalking" {
 		t.Fatalf("scoped interface node topology = %#v", topology)
 	}
 	request := latest["requestSummary"].(map[string]any)
@@ -1669,6 +1814,80 @@ func TestServerExposesCatalogForReactShell(t *testing.T) {
 	}
 	if len(payload.Topology.Nodes) != 1 || payload.Topology.Nodes[0] != "service.alpha" {
 		t.Fatalf("catalog topology = %#v", payload.Topology)
+	}
+}
+
+func TestServerExposesCatalogWorkflowFinderFromProfileConfig(t *testing.T) {
+	bundle := profile.Bundle{
+		ID:          "sample",
+		DisplayName: "Sample Profile",
+		TemplateConfigs: []profile.TemplateConfig{
+			{
+				ID:         "cfg.workflow-directory.default",
+				TemplateID: "TPL-WORKFLOW-DIRECTORY-V1",
+				ScopeType:  "workflow-directory",
+				ScopeID:    "_default",
+				ConfigJSON: `{"workflowFinder":{"targetStepCount":4,"targetInterfaceCount":4,"targetLabel":"Configured target"}}`,
+				Status:     "active",
+			},
+		},
+	}
+	server := httptest.NewServer(controlplane.New(bundle))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/catalog", http.StatusOK)
+	presentation, ok := payload["presentation"].(map[string]any)
+	if !ok {
+		t.Fatalf("catalog presentation missing = %#v", payload)
+	}
+	finder, ok := presentation["workflowFinder"].(map[string]any)
+	if !ok {
+		t.Fatalf("workflow finder presentation missing = %#v", presentation)
+	}
+	if finder["targetStepCount"] != float64(4) || finder["targetInterfaceCount"] != float64(4) || finder["targetLabel"] != "Configured target" {
+		t.Fatalf("workflow finder presentation = %#v", finder)
+	}
+}
+
+func TestServerExposesCatalogWorkflowFinderFromStoreConfig(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "sample",
+		TemplateConfigs: []store.CatalogTemplateConfig{
+			{
+				ID:         "cfg.workflow-directory.default",
+				TemplateID: "TPL-WORKFLOW-DIRECTORY-V1",
+				ScopeType:  "workflow-directory",
+				ScopeID:    "_default",
+				ConfigJSON: `{"workflowFinder":{"targetStepCount":5,"targetInterfaceCount":5,"targetLabel":"Catalog target"}}`,
+				Status:     "active",
+			},
+		},
+		Workflows: []store.CatalogWorkflow{
+			{ID: "workflow.alpha", DisplayName: "Workflow Alpha"},
+		},
+	}); err != nil {
+		t.Fatalf("replace profile catalog: %v", err)
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample"}, s))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/catalog", http.StatusOK)
+	presentation, ok := payload["presentation"].(map[string]any)
+	if !ok {
+		t.Fatalf("catalog presentation missing = %#v", payload)
+	}
+	finder, ok := presentation["workflowFinder"].(map[string]any)
+	if !ok {
+		t.Fatalf("workflow finder presentation missing = %#v", presentation)
+	}
+	if finder["targetStepCount"] != float64(5) || finder["targetInterfaceCount"] != float64(5) || finder["targetLabel"] != "Catalog target" {
+		t.Fatalf("workflow finder presentation = %#v", finder)
 	}
 }
 
@@ -1900,6 +2119,10 @@ func TestServerUsesRuntimeCatalogForDashboardSnapshot(t *testing.T) {
 				ID: "service.beta", DisplayName: "Beta Service", Kind: "app", ContainerName: "sandbox-beta",
 				Image: "example/beta:1", ServicePort: 18081, ManagementPort: 19091, SourcePath: "/tmp/runtime/service/beta-4e8d26674209", Status: "active", SortOrder: 2,
 			},
+			{
+				ID: "service.retired", DisplayName: "Retired Service", Kind: "app", ContainerName: "sandbox-retired",
+				Image: "example/retired:1", ServicePort: 18082, ManagementPort: 19092, Status: "inactive", SortOrder: 3,
+			},
 		},
 		TemplateConfigs: []store.CatalogTemplateConfig{
 			{
@@ -1951,6 +2174,9 @@ func TestServerUsesRuntimeCatalogForDashboardSnapshot(t *testing.T) {
 	}
 	groups := payload["groups"].([]any)
 	items := groups[0].(map[string]any)["items"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("dashboard should hide inactive services, items = %#v", items)
+	}
 	item := items[0].(map[string]any)
 	if item["id"] != "service.alpha" || item["container"] != "sandbox-alpha" || item["port"] != float64(18080) || item["managementPort"] != float64(19090) {
 		t.Fatalf("dashboard item = %#v", item)
@@ -1972,6 +2198,9 @@ func TestServerUsesRuntimeCatalogForDashboardSnapshot(t *testing.T) {
 	betaRuntime := runtimeByID["service.beta"]
 	if betaRuntime["branchName"] != "beta" || betaRuntime["commitId"] != "4e8d26674209" || betaRuntime["sourcePath"] != "/tmp/runtime/service/beta-4e8d26674209" {
 		t.Fatalf("dashboard beta runtime = %#v", betaRuntime)
+	}
+	if _, ok := runtimeByID["service.retired"]; ok {
+		t.Fatalf("dashboard runtime should hide inactive services: %#v", runtimeByID["service.retired"])
 	}
 }
 
@@ -2763,7 +2992,7 @@ func TestServerExposesWorkflowRunContracts(t *testing.T) {
 		RequestID:     "request.beta",
 		TraceID:       "trace.beta",
 		Status:        "complete",
-		TopologyJSON:  `{"status":"complete","confirmedEdges":[{"source":"service.alpha","target":"service.beta"}],"externalExits":[],"unresolvedExits":[],"observedNodes":["service.alpha","service.beta"]}`,
+		TopologyJSON:  `{"provider":"skywalking","status":"complete","confirmedEdges":[{"source":"service.alpha","target":"service.beta"}],"externalExits":[],"unresolvedExits":[],"observedNodes":["service.alpha","service.beta"]}`,
 		TextTopology:  "service.alpha -> service.beta",
 	})
 	if err != nil {
@@ -2843,6 +3072,138 @@ func TestServerExposesWorkflowRunContracts(t *testing.T) {
 	systems := trace["systems"].([]any)
 	if len(systems) != 1 || systems[0].(map[string]any)["name"] != "worker" {
 		t.Fatalf("latest workflow step should use cached runtime logs: %#v", latest)
+	}
+}
+
+func TestServerCopiesStepTraceTopologyIntoSavedWorkflowRun(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+
+	started := time.Date(2026, 5, 18, 7, 0, 0, 0, time.UTC)
+	_, err = s.CreateRun(ctx, store.Run{
+		ID:          "run.single.apply",
+		ProfileID:   "sample",
+		WorkflowID:  "workflow.alpha",
+		Status:      store.StatusPassed,
+		SummaryJSON: `{"kind":"apiCase","caseId":"case.apply","stepId":"apply","ok":true}`,
+		CreatedAt:   started,
+		UpdatedAt:   started,
+	})
+	if err != nil {
+		t.Fatalf("create source run: %v", err)
+	}
+	_, err = s.SaveTraceTopology(ctx, store.TraceTopology{
+		ID:            "topology.single.apply",
+		WorkflowRunID: "run.single.apply",
+		WorkflowID:    "workflow.alpha",
+		StepID:        "apply",
+		CaseID:        "case.apply",
+		RequestID:     "request.apply",
+		TraceID:       "trace.apply",
+		Status:        "complete",
+		TopologyJSON:  `{"provider":"skywalking","status":"complete","confirmedEdges":[{"source":"retail-gateway","target":"loan-service"}],"externalExits":[],"unresolvedExits":[],"observedNodes":["retail-gateway","loan-service"]}`,
+		TextTopology:  "retail-gateway -> loan-service",
+		CreatedAt:     started,
+	})
+	if err != nil {
+		t.Fatalf("save source topology: %v", err)
+	}
+
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample"}, s))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/workflow-runs", "application/json", strings.NewReader(`{
+		"workflowId":"workflow.alpha",
+		"ok":true,
+		"steps":[
+			{"stepId":"apply","caseId":"case.apply","runId":"run.single.apply","caseRunId":"run.single.apply.case","ok":true,"status":"passed"}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("post workflow run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("workflow run status = %d body=%s", resp.StatusCode, raw)
+	}
+
+	latest := decodeJSONResponse(t, server.URL+"/api/workflow-runs/latest-step?workflowId=workflow.alpha&stepId=apply", http.StatusOK)
+	topologies := latest["traceTopologies"].([]any)
+	if len(topologies) != 1 {
+		t.Fatalf("latest saved workflow step should include copied topology: %#v", latest)
+	}
+	topology := topologies[0].(map[string]any)
+	if topology["runId"] == "run.single.apply" || topology["stepId"] != "apply" || topology["traceId"] != "trace.apply" {
+		t.Fatalf("copied topology should belong to saved workflow run and keep step evidence: %#v", topology)
+	}
+}
+
+func TestServerBackfillsSavedWorkflowStepTopologyAfterAsyncCollection(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+
+	started := time.Date(2026, 5, 18, 7, 0, 0, 0, time.UTC)
+	if _, err := s.CreateRun(ctx, store.Run{
+		ID:          "run.single.apply",
+		ProfileID:   "sample",
+		WorkflowID:  "workflow.alpha",
+		Status:      store.StatusPassed,
+		SummaryJSON: `{"kind":"apiCase","caseId":"case.apply","stepId":"apply","ok":true}`,
+		CreatedAt:   started,
+		UpdatedAt:   started,
+	}); err != nil {
+		t.Fatalf("create source run: %v", err)
+	}
+
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample"}, s))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/workflow-runs", "application/json", strings.NewReader(`{
+		"workflowId":"workflow.alpha",
+		"ok":true,
+		"steps":[
+			{"stepId":"apply","caseId":"case.apply","runId":"run.single.apply","caseRunId":"run.single.apply.case","ok":true,"status":"passed"}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("post workflow run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("workflow run status = %d body=%s", resp.StatusCode, raw)
+	}
+
+	_, err = s.SaveTraceTopology(ctx, store.TraceTopology{
+		ID:            "topology.single.apply",
+		WorkflowRunID: "run.single.apply",
+		WorkflowID:    "workflow.alpha",
+		StepID:        "apply",
+		CaseID:        "case.apply",
+		RequestID:     "request.apply",
+		TraceID:       "trace.apply",
+		Status:        "complete",
+		TopologyJSON:  `{"provider":"skywalking","status":"complete","confirmedEdges":[{"source":"retail-gateway","target":"loan-service"}],"externalExits":[],"unresolvedExits":[],"observedNodes":["retail-gateway","loan-service"]}`,
+		TextTopology:  "retail-gateway -> loan-service",
+		CreatedAt:     started.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("save late source topology: %v", err)
+	}
+
+	latest := decodeJSONResponse(t, server.URL+"/api/workflow-runs/latest-step?workflowId=workflow.alpha&stepId=apply", http.StatusOK)
+	topologies := latest["traceTopologies"].([]any)
+	if len(topologies) != 1 || topologies[0].(map[string]any)["traceId"] != "trace.apply" {
+		t.Fatalf("latest saved workflow step should backfill late topology: %#v", latest)
 	}
 }
 
@@ -3312,6 +3673,150 @@ func TestServerExecutesTestKitRunFromRuntimeConfig(t *testing.T) {
 	}
 }
 
+func TestServerExecutesTestKitRunFromStoreRegisteredServicePort(t *testing.T) {
+	ctx := context.Background()
+	var receivedPath string
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.String()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"request_id":"req-store-port"}`))
+	}))
+	defer target.Close()
+	targetURL, err := url.Parse(target.URL)
+	if err != nil {
+		t.Fatalf("parse target url: %v", err)
+	}
+	targetPort, err := strconv.Atoi(targetURL.Port())
+	if err != nil {
+		t.Fatalf("parse target port: %v", err)
+	}
+
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "current",
+		IndexedAt: time.Now().UTC(),
+		Services: []store.CatalogService{
+			{ID: "service.gateway", DisplayName: "Gateway", Kind: "http", ServicePort: targetPort, Status: "active"},
+		},
+		APICases: []store.CatalogAPICase{
+			{ID: "case.gateway", DisplayName: "Gateway Case", NodeID: "node.gateway", Status: "active"},
+		},
+		TemplateConfigs: []store.CatalogTemplateConfig{
+			{
+				ID:         "cfg.case.gateway",
+				TemplateID: "template.case.gateway",
+				NodeID:     "node.gateway",
+				WorkflowID: "workflow.gateway",
+				ScopeType:  "step",
+				ScopeID:    "step.gateway",
+				Status:     "active",
+				ConfigJSON: `{
+					"caseId":"case.gateway",
+					"caseExecution":{
+						"method":"GET",
+						"nodeId":"service.gateway",
+						"path":"/ready",
+						"expectedHttpCodes":[200]
+					}
+				}`,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("replace profile catalog: %v", err)
+	}
+
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "current"}, s))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/test-kit/run", "application/json", strings.NewReader(`{
+		"caseId":"case.gateway",
+		"workflowId":"workflow.gateway",
+		"stepId":"step.gateway",
+		"timeoutSeconds":5
+	}`))
+	if err != nil {
+		t.Fatalf("post test kit run: %v", err)
+	}
+	defer resp.Body.Close()
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode test kit result: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK || result["ok"] != true {
+		t.Fatalf("test kit run status=%d result=%#v", resp.StatusCode, result)
+	}
+	if receivedPath != "/ready" {
+		t.Fatalf("target received path = %q", receivedPath)
+	}
+}
+
+func TestServerCatalogUsesStoreCatalogOverStaleReadModel(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+
+	stale := store.ProfileCatalog{
+		ProfileID: "current",
+		Services:  []store.CatalogService{{ID: "service.gateway", Kind: "http"}},
+		Workflows: []store.CatalogWorkflow{{ID: "workflow.core", DisplayName: "Core"}},
+		InterfaceNodes: []store.CatalogInterfaceNode{
+			{ID: "node.query", ServiceID: "service.gateway", Status: "active"},
+		},
+		APICases: []store.CatalogAPICase{
+			{ID: "case.old", NodeID: "node.query", Status: "active"},
+		},
+		WorkflowBindings: []store.CatalogWorkflowBinding{
+			{WorkflowID: "workflow.core", StepID: "query", NodeID: "node.query", CaseID: "case.old", Required: true, SortOrder: 1},
+		},
+	}
+	readModel, err := controlplane.CatalogReadModel(stale, "config.stale", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("build stale catalog read model: %v", err)
+	}
+	if _, err := s.UpsertReadModel(ctx, readModel); err != nil {
+		t.Fatalf("upsert stale catalog read model: %v", err)
+	}
+
+	current := stale
+	current.APICases = []store.CatalogAPICase{{ID: "case.current", NodeID: "node.query", Status: "active"}}
+	current.WorkflowBindings = []store.CatalogWorkflowBinding{
+		{WorkflowID: "workflow.core", StepID: "query", NodeID: "node.query", CaseID: "case.current", Required: true, SortOrder: 1},
+	}
+	current.TemplateConfigs = []store.CatalogTemplateConfig{
+		{
+			ID:         "cfg.workflow.core.query",
+			WorkflowID: "workflow.core",
+			ScopeType:  "step",
+			ScopeID:    "query",
+			Status:     "active",
+			ConfigJSON: `{"caseId":"case.old","caseExecution":{"method":"GET","nodeId":"service.gateway","path":"/query"}}`,
+		},
+	}
+	if err := s.ReplaceProfileCatalog(ctx, current); err != nil {
+		t.Fatalf("replace current catalog: %v", err)
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "current"}, s))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/catalog", http.StatusOK)
+	source := payload["source"].(map[string]any)
+	if source["kind"] != "store" {
+		t.Fatalf("catalog should use store source over stale read model: %#v", source)
+	}
+	workflows := payload["workflows"].([]any)
+	steps := workflows[0].(map[string]any)["steps"].([]any)
+	if steps[0].(map[string]any)["caseId"] != "case.current" {
+		t.Fatalf("catalog step should use current store binding: %#v", steps[0])
+	}
+}
+
 func TestServerCollectsTraceTopologyForSingleTestKitRun(t *testing.T) {
 	ctx := context.Background()
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -3435,6 +3940,99 @@ func TestServerCollectsTraceTopologyForSingleTestKitRun(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("stored trace topology was not collected asynchronously")
+}
+
+func TestServerRecordsSkippedTraceTopologyTaskWhenTraceProviderMissing(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "store.sqlite")})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Request-Id", "request.alpha")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer target.Close()
+
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "sample",
+		IndexedAt: time.Now().UTC(),
+		APICases: []store.CatalogAPICase{
+			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha", Status: "active"},
+		},
+		TemplateConfigs: []store.CatalogTemplateConfig{
+			{
+				ID:         "cfg.case.alpha",
+				TemplateID: "template.case.alpha",
+				NodeID:     "node.alpha",
+				WorkflowID: "workflow.alpha",
+				ScopeType:  "step",
+				ScopeID:    "step.alpha",
+				Title:      "Case Alpha Runtime",
+				Status:     "active",
+				ConfigJSON: `{
+					"caseId":"case.alpha",
+					"caseExecution":{
+						"method":"GET",
+						"nodeId":"service.alpha",
+						"path":"/callback",
+						"expectedHttpCodes":[200]
+					}
+				}`,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("replace profile catalog: %v", err)
+	}
+
+	server := httptest.NewServer(controlplane.NewWithOptions(profile.Bundle{ID: "sample"}, controlplane.Options{Runtime: s}))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/test-kit/run", "application/json", strings.NewReader(fmt.Sprintf(`{
+		"caseId":"case.alpha",
+		"workflowId":"workflow.alpha",
+		"stepId":"step.alpha",
+		"baseUrl":%q,
+		"timeoutSeconds":5
+	}`, target.URL)))
+	if err != nil {
+		t.Fatalf("post test kit run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("test kit run status = %d body=%s", resp.StatusCode, raw)
+	}
+
+	runs, err := s.ListRuns(ctx)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("runs = %#v", runs)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		tasks, err := s.ListPostProcessTasks(ctx, runs[0].ID)
+		if err != nil {
+			t.Fatalf("list post process tasks: %v", err)
+		}
+		if len(tasks) == 1 {
+			if tasks[0].Kind != "trace_topology_collect" || tasks[0].Status != store.StatusSkipped || tasks[0].StepID != "step.alpha" {
+				t.Fatalf("trace task should record skipped collection: %#v", tasks)
+			}
+			if !strings.Contains(tasks[0].Error, "TraceGraphQLURL") {
+				t.Fatalf("trace skipped task should explain missing provider config: %#v", tasks[0])
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("missing trace topology skipped task")
 }
 
 func TestServerExposesPostProcessTasks(t *testing.T) {
@@ -4404,6 +5002,73 @@ func TestServerExposesCaseRunsFromStore(t *testing.T) {
 	}
 }
 
+func TestServerExposesCaseRunFailureCategoriesFromProfile(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+
+	_, err = s.CreateRun(ctx, store.Run{
+		ID:           "run.failed",
+		ProfileID:    "sample",
+		Status:       store.StatusFailed,
+		EvidenceRoot: ".runtime/evidence/run.failed",
+		SummaryJSON:  "{}",
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	_, err = s.RecordAPICaseRun(ctx, store.APICaseRun{
+		ID:                   "run.failed.case",
+		RunID:                "run.failed",
+		CaseID:               "case.failed",
+		Status:               store.StatusFailed,
+		RequestSummaryJSON:   `{"method":"GET","path":"/failed"}`,
+		AssertionSummaryJSON: `{"status":"failed","errorCount":1}`,
+	})
+	if err != nil {
+		t.Fatalf("record api case run: %v", err)
+	}
+	bundle := profile.Bundle{
+		ID:          "sample",
+		DisplayName: "Sample Profile",
+		FailureCategories: []profile.FailureCategoryRule{
+			{
+				Name: "Product errors",
+				Matchers: profile.FailureCategoryMatchers{
+					Statuses:          []string{store.StatusFailed},
+					FailureCategories: []string{"assertion-mismatch"},
+					MessageContains:   []string{"assertion errors"},
+				},
+			},
+			{
+				Name: "Later matching rule",
+				Matchers: profile.FailureCategoryMatchers{
+					Statuses: []string{store.StatusFailed},
+				},
+			},
+		},
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/case/runs", http.StatusOK)
+	caseRuns := payload["caseRuns"].([]any)
+	if len(caseRuns) != 1 {
+		t.Fatalf("case runs = %#v", payload)
+	}
+	item := caseRuns[0].(map[string]any)
+	if item["failureCategory"] != "Product errors" || item["defaultFailureCategory"] != "assertion-mismatch" {
+		t.Fatalf("case run failure category = %#v", item)
+	}
+	categories := payload["failureCategories"].([]any)
+	if len(categories) != 2 || categories[0].(map[string]any)["name"] != "Product errors" {
+		t.Fatalf("failure category rules = %#v", payload["failureCategories"])
+	}
+}
+
 func TestServerExposesCaseEvidenceFromStore(t *testing.T) {
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
@@ -4443,13 +5108,16 @@ func TestServerExposesCaseEvidenceFromStore(t *testing.T) {
 		t.Fatalf("write response evidence: %v", err)
 	}
 	_, err = s.RecordEvidence(ctx, store.EvidenceRecord{
-		ID:        "run.alpha.request",
-		RunID:     "run.alpha",
-		CaseRunID: "run.alpha.case",
-		Kind:      "request",
-		URI:       requestPath,
-		MediaType: "application/json",
-		Summary:   `{"method":"POST","path":"/alpha","hasBody":true}`,
+		ID:         "run.alpha.request",
+		RunID:      "run.alpha",
+		CaseRunID:  "run.alpha.case",
+		Kind:       "request",
+		URI:        requestPath,
+		MediaType:  "application/json",
+		Summary:    `{"method":"POST","path":"/alpha","hasBody":true}`,
+		Category:   "http-exchange",
+		Visibility: "public",
+		LabelsJSON: `{"kind":"request","owner":"qa"}`,
 	})
 	if err != nil {
 		t.Fatalf("record request evidence: %v", err)
@@ -4488,6 +5156,11 @@ func TestServerExposesCaseEvidenceFromStore(t *testing.T) {
 	}
 	if response["body"] != `{"ok":true}` {
 		t.Fatalf("case evidence response body = %#v", response)
+	}
+	attachment := request["attachment"].(map[string]any)
+	labels := attachment["labels"].(map[string]any)
+	if attachment["category"] != "http-exchange" || attachment["visibility"] != "public" || labels["owner"] != "qa" {
+		t.Fatalf("case evidence attachment metadata = %#v", request)
 	}
 }
 
@@ -4554,7 +5227,7 @@ func TestServerExposesFailedCaseRunEvidenceByCaseRunID(t *testing.T) {
 		RequestID:     "request.alpha",
 		TraceID:       "trace.alpha",
 		Status:        "complete",
-		TopologyJSON:  `{"status":"complete","confirmedEdges":[{"source":"service.entry","target":"service.worker"}],"externalExits":[],"unresolvedExits":[],"observedNodes":["service.entry","service.worker"]}`,
+		TopologyJSON:  `{"provider":"skywalking","status":"complete","confirmedEdges":[{"source":"service.entry","target":"service.worker"}],"externalExits":[],"unresolvedExits":[],"observedNodes":["service.entry","service.worker"]}`,
 		TextTopology:  "service.entry -> service.worker",
 	})
 	if err != nil {
@@ -4736,7 +5409,7 @@ func TestServerSelectsCaseEvidenceWithinWorkflowRun(t *testing.T) {
 		RequestID:     "request.two",
 		TraceID:       "trace.two",
 		Status:        "complete",
-		TopologyJSON:  `{"status":"complete","confirmedEdges":[{"source":"service.one","target":"service.two"}],"externalExits":[],"unresolvedExits":[]}`,
+		TopologyJSON:  `{"provider":"skywalking","status":"complete","confirmedEdges":[{"source":"service.one","target":"service.two"}],"externalExits":[],"unresolvedExits":[]}`,
 	}); err != nil {
 		t.Fatalf("save trace topology: %v", err)
 	}
@@ -5019,6 +5692,9 @@ func TestServerExposesAPICaseCapabilities(t *testing.T) {
 				DisplayName:    "Case Alpha",
 				NodeID:         "node.alpha",
 				CasePath:       "cases/case.alpha.json",
+				SourceKind:     "karate",
+				SourcePath:     "tests/api.feature",
+				ExecutorID:     "executor.karate",
 				BaseURL:        "http://127.0.0.1:18080",
 				EvidenceDir:    ".runtime/cases",
 				TimeoutSeconds: 30,
@@ -5046,6 +5722,9 @@ func TestServerExposesAPICaseCapabilities(t *testing.T) {
 			Title            string         `json:"title"`
 			Operation        string         `json:"operation"`
 			CasePath         string         `json:"casePath"`
+			SourceKind       string         `json:"sourceKind"`
+			SourcePath       string         `json:"sourcePath"`
+			ExecutorID       string         `json:"executorId"`
 			BaseURL          string         `json:"baseUrl"`
 			EvidenceDir      string         `json:"evidenceDir"`
 			TimeoutSeconds   int            `json:"timeoutSeconds"`
@@ -5065,7 +5744,7 @@ func TestServerExposesAPICaseCapabilities(t *testing.T) {
 	if len(payload.Cases) != 1 || payload.Cases[0].ID != "case.alpha" || payload.Cases[0].Operation != "Node Alpha" {
 		t.Fatalf("api case capabilities = %#v", payload.Cases)
 	}
-	if payload.Cases[0].CasePath != "cases/case.alpha.json" || payload.Cases[0].BaseURL == "" || payload.Cases[0].EvidenceDir != ".runtime/cases" || payload.Cases[0].TimeoutSeconds != 30 || payload.Cases[0].DefaultOverrides["itemId"] != "item-001" {
+	if payload.Cases[0].CasePath != "cases/case.alpha.json" || payload.Cases[0].SourceKind != "karate" || payload.Cases[0].SourcePath != "tests/api.feature" || payload.Cases[0].ExecutorID != "executor.karate" || payload.Cases[0].BaseURL == "" || payload.Cases[0].EvidenceDir != ".runtime/cases" || payload.Cases[0].TimeoutSeconds != 30 || payload.Cases[0].DefaultOverrides["itemId"] != "item-001" {
 		t.Fatalf("api case run config = %#v", payload.Cases[0])
 	}
 	if len(payload.Cases[0].Graph.Nodes) != 1 || payload.Cases[0].Graph.Nodes[0].ID != "service.alpha" || payload.Cases[0].Graph.Nodes[0].Role != "http" {
@@ -5095,6 +5774,9 @@ func TestServerExposesAPICaseCapabilitiesFromStoreCatalog(t *testing.T) {
 				DisplayName:          "Case Alpha",
 				NodeID:               "node.alpha",
 				CasePath:             "cases/case.alpha.json",
+				SourceKind:           "karate",
+				SourcePath:           "tests/api.feature",
+				ExecutorID:           "executor.karate",
 				BaseURL:              "http://127.0.0.1:18080",
 				EvidenceDir:          ".runtime/cases",
 				TimeoutSeconds:       30,
@@ -5115,7 +5797,7 @@ func TestServerExposesAPICaseCapabilitiesFromStoreCatalog(t *testing.T) {
 		t.Fatalf("api case capabilities from store = %#v", payload)
 	}
 	item := cases[0].(map[string]any)
-	if item["id"] != "case.alpha" || item["casePath"] != "cases/case.alpha.json" || item["baseUrl"] != "http://127.0.0.1:18080" || item["evidenceDir"] != ".runtime/cases" || item["timeoutSeconds"] != float64(30) {
+	if item["id"] != "case.alpha" || item["casePath"] != "cases/case.alpha.json" || item["sourceKind"] != "karate" || item["sourcePath"] != "tests/api.feature" || item["executorId"] != "executor.karate" || item["baseUrl"] != "http://127.0.0.1:18080" || item["evidenceDir"] != ".runtime/cases" || item["timeoutSeconds"] != float64(30) {
 		t.Fatalf("api case store run config = %#v", item)
 	}
 	overrides := item["defaultOverrides"].(map[string]any)
@@ -5807,6 +6489,23 @@ func TestServerExposesAPICaseBatchFailureSummary(t *testing.T) {
 	}
 	bundle := profile.Bundle{
 		ID: "sample",
+		FailureCategories: []profile.FailureCategoryRule{
+			{
+				Name: "Product errors",
+				Matchers: profile.FailureCategoryMatchers{
+					Statuses:          []string{store.StatusFailed},
+					FailureCategories: []string{"assertion-mismatch"},
+					MessageContains:   []string{"not expected"},
+				},
+			},
+			{
+				Name: "Later matching rule",
+				Matchers: profile.FailureCategoryMatchers{
+					Statuses:          []string{store.StatusFailed},
+					FailureCategories: []string{"assertion-mismatch"},
+				},
+			},
+		},
 		InterfaceNodes: []profile.InterfaceNode{
 			{ID: "node.alpha", DisplayName: "Node Alpha", Operation: "Failure Summary"},
 		},
@@ -5853,12 +6552,13 @@ func TestServerExposesAPICaseBatchFailureSummary(t *testing.T) {
 		RequestID  string `json:"requestId"`
 		Failed     int    `json:"failed"`
 		Failures   []struct {
-			CaseID       string `json:"caseId"`
-			CaseRunID    string `json:"caseRunId"`
-			Status       string `json:"status"`
-			DetailURL    string `json:"detailUrl"`
-			EvidencePath string `json:"evidencePath"`
-			Error        string `json:"error"`
+			CaseID          string `json:"caseId"`
+			CaseRunID       string `json:"caseRunId"`
+			Status          string `json:"status"`
+			FailureCategory string `json:"failureCategory"`
+			DetailURL       string `json:"detailUrl"`
+			EvidencePath    string `json:"evidencePath"`
+			Error           string `json:"error"`
 		} `json:"failures"`
 	}
 	if err := json.NewDecoder(summaryResp.Body).Decode(&summary); err != nil {
@@ -5868,7 +6568,7 @@ func TestServerExposesAPICaseBatchFailureSummary(t *testing.T) {
 		t.Fatalf("failure summary = %#v", summary)
 	}
 	failure := summary.Failures[0]
-	if failure.CaseID != "case.fail" || failure.Status != store.StatusFailed || failure.CaseRunID == "" || failure.DetailURL == "" || failure.EvidencePath == "" || failure.Error == "" {
+	if failure.CaseID != "case.fail" || failure.Status != store.StatusFailed || failure.FailureCategory != "Product errors" || failure.CaseRunID == "" || failure.DetailURL == "" || failure.EvidencePath == "" || failure.Error == "" {
 		t.Fatalf("failure item = %#v", failure)
 	}
 }

@@ -115,6 +115,20 @@ func NewWithOptions(bundle profile.Bundle, options Options) http.Handler {
 		}
 		writeJSON(w, statePayloadFromBundle(profiles.Current()))
 	})
+	mux.HandleFunc("/api/sandbox/services", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleSandboxServiceRegistration(w, r, runtime)
+	})
+	mux.HandleFunc("/api/sandbox/interfaces", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleSandboxInterfaceRegistration(w, r, runtime)
+	})
 	mux.HandleFunc("/api/dashboard", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -200,7 +214,7 @@ func NewWithOptions(bundle profile.Bundle, options Options) http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		handleCaseRuns(w, r, runtime)
+		handleCaseRuns(w, r, profiles.Current(), runtime)
 	})
 	mux.HandleFunc("/api/case/evidence", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -709,6 +723,9 @@ type apiCaseCapability struct {
 	Title            string              `json:"title,omitempty"`
 	Operation        string              `json:"operation,omitempty"`
 	CasePath         string              `json:"casePath,omitempty"`
+	SourceKind       string              `json:"sourceKind,omitempty"`
+	SourcePath       string              `json:"sourcePath,omitempty"`
+	ExecutorID       string              `json:"executorId,omitempty"`
 	BaseURL          string              `json:"baseUrl,omitempty"`
 	EvidenceDir      string              `json:"evidenceDir,omitempty"`
 	TimeoutSeconds   int                 `json:"timeoutSeconds,omitempty"`
@@ -732,16 +749,27 @@ type apiCaseServiceNode struct {
 }
 
 type catalogPayload struct {
-	SchemaVersion string            `json:"schemaVersion"`
-	OK            bool              `json:"ok"`
-	GeneratedAt   time.Time         `json:"generatedAt"`
-	Navigation    map[string]any    `json:"navigation"`
-	Warnings      []string          `json:"warnings"`
-	Source        map[string]string `json:"source"`
-	Services      []catalogService  `json:"services"`
-	Workflows     []catalogWorkflow `json:"workflows"`
-	APICases      []catalogAPICase  `json:"apiCases"`
-	Topology      catalogTopology   `json:"topology"`
+	SchemaVersion string               `json:"schemaVersion"`
+	OK            bool                 `json:"ok"`
+	GeneratedAt   time.Time            `json:"generatedAt"`
+	Navigation    map[string]any       `json:"navigation"`
+	Warnings      []string             `json:"warnings"`
+	Source        map[string]string    `json:"source"`
+	Presentation  *catalogPresentation `json:"presentation,omitempty"`
+	Services      []catalogService     `json:"services"`
+	Workflows     []catalogWorkflow    `json:"workflows"`
+	APICases      []catalogAPICase     `json:"apiCases"`
+	Topology      catalogTopology      `json:"topology"`
+}
+
+type catalogPresentation struct {
+	WorkflowFinder *catalogWorkflowFinderConfig `json:"workflowFinder,omitempty"`
+}
+
+type catalogWorkflowFinderConfig struct {
+	TargetStepCount      int    `json:"targetStepCount,omitempty"`
+	TargetInterfaceCount int    `json:"targetInterfaceCount,omitempty"`
+	TargetLabel          string `json:"targetLabel,omitempty"`
 }
 
 type catalogService struct {
@@ -828,6 +856,9 @@ type catalogAPICase struct {
 	DisplayName      string         `json:"displayName,omitempty"`
 	NodeID           string         `json:"nodeId,omitempty"`
 	CasePath         string         `json:"casePath,omitempty"`
+	SourceKind       string         `json:"sourceKind,omitempty"`
+	SourcePath       string         `json:"sourcePath,omitempty"`
+	ExecutorID       string         `json:"executorId,omitempty"`
 	BaseURL          string         `json:"baseUrl,omitempty"`
 	EvidenceDir      string         `json:"evidenceDir,omitempty"`
 	TimeoutSeconds   int            `json:"timeoutSeconds,omitempty"`
@@ -951,9 +982,10 @@ func dashboardPayloadFromReadModel(ctx context.Context, runtime store.Store, pro
 }
 
 func dashboardPayloadFromCatalog(catalog store.ProfileCatalog) dashboardPayload {
-	items := make([]dashboardItem, 0, len(catalog.Services))
-	serviceRuntimes := make([]serviceRuntime, 0, len(catalog.Services))
-	for _, service := range catalog.Services {
+	services := activeCatalogServices(catalog.Services)
+	items := make([]dashboardItem, 0, len(services))
+	serviceRuntimes := make([]serviceRuntime, 0, len(services))
+	for _, service := range services {
 		state := "missing"
 		health := "unknown"
 		healthy := false
@@ -979,23 +1011,25 @@ func dashboardPayloadFromCatalog(catalog store.ProfileCatalog) dashboardPayload 
 }
 
 func hydrateDashboardRuntime(ctx context.Context, payload *dashboardPayload, catalog store.ProfileCatalog) {
-	dockerRuntimes := dockerRuntimeByCatalogService(ctx, catalog.Services)
+	services := activeCatalogServices(catalog.Services)
+	filterDashboardPayloadServices(payload, services)
+	dockerRuntimes := dockerRuntimeByCatalogService(ctx, services)
 	runtimeByService := map[string]serviceRuntime{}
 	for _, runtime := range payload.ServiceRuntime {
 		runtimeByService[runtime.ServiceID] = runtime
 	}
-	for _, service := range catalog.Services {
+	for _, service := range services {
 		runtime := runtimeByService[service.ID]
 		if observed, ok := dockerRuntimes[service.ID]; ok {
 			runtime = mergeRuntime(runtime, observed)
 		}
 		runtimeByService[service.ID] = runtime
 	}
-	payload.ServiceRuntime = make([]serviceRuntime, 0, len(catalog.Services))
+	payload.ServiceRuntime = make([]serviceRuntime, 0, len(services))
 	for groupIndex := range payload.Groups {
 		for itemIndex := range payload.Groups[groupIndex].Items {
 			item := &payload.Groups[groupIndex].Items[itemIndex]
-			service := catalogServiceByID(catalog.Services, item.ID)
+			service := catalogServiceByID(services, item.ID)
 			runtime := runtimeByService[item.ID]
 			if runtime.ServiceID == "" {
 				continue
@@ -1006,7 +1040,7 @@ func hydrateDashboardRuntime(ctx context.Context, payload *dashboardPayload, cat
 			*item = dashboardItemFromCatalogService(catalog, service, runtime, state, health, healthy)
 		}
 	}
-	for _, service := range catalog.Services {
+	for _, service := range services {
 		if runtime := runtimeByService[service.ID]; runtime.ServiceID != "" {
 			payload.ServiceRuntime = append(payload.ServiceRuntime, runtime)
 		}
@@ -1016,6 +1050,44 @@ func hydrateDashboardRuntime(ctx context.Context, payload *dashboardPayload, cat
 		allItems = append(allItems, group.Items...)
 	}
 	payload.Summary = dashboardSummaryForItems(allItems)
+}
+
+func activeCatalogServices(services []store.CatalogService) []store.CatalogService {
+	out := make([]store.CatalogService, 0, len(services))
+	for _, service := range services {
+		if catalogServiceActive(service) {
+			out = append(out, service)
+		}
+	}
+	return out
+}
+
+func catalogServiceActive(service store.CatalogService) bool {
+	status := strings.TrimSpace(service.Status)
+	return status == "" || strings.EqualFold(status, "active")
+}
+
+func filterDashboardPayloadServices(payload *dashboardPayload, services []store.CatalogService) {
+	activeByID := make(map[string]bool, len(services))
+	for _, service := range services {
+		activeByID[service.ID] = true
+	}
+	for groupIndex := range payload.Groups {
+		items := payload.Groups[groupIndex].Items[:0]
+		for _, item := range payload.Groups[groupIndex].Items {
+			if activeByID[item.ID] {
+				items = append(items, item)
+			}
+		}
+		payload.Groups[groupIndex].Items = items
+	}
+	runtimes := payload.ServiceRuntime[:0]
+	for _, runtime := range payload.ServiceRuntime {
+		if activeByID[runtime.ServiceID] {
+			runtimes = append(runtimes, runtime)
+		}
+	}
+	payload.ServiceRuntime = runtimes
 }
 
 func dashboardItemFromCatalogService(catalog store.ProfileCatalog, service store.CatalogService, runtime serviceRuntime, state string, health string, healthy bool) dashboardItem {
@@ -1557,6 +1629,9 @@ func catalogPayloadFromBundle(bundle profile.Bundle) catalogPayload {
 			DisplayName:      item.DisplayName,
 			NodeID:           item.NodeID,
 			CasePath:         item.CasePath,
+			SourceKind:       item.SourceKind,
+			SourcePath:       item.SourcePath,
+			ExecutorID:       item.ExecutorID,
 			BaseURL:          item.BaseURL,
 			EvidenceDir:      item.EvidenceDir,
 			TimeoutSeconds:   item.TimeoutSeconds,
@@ -1575,13 +1650,57 @@ func catalogPayloadFromBundle(bundle profile.Bundle) catalogPayload {
 			"id":          bundle.ID,
 			"displayName": bundle.DisplayName,
 		},
-		Services:  services,
-		Workflows: catalogWorkflows(bundle),
-		APICases:  apiCases,
+		Services:     services,
+		Presentation: catalogPresentationFromProfileConfigs(bundle.TemplateConfigs),
+		Workflows:    catalogWorkflows(bundle),
+		APICases:     apiCases,
 		Topology: catalogTopology{
 			Nodes: nodes,
 			Edges: []catalogEdge{},
 		},
+	}
+}
+
+func catalogPresentationFromProfileConfigs(configs []profile.TemplateConfig) *catalogPresentation {
+	var presentation catalogPresentation
+	for _, config := range configs {
+		if !visibleTemplateConfigStatus(config.Status) || config.ScopeType != "workflow-directory" {
+			continue
+		}
+		if config.ScopeID != "" && config.ScopeID != "_default" {
+			continue
+		}
+		mergeCatalogWorkflowFinder(&presentation, jsonObject(config.ConfigJSON))
+	}
+	if presentation.WorkflowFinder == nil {
+		return nil
+	}
+	return &presentation
+}
+
+func mergeCatalogWorkflowFinder(presentation *catalogPresentation, config map[string]any) {
+	rawFinder := config["workflowFinder"]
+	if rawFinder == nil {
+		rawFinder = config["targetWorkflow"]
+	}
+	finderConfig, ok := rawFinder.(map[string]any)
+	if !ok {
+		return
+	}
+	if presentation.WorkflowFinder == nil {
+		presentation.WorkflowFinder = &catalogWorkflowFinderConfig{}
+	}
+	if value := intValue(finderConfig["targetStepCount"]); value > 0 {
+		presentation.WorkflowFinder.TargetStepCount = value
+	}
+	if value := intValue(finderConfig["targetInterfaceCount"]); value > 0 {
+		presentation.WorkflowFinder.TargetInterfaceCount = value
+	}
+	if value := strings.TrimSpace(valueString(finderConfig["targetLabel"])); value != "" {
+		presentation.WorkflowFinder.TargetLabel = value
+	}
+	if presentation.WorkflowFinder.TargetStepCount == 0 && presentation.WorkflowFinder.TargetInterfaceCount == 0 && presentation.WorkflowFinder.TargetLabel == "" {
+		presentation.WorkflowFinder = nil
 	}
 }
 
@@ -1955,6 +2074,9 @@ func apiCaseCapabilitiesFromBundle(bundle profile.Bundle) apiCaseCapabilitiesPay
 			Title:            firstNonEmpty(item.DisplayName, item.ID),
 			Operation:        firstNonEmpty(node.DisplayName, item.NodeID),
 			CasePath:         item.CasePath,
+			SourceKind:       item.SourceKind,
+			SourcePath:       item.SourcePath,
+			ExecutorID:       item.ExecutorID,
 			BaseURL:          item.BaseURL,
 			EvidenceDir:      item.EvidenceDir,
 			TimeoutSeconds:   item.TimeoutSeconds,
@@ -1997,6 +2119,9 @@ func apiCaseCapabilitiesFromCatalog(catalog store.ProfileCatalog) apiCaseCapabil
 			Title:            firstNonEmpty(item.DisplayName, item.ID),
 			Operation:        firstNonEmpty(node.DisplayName, item.NodeID),
 			CasePath:         item.CasePath,
+			SourceKind:       item.SourceKind,
+			SourcePath:       item.SourcePath,
+			ExecutorID:       item.ExecutorID,
 			BaseURL:          item.BaseURL,
 			EvidenceDir:      item.EvidenceDir,
 			TimeoutSeconds:   item.TimeoutSeconds,
@@ -2065,6 +2190,7 @@ func interfaceNodeDetailPayloadFromCatalog(catalog store.ProfileCatalog, id stri
 		OK:         true,
 		TemplateID: "TPL-INTERFACE-NODE-CASE-LIST-V1",
 		Source:     map[string]string{"kind": "store", "id": catalog.ProfileID},
+		Requested:  id,
 		Node: interfaceNodeDetail{
 			ID:          node.ID,
 			DisplayName: node.DisplayName,

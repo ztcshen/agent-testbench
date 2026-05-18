@@ -1,550 +1,224 @@
-# CLI and API Contracts
-
-This page summarizes the public surfaces intended for local agents, CI jobs,
-and lightweight automation. Contracts are pre-1.0, but changes should be
-documented in `CHANGELOG.md`.
-
-## Discovery
-
-Agents should discover runnable targets before generating reports.
-
-```sh
-otsandbox interface-node discover \
-  --profile PATH_OR_ID \
-  --store-url .runtime/store.sqlite \
-  --filter "query" \
-  --json
-
-otsandbox workflow discover \
-  --profile PATH_OR_ID \
-  --store-url .runtime/store.sqlite \
-  --filter "happy path" \
-  --json
-
-otsandbox case discover \
-  --profile PATH_OR_ID \
-  --store-url .runtime/store.sqlite \
-  --filter "create item" \
-  --tag smoke \
-  --status active \
-  --owner team-a \
-  --priority p0 \
-  --json
-```
-
-The returned ids are the only ids an agent should pass to report commands.
-`case discover` searches API case id, display name, description, owner, tags,
-and interface node id. Its JSON output includes maintenance metadata plus
-whether the case has a runnable file and execution configuration.
-
-## Maintained Case Authoring
-
-Generate a reviewable draft from a discovered interface node:
-
-```sh
-otsandbox interface-node case draft \
-  --profile /path/to/profile-bundle \
-  --node node.alpha \
-  --case-id case.generated \
-  --title "Generated Case" \
-  --tag regression \
-  --priority p1 \
-  --owner team-a \
-  --output .runtime/case-draft.json \
-  --json
-```
-
-The draft output contains API case metadata, execution config, and a runnable
-case file payload. Apply the reviewed bundle to an external profile directory:
-
-```sh
-otsandbox interface-node case apply \
-  --profile /path/to/profile-bundle \
-  --file .runtime/case-draft.json \
-  --json
-```
-
-`apply` writes profile-owned files only: `catalog.json` receives maintained
-case metadata and execution config, while runnable case JSON files are written
-under the profile bundle. It does not write Store records; publish or verify
-the profile afterward when the caller wants indexed read-models.
-
-## Profile Audit Repair Plan
-
-Before publishing a profile bundle, an agent can turn audit failures into
-stable repair actions:
-
-```sh
-otsandbox profile audit-plan \
-  --profile /path/to/profile-bundle \
-  --store-url .runtime/store.sqlite \
-  --json
-```
-
-```http
-POST /api/profile/audit-plan
-Content-Type: application/json
-
-{"path":"/path/to/profile-bundle"}
-```
-
-The response includes the original audit report plus `actions` grouped by type:
-`update-reference-or-add-asset`, `fill-required-field`, `fix-invalid-json`,
-`rename-duplicate-id`, and `review`. The command is read-only; it gives profile
-authors and agents a deterministic checklist without writing profile files or
-Store rows.
-
-## Maintained Case Suite Quality
-
-```sh
-otsandbox case suite quality \
-  --profile PATH_OR_ID \
-  --store-url .runtime/store.sqlite \
-  --status active \
-  --json
-```
-
-The quality command audits authoring readiness before runtime execution. It
-flags interface nodes with no maintained cases and cases missing description,
-tags, priority, owner, runnable source, or execution config. The command is
-read-only; it helps agents decide whether to draft/apply more cases or ask a
-team owner to fill in metadata before relying on the suite.
-
-The Control plane exposes the same quality contract:
-
-```http
-GET /api/case/suite-quality?status=active
-```
-
-Use the quality plan when an automation needs next actions instead of raw gaps:
-
-```sh
-otsandbox case suite quality-plan \
-  --profile PATH_OR_ID \
-  --store-url .runtime/store.sqlite \
-  --status active \
-  --json
-```
-
-The plan returns stable actions such as `draft-case`,
-`complete-case-metadata`, `add-runnable-source`, and `add-execution-config`.
-For uncovered interface nodes, the action includes a suggested case id and an
-`interface-node case draft` command fragment.
-
-```http
-GET /api/case/suite-quality-plan?status=active
-```
-
-When the caller needs a shareable artifact instead of a raw plan, generate a
-compact JSON and HTML report:
-
-```sh
-otsandbox case suite quality-report \
-  --profile PATH_OR_ID \
-  --store-url .runtime/store.sqlite \
-  --status active \
-  --output-dir .runtime/reports/case-quality \
-  --json
-```
-
-The command writes `report.json` and `report.html`. The JSON keeps the full
-quality plan under `qualityPlan`; the HTML presents a compact action table for
-review, assignment, or agent handoff. This report is read-only and does not
-execute API requests.
-
-## Maintained Case Suite Report
-
-```sh
-otsandbox case suite report \
-  --profile PATH_OR_ID \
-  --store-url .runtime/store.sqlite \
-  --tag smoke \
-  --owner team-a \
-  --status active \
-  --base-url http://127.0.0.1:8080 \
-  --output-dir .runtime/reports/smoke-suite \
-  --json
-```
-
-The command turns case maintenance metadata into an executable suite. It
-selects active API cases by filter, node id, tag, owner, or priority; executes
-the selected cases; and writes `report.json` plus a compact `report.html`.
-It also writes `report.junit.xml` for CI systems that collect JUnit artifacts.
-The report keeps case title, node id, tags, priority, owner, elapsed time,
-status, failed-case Evidence links, and `junitReportUrl`.
-
-## Maintained Case Suite Coverage
-
-```sh
-otsandbox case suite coverage \
-  --profile PATH_OR_ID \
-  --store-url .runtime/store.sqlite \
-  --tag smoke \
-  --owner team-a \
-  --status active \
-  --json
-```
-
-The command uses the same maintenance selector as `case suite report`, but it
-does not run any HTTP requests. It reads Store case-run records and returns
-the latest status for each selected case, plus passed, failed, and not-run
-counts. Failed and latest-run cases include `caseRunId` and `detailUrl` so a
-caller can jump directly to Evidence.
-
-The Control plane exposes the same read-only coverage contract:
-
-```http
-GET /api/case/suite-coverage?tag=smoke&owner=team-a&status=active
-```
-
-## Maintained Case Suite Stability
-
-```sh
-otsandbox case suite stability \
-  --profile PATH_OR_ID \
-  --store-url .runtime/store.sqlite \
-  --tag smoke \
-  --owner team-a \
-  --status active \
-  --limit 10 \
-  --json
-```
-
-The command uses the same maintenance selector, reads recent Store case-run
-history, and reports pass/fail counts, latest status, status transitions,
-recent run ids, and detail URLs. A case is marked `unstable` when the selected
-history contains both passed and failed runs with at least one status
-transition.
-
-The Control plane exposes the same stability contract:
-
-```http
-GET /api/case/suite-stability?tag=smoke&owner=team-a&status=active&limit=10
-```
-
-## Maintained Case Suite Priority
-
-```sh
-otsandbox case suite priority \
-  --profile PATH_OR_ID \
-  --store-url .runtime/store.sqlite \
-  --signal "/api/items" \
-  --tag smoke \
-  --status active \
-  --limit 20 \
-  --request-id change-005 \
-  --base-url http://127.0.0.1:8080 \
-  --json
-```
-
-The priority command ranks ready maintained cases before execution. It combines
-impact matches, latest Store status, recent stability, and case priority
-metadata into a score with explanation reasons. The response returns selected,
-skipped, and blocked cases plus a `batchRequest` object that can be posted to
-`/api/cases/batch-runs`.
-
-The Control plane exposes the same ranking contract:
-
-```http
-GET /api/case/suite-priority?signal=/api/items&tag=smoke&status=active&limit=20&requestId=change-005
-```
-
-## Maintained Case Suite Brief
-
-```sh
-otsandbox case suite brief \
-  --profile PATH_OR_ID \
-  --store-url .runtime/store.sqlite \
-  --signal "/api/items" \
-  --tag smoke \
-  --status active \
-  --limit 20 \
-  --request-id change-006 \
-  --base-url http://127.0.0.1:8080 \
-  --json
-```
-
-The brief command is the one-call triage surface for agents and CI. It returns
-latest coverage, readiness issues, recent stability, ranked recommendations,
-blocked cases, and a `batchRequest` payload. Failed, not-run, or unstable cases
-remain normal report content; the command only fails on transport or Store
-errors.
-
-The Control plane exposes the same brief contract:
-
-```http
-GET /api/case/suite-brief?signal=/api/items&tag=smoke&status=active&limit=20&requestId=change-006
-```
-
-## Maintained Case Suite Inspection
-
-```sh
-otsandbox case suite inspect \
-  --profile PATH_OR_ID \
-  --store-url .runtime/store.sqlite \
-  --tag smoke \
-  --owner team-a \
-  --status active \
-  --json
-```
-
-The command uses the same maintenance selector as suite reports and coverage,
-but returns a pre-run readiness view. Each row includes runnable file presence,
-execution configuration presence, latest Store state, blocking issues, and a
-suggested action such as `run`, `rerun`, `add-runnable-source`, or `keep`.
-
-The Control plane exposes the same inspection contract:
-
-```http
-GET /api/case/suite-inspection?tag=smoke&owner=team-a&status=active
-```
-
-## Maintained Case Suite Plan
-
-```sh
-otsandbox case suite plan \
-  --profile PATH_OR_ID \
-  --store-url .runtime/store.sqlite \
-  --tag smoke \
-  --status active \
-  --action run \
-  --action rerun \
-  --request-id change-001 \
-  --base-url http://127.0.0.1:8080 \
-  --json
-```
-
-The plan command turns inspection into a deterministic execution payload. It
-returns selected ready `caseIds`, blocked cases, skipped ready cases, and a
-`batchRequest` object that can be posted to `/api/cases/batch-runs`.
-
-The Control plane exposes the same planning contract:
-
-```http
-GET /api/case/suite-plan?tag=smoke&status=active&action=run&action=rerun&requestId=change-001
-```
-
-## Maintained Case Suite Impact
-
-```sh
-otsandbox case suite impact \
-  --profile PATH_OR_ID \
-  --store-url .runtime/store.sqlite \
-  --signal "/api/items" \
-  --change "changed/module/path" \
-  --status active \
-  --action run \
-  --action rerun \
-  --request-id change-002 \
-  --base-url http://127.0.0.1:8080 \
-  --json
-```
-
-The impact command maps change signals to interface nodes, workflow bindings,
-and maintained API cases, then reuses the suite planning rules to return
-selected ready cases, blocked cases, explanation reasons, and a `batchRequest`
-that can be posted to `/api/cases/batch-runs`. Signals are generic strings and
-can be changed paths, route paths, operation text, workflow names, tags, or
-case text.
-
-The Control plane exposes the same impact planning contract:
-
-```http
-GET /api/case/suite-impact?signal=/api/items&change=module/path&status=active&action=run&action=rerun&requestId=change-002
-```
-
-Use `impact-report` when an automation wants the same selection and execution
-in one synchronous CLI call:
-
-```sh
-otsandbox case suite impact-report \
-  --profile PATH_OR_ID \
-  --store-url .runtime/store.sqlite \
-  --signal "/api/items" \
-  --status active \
-  --action run \
-  --action rerun \
-  --request-id change-003 \
-  --base-url http://127.0.0.1:8080 \
-  --output-dir .runtime/reports/impact-change-003 \
-  --json
-```
-
-The JSON response contains both the `impact` selection and the executed
-`report`. The report still preserves failed cases instead of treating them as
-transport failures.
-
-Use the asynchronous Control plane endpoint when a caller should receive
-report URLs immediately:
-
-```http
-POST /api/case/suite-impact-runs
-Content-Type: application/json
-
-{
-  "requestId": "change-004",
-  "signals": ["/api/items"],
-  "status": "active",
-  "actions": ["run", "rerun"],
-  "baseUrl": "http://127.0.0.1:8080"
-}
-```
-
-The response is `202 Accepted` with the `impact` selection, `batchRunId`,
-`reportUrl`, and the same batch report fields as `/api/cases/batch-runs`.
-
-## Single Interface Report
-
-```sh
-otsandbox interface-node case report \
-  --node NODE_ID \
-  --profile PATH_OR_ID \
-  --store-url .runtime/store.sqlite \
-  --base-url http://127.0.0.1:8080 \
-  --output-dir .runtime/reports \
-  --json
-```
-
-The command runs every API case attached to the selected interface node. The
-report includes per-case status, elapsed time, run id, case run id, Evidence
-path, and detail URL. A failing case should still appear in the report.
-Response body previews and request URLs in reports redact common sensitive JSON
-keys and query parameters such as tokens, passwords, cookies, and secrets.
-
-## Workflow Report
-
-```sh
-otsandbox workflow report \
-  --workflow WORKFLOW_ID \
-  --profile PATH_OR_ID \
-  --store-url .runtime/store.sqlite \
-  --base-url http://127.0.0.1:8080 \
-  --output-dir .runtime/reports \
-  --json
-```
-
-The command follows workflow bindings in configured order. Each step records
-its own case run id and detail URL so a UI or agent can jump directly to the
-failed step.
-
-## Asynchronous Batch API
-
-```http
-POST /api/cases/batch-runs
-Content-Type: application/json
-```
-
-Run all cases for selected interface nodes:
-
-```json
-{
-  "requestId": "change-001",
-  "nodeIds": ["node.alpha"],
-  "baseUrl": "http://127.0.0.1:8080",
-  "evidenceDir": ".runtime/case-batches"
-}
-```
-
-Run an exact case list, usually produced by `case suite plan`:
-
-```json
-{
-  "requestId": "planned-001",
-  "caseIds": ["case.alpha", "case.beta"],
-  "baseUrl": "http://127.0.0.1:8080",
-  "evidenceDir": ".runtime/case-batches"
-}
-```
-
-Run a workflow-shaped regression:
-
-```json
-{
-  "requestId": "workflow-001",
-  "workflowId": "workflow.alpha"
-}
-```
-
-Run a maintained suite and only rerun cases whose latest Store state is failed
-or not-run:
-
-```json
-{
-  "requestId": "suite-rerun-001",
-  "suite": {
-    "tags": ["regression"],
-    "status": "active",
-    "runStates": ["failed", "not-run"]
-  },
-  "baseUrl": "http://127.0.0.1:8080"
-}
-```
-
-The `suite` selector accepts `filter`, `nodeId`, `tags`, `status`, `owner`,
-`priority`, and `runStates`. Omit `runStates` to run every case matched by the
-maintenance selector.
-
-The API returns `202 Accepted` with a batch run id, JSON report URL, HTML
-report URL, JUnit report URL, artifact manifest URL, and failure summary URL.
-Poll the JSON report URL until the status is terminal, then collect
-`/report.junit.xml` when CI needs a test result artifact, `/artifacts.json`
-when an agent needs the full archive list, or `/failures.json` when it only
-needs failed cases for triage.
-
-```http
-GET /api/cases/batch-runs/{batchRunId}/artifacts.json
-```
-
-The artifact manifest lists the batch JSON, HTML, JUnit XML, per-case Evidence
-paths, and per-case detail API links.
-
-```http
-GET /api/cases/batch-runs/{batchRunId}/failures.json
-```
-
-The failure summary is a compact JSON document with batch status, failed count,
-and one row per failed case. Each row includes case id, display name, status,
-elapsed time, case run id, detail URL, Evidence path, and assertion error text
-when available.
-
-## Failed Case Evidence
-
-Single-case detail lookup is synchronous:
-
-```http
-GET /api/case-run/evidence?caseRunId={caseRunId}
-```
-
-The payload contains the case summary, request, response, assertions,
-precondition fixture context, stored topology, and persisted runtime log
-records when those records exist.
-
-## Post-Process Task Lookup
-
-```sh
-otsandbox evidence tasks \
-  --store-url .runtime/store.sqlite \
-  --run RUN_ID \
-  --step STEP_ID \
-  --kind trace_topology_collect \
-  --json
-```
-
-```http
-GET /api/post-process-tasks?runId=RUN_ID&stepId=STEP_ID&kind=trace_topology_collect
-```
-
-This lookup reads stored post-process task records for one run and can narrow
-them by step id, case id, task kind, or status. The response includes compact
-counts for passed, failed, running, skipped, and total duration so a UI or agent
-can tell whether slow topology, log, or report enrichment happened after the
-main request finished.
-
-## Stability Notes
-
-- Runtime ids are unique per run. Target ids come from profile discovery.
-- Store rows are indexes and read-models; profile files remain the source of
-  truth.
-- Reports may contain failed cases. A failed case is not a transport failure if
-  the report was produced successfully.
-- HTML reports are temporary local artifacts and should not be committed.
+# CLI and API Surface
+
+This document summarizes the current Open Test Sandbox command-line and
+control-plane HTTP surfaces, then calls out where the two are not yet one-to-one.
+
+Verification baseline: this page was checked against `cmd/otsandbox/main.go`,
+`internal/controlplane/server.go`, and `go test ./...`.
+
+## Scope
+
+- CLI means `otsandbox ...`.
+- API means routes exposed by `otsandbox serve`.
+- Static HTML pages under `control-plane/static/` are UI entrypoints, not API
+  contracts, so they are not counted as API parity targets here.
+- SQLite Store is the active source of truth for the served control plane.
+  Profile packages are import/export and review artifacts, not the daily
+  maintenance surface.
+
+## CLI Surface
+
+| Area | CLI commands |
+| --- | --- |
+| General | `version`, `help` |
+| Store | `store status`, `store upgrade` |
+| Sandbox runtime | `sandbox start` |
+| Profile lifecycle | `profile init`, `profile install`, `profile pack`, `profile list`, `profile inspect`, `profile audit`, `profile audit-plan`, `profile verify`, `profile import` |
+| Profile generation/import planning | `profile generation-plan openapi`, `profile import-plan openapi`, `profile import-plan http-capture` |
+| Config publication | `config publish` (`config apply` alias) |
+| Executor planning | `executor plan` |
+| Evidence | `evidence import`, `evidence list`, `evidence tasks` |
+| Workflow | `workflow discover`, `workflow plan`, `workflow audit`, `workflow report` |
+| Baseline | `baseline get`, `baseline set` |
+| Template | `template render` |
+| Interface node | `interface-node discover`, `interface-node case audit`, `interface-node case draft`, `interface-node case apply`, `interface-node case report` |
+| API case | `case discover`, `case run`, `case incomplete-batches` |
+| Case suite | `case suite report`, `case suite coverage`, `case suite stability`, `case suite priority`, `case suite brief`, `case suite quality`, `case suite quality-plan`, `case suite quality-report`, `case suite inspect`, `case suite plan`, `case suite impact`, `case suite impact-report` |
+| Server | `serve` |
+
+## API Surface
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/profile/import` | Publish a profile into Store and activate it in the running control plane. |
+| `POST` | `/api/profile/verify` | Audit, publish, and verify Store/read-model effects. |
+| `POST` | `/api/profile/audit-plan` | Return a deterministic profile repair plan. |
+| `POST` | `/api/profile/install` | Install an archive or profile path into profile home. |
+| `GET` | `/api/profile/installed` | List installed profiles. |
+| `GET` | `/api/profile` | Return current active profile id, display name, and counts. |
+| `GET` | `/api/profile/assets` | Return current profile services, workflows, interface nodes, and API cases. |
+| `GET` | `/api/profile/catalog-index` | Return active Store catalog index and config version. |
+| `GET` | `/api/state` | Return dashboard-friendly state from the active profile. |
+| `POST` | `/api/sandbox/services` | Register or update a Store-backed sandbox service. |
+| `POST` | `/api/sandbox/interfaces` | Register or update a Store-backed interface node, request template, API case, and execution config. |
+| `GET` | `/api/dashboard` | Return dashboard summary, Store-aware when available. |
+| `GET` | `/api/catalog` | Return catalog payload, Store-aware when available. |
+| `GET` | `/api/interface-nodes` | List interface nodes; accepts `serviceId` and `operation`. |
+| `GET` | `/api/interface-node` | Return interface-node detail; accepts `id`, plus optional run context. |
+| `GET` | `/api/interface-node/coverage` | Return workflow/interface coverage. |
+| `GET` | `/api/interface-node/coverage-gaps` | Return coverage gaps. |
+| `GET` | `/api/workflow-audit` | Audit one workflow; requires `workflowId`. |
+| `GET` | `/api/runs` | List workflow/replay/probe run headers. |
+| `POST` | `/api/workflow-runs` | Persist a workflow run snapshot. |
+| `GET` | `/api/workflow-runs/{runId}` | Return one workflow run. |
+| `GET` | `/api/workflow-runs/step` | Return one run step; requires `runId` and `stepId`. |
+| `GET` | `/api/workflow-runs/latest-step` | Return latest matching workflow step; requires `workflowId` and `stepId`. |
+| `POST` | `/api/trace-topology/collect` | Query trace provider and persist topology for a run. |
+| `GET` | `/api/agent-test` | Return agent workbench payload. |
+| `GET` | `/api/case/runs` | List stored API case runs with failure category metadata. |
+| `GET` | `/api/case/evidence` | Return case evidence by `caseRunId`, or by `runId` plus optional `caseId`/`stepId`. |
+| `GET` | `/api/case-run/evidence` | Return case evidence by `caseRunId`. |
+| `GET` | `/api/case/timing` | Return case-run timing summary; accepts `kind` and `maxAgeMinutes`. |
+| `GET` | `/api/post-process-tasks` | List post-process tasks; requires `runId`, accepts `stepId`, `caseId`, `kind`, `status`. |
+| `GET` | `/api/case/incomplete-batches` | List profile API cases without a passed Store run. |
+| `GET` | `/api/case/suite-coverage` | Return suite coverage for selected cases. |
+| `GET` | `/api/case/suite-inspection` | Return pre-run suite readiness. |
+| `GET` | `/api/case/suite-plan` | Return selected ready cases and a batch-run request. |
+| `GET` | `/api/case/suite-stability` | Return recent pass/fail stability. |
+| `GET` | `/api/case/suite-priority` | Rank cases using change signals and Store history. |
+| `GET` | `/api/case/suite-brief` | Return one-call suite triage. |
+| `GET` | `/api/case/suite-quality` | Return suite authoring-readiness quality report. |
+| `GET` | `/api/case/suite-quality-plan` | Return suite quality next actions. |
+| `GET` | `/api/case/suite-impact` | Map change signals to impacted cases and a batch-run request. |
+| `POST` | `/api/case/suite-impact-runs` | Plan impacted cases and start an async batch run. |
+| `GET` | `/api/replay/evidence` | Return replay evidence shell by `traceId`. |
+| `GET` | `/api/cases/capabilities` | Return runnable case capability payload. |
+| `POST` | `/api/cases/run` | Run a case file by `casePath`. |
+| `POST` | `/api/cases/batch-runs` | Start an async case batch by `caseIds`, `nodeIds`, `workflowId`, or `suite`. |
+| `GET` | `/api/cases/batch-runs/{batchRunId}` | Poll async batch status. |
+| `GET` | `/api/cases/batch-runs/{batchRunId}/report.html` | Fetch async batch HTML report. |
+| `GET` | `/api/cases/batch-runs/{batchRunId}/report.junit.xml` | Fetch async batch JUnit report. |
+| `GET` | `/api/cases/batch-runs/{batchRunId}/artifacts.json` | Fetch async batch artifact manifest. |
+| `GET` | `/api/cases/batch-runs/{batchRunId}/failures.json` | Fetch async batch failure summary. |
+| `POST` | `/api/test-kit/run` | Run a Store/profile API case by `caseId`. |
+| `POST` | `/api/test-kit/run-batch` | Run Store/profile API cases by `caseIds`. |
+
+Common suite selector query parameters are `filter`, `node`/`nodeId`, `tag` or
+`tags`, `status`, `owner`, and `priority`. Planning and impact APIs also accept
+`action`, `requestId`, `baseUrl`, `evidenceDir`, and `timeoutSeconds`. Impact
+and priority APIs accept `signal`, `signals`, `change`, `changes`,
+`changedPath`, and `changedPaths`.
+
+## API/CLI Parity Matrix
+
+| Capability | CLI | API | Parity |
+| --- | --- | --- | --- |
+| Serve control plane | `serve` | Not applicable | CLI-only bootstrap. |
+| Version/help | `version`, `help` | None | CLI-only. |
+| Store status and schema upgrade | `store status`, `store upgrade` | None | CLI-only. |
+| Start registered sandbox service | `sandbox start` | None | CLI-only. |
+| Register sandbox service/interface in Store | None | `/api/sandbox/services`, `/api/sandbox/interfaces` | API-only and important. This is currently the clearest Store-first API gap in CLI. |
+| Profile install/list | `profile install`, `profile list` | `/api/profile/install`, `/api/profile/installed` | Mostly paired. |
+| Current profile summary/assets | `profile inspect` | `/api/profile`, `/api/profile/assets` | Partial. CLI inspects a package/reference; API reports the active served profile. |
+| Profile import/publish | `profile import`, `config publish` | `/api/profile/import` | Mostly paired. CLI can also audit/require audit ok. |
+| Profile verify | `profile verify` | `/api/profile/verify` | Paired. |
+| Profile audit repair plan | `profile audit-plan` | `/api/profile/audit-plan` | Paired. |
+| Profile init/pack/audit | `profile init`, `profile pack`, `profile audit` | None | CLI-only package authoring. |
+| Profile import/generation planning | `profile import-plan ...`, `profile generation-plan openapi` | None | CLI-only. |
+| Profile catalog index | None | `/api/profile/catalog-index` | API-only. |
+| Catalog/dashboard/state | Roughly `profile inspect`, discovery commands | `/api/state`, `/api/dashboard`, `/api/catalog` | API-first UI payloads; no exact CLI. |
+| Interface-node discovery/list | `interface-node discover` | `/api/interface-nodes`, `/api/interface-node` | Partial. CLI has search filter; API has service/operation/detail. |
+| Interface-node coverage | None | `/api/interface-node/coverage`, `/api/interface-node/coverage-gaps` | API-only. |
+| Interface-node case authoring | `interface-node case audit/draft/apply` | None | CLI-only package authoring. |
+| Single interface report | `interface-node case report` | `/api/cases/batch-runs` with `nodeIds` | Partial. CLI is synchronous and writes report files; API is async and process-local. |
+| Case discovery/capabilities | `case discover` | `/api/cases/capabilities`, `/api/catalog` | Partial. CLI has richer maintenance filters. |
+| Single case run by file | `case run --case PATH` | `/api/cases/run` with `casePath` | Paired. |
+| Single case run by catalog id | None | `/api/test-kit/run` with `caseId` | API-only. |
+| Case batch run | `case suite report`, `workflow report`, `interface-node case report` | `/api/cases/batch-runs`, `/api/test-kit/run-batch` | Partial. CLI variants are synchronous reports; API variants are async or test-kit oriented. |
+| Case run list/evidence | No exact command | `/api/case/runs`, `/api/case/evidence`, `/api/case-run/evidence` | API-only. CLI has `evidence list`, but not case-focused detail payloads. |
+| Case timing | None | `/api/case/timing` | API-only. |
+| Incomplete case batches | `case incomplete-batches` | `/api/case/incomplete-batches` | Paired. |
+| Suite coverage | `case suite coverage` | `/api/case/suite-coverage` | Paired. |
+| Suite inspection | `case suite inspect` | `/api/case/suite-inspection` | Paired. |
+| Suite plan | `case suite plan` | `/api/case/suite-plan` | Paired. |
+| Suite stability | `case suite stability` | `/api/case/suite-stability` | Paired. |
+| Suite priority | `case suite priority` | `/api/case/suite-priority` | Paired. |
+| Suite brief | `case suite brief` | `/api/case/suite-brief` | Paired. |
+| Suite quality | `case suite quality` | `/api/case/suite-quality` | Paired. |
+| Suite quality plan | `case suite quality-plan` | `/api/case/suite-quality-plan` | Paired. |
+| Suite quality HTML/JSON report | `case suite quality-report` | None | CLI-only artifact generation. |
+| Suite impact plan | `case suite impact` | `/api/case/suite-impact` | Paired. |
+| Suite impact run/report | `case suite impact-report` | `/api/case/suite-impact-runs` | Partial. CLI is synchronous report generation; API starts async execution. |
+| Workflow discovery | `workflow discover` | `/api/catalog`/profile assets only | Partial. No dedicated API filter equivalent. |
+| Workflow plan | `workflow plan` | None | CLI-only. |
+| Workflow audit | `workflow audit` | `/api/workflow-audit` | Paired. |
+| Workflow report/run | `workflow report` | `/api/cases/batch-runs` with `workflowId`, `/api/workflow-runs` | Partial. API has async execution and persisted run snapshots, not the same synchronous report command. |
+| Workflow run lookup | None | `/api/runs`, `/api/workflow-runs/*` | API-only. |
+| Trace topology collection | No exact command | `/api/trace-topology/collect` | API-only. CLI reports may schedule related work indirectly. |
+| Replay evidence shell | None | `/api/replay/evidence` | API-only. |
+| Post-process task lookup | `evidence tasks` | `/api/post-process-tasks` | Paired. |
+| Evidence import/list | `evidence import`, `evidence list` | No exact API | CLI-only. |
+| Executor plan | `executor plan` | None | CLI-only. |
+| Baseline get/set | `baseline get`, `baseline set` | None | CLI-only. |
+| Template render | `template render` | None | CLI-only. |
+
+## Main Differences
+
+The surfaces are not yet one-to-one. The current design has three distinct
+classes of mismatch:
+
+1. Store-first API capabilities without CLI adapters:
+   `/api/sandbox/services` and `/api/sandbox/interfaces` let users register
+   runtime facts and executable interface cases directly into Store. There is no
+   `otsandbox sandbox register ...` or equivalent CLI command today.
+
+2. CLI package-authoring capabilities without API endpoints:
+   profile initialization, packing, audit, import-plan generation, OpenAPI
+   negative-case generation, interface-node case draft/apply, executor planning,
+   baseline updates, and template rendering are available from CLI only.
+
+3. Same domain but different execution model:
+   several CLI commands synchronously produce local reports, while the API starts
+   async runs and exposes process-local polling/report URLs. This affects
+   `case suite report`, `interface-node case report`, `workflow report`, and
+   `case suite impact-report`.
+
+There are also naming and selector differences:
+
+- CLI flags use `--profile`, while served APIs operate on the active Store-backed
+  profile for the running server.
+- CLI uses `--node`; suite APIs accept both `node` and `nodeId`.
+- CLI `case run` runs a case file path, while `/api/test-kit/run` runs a catalog
+  case id. `/api/cases/run` is the closer API match for `case run`.
+- Existing older prose used pre-profile package terminology; current code and
+  help text use `profile`. New docs should prefer `profile`.
+
+## Recommended Parity Work
+
+If the product goal is API/CLI one-to-one capability, prioritize parity in this
+order:
+
+1. Add CLI wrappers for Store-first registration:
+   `otsandbox sandbox service register ...` and
+   `otsandbox sandbox interface register ...`, backed by the same Store write
+   path as `/api/sandbox/services` and `/api/sandbox/interfaces`.
+
+2. Add read CLI commands for API-only Store views:
+   `profile catalog-index`, `case runs`, `case evidence`, `case timing`,
+   `workflow runs`, `workflow run`, and `trace topology collect`.
+
+3. Add API endpoints for CLI-only daily testing helpers:
+   `executor plan`, `evidence import/list`, `baseline get/set`, and
+   `template render`.
+
+4. Decide whether package-authoring commands should be API contracts:
+   `profile init/pack/audit/import-plan/generation-plan` and
+   `interface-node case draft/apply` may remain CLI-only if they are intended as
+   offline authoring tools. If they are part of the workbench product surface,
+   expose them under `/api/profile/*` and `/api/interface-node/case/*`.
+
+5. Normalize report execution semantics:
+   either add synchronous API report endpoints, or add CLI commands that start
+   async batch runs and poll `/api/cases/batch-runs/{batchRunId}`. The current
+   split is workable, but it is not one-to-one.
+
+## Notes for Future Changes
+
+- When adding a new CLI command, add the corresponding API row or explicitly
+  mark it CLI-only in this document.
+- When adding a new API endpoint, add the corresponding CLI row or explicitly
+  mark it API-only in this document.
+- Keep selector names aligned where possible. If aliases are necessary, document
+  both names.
+- Prefer Store-first APIs and UI paths for new daily testing behavior; keep
+  profile package flows as import/export or compatibility bridges.

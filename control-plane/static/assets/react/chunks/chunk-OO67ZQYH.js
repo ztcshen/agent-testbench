@@ -1,0 +1,1 @@
+async function o(t){let e=await fetch(t,{cache:"no-store",headers:{Accept:"application/json"}}),n=await e.json();if(!e.ok)throw new Error(n.error||e.statusText);return n}function r(...t){return t.filter(Boolean).join(" ")}function c(t){return[...new Set(t.filter(Boolean))]}function a(t,e="-"){return String(t||"").replace(/\s+/g," ").trim()||e}export{o as a,r as b,c,a as d};

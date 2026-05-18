@@ -21,8 +21,9 @@ import (
 )
 
 type runnableAPICase struct {
-	Case      profile.APICase
-	Execution *caseExecutionConfig
+	Case        profile.APICase
+	Execution   *caseExecutionConfig
+	CaseBaseURL string
 }
 
 type caseExecutionConfig struct {
@@ -139,7 +140,7 @@ func testKitCaseResult(ctx context.Context, bundle profile.Bundle, runtime store
 		}, http.StatusNotFound
 	}
 
-	executionResult := executeTestKitCase(ctx, bundle, item, payload)
+	executionResult := executeTestKitCase(ctx, bundle, runtime, item, payload)
 	runOK := executionResult.ok
 	status := store.StatusPassed
 	if !runOK {
@@ -176,7 +177,7 @@ type caseExecutionResult struct {
 	result        map[string]any
 }
 
-func executeTestKitCase(ctx context.Context, bundle profile.Bundle, item runnableAPICase, payload map[string]any) caseExecutionResult {
+func executeTestKitCase(ctx context.Context, bundle profile.Bundle, runtime store.Store, item runnableAPICase, payload map[string]any) caseExecutionResult {
 	if item.Execution == nil {
 		return caseExecutionResult{
 			ok:            false,
@@ -187,7 +188,7 @@ func executeTestKitCase(ctx context.Context, bundle profile.Bundle, item runnabl
 			},
 		}
 	}
-	request, err := buildCaseHTTPRequest(bundle, *item.Execution, payload)
+	request, err := buildCaseHTTPRequest(ctx, bundle, runtime, *item.Execution, item.CaseBaseURL, payload)
 	if err != nil {
 		return failedCaseExecution(item.Case.ID, err.Error())
 	}
@@ -245,10 +246,16 @@ type caseHTTPRequest struct {
 	signed            bool
 }
 
-func buildCaseHTTPRequest(bundle profile.Bundle, execution caseExecutionConfig, payload map[string]any) (caseHTTPRequest, error) {
+func buildCaseHTTPRequest(ctx context.Context, bundle profile.Bundle, runtime store.Store, execution caseExecutionConfig, caseBaseURL string, payload map[string]any) (caseHTTPRequest, error) {
 	baseURL := strings.TrimRight(valueString(payload["baseUrl"]), "/")
 	if baseURL == "" {
-		baseURL = serviceBaseURL(context.Background(), bundle.Services, execution.NodeID)
+		baseURL = strings.TrimRight(caseBaseURL, "/")
+	}
+	if baseURL == "" {
+		baseURL = serviceBaseURL(ctx, bundle.Services, execution.NodeID)
+	}
+	if baseURL == "" {
+		baseURL = catalogServiceBaseURL(ctx, runtime, execution.NodeID)
 	}
 	if baseURL == "" {
 		return caseHTTPRequest{}, fmt.Errorf("service runtime is not available for %s", execution.NodeID)
@@ -289,6 +296,34 @@ func serviceBaseURL(ctx context.Context, services []profile.Service, serviceID s
 		return ""
 	}
 	return fmt.Sprintf("http://127.0.0.1:%d", runtime.Port)
+}
+
+func catalogServiceBaseURL(ctx context.Context, runtime store.Store, serviceID string) string {
+	if runtime == nil || strings.TrimSpace(serviceID) == "" {
+		return ""
+	}
+	catalog, err := runtime.GetProfileCatalog(ctx)
+	if err != nil {
+		return ""
+	}
+	resolvedServiceID := strings.TrimSpace(serviceID)
+	for _, node := range catalog.InterfaceNodes {
+		if node.ID == serviceID && strings.TrimSpace(node.ServiceID) != "" {
+			resolvedServiceID = strings.TrimSpace(node.ServiceID)
+			break
+		}
+	}
+	for _, service := range catalog.Services {
+		if service.ID != resolvedServiceID {
+			continue
+		}
+		port := service.ServicePort
+		if port <= 0 {
+			return ""
+		}
+		return fmt.Sprintf("http://127.0.0.1:%d", port)
+	}
+	return ""
 }
 
 func (request caseHTTPRequest) bodyReader() io.Reader {
@@ -778,7 +813,11 @@ func attachTestKitTraceTopology(ctx context.Context, runtime store.Store, collec
 
 func scheduleTestKitTraceTopology(runtime store.Store, collector traceCollector, runID string, payload map[string]any, result map[string]any) {
 	collectPayload, ok := testKitTraceTopologyCollectPayload(runID, payload, result)
-	if !ok || runtime == nil || strings.TrimSpace(collector.GraphQLURL) == "" {
+	if !ok || runtime == nil {
+		return
+	}
+	if strings.TrimSpace(collector.GraphQLURL) == "" {
+		recordSkippedTestKitTraceTopologyTask(runtime, runID, payload, collectPayload, "TraceGraphQLURL is not configured; trace topology collection skipped")
 		return
 	}
 	go func() {
@@ -819,13 +858,38 @@ func scheduleTestKitTraceTopology(runtime store.Store, collector traceCollector,
 	}()
 }
 
+func recordSkippedTestKitTraceTopologyTask(runtime store.Store, runID string, payload map[string]any, collectPayload map[string]any, errText string) {
+	now := time.Now().UTC()
+	recordPostProcessTask(context.Background(), runtime, store.PostProcessTask{
+		ID:          runID + "." + safeRuntimeLogPathSegment(valueString(collectPayload["stepId"])) + "." + postProcessKindTraceTopology,
+		RunID:       runID,
+		WorkflowID:  valueString(payload["workflowId"]),
+		StepID:      valueString(collectPayload["stepId"]),
+		CaseID:      valueString(collectPayload["caseId"]),
+		Kind:        postProcessKindTraceTopology,
+		Status:      store.StatusSkipped,
+		StartedAt:   now,
+		FinishedAt:  now,
+		DurationMs:  0,
+		Error:       errText,
+		SummaryJSON: compactJSON(map[string]any{"reason": "trace_provider_missing"}),
+		CreatedAt:   now,
+	})
+}
+
 func testKitTraceTopologyCollectPayload(runID string, payload map[string]any, result map[string]any) (map[string]any, bool) {
 	if runID == "" || result["ok"] != true {
 		return nil, false
 	}
 	request := mapFromAny(mapFromAny(result["result"])["request"])
 	response := mapFromAny(mapFromAny(result["result"])["response"])
-	endpoint := firstNonEmpty(valueString(request["path"]), valueString(request["fullUrl"]))
+	headers := request["headers"]
+	endpoint := firstNonEmpty(
+		valueString(headerValue(headers, "X-Sandbox-Trace-Endpoint")),
+		valueString(headerValue(headers, "X-Sandbox-Callback-Path")),
+		valueString(request["path"]),
+		valueString(request["fullUrl"]),
+	)
 	if endpoint == "" {
 		return nil, false
 	}
@@ -924,7 +988,7 @@ func findRunnableAPICase(ctx context.Context, bundle profile.Bundle, runtime sto
 				ID:          item.ID,
 				DisplayName: item.DisplayName,
 				NodeID:      item.NodeID,
-			}, Execution: findCaseExecutionConfigFromCatalog(catalog, id, payload)}, true
+			}, Execution: findCaseExecutionConfigFromCatalog(catalog, id, payload), CaseBaseURL: item.BaseURL}, true
 		}
 	}
 	return runnableAPICase{}, false
@@ -950,7 +1014,7 @@ func findCaseExecutionConfigFromCatalog(catalog store.ProfileCatalog, caseID str
 			continue
 		}
 		var parsed caseExecutionTemplateConfig
-		if err := json.Unmarshal([]byte(config.ConfigJSON), &parsed); err != nil || parsed.CaseID != caseID {
+		if err := json.Unmarshal([]byte(config.ConfigJSON), &parsed); err != nil {
 			continue
 		}
 		next := parsed.CaseExecution
@@ -959,6 +1023,9 @@ func findCaseExecutionConfigFromCatalog(catalog store.ProfileCatalog, caseID str
 		}
 		if workflowID != "" && stepID != "" && config.WorkflowID == workflowID && config.ScopeID == stepID {
 			return &next
+		}
+		if parsed.CaseID != caseID {
+			continue
 		}
 		if fallback == nil {
 			fallback = &next

@@ -142,6 +142,15 @@ type PlanReport struct {
 	Warnings     []string         `json:"warnings,omitempty"`
 }
 
+const (
+	CaseLifecycleDraft       = "draft"
+	CaseLifecycleReview      = "review"
+	CaseLifecycleActive      = "active"
+	CaseLifecycleQuarantined = "quarantined"
+	CaseLifecycleDeprecated  = "deprecated"
+	CaseLifecycleInvalid     = "invalid"
+)
+
 type RecordStore interface {
 	ListRuns(context.Context) ([]store.Run, error)
 	ListAPICaseRuns(context.Context, string) ([]store.APICaseRun, error)
@@ -276,7 +285,7 @@ func Inspect(ctx context.Context, bundle profile.Bundle, runtime RecordStore, fi
 		if row.LatestStatus == "" {
 			row.LatestStatus = "not-run"
 		}
-		if !strings.EqualFold(status, "active") {
+		if !IsExecutableCaseLifecycle(status) {
 			row.Issues = append(row.Issues, "case status is "+status)
 			report.Counts.Inactive++
 		}
@@ -483,7 +492,7 @@ func activeStatus(status string) bool {
 }
 
 func SuggestedAction(item InspectionItem) string {
-	if !strings.EqualFold(item.Status, "active") {
+	if !IsExecutableCaseLifecycle(item.Status) {
 		return "review-status"
 	}
 	if !item.HasRunnableFile && !item.HasExecutionConfig {
@@ -540,10 +549,31 @@ func NormalizeFilter(filter Filter) Filter {
 }
 
 func CaseStatus(item profile.APICase) string {
-	if strings.TrimSpace(item.Status) == "" {
-		return "active"
+	return NormalizeCaseLifecycle(item.Status)
+}
+
+func NormalizeCaseLifecycle(status string) string {
+	status = strings.ToLower(strings.TrimSpace(status))
+	if status == "" {
+		return CaseLifecycleActive
 	}
-	return item.Status
+	if IsKnownCaseLifecycle(status) {
+		return status
+	}
+	return CaseLifecycleInvalid
+}
+
+func IsKnownCaseLifecycle(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case CaseLifecycleDraft, CaseLifecycleReview, CaseLifecycleActive, CaseLifecycleQuarantined, CaseLifecycleDeprecated:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsExecutableCaseLifecycle(status string) bool {
+	return NormalizeCaseLifecycle(status) == CaseLifecycleActive
 }
 
 func HasAllTags(actual []string, required []string) bool {

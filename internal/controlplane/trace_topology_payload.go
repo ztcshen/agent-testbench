@@ -1,6 +1,10 @@
 package controlplane
 
-import "open-test-sandbox/internal/store"
+import (
+	"strings"
+
+	"open-test-sandbox/internal/store"
+)
 
 type topologyEvidenceViewInput struct {
 	RunID        string
@@ -10,7 +14,8 @@ type topologyEvidenceViewInput struct {
 }
 
 func traceTopologyPayload(row store.TraceTopology) map[string]any {
-	return map[string]any{
+	provider := traceTopologyProvider(row)
+	payload := map[string]any{
 		"id":            row.ID,
 		"workflowRunId": row.WorkflowRunID,
 		"workflowId":    row.WorkflowID,
@@ -23,6 +28,10 @@ func traceTopologyPayload(row store.TraceTopology) map[string]any {
 		"textTopology":  row.TextTopology,
 		"createdAt":     row.CreatedAt,
 	}
+	if provider != "" {
+		payload["provider"] = provider
+	}
+	return payload
 }
 
 func topologyEvidenceViewForCase(input topologyEvidenceViewInput) map[string]any {
@@ -42,6 +51,9 @@ func storedTraceTopologyEvidence(caseID string, rows []store.TraceTopology) map[
 	for i := len(rows) - 1; i >= 0; i-- {
 		row := rows[i]
 		if row.CaseID != caseID {
+			continue
+		}
+		if !isSkyWalkingTraceTopology(row) {
 			continue
 		}
 		return traceTopologyEvidencePayload(row)
@@ -65,6 +77,19 @@ func traceTopologyEvidencePayload(row store.TraceTopology) map[string]any {
 	return topology
 }
 
+func isSkyWalkingTraceTopology(row store.TraceTopology) bool {
+	return traceTopologyProvider(row) == "skywalking"
+}
+
+func traceTopologyProvider(row store.TraceTopology) string {
+	topology := jsonObject(row.TopologyJSON)
+	provider := strings.ToLower(strings.TrimSpace(valueString(topology["provider"])))
+	if provider == "" {
+		provider = strings.ToLower(strings.TrimSpace(valueString(topology["source"])))
+	}
+	return provider
+}
+
 func unavailableTraceTopologyEvidence(runID string, caseID string) map[string]any {
 	return map[string]any{
 		"status":          "unavailable",
@@ -74,7 +99,7 @@ func unavailableTraceTopologyEvidence(runID string, caseID string) map[string]an
 		"confirmedEdges":  []map[string]any{},
 		"externalExits":   []map[string]any{},
 		"unresolvedExits": []map[string]any{},
-		"warnings":        []string{"Trace topology was not captured for this case run."},
-		"textTopology":    "Trace topology unavailable: no captured spans",
+		"warnings":        []string{"SkyWalking topology was not captured for this case run."},
+		"textTopology":    "SkyWalking topology unavailable: no captured spans",
 	}
 }

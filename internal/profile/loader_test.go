@@ -40,6 +40,7 @@ func TestLoadProfileReadsSplitAssetDirectories(t *testing.T) {
   "workflows": [],
   "interfaceNodes": [],
   "apiCases": [],
+  "executors": [],
   "fixtures": []
 }`)
 	writeFile(t, filepath.Join(dir, "services", "service.json"), `{"id":"service.one","displayName":"Service One","kind":"http"}`)
@@ -49,6 +50,7 @@ func TestLoadProfileReadsSplitAssetDirectories(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "request-templates", "template.json"), `{"id":"template.one","displayName":"Template One","nodeId":"node.one","method":"GET","path":"/health","templateJson":"{}"}`)
 	writeFile(t, filepath.Join(dir, "case-dependencies", "dependency.json"), `{"id":"dependency.one","caseId":"case.one","fixtureId":"fixture.one","mappingsJson":"[]"}`)
 	writeFile(t, filepath.Join(dir, "workflow-bindings", "binding.json"), `{"workflowId":"workflow.one","stepId":"step.one","nodeId":"node.one","caseId":"case.one","required":true}`)
+	writeFile(t, filepath.Join(dir, "executors", "karate.json"), `{"id":"executor.karate","displayName":"Karate suite","kind":"karate","sourcePath":"tests/api.feature","status":"active","tags":["api"]}`)
 	writeFile(t, filepath.Join(dir, "fixtures", "fixture.json"), `{"id":"fixture.one","displayName":"Fixture One","kind":"json"}`)
 
 	bundle, err := profile.Load(dir)
@@ -57,7 +59,7 @@ func TestLoadProfileReadsSplitAssetDirectories(t *testing.T) {
 	}
 
 	counts := bundle.Counts()
-	if counts.Services != 1 || counts.Workflows != 1 || counts.InterfaceNodes != 1 || counts.APICases != 1 || counts.RequestTemplates != 1 || counts.CaseDependencies != 1 || counts.WorkflowBindings != 1 || counts.Fixtures != 1 {
+	if counts.Services != 1 || counts.Workflows != 1 || counts.InterfaceNodes != 1 || counts.APICases != 1 || counts.RequestTemplates != 1 || counts.CaseDependencies != 1 || counts.WorkflowBindings != 1 || counts.Executors != 1 || counts.Fixtures != 1 {
 		t.Fatalf("split profile counts = %#v", counts)
 	}
 	if bundle.APICases[0].ID != "case.one" || bundle.RequestTemplates[0].NodeID != "node.one" || !bundle.WorkflowBindings[0].Required {
@@ -68,6 +70,9 @@ func TestLoadProfileReadsSplitAssetDirectories(t *testing.T) {
 	}
 	if bundle.APICases[0].CasePath != filepath.ToSlash(filepath.Join("cases", "case.json")) {
 		t.Fatalf("split profile case path = %#v", bundle.APICases[0])
+	}
+	if bundle.Executors[0].ID != "executor.karate" || bundle.Executors[0].Kind != "karate" || bundle.Executors[0].SourcePath != "tests/api.feature" {
+		t.Fatalf("split profile executor = %#v", bundle.Executors[0])
 	}
 }
 

@@ -46,13 +46,7 @@ func catalogPayloadFromBundleWithStore(ctx context.Context, bundle profile.Bundl
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return catalogPayload{}, err
 	}
-	if err == nil && catalogHasWorkflowDirectory(catalog) {
-		if payload, ok, err := catalogPayloadFromReadModel(ctx, runtime, catalog.ProfileID); err != nil {
-			return catalogPayload{}, err
-		} else if ok {
-			hydrateCatalogPayloadRuns(&payload, byWorkflow)
-			return payload, nil
-		}
+	if err == nil && catalogHasAnyState(catalog) {
 		return catalogPayloadFromStoreCatalog(catalog, byWorkflow), nil
 	}
 
@@ -93,6 +87,17 @@ func catalogHasWorkflowDirectory(catalog store.ProfileCatalog) bool {
 	return len(catalog.WorkflowBindings) > 0 || len(catalog.Workflows) > 0 || len(catalog.InterfaceNodes) > 0
 }
 
+func catalogHasAnyState(catalog store.ProfileCatalog) bool {
+	return catalogHasWorkflowDirectory(catalog) ||
+		len(catalog.Services) > 0 ||
+		len(catalog.APICases) > 0 ||
+		len(catalog.RequestTemplates) > 0 ||
+		len(catalog.InterfaceFields) > 0 ||
+		len(catalog.CaseDependencies) > 0 ||
+		len(catalog.Fixtures) > 0 ||
+		len(catalog.TemplateConfigs) > 0
+}
+
 func catalogPayloadFromStoreCatalog(catalog store.ProfileCatalog, byWorkflow map[string]catalogWorkflowRunState) catalogPayload {
 	services, serviceIDs := catalogServicesFromStore(catalog)
 	workflows := catalogWorkflowsFromStore(catalog, byWorkflow)
@@ -109,11 +114,29 @@ func catalogPayloadFromStoreCatalog(catalog store.ProfileCatalog, byWorkflow map
 			"kind": "store",
 			"id":   catalog.ProfileID,
 		},
-		Services:  services,
-		Workflows: workflows,
-		APICases:  apiCases,
-		Topology:  topology,
+		Presentation: catalogPresentationFromStoreConfigs(catalog.TemplateConfigs),
+		Services:     services,
+		Workflows:    workflows,
+		APICases:     apiCases,
+		Topology:     topology,
 	}
+}
+
+func catalogPresentationFromStoreConfigs(configs []store.CatalogTemplateConfig) *catalogPresentation {
+	var presentation catalogPresentation
+	for _, config := range configs {
+		if !visibleTemplateConfigStatus(config.Status) || config.ScopeType != "workflow-directory" {
+			continue
+		}
+		if config.ScopeID != "" && config.ScopeID != "_default" {
+			continue
+		}
+		mergeCatalogWorkflowFinder(&presentation, jsonObject(config.ConfigJSON))
+	}
+	if presentation.WorkflowFinder == nil {
+		return nil
+	}
+	return &presentation
 }
 
 func catalogServicesFromStore(catalog store.ProfileCatalog) ([]catalogService, []string) {
@@ -219,7 +242,7 @@ func catalogWorkflowsFromStore(catalog store.ProfileCatalog, byWorkflow map[stri
 				ID:                 stepID,
 				DisplayName:        firstNonEmpty(stepConfig.Title, item.DisplayName, node.DisplayName, binding.StepID),
 				ServiceID:          serviceID,
-				CaseID:             firstNonEmpty(valueString(stepConfigJSON["caseId"]), binding.CaseID),
+				CaseID:             firstNonEmpty(binding.CaseID, valueString(stepConfigJSON["caseId"])),
 				Action:             firstNonEmpty(valueString(stepConfigJSON["action"]), item.CaseType, node.Operation, item.DisplayName),
 				Required:           binding.Required,
 				Executable:         true,
@@ -467,6 +490,9 @@ func catalogAPICasesFromStore(catalog store.ProfileCatalog) []catalogAPICase {
 			DisplayName:      item.DisplayName,
 			NodeID:           item.NodeID,
 			CasePath:         item.CasePath,
+			SourceKind:       item.SourceKind,
+			SourcePath:       item.SourcePath,
+			ExecutorID:       item.ExecutorID,
 			BaseURL:          item.BaseURL,
 			EvidenceDir:      item.EvidenceDir,
 			TimeoutSeconds:   item.TimeoutSeconds,

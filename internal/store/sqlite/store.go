@@ -477,11 +477,15 @@ func (s *Store) RecordEvidence(ctx context.Context, r store.EvidenceRecord) (sto
 	if r.CreatedAt.IsZero() {
 		r.CreatedAt = utcNow()
 	}
+	if strings.TrimSpace(r.LabelsJSON) == "" {
+		r.LabelsJSON = "{}"
+	}
 	if err := s.exec(ctx, fmt.Sprintf(`
-insert into evidence_records (id, run_id, case_run_id, kind, uri, media_type, sha256, size_bytes, summary, created_at)
-values (%s, %s, %s, %s, %s, %s, %s, %d, %s, %s);`,
+insert into evidence_records (id, run_id, case_run_id, kind, uri, media_type, sha256, size_bytes, summary, category, visibility, labels_json, created_at)
+values (%s, %s, %s, %s, %s, %s, %s, %d, %s, %s, %s, %s, %s);`,
 		sqlString(r.ID), sqlString(r.RunID), sqlString(r.CaseRunID), sqlString(r.Kind), sqlString(r.URI),
-		sqlString(r.MediaType), sqlString(r.SHA256), r.SizeBytes, sqlString(r.Summary), sqlString(encodeTime(r.CreatedAt)))); err != nil {
+		sqlString(r.MediaType), sqlString(r.SHA256), r.SizeBytes, sqlString(r.Summary), sqlString(r.Category),
+		sqlString(r.Visibility), sqlString(r.LabelsJSON), sqlString(encodeTime(r.CreatedAt)))); err != nil {
 		return store.EvidenceRecord{}, fmt.Errorf("record evidence %q: %w", r.ID, err)
 	}
 	return r, nil
@@ -490,7 +494,7 @@ values (%s, %s, %s, %s, %s, %s, %s, %d, %s, %s);`,
 func (s *Store) ListEvidence(ctx context.Context, runID string) ([]store.EvidenceRecord, error) {
 	var rows []evidenceRecordRow
 	if err := s.query(ctx, fmt.Sprintf(`
-select id, run_id, case_run_id, kind, uri, media_type, sha256, size_bytes, summary, created_at
+select id, run_id, case_run_id, kind, uri, media_type, sha256, size_bytes, summary, category, visibility, labels_json, created_at
 from evidence_records where run_id = %s order by created_at, id;`, sqlString(runID)), &rows); err != nil {
 		return nil, err
 	}
@@ -843,14 +847,15 @@ values (%s, %s, %s, 'interface_node', %s, %s, %s, 'active', %d);`, sqlString(con
 	}
 	for index, item := range catalog.APICases {
 		statements = append(statements, fmt.Sprintf(`
-	insert into interface_node_case (id, node_id, title, description, case_type, scenario, tags_json, priority, owner, payload_template_json, request_template_id, patch_json, render_mode, expected_json, required_for_admission, status, sort_order, created_at, updated_at, case_path, base_url, evidence_dir, timeout_seconds, default_overrides_json)
-	values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %d, %s, %d, %s, %s, %s, %s, %s, %d, %s);`,
+	insert into interface_node_case (id, node_id, title, description, case_type, scenario, tags_json, priority, owner, payload_template_json, request_template_id, patch_json, render_mode, expected_json, required_for_admission, status, sort_order, created_at, updated_at, case_path, source_kind, source_path, executor_id, base_url, evidence_dir, timeout_seconds, default_overrides_json)
+	values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %d, %s, %d, %s, %s, %s, %s, %s, %s, %s, %s, %d, %s);`,
 			sqlString(item.ID), sqlString(item.NodeID), sqlString(item.DisplayName), sqlString(item.Description), sqlString(stringDefault(item.CaseType, "api")), sqlString(item.Scenario),
 			sqlString(jsonString(item.Tags, "[]")), sqlString(item.Priority), sqlString(item.Owner),
 			sqlString(stringDefault(item.PayloadTemplateJSON, "{}")), sqlString(item.RequestTemplateID), sqlString(stringDefault(item.PatchJSON, "[]")),
 			sqlString(stringDefault(item.RenderMode, "legacy_payload")), sqlString(stringDefault(item.ExpectedJSON, "{}")), boolInt(item.RequiredForAdmission),
 			sqlString(stringDefault(item.Status, "active")), firstNonZero(item.SortOrder, index), sqlString(indexedAt), sqlString(indexedAt),
-			sqlString(item.CasePath), sqlString(item.BaseURL), sqlString(item.EvidenceDir), item.TimeoutSeconds, sqlString(stringDefault(item.DefaultOverridesJSON, "{}"))))
+			sqlString(item.CasePath), sqlString(item.SourceKind), sqlString(item.SourcePath), sqlString(item.ExecutorID),
+			sqlString(item.BaseURL), sqlString(item.EvidenceDir), item.TimeoutSeconds, sqlString(stringDefault(item.DefaultOverridesJSON, "{}"))))
 	}
 	for index, binding := range catalog.WorkflowBindings {
 		statements = append(statements, fmt.Sprintf(`
@@ -974,7 +979,7 @@ func (s *Store) GetProfileCatalog(ctx context.Context) (store.ProfileCatalog, er
 	}
 
 	var cases []catalogAPICaseRow
-	if err := s.query(ctx, `select id, node_id, title, description, case_type, scenario, tags_json, priority, owner, payload_template_json, request_template_id, patch_json, render_mode, expected_json, required_for_admission, status, sort_order, case_path, base_url, evidence_dir, timeout_seconds, default_overrides_json from interface_node_case order by node_id, sort_order, id;`, &cases); err != nil {
+	if err := s.query(ctx, `select id, node_id, title, description, case_type, scenario, tags_json, priority, owner, payload_template_json, request_template_id, patch_json, render_mode, expected_json, required_for_admission, status, sort_order, case_path, source_kind, source_path, executor_id, base_url, evidence_dir, timeout_seconds, default_overrides_json from interface_node_case order by node_id, sort_order, id;`, &cases); err != nil {
 		return store.ProfileCatalog{}, err
 	}
 	for _, row := range cases {
@@ -983,8 +988,9 @@ func (s *Store) GetProfileCatalog(ctx context.Context) (store.ProfileCatalog, er
 			Tags: stringSliceFromJSON(row.TagsJSON), Priority: row.Priority, Owner: row.Owner,
 			PayloadTemplateJSON: row.PayloadTemplateJSON, RequestTemplateID: row.RequestTemplateID, PatchJSON: row.PatchJSON,
 			RenderMode: row.RenderMode, ExpectedJSON: row.ExpectedJSON, RequiredForAdmission: row.RequiredForAdmission != 0,
-			Status: row.Status, SortOrder: row.SortOrder, CasePath: row.CasePath, BaseURL: row.BaseURL, EvidenceDir: row.EvidenceDir,
-			TimeoutSeconds: row.TimeoutSeconds, DefaultOverridesJSON: row.DefaultOverridesJSON,
+			Status: row.Status, SortOrder: row.SortOrder, CasePath: row.CasePath, SourceKind: row.SourceKind, SourcePath: row.SourcePath,
+			ExecutorID: row.ExecutorID, BaseURL: row.BaseURL, EvidenceDir: row.EvidenceDir, TimeoutSeconds: row.TimeoutSeconds,
+			DefaultOverridesJSON: row.DefaultOverridesJSON,
 		})
 	}
 
@@ -1228,6 +1234,9 @@ type catalogAPICaseRow struct {
 	Status               string `json:"status"`
 	SortOrder            int    `json:"sort_order"`
 	CasePath             string `json:"case_path"`
+	SourceKind           string `json:"source_kind"`
+	SourcePath           string `json:"source_path"`
+	ExecutorID           string `json:"executor_id"`
 	BaseURL              string `json:"base_url"`
 	EvidenceDir          string `json:"evidence_dir"`
 	TimeoutSeconds       int    `json:"timeout_seconds"`
@@ -1372,30 +1381,36 @@ func (r apiCaseRunRow) toStore() store.APICaseRun {
 }
 
 type evidenceRecordRow struct {
-	ID        string `json:"id"`
-	RunID     string `json:"run_id"`
-	CaseRunID string `json:"case_run_id"`
-	Kind      string `json:"kind"`
-	URI       string `json:"uri"`
-	MediaType string `json:"media_type"`
-	SHA256    string `json:"sha256"`
-	SizeBytes int64  `json:"size_bytes"`
-	Summary   string `json:"summary"`
-	CreatedAt string `json:"created_at"`
+	ID         string `json:"id"`
+	RunID      string `json:"run_id"`
+	CaseRunID  string `json:"case_run_id"`
+	Kind       string `json:"kind"`
+	URI        string `json:"uri"`
+	MediaType  string `json:"media_type"`
+	SHA256     string `json:"sha256"`
+	SizeBytes  int64  `json:"size_bytes"`
+	Summary    string `json:"summary"`
+	Category   string `json:"category"`
+	Visibility string `json:"visibility"`
+	LabelsJSON string `json:"labels_json"`
+	CreatedAt  string `json:"created_at"`
 }
 
 func (r evidenceRecordRow) toStore() store.EvidenceRecord {
 	return store.EvidenceRecord{
-		ID:        r.ID,
-		RunID:     r.RunID,
-		CaseRunID: r.CaseRunID,
-		Kind:      r.Kind,
-		URI:       r.URI,
-		MediaType: r.MediaType,
-		SHA256:    r.SHA256,
-		SizeBytes: r.SizeBytes,
-		Summary:   r.Summary,
-		CreatedAt: decodeTime(r.CreatedAt),
+		ID:         r.ID,
+		RunID:      r.RunID,
+		CaseRunID:  r.CaseRunID,
+		Kind:       r.Kind,
+		URI:        r.URI,
+		MediaType:  r.MediaType,
+		SHA256:     r.SHA256,
+		SizeBytes:  r.SizeBytes,
+		Summary:    r.Summary,
+		Category:   r.Category,
+		Visibility: r.Visibility,
+		LabelsJSON: r.LabelsJSON,
+		CreatedAt:  decodeTime(r.CreatedAt),
 	}
 }
 

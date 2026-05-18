@@ -190,3 +190,63 @@ func TestTraceTopologyCollectUsesExplicitTraceID(t *testing.T) {
 		t.Fatalf("stored direct topology = %#v", rows)
 	}
 }
+
+func TestTraceCandidatesPreferRunTimeWindow(t *testing.T) {
+	startedAt := time.Date(2026, 5, 18, 11, 1, 34, 793739000, time.UTC)
+	finishedAt := time.Date(2026, 5, 18, 11, 1, 35, 223739000, time.UTC)
+	candidates := []traceCandidate{
+		{TraceID: "trace.too-early", Start: "1779102093735"},
+		{TraceID: "trace.inside", Start: "1779102095116"},
+	}
+
+	sortTraceCandidatesByRunWindow(candidates, startedAt, finishedAt)
+
+	if candidates[0].TraceID != "trace.inside" {
+		t.Fatalf("first candidate = %#v", candidates[0])
+	}
+}
+
+func TestTestKitTraceTopologyCollectPayloadUsesSandboxCallbackPath(t *testing.T) {
+	payload, ok := testKitTraceTopologyCollectPayload("run.callback", map[string]any{
+		"stepId": "callback",
+	}, map[string]any{
+		"ok":     true,
+		"caseId": "case.callback",
+		"result": map[string]any{
+			"request": map[string]any{
+				"path": "/__sandbox/llt/callback",
+				"headers": map[string]any{
+					"X-Sandbox-Callback-Path": "/account-app/v1/llt/notice",
+				},
+			},
+			"response": map[string]any{
+				"headers": map[string]any{},
+			},
+		},
+	})
+	if !ok {
+		t.Fatalf("collect payload was not built")
+	}
+	if payload["endpoint"] != "/account-app/v1/llt/notice" {
+		t.Fatalf("endpoint = %#v", payload["endpoint"])
+	}
+}
+
+func TestReadJSONPayloadPreservesLargeNumericOverrides(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/api/test-kit/run", strings.NewReader(`{
+		"overrides": {
+			"payout_id": 9161030727085880
+		}
+	}`))
+
+	payload, err := readJSONPayload(request)
+	if err != nil {
+		t.Fatalf("read payload: %v", err)
+	}
+	overrides := mapFromAny(payload["overrides"])
+	rendered := renderCaseString("{{override:payout_id}}", overrides)
+
+	if rendered != "9161030727085880" {
+		t.Fatalf("rendered payout_id = %q", rendered)
+	}
+}

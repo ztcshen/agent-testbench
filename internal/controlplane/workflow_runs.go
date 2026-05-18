@@ -1,6 +1,7 @@
 package controlplane
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -208,6 +209,10 @@ func handleSaveWorkflowRun(w http.ResponseWriter, r *http.Request, bundle profil
 		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
+	if err := copyWorkflowRunStepTraceTopologies(r.Context(), runtime, run.ID, workflowID, payload, now); err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
 	writeJSON(w, map[string]any{"ok": true, "workflowRunId": run.ID, "run": workflowRunListItem(run)})
 }
 
@@ -241,6 +246,97 @@ func recordWorkflowRunStepCases(ctx context.Context, runtime store.Store, runID 
 		}
 	}
 	return nil
+}
+
+func copyWorkflowRunStepTraceTopologies(ctx context.Context, runtime store.Store, runID string, workflowID string, payload map[string]any, fallback time.Time) error {
+	for _, raw := range workflowRunSteps(payload) {
+		step, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if _, err := copyWorkflowStepTraceTopologiesFromSources(ctx, runtime, runID, workflowID, step, fallback); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyWorkflowStepTraceTopologiesFromSources(ctx context.Context, runtime store.Store, runID string, workflowID string, step map[string]any, fallback time.Time) ([]map[string]any, error) {
+	copiedRows := []map[string]any{}
+	if runtime == nil {
+		return copiedRows, nil
+	}
+	stepID := strings.TrimSpace(valueString(step["stepId"]))
+	caseID := strings.TrimSpace(valueString(step["caseId"]))
+	for _, sourceRunID := range workflowStepSourceRunIDs(step) {
+		if sourceRunID == "" || sourceRunID == runID {
+			continue
+		}
+		rows, err := runtime.ListTraceTopologies(ctx, sourceRunID)
+		if err != nil {
+			continue
+		}
+		for _, row := range rows {
+			if !isSkyWalkingTraceTopology(row) {
+				continue
+			}
+			if stepID != "" && row.StepID != "" && row.StepID != stepID {
+				continue
+			}
+			if caseID != "" && row.CaseID != "" && row.CaseID != caseID {
+				continue
+			}
+			copied := row
+			copied.ID = copiedWorkflowTraceTopologyID(runID, stepID, row)
+			copied.WorkflowRunID = runID
+			copied.WorkflowID = firstNonEmpty(workflowID, row.WorkflowID)
+			copied.StepID = firstNonEmpty(stepID, row.StepID)
+			copied.CaseID = firstNonEmpty(caseID, row.CaseID)
+			copied.CreatedAt = fallback
+			if copied.CreatedAt.IsZero() {
+				copied.CreatedAt = time.Now().UTC()
+			}
+			saved, err := runtime.SaveTraceTopology(ctx, copied)
+			if err != nil {
+				return nil, err
+			}
+			copiedRows = append(copiedRows, traceTopologyPayload(saved))
+		}
+	}
+	return copiedRows, nil
+}
+
+func workflowStepSourceRunIDs(step map[string]any) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, candidate := range []string{
+		valueString(step["runId"]),
+		runIDFromCaseRunID(valueString(step["caseRunId"])),
+	} {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		out = append(out, candidate)
+	}
+	return out
+}
+
+func runIDFromCaseRunID(caseRunID string) string {
+	caseRunID = strings.TrimSpace(caseRunID)
+	if strings.HasSuffix(caseRunID, ".case") {
+		return strings.TrimSuffix(caseRunID, ".case")
+	}
+	if index := strings.Index(caseRunID, ".case."); index > 0 {
+		return caseRunID[:index]
+	}
+	return ""
+}
+
+func copiedWorkflowTraceTopologyID(runID string, stepID string, row store.TraceTopology) string {
+	suffix := firstNonEmpty(row.TraceID, row.RequestID, row.ID, "topology")
+	return runID + "." + safeRuntimeLogPathSegment(stepID) + "." + safeRuntimeLogPathSegment(suffix) + "." + postProcessKindTraceTopology
 }
 
 func workflowStepCaseStatus(step map[string]any) string {
@@ -343,6 +439,13 @@ func writeWorkflowStepRunPayload(w http.ResponseWriter, ctx context.Context, run
 	if err != nil {
 		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 		return
+	}
+	if len(topologies) == 0 {
+		topologies, err = copyWorkflowStepTraceTopologiesFromSources(ctx, runtime, run.ID, run.WorkflowID, step, time.Now().UTC())
+		if err != nil {
+			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
 	}
 	enrichWorkflowStepLogs(ctx, runtime, run, step, topologies)
 	tasks, err := workflowRunPostProcessTasks(ctx, runtime, run.ID, stepID)
@@ -458,6 +561,9 @@ func workflowRunTraceTopologies(ctx context.Context, runtime store.Store, runID 
 	}
 	out := []map[string]any{}
 	for _, row := range rows {
+		if !isSkyWalkingTraceTopology(row) {
+			continue
+		}
 		if stepID != "" && row.StepID != stepID {
 			continue
 		}
@@ -655,7 +761,9 @@ func readJSONPayload(r *http.Request) (map[string]any, error) {
 		raw = []byte("{}")
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&payload); err != nil {
 		return nil, err
 	}
 	return payload, nil
@@ -667,6 +775,8 @@ func valueString(value any) string {
 		return ""
 	case string:
 		return typed
+	case json.Number:
+		return typed.String()
 	default:
 		return fmt.Sprint(value)
 	}

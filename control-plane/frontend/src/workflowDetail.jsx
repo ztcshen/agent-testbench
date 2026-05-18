@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Chip, fetchJSON, selectedWorkflow, serviceName, workflowIdFromURL } from "./workflowPagesCommon.jsx";
+import { exportedValues } from "./workflowDetailModel.mjs";
 
 function serviceIds(workflow) {
   return [...new Set((workflow?.steps || []).map((step) => step.serviceId).filter(Boolean))];
@@ -50,66 +51,6 @@ function unsupportedStepResult(step) {
     summary: { failureReason: "caseId is required" },
     bodyHealth: { ok: false, level: "failed", message: "caseId is required" },
   };
-}
-
-function parseBody(value) {
-  if (value === undefined || value === null || value === "") return {};
-  if (typeof value === "object") return value;
-  if (typeof value !== "string") return {};
-  try {
-    return JSON.parse(value);
-  } catch {
-    return {};
-  }
-}
-
-function valueAtPath(root, path) {
-  if (!path) return undefined;
-  return String(path).split(".").reduce((current, part) => {
-    if (current === undefined || current === null) return undefined;
-    if (Array.isArray(current) && /^\d+$/.test(part)) return current[Number(part)];
-    return current[part];
-  }, root);
-}
-
-function requestEvidence(result) {
-  return result?.result?.request || {};
-}
-
-function responseEvidence(result) {
-  return result?.result?.response || {};
-}
-
-function exportRoot(result, source) {
-  const request = requestEvidence(result);
-  const response = responseEvidence(result);
-  const responseBody = parseBody(response.body);
-  switch (source) {
-    case "request":
-    case "requestBody":
-      return request.body || {};
-    case "requestQuery":
-      return request.query || {};
-    case "response":
-    case "responseBody":
-      return responseBody;
-    case "responseHeaders":
-      return response.headers || {};
-    default:
-      return responseBody;
-  }
-}
-
-function exportedValues(step, result) {
-  const out = {};
-  for (const item of step?.exports || []) {
-    const name = item?.name;
-    const value = valueAtPath(exportRoot(result, item?.from), item?.path);
-    if (name && value !== undefined && value !== null && value !== "") {
-      out[name] = value;
-    }
-  }
-  return out;
 }
 
 function workflowRunSnapshot(workflow, steps, startedAt, done) {
@@ -309,6 +250,7 @@ function WorkflowDetailApp() {
   const warnings = catalog?.warnings || [];
   const latestRun = workflow?.latestRun || null;
   const latestStatus = latestRun?.status || (workflow?.runCount ? "unknown" : "no run");
+  const visibleStatus = runner.runId ? runner.status : latestStatus;
 
   useEffect(() => {
     if (!workflow?.id || !latestRun?.id) {
@@ -415,7 +357,7 @@ function WorkflowDetailApp() {
           <article><span>steps</span><strong>{workflow?.steps?.length || 0}</strong></article>
           <article><span>timeout</span><strong>{formatMs(workflowTimeoutMs(workflow))}</strong></article>
           <article><span>runs</span><strong>{workflow?.runCount || 0}</strong></article>
-          <article><span>status</span><strong className={`status-pill ${runStatusTone(latestStatus)}`}>{latestStatus}</strong></article>
+          <article><span>status</span><strong className={`status-pill ${runStatusTone(visibleStatus)}`}>{visibleStatus}</strong></article>
           <article><span>source</span><strong>{catalog?.source?.kind || "-"}</strong></article>
         </div>
         <WorkflowRunner workflow={workflow} state={runner} onRun={runWorkflow} />

@@ -80,6 +80,7 @@ type apiCaseBatchCaseReport struct {
 	EvidencePath    string `json:"evidencePath,omitempty"`
 	ElapsedMs       int64  `json:"elapsedMs"`
 	Error           string `json:"error,omitempty"`
+	FailureCategory string `json:"failureCategory,omitempty"`
 	StartedAt       string `json:"startedAt,omitempty"`
 	FinishedAt      string `json:"finishedAt,omitempty"`
 }
@@ -267,7 +268,7 @@ func startAPICaseBatchRun(ctx context.Context, bundle profile.Bundle, runtime st
 	}
 	runner.save(report)
 
-	go runner.run(context.Background(), batchRunID, bundle.ID, plans, runtime)
+	go runner.run(context.Background(), batchRunID, bundle.ID, plans, runtime, bundle.FailureCategories)
 	return report, http.StatusAccepted, nil
 }
 
@@ -318,7 +319,7 @@ func handleAPICaseBatchRunReport(w http.ResponseWriter, r *http.Request, runner 
 	writeJSON(w, report)
 }
 
-func (r *apiCaseBatchRunner) run(ctx context.Context, batchRunID string, profileID string, plans []apiCaseBatchCasePlan, runtime store.Store) {
+func (r *apiCaseBatchRunner) run(ctx context.Context, batchRunID string, profileID string, plans []apiCaseBatchCasePlan, runtime store.Store, rules []profile.FailureCategoryRule) {
 	for index, plan := range plans {
 		caseCtx := ctx
 		var cancel context.CancelFunc
@@ -349,6 +350,7 @@ func (r *apiCaseBatchRunner) run(ctx context.Context, batchRunID string, profile
 		}
 		if err != nil {
 			item.Error = err.Error()
+			item.FailureCategory = apiCaseBatchApplyFailureCategoryRules(rules, item.Status, apiCaseBatchFailureCategoryFromError(err), item.Error)
 		} else {
 			item.RunID = result.RunID
 			item.CaseRunID = apiCaseRunRecordID(result.RunID)
@@ -360,10 +362,12 @@ func (r *apiCaseBatchRunner) run(ctx context.Context, batchRunID string, profile
 			item.StartedAt = result.StartedAt
 			item.FinishedAt = result.FinishedAt
 			item.Error = apiCaseBatchFailureMessage(result)
+			item.FailureCategory = apiCaseBatchApplyFailureCategoryRules(rules, item.Status, apiCaseBatchFailureCategory(result), item.Error)
 			if runtime != nil {
 				if err := recordAPICaseRun(ctx, runtime, profileID, result); err != nil {
 					item.Status = store.StatusFailed
 					item.Error = err.Error()
+					item.FailureCategory = apiCaseBatchApplyFailureCategoryRules(rules, item.Status, apiCaseBatchFailureCategoryFromError(err), item.Error)
 				}
 			}
 		}
@@ -569,6 +573,95 @@ func apiCaseBatchFailureMessage(result apicase.RunResult) string {
 		return "case run failed"
 	}
 	return strings.Join(assertions.Errors, "; ")
+}
+
+func apiCaseBatchFailureCategory(result apicase.RunResult) string {
+	if result.Status != store.StatusFailed {
+		return ""
+	}
+	if strings.TrimSpace(result.EvidencePath) == "" {
+		return "case-failure"
+	}
+	raw, err := os.ReadFile(filepath.Join(result.EvidencePath, "assertions.json"))
+	if err != nil {
+		return "case-failure"
+	}
+	var assertions apicase.AssertionEvidence
+	if err := json.Unmarshal(raw, &assertions); err != nil {
+		return "case-failure"
+	}
+	if len(assertions.Errors) == 0 {
+		return "case-failure"
+	}
+	return "assertion-mismatch"
+}
+
+func apiCaseBatchFailureCategoryFromError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "context deadline exceeded"), strings.Contains(message, "timeout"):
+		return "timeout"
+	case strings.Contains(message, "base url"), strings.Contains(message, "send request"), strings.Contains(message, "create request"), strings.Contains(message, "parse"):
+		return "transport-error"
+	default:
+		return "case-failure"
+	}
+}
+
+func apiCaseBatchApplyFailureCategoryRules(rules []profile.FailureCategoryRule, status string, defaultCategory string, message string) string {
+	if strings.TrimSpace(defaultCategory) == "" {
+		return ""
+	}
+	for _, rule := range rules {
+		if apiCaseBatchFailureCategoryRuleMatches(rule, status, defaultCategory, message) {
+			return firstNonEmpty(rule.Category, rule.Name, defaultCategory)
+		}
+	}
+	return defaultCategory
+}
+
+func apiCaseBatchFailureCategoryRuleMatches(rule profile.FailureCategoryRule, status string, defaultCategory string, message string) bool {
+	matcher := rule.Matchers
+	if len(matcher.Statuses) > 0 && !containsFold(matcher.Statuses, status) {
+		return false
+	}
+	if len(matcher.FailureCategories) > 0 && !containsFold(matcher.FailureCategories, defaultCategory) {
+		return false
+	}
+	if len(matcher.MessageContains) > 0 && !containsMessageFragment(matcher.MessageContains, message) {
+		return false
+	}
+	return len(matcher.Statuses) > 0 || len(matcher.FailureCategories) > 0 || len(matcher.MessageContains) > 0
+}
+
+func containsFold(values []string, want string) bool {
+	want = strings.TrimSpace(strings.ToLower(want))
+	if want == "" {
+		return false
+	}
+	for _, value := range values {
+		if strings.TrimSpace(strings.ToLower(value)) == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsMessageFragment(fragments []string, message string) bool {
+	message = strings.ToLower(message)
+	for _, fragment := range fragments {
+		fragment = strings.TrimSpace(strings.ToLower(fragment))
+		if fragment != "" && strings.Contains(message, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 func apiCaseBatchPlans(ctx context.Context, bundle profile.Bundle, runtime store.Store, request apiCaseBatchRunRequest) ([]apiCaseBatchCasePlan, error) {

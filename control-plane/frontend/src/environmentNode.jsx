@@ -223,7 +223,7 @@ function NodeDetail({ item, snapshot }) {
           ["version", item.version],
         ]} />
       </Panel>
-      <Panel title={envCopy(snapshot, item, "runtimeTitle", "运行态索引")} summary={envCopy(snapshot, item, "runtimeSummary", "来自 profile runtime 配置与当前环境快照")} className="environment-node-runtime-panel">
+      <Panel title={envCopy(snapshot, item, "runtimeTitle", "运行态索引")} summary={envCopy(snapshot, item, "runtimeSummary", "来自 Store 运行时配置与当前环境快照")} className="environment-node-runtime-panel">
         <RuntimeIdentity item={item} runtime={runtime} snapshot={snapshot} />
       </Panel>
       <ConnectionPanel item={item} snapshot={snapshot} />

@@ -153,6 +153,12 @@ func loadAssets(baseDir string, bundle *Bundle) error {
 	}
 	bundle.APICases = mergeAPICases(bundle.APICases, catalogCases, cases)
 
+	executors, err := loadAssetDir[ExecutorDescriptor](baseDir, "executors")
+	if err != nil {
+		return err
+	}
+	bundle.Executors = append(bundle.Executors, executors...)
+
 	requestTemplates, err := loadAssetDir[RequestTemplate](baseDir, "request-templates")
 	if err != nil {
 		return err

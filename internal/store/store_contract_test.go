@@ -104,15 +104,18 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	}
 
 	evidence, err := s.RecordEvidence(ctx, store.EvidenceRecord{
-		ID:        "evidence-001",
-		RunID:     "run-001",
-		CaseRunID: "case-run-001",
-		Kind:      "http-response",
-		URI:       "evidence/run-001/response.json",
-		MediaType: "application/json",
-		SHA256:    "abc123",
-		SizeBytes: 42,
-		Summary:   "response body",
+		ID:         "evidence-001",
+		RunID:      "run-001",
+		CaseRunID:  "case-run-001",
+		Kind:       "http-response",
+		URI:        "evidence/run-001/response.json",
+		MediaType:  "application/json",
+		SHA256:     "abc123",
+		SizeBytes:  42,
+		Summary:    "response body",
+		Category:   "runtime-attachment",
+		Visibility: "public",
+		LabelsJSON: `{"owner":"qa","severity":"critical"}`,
 	})
 	if err != nil {
 		t.Fatalf("record evidence: %v", err)
@@ -130,6 +133,9 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	}
 	if evidenceRecords[0].Kind != "http-response" || evidenceRecords[0].MediaType != "application/json" || evidenceRecords[0].SHA256 != "abc123" || evidenceRecords[0].SizeBytes != 42 || evidenceRecords[0].Summary != "response body" {
 		t.Fatalf("evidence metadata = %#v", evidenceRecords[0])
+	}
+	if evidenceRecords[0].Category != "runtime-attachment" || evidenceRecords[0].Visibility != "public" || evidenceRecords[0].LabelsJSON != `{"owner":"qa","severity":"critical"}` {
+		t.Fatalf("evidence attachment metadata = %#v", evidenceRecords[0])
 	}
 
 	taskStarted := time.Now().UTC().Add(-150 * time.Millisecond)
@@ -295,6 +301,9 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 				DisplayName:          "Case Alpha",
 				NodeID:               "node.alpha",
 				CasePath:             "cases/case.alpha.json",
+				SourceKind:           "karate",
+				SourcePath:           "tests/api.feature",
+				ExecutorID:           "executor.karate",
 				BaseURL:              "http://127.0.0.1:18080",
 				EvidenceDir:          ".runtime/cases",
 				TimeoutSeconds:       12,
@@ -333,7 +342,7 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	if len(catalog.Services) != 1 || catalog.Services[0].SourcePath != "/tmp/source/service.alpha" {
 		t.Fatalf("profile catalog services = %#v", catalog.Services)
 	}
-	if len(catalog.APICases) != 1 || catalog.APICases[0].CasePath != "cases/case.alpha.json" || catalog.APICases[0].BaseURL != "http://127.0.0.1:18080" || catalog.APICases[0].EvidenceDir != ".runtime/cases" || catalog.APICases[0].TimeoutSeconds != 12 || catalog.APICases[0].DefaultOverridesJSON != `{"itemId":"item-001"}` {
+	if len(catalog.APICases) != 1 || catalog.APICases[0].CasePath != "cases/case.alpha.json" || catalog.APICases[0].SourceKind != "karate" || catalog.APICases[0].SourcePath != "tests/api.feature" || catalog.APICases[0].ExecutorID != "executor.karate" || catalog.APICases[0].BaseURL != "http://127.0.0.1:18080" || catalog.APICases[0].EvidenceDir != ".runtime/cases" || catalog.APICases[0].TimeoutSeconds != 12 || catalog.APICases[0].DefaultOverridesJSON != `{"itemId":"item-001"}` {
 		t.Fatalf("profile catalog api case run config = %#v", catalog.APICases)
 	}
 

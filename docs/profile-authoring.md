@@ -1,11 +1,11 @@
-# Profile Authoring Guide
+# Import Bundle Authoring Guide
 
-Profiles make Open Test Sandbox useful without turning the core repository into
-a business-specific codebase. A profile is a reviewable configuration bundle
+Import Bundles make Open Test Sandbox useful without turning the core repository into
+a business-specific codebase. A import bundle is a reviewable configuration bundle
 owned outside this repository and published into the local Store when a user or
 agent needs to run it.
 
-## What Belongs in a Profile
+## What Belongs in a Import Bundle
 
 - Services and runtime endpoints for a team environment.
 - Workflows and step order.
@@ -17,7 +17,7 @@ agent needs to run it.
 ## What Stays in Core
 
 - Generic Store interfaces and SQLite implementation.
-- Profile loading, auditing, installation, packing, and publishing.
+- Import Bundle loading, auditing, installation, packing, and publishing.
 - API case execution and Evidence indexing.
 - Control plane APIs and React workbench pages.
 - Generic report templates and stable CLI contracts.
@@ -25,7 +25,7 @@ agent needs to run it.
 ## Recommended Layout
 
 ```text
-profile.json
+import bundle.json
 services/
 workflows/
 interface-nodes/
@@ -45,7 +45,7 @@ which makes review and generated diffs predictable.
 1. Create a bundle outside the core repository:
 
    ```sh
-   otsandbox profile init --output /path/to/team-profile --id team-alpha
+   otsandbox import bundle init --output /path/to/team-import bundle --id team-alpha
    ```
 
 2. Add services, workflows, interface nodes, cases, fixtures, and bindings.
@@ -53,14 +53,14 @@ which makes review and generated diffs predictable.
 3. Audit locally:
 
    ```sh
-   otsandbox profile audit --profile /path/to/team-profile --json
+   otsandbox import bundle audit --import bundle /path/to/team-import bundle --json
    ```
 
 4. Publish and verify against a local Store:
 
    ```sh
-   otsandbox profile verify \
-     --profile /path/to/team-profile \
+   otsandbox import bundle verify \
+     --import bundle /path/to/team-import bundle \
      --store-url .runtime/store.sqlite \
      --require-case-runs \
      --require-workflow-runs
@@ -69,9 +69,9 @@ which makes review and generated diffs predictable.
 5. Pack the reviewed bundle for handoff:
 
    ```sh
-   otsandbox profile pack \
-     --profile /path/to/team-profile \
-     --output team-alpha-profile.tar.gz
+   otsandbox import bundle pack \
+     --import bundle /path/to/team-import bundle \
+     --output team-alpha-import bundle.tar.gz
    ```
 
 ## Agent-Friendly Discovery
@@ -84,14 +84,14 @@ flow is:
 3. Run the matching report command with the selected identifier.
 4. Use the report links to inspect failed case Evidence when needed.
 
-This keeps prompts generic and lets each team evolve profile ids without
+This keeps prompts generic and lets each team evolve import bundle ids without
 changing core code.
 
 ## Review Rules
 
-- Keep profile changes file-first and reviewable.
+- Keep import bundle changes file-first and reviewable.
 - Keep generated Store rows, Evidence bundles, reports, and logs out of source
   control.
 - Use synthetic data for public examples.
 - Put secret or private values behind local environment configuration, not in a
-  shared profile bundle.
+  shared import bundle bundle.

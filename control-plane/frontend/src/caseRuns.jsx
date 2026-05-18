@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { RefreshCw } from "lucide-react";
+import { ArrowDownUp, RefreshCw } from "lucide-react";
 import { fetchJSON } from "./api.js";
+import { buildRunAnalysis } from "./caseRunsModel.mjs";
 
 async function requestJSON(path) {
   const payload = await fetchJSON(path);
@@ -38,24 +39,18 @@ function formatSpeedup(value) {
   return `${parsed.toFixed(parsed >= 10 ? 0 : 1)}x`;
 }
 
-function evidenceHref(run) {
+function evidenceHref(run, workflowId = "") {
   const params = new URLSearchParams({ caseRun: run.runId || "" });
   if (run.caseId) params.set("caseId", run.caseId);
+  if (workflowId) params.set("workflow", workflowId);
   return `/evidence-viewer.html?${params.toString()}`;
-}
-
-function caseRunSearchText(run) {
-  return [run.runId, run.caseId, run.operation, run.traceId, run.status, run.failureKind, run.failureReason, run.evidencePath]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
 }
 
 function caseRunDetail(run) {
   return [
     run.operation || "-",
     shortTime(run.updatedAt),
-    run.failureKind ? `failureKind ${run.failureKind}` : "",
+    run.failureCategory ? `category ${run.failureCategory}` : run.failureKind ? `failureKind ${run.failureKind}` : "",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -97,6 +92,26 @@ function CaseRunRow({ run }) {
       <p>{caseRunDetail(run)}</p>
       <p className="agent-run-detail-note">{run.failureReason || run.traceId || run.evidencePath || "open evidence bundle"}</p>
     </a>
+  );
+}
+
+function CaseRunGridRow({ row }) {
+  return (
+    <tr className={`case-run-report-row ${statusTone(row.status)}`}>
+      <td><span className={`agent-status ${statusTone(row.status)}`}>{row.status || "-"}</span></td>
+      <td>
+        <a className="case-run-case-link" href={row.evidenceHref}>{row.caseId || row.id}</a>
+        {row.traceId ? <code>{row.traceId}</code> : null}
+      </td>
+      <td>
+        <strong>{row.operation || "-"}</strong>
+        <span>{row.failureReason || "runtime bundle available"}</span>
+      </td>
+      <td><button className="case-run-category-button" type="button" data-category={row.failureCategory}>{row.failureCategory || "-"}</button></td>
+      <td className="numeric"><strong>{formatDuration(row.durationMs)}</strong><span>{`#${row.durationRank}`}</span></td>
+      <td><span>{shortTime(row.updatedAt)}</span></td>
+      <td><a className="button-link case-run-evidence-action" href={row.evidenceHref}>Evidence</a></td>
+    </tr>
   );
 }
 
@@ -199,44 +214,230 @@ function IncompleteBatches({ report }) {
   );
 }
 
-function Facets({ caseRuns, visibleRuns, onStatus, onQuery, onReset }) {
-  const statusCounts = caseRuns.reduce((acc, run) => {
-    const status = run.status || "unknown";
-    acc[status] = (acc[status] || 0) + 1;
-    return acc;
-  }, {});
-  const failureKindCounts = caseRuns.reduce((acc, run) => {
-    const kind = run.failureKind || "no failureKind";
-    acc[kind] = (acc[kind] || 0) + 1;
-    return acc;
-  }, {});
+function Facets({ analysis, onStatus, onFailureCategory, onReset }) {
   return (
     <div className="case-run-facets">
       <button className="agent-chip case-run-facet" type="button" onClick={onReset}>
-        {`${visibleRuns.length}/${caseRuns.length} visible`}
+        {`${analysis.summary.visible}/${analysis.summary.total} visible`}
       </button>
-      {Object.entries(statusCounts).map(([status, count]) => (
-        <button className="agent-chip case-run-facet" type="button" key={status} onClick={() => onStatus(status)}>
-          {`${status}: ${count}`}
+      {analysis.statusFacets.map((facet) => (
+        <button className="agent-chip case-run-facet" type="button" key={`status-${facet.key}`} onClick={() => onStatus(facet.key)}>
+          {`${facet.label}: ${facet.count}`}
         </button>
       ))}
-      {Object.entries(failureKindCounts)
-        .slice(0, 4)
-        .map(([kind, count]) => (
-          <button className="agent-chip case-run-facet" type="button" key={kind} onClick={() => onQuery(kind === "no failureKind" ? "" : kind)}>
-            {`failureKind ${kind}: ${count}`}
-          </button>
-        ))}
+      {analysis.failureCategoryFacets.slice(0, 6).map((facet) => (
+        <button className="agent-chip case-run-facet" type="button" key={`category-${facet.key}`} onClick={() => onFailureCategory(facet.key)}>
+          {`category ${facet.label}: ${facet.count}`}
+        </button>
+      ))}
     </div>
   );
 }
 
+function SlowestRuns({ runs, workflowId = "" }) {
+  if (!runs.length) {
+    return null;
+  }
+  return (
+    <div className="case-run-outliers" aria-label="Slowest case runs">
+      {runs.slice(0, 3).map((run) => (
+        <a className="case-run-outlier" href={evidenceHref(run, workflowId)} key={run.runId || `${run.caseId}-${run.updatedAt}`}>
+          <span>{run.caseId || run.runId || "-"}</span>
+          <strong>{formatDuration(run.durationMs || run.elapsedMs)}</strong>
+          <code>{run.status || "-"}</code>
+        </a>
+      ))}
+    </div>
+  );
+}
+
+function ReportMetrics({ analysis, latest }) {
+  const metrics = [
+    ["Visible", `${analysis.summary.visible}/${analysis.summary.total}`, "filtered rows"],
+    ["Failed", String(analysis.summary.failed), `${analysis.failureGroups.length} groups`],
+    ["Passed", String(analysis.summary.passed), "latest local store"],
+    ["Latest", latest?.status || "-", latest?.caseId || latest?.runId || "no runs"],
+  ];
+  return (
+    <section className="case-run-report-metrics" aria-label="Run report metrics">
+      {metrics.map(([label, value, detail]) => (
+        <article className="case-run-report-metric" key={label}>
+          <span>{label}</span>
+          <strong>{value}</strong>
+          <p>{detail}</p>
+        </article>
+      ))}
+    </section>
+  );
+}
+
+function CaseFocusSummary({ focus }) {
+  if (!focus) {
+    return null;
+  }
+  const latestDetail = focus.latestRunId ? `${focus.latestStatus} · ${focus.latestRunId}` : focus.latestStatus;
+  return (
+    <section className="case-run-focus-summary" aria-label="Case execution summary">
+      <div>
+        <span>Case execution summary</span>
+        <strong>{focus.caseId}</strong>
+        <p>{`${focus.total} runs · ${focus.passed} passed · ${focus.failed} failed`}</p>
+      </div>
+      <div className="case-run-focus-stats">
+        <Metric label="latest" value={latestDetail || "not-run"} />
+        <Metric label="longest" value={formatDuration(focus.longestDurationMs)} />
+        <Metric label="updated" value={shortTime(focus.latestUpdatedAt)} />
+      </div>
+      {focus.latestEvidenceHref ? (
+        <a className="button-link case-run-focus-evidence" href={focus.latestEvidenceHref}>Evidence</a>
+      ) : null}
+    </section>
+  );
+}
+
+function WorkflowRunContext({ context }) {
+  if (!context) {
+    return null;
+  }
+  return (
+    <section className="case-run-workflow-context" aria-label="Workflow run context">
+      <div>
+        <span>Workflow context</span>
+        <strong>{context.workflowId}</strong>
+        <p>{context.caseId ? `Focused case ${context.caseId}` : "Case run report opened from workflow context"}</p>
+      </div>
+      <a className="button-link" href={context.caseSetHref}>Workflow case set</a>
+    </section>
+  );
+}
+
+function FailureNavigator({ groups, onFailureCategory }) {
+  return (
+    <section className="case-run-failure-navigator" aria-label="Failure groups">
+      <div className="case-run-panel-head">
+        <h3>Failure triage</h3>
+        <span>{`${groups.length} buckets`}</span>
+      </div>
+      <div className="case-run-failure-group-list">
+        {groups.length ? groups.map((group) => (
+          <article className="case-run-failure-triage-item" key={group.key}>
+            <button type="button" onClick={() => onFailureCategory(group.key)}>
+              <strong>{group.label}</strong>
+              <span>{`${group.count} failed · ${group.matchedBy || "default"} · longest ${formatDuration(group.longestDurationMs)}`}</span>
+              <code>{group.sampleReason || group.longestRunId || "-"}</code>
+            </button>
+            {group.sampleEvidenceHref ? <a className="button-link" href={group.sampleEvidenceHref}>Evidence</a> : null}
+          </article>
+        )) : <p className="run-history-empty">No failed groups in current run set.</p>}
+      </div>
+    </section>
+  );
+}
+
+function FlakyCandidates({ candidates }) {
+  return (
+    <section className="case-run-flaky-panel" aria-label="Flaky candidates">
+      <div className="case-run-panel-head">
+        <h3>Flaky candidates</h3>
+        <span>{`${candidates.length} mixed-history cases`}</span>
+      </div>
+      <div className="case-run-flaky-list">
+        {candidates.length ? candidates.slice(0, 6).map((candidate) => (
+          <article className="case-run-flaky-item" key={candidate.caseId}>
+            <div>
+              <strong>{candidate.caseId}</strong>
+              <span>{candidate.operation || "case history"}</span>
+            </div>
+            <div className="case-run-flaky-stats">
+              <code>{`score ${candidate.flakeScore}`}</code>
+              <code>{`${candidate.passed} pass`}</code>
+              <code>{`${candidate.failed} fail`}</code>
+              <code>{`latest ${candidate.latestStatus || "-"}`}</code>
+            </div>
+            <div className="case-run-flaky-reasons">
+              {candidate.failureReasons.length
+                ? candidate.failureReasons.map((reason) => <span key={reason}>{reason}</span>)
+                : <span>mixed pass and fail history</span>}
+            </div>
+            <div className="case-run-flaky-actions">
+              <a className="button-link" href={candidate.caseRunsHref}>Runs</a>
+              {candidate.latestEvidenceHref ? <a className="button-link" href={candidate.latestEvidenceHref}>Evidence</a> : null}
+            </div>
+          </article>
+        )) : <p className="run-history-empty">No mixed pass/fail case history in the current local store.</p>}
+      </div>
+    </section>
+  );
+}
+
+function ReportGrid({ analysis, sortOrder, onSort, onFailureCategory }) {
+  const sortLabel = {
+    updated_desc: "Updated ↓",
+    updated_asc: "Updated ↑",
+    duration_desc: "Duration ↓",
+    duration_asc: "Duration ↑",
+    case_asc: "Case A-Z",
+    status_asc: "Status A-Z",
+  }[sortOrder] || sortOrder;
+  return (
+    <section className="case-run-report-grid-panel">
+      <div className="case-run-panel-head">
+        <div>
+          <h3>Report Grid</h3>
+          <span>{`${analysis.grid.rows.length} rows · ${sortLabel}`}</span>
+        </div>
+        <div className="case-run-grid-sort">
+          <ArrowDownUp size={14} aria-hidden="true" />
+          <select title="Report grid sort" value={sortOrder} onChange={(event) => onSort(event.target.value)}>
+            <option value="updated_desc">Updated newest</option>
+            <option value="updated_asc">Updated oldest</option>
+            <option value="duration_desc">Duration longest</option>
+            <option value="duration_asc">Duration shortest</option>
+            <option value="case_asc">Case A-Z</option>
+            <option value="status_asc">Status A-Z</option>
+          </select>
+        </div>
+      </div>
+      <div className="case-run-report-table-wrap">
+        <table className="case-run-report-table">
+          <thead>
+            <tr>
+              {analysis.grid.columns.map((column) => (
+                <th className={column.align === "right" ? "numeric" : ""} key={column.id}>{column.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody onClick={(event) => {
+            const category = event.target?.dataset?.category;
+            if (category) onFailureCategory(category);
+          }}>
+            {analysis.grid.rows.length ? analysis.grid.rows.slice(0, 80).map((row) => (
+              <CaseRunGridRow row={row} key={row.id} />
+            )) : (
+              <tr>
+                <td colSpan={analysis.grid.columns.length} className="case-run-report-empty">No matching case runs.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function CaseRunsApp() {
+  const params = new URLSearchParams(window.location.search);
+  const initialCaseFocus = params.get("case") || "";
+  const initialWorkflowFocus = params.get("workflow") || "";
   const [payload, setPayload] = useState(null);
   const [timing, setTiming] = useState(null);
   const [incompleteBatches, setIncompleteBatches] = useState(null);
+  const [caseFocus, setCaseFocus] = useState(initialCaseFocus);
+  const [workflowFocus] = useState(initialWorkflowFocus);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [failureCategoryFilter, setFailureCategoryFilter] = useState("");
+  const [sortOrder, setSortOrder] = useState("updated_desc");
   const [timingKind, setTimingKind] = useState("all");
   const [freshness, setFreshness] = useState("");
   const [message, setMessage] = useState("loading");
@@ -285,25 +486,23 @@ function CaseRunsApp() {
   }, []);
 
   const caseRuns = payload?.caseRuns || [];
-  const visibleRuns = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    return caseRuns.filter((run) => {
-      const statusOK = !statusFilter || String(run.status || "").toLowerCase() === statusFilter;
-      return statusOK && (!normalizedQuery || caseRunSearchText(run).includes(normalizedQuery));
-    });
-  }, [caseRuns, query, statusFilter]);
+  const analysis = useMemo(
+    () => buildRunAnalysis(caseRuns, { query, caseId: caseFocus, workflowId: workflowFocus, status: statusFilter, failureCategory: failureCategoryFilter, failureCategoryRules: payload?.failureCategories || [], sort: sortOrder }),
+    [caseRuns, query, caseFocus, workflowFocus, statusFilter, failureCategoryFilter, payload?.failureCategories, sortOrder],
+  );
+  const visibleRuns = analysis.visibleRuns;
 
   const latest = caseRuns[0];
   const warnings = payload?.warnings || [];
   const summary = latest
-    ? `${visibleRuns.length}/${caseRuns.length} case runs · latest ${latest.status || "unknown"} · ${latest.caseId || latest.runId}`
+    ? `${analysis.summary.visible}/${analysis.summary.total} case runs · failed ${analysis.summary.failed} · latest ${latest.status || "unknown"} · ${latest.caseId || latest.runId}`
     : "0 case runs";
 
   return (
     <main className="app case-runs-page">
       <section className="topbar">
         <div>
-          <h1>API Case Evidence</h1>
+          <h1>Run Analysis Center</h1>
           <p>{summary}</p>
         </div>
         <div className="actions">
@@ -320,11 +519,15 @@ function CaseRunsApp() {
         </div>
       </section>
 
+      <ReportMetrics analysis={analysis} latest={latest} />
+      <WorkflowRunContext context={analysis.workflowContext} />
+      <CaseFocusSummary focus={analysis.caseFocus} />
+
       <section className="agent-test-panel">
         <div className="agent-test-section-head">
           <div>
-            <h2>Latest case runs</h2>
-            <p>Runtime bundles under .runtime/cases</p>
+            <h2>Case run report workbench</h2>
+            <p>Dense grid, failure navigator, timing outliers, and Evidence links</p>
           </div>
           <div className="case-run-controls">
             <label className="workflow-filter">
@@ -364,29 +567,48 @@ function CaseRunsApp() {
             </label>
             <select title="按状态过滤" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
               <option value="">All status</option>
-              <option value="fail">Fail</option>
-              <option value="pass">Pass</option>
+              <option value="failed">Fail</option>
+              <option value="passed">Pass</option>
             </select>
           </div>
         </div>
         <Facets
-          caseRuns={caseRuns}
-          visibleRuns={visibleRuns}
+          analysis={analysis}
           onStatus={setStatusFilter}
-          onQuery={setQuery}
+          onFailureCategory={setFailureCategoryFilter}
           onReset={() => {
             setQuery("");
             setStatusFilter("");
+            setFailureCategoryFilter("");
           }}
         />
-        <TimingSummary timing={timing} kind={timingKind} freshness={freshness} />
-        <IncompleteBatches report={incompleteBatches} />
-        <div className="case-run-list run-history-grid">
-          {visibleRuns.length ? (
-            visibleRuns.slice(0, 24).map((run) => <CaseRunRow run={run} key={run.runId || `${run.caseId}-${run.updatedAt}`} />)
-          ) : (
-            <div className="run-history-empty">{caseRuns.length ? "没有匹配的 API Case evidence" : warnings[0] || "暂无 API Case evidence"}</div>
-          )}
+        {caseFocus ? (
+          <div className="case-run-active-filter">
+            <span>{`case: ${caseFocus}`}</span>
+            <button type="button" onClick={() => setCaseFocus("")}>Clear case focus</button>
+          </div>
+        ) : null}
+        {failureCategoryFilter ? (
+          <div className="case-run-active-filter">
+            <span>{`failure category: ${failureCategoryFilter}`}</span>
+            <button type="button" onClick={() => setFailureCategoryFilter("")}>Clear</button>
+          </div>
+        ) : null}
+        <div className="case-run-workbench-layout">
+          <aside className="case-run-workbench-side">
+            <FailureNavigator groups={analysis.failureTriage} onFailureCategory={setFailureCategoryFilter} />
+            <FlakyCandidates candidates={analysis.flakyCandidates} />
+            <section className="case-run-workbench-panel">
+              <div className="case-run-panel-head">
+                <h3>Timing outliers</h3>
+                <span>{`${analysis.slowest.length} tracked`}</span>
+              </div>
+              <SlowestRuns runs={analysis.slowest} workflowId={workflowFocus} />
+              <TimingSummary timing={timing} kind={timingKind} freshness={freshness} />
+              <IncompleteBatches report={incompleteBatches} />
+            </section>
+          </aside>
+          <ReportGrid analysis={analysis} sortOrder={sortOrder} onSort={setSortOrder} onFailureCategory={setFailureCategoryFilter} />
         </div>
       </section>
     </main>

@@ -1,6 +1,7 @@
 package controlplane
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -30,7 +31,7 @@ func TestBuildCaseHTTPRequestAddsConfiguredAuthorization(t *testing.T) {
 		Signed: true,
 	}
 
-	request, err := buildCaseHTTPRequest(profile.Bundle{}, execution, map[string]any{"baseUrl": "http://127.0.0.1:1234"})
+	request, err := buildCaseHTTPRequest(context.Background(), profile.Bundle{}, nil, execution, "", map[string]any{"baseUrl": "http://127.0.0.1:1234"})
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}

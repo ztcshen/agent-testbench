@@ -424,6 +424,126 @@ func TestQualityAuditsMaintainedCaseAuthoringGaps(t *testing.T) {
 	}
 }
 
+func TestQualityAuditsCaseLifecycleStatus(t *testing.T) {
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.active", DisplayName: "Active Case", Description: "Ready.", NodeID: "node.alpha", CasePath: "cases/active.json", Tags: []string{"regression"}, Priority: "p0", Owner: "team-a", Status: "active", SortOrder: 1},
+			{ID: "case.review", DisplayName: "Review Case", Description: "Needs review.", NodeID: "node.alpha", CasePath: "cases/review.json", Tags: []string{"regression"}, Priority: "p1", Owner: "team-a", Status: "review", SortOrder: 2},
+			{ID: "case.invalid", DisplayName: "Invalid Case", Description: "Bad status.", NodeID: "node.alpha", CasePath: "cases/invalid.json", Tags: []string{"regression"}, Priority: "p2", Owner: "team-a", Status: "paused", SortOrder: 3},
+		},
+		TemplateConfigs: []profile.TemplateConfig{
+			{ID: "cfg.case.active", ScopeType: "case", ScopeID: "case.active", Status: "active", ConfigJSON: `{"caseId":"case.active","caseExecution":{"method":"GET","path":"/active"}}`},
+			{ID: "cfg.case.review", ScopeType: "case", ScopeID: "case.review", Status: "active", ConfigJSON: `{"caseId":"case.review","caseExecution":{"method":"GET","path":"/review"}}`},
+			{ID: "cfg.case.invalid", ScopeType: "case", ScopeID: "case.invalid", Status: "active", ConfigJSON: `{"caseId":"case.invalid","caseExecution":{"method":"GET","path":"/invalid"}}`},
+		},
+	}
+	cases := SelectCases(bundle, Filter{})
+
+	report, err := Quality(context.Background(), bundle, recordStore{}, Filter{}, cases)
+	if err != nil {
+		t.Fatalf("quality: %v", err)
+	}
+	if report.OK || report.Counts.Cases != 3 || report.Counts.CompleteCases != 1 || report.Counts.IncompleteCases != 2 || report.Counts.NonExecutableLifecycle != 2 || report.Counts.InvalidStatus != 1 {
+		t.Fatalf("quality lifecycle counts = %#v", report.Counts)
+	}
+	byCase := map[string]QualityCase{}
+	for _, item := range report.Cases {
+		byCase[item.CaseID] = item
+	}
+	if !byCase["case.active"].Complete {
+		t.Fatalf("active case = %#v", byCase["case.active"])
+	}
+	if byCase["case.review"].Complete || byCase["case.review"].Lifecycle != "review" || !containsString(byCase["case.review"].Issues, "non-executable-lifecycle") {
+		t.Fatalf("review case = %#v", byCase["case.review"])
+	}
+	if byCase["case.invalid"].Complete || byCase["case.invalid"].Lifecycle != "invalid" || !containsString(byCase["case.invalid"].Issues, "invalid-status") {
+		t.Fatalf("invalid case = %#v", byCase["case.invalid"])
+	}
+
+	plan, err := QualityPlan(context.Background(), bundle, recordStore{}, Filter{}, cases)
+	if err != nil {
+		t.Fatalf("quality plan: %v", err)
+	}
+	if plan.Counts.ReviewLifecycle != 2 {
+		t.Fatalf("quality plan counts = %#v", plan.Counts)
+	}
+	lifecycleActions := 0
+	for _, action := range plan.Actions {
+		if action.Type == "review-case-lifecycle" {
+			lifecycleActions++
+			if !containsString(action.Issues, "non-executable-lifecycle") && !containsString(action.Issues, "invalid-status") {
+				t.Fatalf("lifecycle action missing lifecycle issue = %#v", action)
+			}
+		}
+	}
+	if lifecycleActions != 2 {
+		t.Fatalf("lifecycle action count = %d actions=%#v", lifecycleActions, plan.Actions)
+	}
+}
+
+func TestQualityAcceptsExternalExecutorSourceAsRunnable(t *testing.T) {
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha"},
+		},
+		Executors: []profile.ExecutorDescriptor{
+			{ID: "executor.karate", Kind: "karate", SourcePath: "tests/api.feature", Status: "active"},
+		},
+		APICases: []profile.APICase{
+			{
+				ID:          "case.karate",
+				DisplayName: "Karate Case",
+				Description: "Runs through an external Karate feature.",
+				NodeID:      "node.alpha",
+				Tags:        []string{"regression"},
+				Priority:    "p0",
+				Owner:       "team-a",
+				Status:      "active",
+				SourceKind:  "karate",
+				SourcePath:  "tests/api.feature",
+				ExecutorID:  "executor.karate",
+			},
+			{
+				ID:          "case.missing-executor",
+				DisplayName: "Missing Executor Case",
+				Description: "References an external source without an executor.",
+				NodeID:      "node.alpha",
+				Tags:        []string{"regression"},
+				Priority:    "p1",
+				Owner:       "team-a",
+				Status:      "active",
+				SourceKind:  "karate",
+				SourcePath:  "tests/missing.feature",
+				ExecutorID:  "executor.missing",
+			},
+		},
+	}
+	cases := SelectCases(bundle, Filter{Status: "active"})
+
+	report, err := Quality(context.Background(), bundle, recordStore{}, Filter{Status: "active"}, cases)
+	if err != nil {
+		t.Fatalf("quality: %v", err)
+	}
+	if report.OK || report.Counts.Cases != 2 || report.Counts.CompleteCases != 1 || report.Counts.IncompleteCases != 1 || report.Counts.MissingRunnable != 0 || report.Counts.MissingExecution != 1 {
+		t.Fatalf("quality external source counts = %#v", report.Counts)
+	}
+	byCase := map[string]QualityCase{}
+	for _, item := range report.Cases {
+		byCase[item.CaseID] = item
+	}
+	if !byCase["case.karate"].Complete || !byCase["case.karate"].HasRunnableFile || !byCase["case.karate"].HasExecutionConfig {
+		t.Fatalf("karate case = %#v", byCase["case.karate"])
+	}
+	if byCase["case.missing-executor"].Complete || !containsString(byCase["case.missing-executor"].Issues, "missing-executor") {
+		t.Fatalf("missing executor case = %#v", byCase["case.missing-executor"])
+	}
+}
+
 func TestQualityPlanBuildsActionableAuthoringSteps(t *testing.T) {
 	bundle := profile.Bundle{
 		ID: "sample",

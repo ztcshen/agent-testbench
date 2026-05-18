@@ -6,7 +6,7 @@ type Change struct {
 	SQL     string
 }
 
-const CurrentVersion = 11
+const CurrentVersion = 13
 
 func All() []Change {
 	return []Change{
@@ -450,6 +450,28 @@ alter table interface_node_case add column owner text not null default '';
 
 create index if not exists idx_interface_node_case_status_owner
   on interface_node_case(status, owner, priority, sort_order, id);`,
+		},
+		{
+			Version: 12,
+			Name:    "add evidence attachment metadata",
+			SQL: `
+alter table evidence_records add column category text not null default '';
+alter table evidence_records add column visibility text not null default '';
+alter table evidence_records add column labels_json text not null default '{}';
+
+create index if not exists idx_evidence_records_category
+  on evidence_records(category, visibility, created_at, id);`,
+		},
+		{
+			Version: 13,
+			Name:    "add api case external source refs",
+			SQL: `
+alter table interface_node_case add column source_kind text not null default '';
+alter table interface_node_case add column source_path text not null default '';
+alter table interface_node_case add column executor_id text not null default '';
+
+create index if not exists idx_interface_node_case_executor
+  on interface_node_case(executor_id, source_kind, status, sort_order, id);`,
 		},
 	}
 }

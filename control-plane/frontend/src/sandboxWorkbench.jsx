@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { RefreshCw } from "lucide-react";
 import { fetchJSON } from "./api.js";
+import { buildCapabilityCards } from "./sandboxWorkbenchModel.mjs";
 
 function text(value, fallback = "-") {
   const out = String(value ?? "").trim();
@@ -68,41 +69,7 @@ function CapabilityCard({ card }) {
 }
 
 function CapabilityGrid({ runs, caseRuns, catalog }) {
-  const workflowRuns = runs?.workflowRuns || [];
-  const latestRun = workflowRuns[0];
-  const latestCaseRun = caseRuns?.caseRuns?.[0];
-  const cards = [
-    {
-      title: "Workflow Evidence",
-      detail: "Requests, responses, logs, journal entries, database hints, and trace topology.",
-      href: latestRun ? `/workflow-run.html?id=${encodeURIComponent(latestRun.id)}` : "/workflow-run.html",
-      meta: latestRun ? `latest ${latestRun.status}` : "no run yet",
-    },
-    {
-      title: "Run Topology",
-      detail: "Confirmed edges, external exits, unresolved exits, request ids, and trace ids.",
-      href: latestRun ? `/trace-topology.html?workflowRunId=${encodeURIComponent(latestRun.id)}` : "/trace-topology.html",
-      meta: latestRun ? `run #${latestRun.id}` : "no run yet",
-    },
-    {
-      title: "API Case Evidence",
-      detail: "Runtime case bundles, request and response snapshots, trace continuity, and failure kind.",
-      href: "/case-runs.html",
-      meta: latestCaseRun ? `${latestCaseRun.status || "unknown"} · ${latestCaseRun.failureKind || "no failure kind"}` : "no case run yet",
-    },
-    {
-      title: "Service Inventory",
-      detail: "Registry-backed services, runtime nodes, containers, ports, and declared dependencies.",
-      href: "/service-inventory.html",
-      meta: `${catalog?.services?.length || 0} services`,
-    },
-    {
-      title: "Replay And Probe",
-      detail: "Replay fixtures, negative probes, capability evidence, and persisted reports.",
-      href: "/workflow-detail.html?id=sandbox.replay_probe_observability",
-      meta: `${runs?.probeRuns?.length || 0} probes`,
-    },
-  ];
+  const cards = buildCapabilityCards({ runs, caseRuns, catalog });
   return <section className="sandbox-capability-grid home-capability-grid-density" aria-label="Sandbox 能力">{cards.map((card) => <CapabilityCard card={card} key={card.title} />)}</section>;
 }
 
@@ -255,7 +222,7 @@ function ServiceHealth({ snapshot }) {
 }
 
 function ProfileImportPanel({ onImported }) {
-  const [path, setPath] = useState("/path/to/profile-bundle");
+  const [path, setPath] = useState("/path/to/template-package");
   const [audit, setAudit] = useState(true);
   const [requireAuditOk, setRequireAuditOk] = useState(false);
   const [requireCaseRuns, setRequireCaseRuns] = useState(false);
@@ -343,7 +310,7 @@ function ProfileImportPanel({ onImported }) {
   return (
     <section className="services">
       <div className="section-head">
-        <h2>Profile 导入</h2>
+        <h2>模板包导入</h2>
         <span className="console-status-pill" role="status">{message}</span>
       </div>
       <form className="sandbox-link-list" onSubmit={submit}>
@@ -353,8 +320,8 @@ function ProfileImportPanel({ onImported }) {
         </label>
         <label className="workflow-filter">
           <span>已安装</span>
-          <select value={selectedInstalledProfile} onChange={(event) => event.target.value && setPath(event.target.value)} title={profileHome || "Profile home"}>
-            <option value="">选择 Profile</option>
+          <select value={selectedInstalledProfile} onChange={(event) => event.target.value && setPath(event.target.value)} title={profileHome || "template package home"}>
+            <option value="">选择模板包</option>
             {installedProfiles.map((item) => (
               <option value={item.id} key={item.id} disabled={item.valid === false}>
                 {item.valid === false ? `${item.id} · invalid` : `${item.id} · ${item.counts?.workflows || 0} workflows`}
@@ -400,7 +367,7 @@ function ProfileImportPanel({ onImported }) {
             </div>
           ) : null}
           {reportChecks.length ? (
-            <div className="profile-check-list" aria-label="Profile verification checks">
+            <div className="profile-check-list" aria-label="template package verification checks">
               {reportChecks.slice(0, 12).map((item) => (
                 <div className={item.ok ? "profile-check-row passed" : "profile-check-row failed"} key={item.name}>
                   <strong>{item.name}</strong>

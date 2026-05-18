@@ -10,6 +10,7 @@ func EmptyBundle() Bundle {
 		Workflows:         []Workflow{},
 		InterfaceNodes:    []InterfaceNode{},
 		APICases:          []APICase{},
+		Executors:         []ExecutorDescriptor{},
 		RequestTemplates:  []RequestTemplate{},
 		CaseDependencies:  []CaseDependency{},
 		WorkflowBindings:  []WorkflowBinding{},

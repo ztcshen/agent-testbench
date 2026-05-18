@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -20,11 +21,15 @@ import (
 	"open-test-sandbox/internal/casesuite"
 	"open-test-sandbox/internal/controlplane"
 	"open-test-sandbox/internal/evidence"
+	"open-test-sandbox/internal/executor"
 	"open-test-sandbox/internal/junit"
 	"open-test-sandbox/internal/profile"
 	"open-test-sandbox/internal/profileaudit"
 	"open-test-sandbox/internal/profilecatalog"
+	profilegenerateopenapi "open-test-sandbox/internal/profilegenerate/openapi"
 	"open-test-sandbox/internal/profilehome"
+	profileimporthttpcapture "open-test-sandbox/internal/profileimport/httpcapture"
+	profileimportopenapi "open-test-sandbox/internal/profileimport/openapi"
 	"open-test-sandbox/internal/redaction"
 	"open-test-sandbox/internal/requesttemplate"
 	"open-test-sandbox/internal/store"
@@ -133,6 +138,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
+	case "sandbox":
+		if err := runSandbox(context.Background(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 	case "profile":
 		if err := runProfile(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -145,6 +155,11 @@ func main() {
 		}
 	case "evidence":
 		if err := runEvidence(context.Background(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	case "executor":
+		if err := runExecutor(context.Background(), os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
@@ -192,6 +207,7 @@ Usage:
   otsandbox version
   otsandbox store status [--store-url PATH]
   otsandbox store upgrade [--store-url PATH]
+  otsandbox sandbox start [--store-url PATH] [--service ID] [--kind KIND] [--timeout-seconds N] [--json]
   otsandbox profile init --output PATH [--id ID] [--display-name NAME] [--force]
   otsandbox profile install --from PATH [--profile-home PATH] [--force]
   otsandbox profile pack --profile PATH_OR_ID --output PATH [--profile-home PATH] [--force]
@@ -199,9 +215,13 @@ Usage:
   otsandbox profile inspect --profile PATH_OR_ID [--profile-home PATH]
   otsandbox profile audit --profile PATH_OR_ID [--profile-home PATH] [--store-url PATH] [--json] [--force]
   otsandbox profile audit-plan --profile PATH_OR_ID [--profile-home PATH] [--store-url PATH] [--json] [--force]
+  otsandbox profile generation-plan openapi --from PATH [--service-id ID] [--evidence-dir PATH] [--output-dir PATH] [--json]
+  otsandbox profile import-plan openapi --from PATH [--service-id ID] [--evidence-dir PATH] [--output-dir PATH] [--json]
+  otsandbox profile import-plan http-capture --from PATH [--service-id ID] [--evidence-dir PATH] [--output-dir PATH] [--json]
   otsandbox profile verify --profile PATH_OR_ID [--profile-home PATH] [--store-url PATH] [--require-case-runs] [--require-workflow-runs] [--json] [--force]
   otsandbox profile import --from PATH_OR_ID [--profile-home PATH] [--store-url PATH] [--json] [--audit] [--require-audit-ok] [--force]
   otsandbox config publish --from PATH_OR_ID [--profile-home PATH] [--store-url PATH] [--json] [--audit] [--require-audit-ok] [--force]
+  otsandbox executor plan --profile PATH_OR_ID [--profile-home PATH] [--json]
   otsandbox evidence import --from PATH --profile ID [--store-url PATH]
   otsandbox evidence list [--store-url PATH] [--run ID] [--json]
   otsandbox evidence tasks --store-url PATH --run ID [--step ID] [--case ID] [--kind KIND] [--status STATUS] [--json]
@@ -289,6 +309,187 @@ func printStoreStatus(status sqlite.SchemaStatusResult) {
 	fmt.Printf("Pending: %d\n", pending)
 }
 
+type sandboxStartReport struct {
+	OK        bool                        `json:"ok"`
+	StorePath string                      `json:"storePath"`
+	Services  []sandboxStartServiceResult `json:"services"`
+	Counts    sandboxStartReportCounts    `json:"counts"`
+}
+
+type sandboxStartReportCounts struct {
+	Total   int `json:"total"`
+	Started int `json:"started"`
+	Skipped int `json:"skipped"`
+	Failed  int `json:"failed"`
+}
+
+type sandboxStartServiceResult struct {
+	ID             string `json:"id"`
+	DisplayName    string `json:"displayName"`
+	Kind           string `json:"kind"`
+	ContainerName  string `json:"containerName,omitempty"`
+	ServicePort    int    `json:"servicePort,omitempty"`
+	ManagementPort int    `json:"managementPort,omitempty"`
+	Command        string `json:"command,omitempty"`
+	Skipped        bool   `json:"skipped"`
+	SkipReason     string `json:"skipReason,omitempty"`
+	ExitCode       int    `json:"exitCode"`
+	Output         string `json:"output,omitempty"`
+	Error          string `json:"error,omitempty"`
+}
+
+func runSandbox(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing sandbox command")
+	}
+	switch args[0] {
+	case "start":
+		return runSandboxStart(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown sandbox command: %s", args[0])
+	}
+}
+
+func runSandboxStart(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("sandbox start", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	serviceID := flags.String("service", "", "Only start one registered service")
+	serviceKind := flags.String("kind", "", "Only start services of this kind; default includes all kinds")
+	timeoutSeconds := flags.Int("timeout-seconds", 300, "Per-service startup command timeout")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *timeoutSeconds <= 0 {
+		return errors.New("--timeout-seconds must be greater than 0")
+	}
+	runtime, err := openStore(ctx, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer runtime.Close()
+	catalog, err := runtime.GetProfileCatalog(ctx)
+	if err != nil {
+		return err
+	}
+	storeCfg, err := sqlite.ParseConfigFromURL(*storeURL)
+	if err != nil {
+		return err
+	}
+	report := sandboxStartReport{
+		OK:        true,
+		StorePath: storeCfg.Resolve().Path,
+	}
+	kindFilter := strings.TrimSpace(*serviceKind)
+	for _, service := range catalog.Services {
+		if strings.TrimSpace(*serviceID) != "" && service.ID != strings.TrimSpace(*serviceID) {
+			continue
+		}
+		if kindFilter != "" && strings.TrimSpace(service.Kind) != kindFilter {
+			continue
+		}
+		result := runSandboxServiceStartup(ctx, service, time.Duration(*timeoutSeconds)*time.Second)
+		report.Services = append(report.Services, result)
+		report.Counts.Total++
+		switch {
+		case result.Skipped:
+			report.Counts.Skipped++
+		case result.ExitCode == 0:
+			report.Counts.Started++
+		default:
+			report.Counts.Failed++
+			report.OK = false
+		}
+	}
+	if strings.TrimSpace(*serviceID) != "" && report.Counts.Total == 0 {
+		return fmt.Errorf("registered service not found: %s", strings.TrimSpace(*serviceID))
+	}
+	if *jsonOutput {
+		if err := writeIndentedJSON(report); err != nil {
+			return err
+		}
+	} else {
+		printSandboxStartReport(report)
+	}
+	if !report.OK {
+		return errors.New("one or more sandbox services failed to start")
+	}
+	return nil
+}
+
+func runSandboxServiceStartup(ctx context.Context, service store.CatalogService, timeout time.Duration) sandboxStartServiceResult {
+	command := strings.TrimSpace(service.StartupCommand)
+	result := sandboxStartServiceResult{
+		ID:             service.ID,
+		DisplayName:    service.DisplayName,
+		Kind:           service.Kind,
+		ContainerName:  service.ContainerName,
+		ServicePort:    service.ServicePort,
+		ManagementPort: service.ManagementPort,
+		Command:        command,
+		ExitCode:       0,
+	}
+	if strings.TrimSpace(service.Status) != "" && strings.TrimSpace(service.Status) != "active" {
+		result.Skipped = true
+		result.SkipReason = "service is not active"
+		return result
+	}
+	if command == "" {
+		result.Skipped = true
+		result.SkipReason = "startup command is empty"
+		return result
+	}
+	commandCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	cmd := exec.CommandContext(commandCtx, "/bin/sh", "-c", command)
+	output, err := cmd.CombinedOutput()
+	result.Output = strings.TrimSpace(string(output))
+	if commandCtx.Err() == context.DeadlineExceeded {
+		result.ExitCode = 124
+		result.Error = "startup command timed out"
+		return result
+	}
+	if err != nil {
+		result.ExitCode = 1
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			result.ExitCode = exitErr.ExitCode()
+		}
+		result.Error = err.Error()
+	}
+	return result
+}
+
+func printSandboxStartReport(report sandboxStartReport) {
+	fmt.Println("Sandbox Start")
+	fmt.Printf("OK: %t\n", report.OK)
+	fmt.Printf("Store: %s\n", report.StorePath)
+	fmt.Printf("Total: %d Started: %d Skipped: %d Failed: %d\n", report.Counts.Total, report.Counts.Started, report.Counts.Skipped, report.Counts.Failed)
+	for _, service := range report.Services {
+		state := "started"
+		if service.Skipped {
+			state = "skipped"
+		}
+		if service.ExitCode != 0 {
+			state = "failed"
+		}
+		fmt.Printf("- %s [%s]\n", service.ID, state)
+		if service.Command != "" {
+			fmt.Printf("  command: %s\n", service.Command)
+		}
+		if service.SkipReason != "" {
+			fmt.Printf("  reason: %s\n", service.SkipReason)
+		}
+		if service.Error != "" {
+			fmt.Printf("  error: %s\n", service.Error)
+		}
+		if service.Output != "" {
+			fmt.Printf("  output: %s\n", service.Output)
+		}
+	}
+}
+
 func runProfile(args []string) error {
 	if len(args) == 0 {
 		return errors.New("missing profile command")
@@ -309,6 +510,10 @@ func runProfile(args []string) error {
 		return runProfileAudit(context.Background(), args[1:])
 	case "audit-plan":
 		return runProfileAuditPlan(context.Background(), args[1:])
+	case "generation-plan":
+		return runProfileGenerationPlan(args[1:])
+	case "import-plan":
+		return runProfileImportPlan(args[1:])
 	case "import":
 		return runProfileImport(context.Background(), args[1:])
 	case "verify":
@@ -328,6 +533,464 @@ func runConfig(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown config command: %s", args[0])
 	}
+}
+
+func runExecutor(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing executor command")
+	}
+	switch args[0] {
+	case "plan":
+		return runExecutorPlan(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown executor command: %s", args[0])
+	}
+}
+
+func runExecutorPlan(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("executor plan", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	resolvedProfilePath, err := materializeProfileReference(*profilePath, *profileHome, false)
+	if err != nil {
+		return err
+	}
+	bundle, err := profile.Load(resolvedProfilePath)
+	if err != nil {
+		return err
+	}
+	report := executor.Plan(ctx, bundle)
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printExecutorPlan(report)
+	return nil
+}
+
+func printExecutorPlan(report executor.PlanReport) {
+	fmt.Println("Executor Plan")
+	fmt.Printf("Profile: %s\n", report.ProfileID)
+	fmt.Printf("OK: %t\n", report.OK)
+	fmt.Printf("Total: %d Ready: %d Blocked: %d\n", report.Counts.Total, report.Counts.Ready, report.Counts.Blocked)
+	for _, item := range report.Items {
+		state := "blocked"
+		if item.Ready {
+			state = "ready"
+		}
+		fmt.Printf("- %s [%s] %s\n", item.ID, item.Kind, state)
+		if item.SourcePath != "" {
+			fmt.Printf("  source: %s\n", item.SourcePath)
+		}
+		if item.Command != "" {
+			fmt.Printf("  command: %s\n", item.Command)
+		}
+		if len(item.Issues) > 0 {
+			fmt.Printf("  issues: %s\n", strings.Join(item.Issues, ","))
+		}
+	}
+	for _, warning := range report.Warnings {
+		fmt.Printf("Warning: %s\n", warning)
+	}
+}
+
+type profileGenerationPlanReport struct {
+	Kind         string                            `json:"kind"`
+	SourcePath   string                            `json:"sourcePath"`
+	OutputDir    string                            `json:"outputDir,omitempty"`
+	WrittenFiles []string                          `json:"writtenFiles,omitempty"`
+	Plan         profilegenerateopenapi.PlanResult `json:"plan"`
+}
+
+func runProfileGenerationPlan(args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing profile generation-plan kind")
+	}
+	switch args[0] {
+	case "openapi":
+		return runProfileOpenAPIGenerationPlan(args[1:])
+	default:
+		return fmt.Errorf("unknown profile generation-plan kind: %s", args[0])
+	}
+}
+
+func runProfileOpenAPIGenerationPlan(args []string) error {
+	flags := flag.NewFlagSet("profile generation-plan openapi", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	sourcePath := flags.String("from", "", "OpenAPI JSON document path")
+	serviceID := flags.String("service-id", "", "Service ID for generated draft assets")
+	evidenceDir := flags.String("evidence-dir", "", "Evidence directory for generated draft API cases")
+	outputDir := flags.String("output-dir", "", "Write a reviewable generation plan file tree")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*sourcePath) == "" {
+		return errors.New("missing --from")
+	}
+	raw, err := os.ReadFile(*sourcePath)
+	if err != nil {
+		return fmt.Errorf("read openapi document: %w", err)
+	}
+	plan, err := profilegenerateopenapi.Plan(raw, profilegenerateopenapi.Options{
+		ServiceID:   *serviceID,
+		EvidenceDir: *evidenceDir,
+	})
+	if err != nil {
+		return err
+	}
+	report := profileGenerationPlanReport{
+		Kind:       "openapi",
+		SourcePath: *sourcePath,
+		Plan:       plan,
+	}
+	if strings.TrimSpace(*outputDir) != "" {
+		report.OutputDir = *outputDir
+		writtenFiles, err := writeProfileGenerationPlanOutput(*outputDir, report)
+		if err != nil {
+			return err
+		}
+		report.WrittenFiles = writtenFiles
+		if err := writeProfileGenerationPlanManifest(*outputDir, report); err != nil {
+			return err
+		}
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printProfileGenerationPlan("OpenAPI Generation Plan", report)
+	return nil
+}
+
+func printProfileGenerationPlan(title string, report profileGenerationPlanReport) {
+	fmt.Println(title)
+	fmt.Printf("Source: %s\n", report.SourcePath)
+	fmt.Printf("Service: %s\n", report.Plan.Service.ID)
+	fmt.Printf("OK: %t\n", report.Plan.OK)
+	fmt.Printf("Candidates: %d\n", len(report.Plan.Candidates))
+	fmt.Printf("API Cases: %d\n", len(report.Plan.APICases))
+	fmt.Printf("Case Files: %d\n", len(report.Plan.CaseFiles))
+	if strings.TrimSpace(report.OutputDir) != "" {
+		fmt.Printf("Output Dir: %s\n", report.OutputDir)
+		fmt.Printf("Written Files: %d\n", len(report.WrittenFiles))
+	}
+	for _, warning := range report.Plan.Warnings {
+		fmt.Printf("Warning: %s\n", warning)
+	}
+}
+
+func writeProfileGenerationPlanOutput(outputDir string, report profileGenerationPlanReport) ([]string, error) {
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create generation plan output directory: %w", err)
+	}
+	written := []string{"generation-plan.json"}
+	for _, item := range []profile.Service{report.Plan.Service} {
+		relative := filepath.Join("services", safeImportPlanFileName(item.ID)+".json")
+		if err := writeImportPlanJSON(outputDir, relative, item); err != nil {
+			return nil, err
+		}
+		written = append(written, filepath.ToSlash(relative))
+	}
+	for _, item := range report.Plan.InterfaceNodes {
+		relative := filepath.Join("interface-nodes", safeImportPlanFileName(item.ID)+".json")
+		if err := writeImportPlanJSON(outputDir, relative, item); err != nil {
+			return nil, err
+		}
+		written = append(written, filepath.ToSlash(relative))
+	}
+	for _, item := range report.Plan.APICases {
+		relative := filepath.Join("cases", safeImportPlanFileName(item.ID)+".json")
+		if err := writeImportPlanJSON(outputDir, relative, item); err != nil {
+			return nil, err
+		}
+		written = append(written, filepath.ToSlash(relative))
+	}
+	for _, item := range report.Plan.CaseFiles {
+		relative, err := safeBundleRelativePath(item.Path)
+		if err != nil {
+			return nil, err
+		}
+		if err := writeImportPlanRawJSON(outputDir, relative, item.Body); err != nil {
+			return nil, err
+		}
+		written = append(written, filepath.ToSlash(relative))
+	}
+	sort.Strings(written)
+	return written, nil
+}
+
+func writeProfileGenerationPlanManifest(outputDir string, report profileGenerationPlanReport) error {
+	return writeImportPlanJSON(outputDir, "generation-plan.json", report)
+}
+
+type profileImportPlanReport struct {
+	Kind         string                  `json:"kind"`
+	SourcePath   string                  `json:"sourcePath"`
+	OutputDir    string                  `json:"outputDir,omitempty"`
+	WrittenFiles []string                `json:"writtenFiles,omitempty"`
+	Plan         profileImportPlanAssets `json:"plan"`
+}
+
+type profileImportPlanAssets struct {
+	Service          profile.Service             `json:"service"`
+	InterfaceNodes   []profile.InterfaceNode     `json:"interfaceNodes"`
+	RequestTemplates []profile.RequestTemplate   `json:"requestTemplates"`
+	APICases         []profile.APICase           `json:"apiCases"`
+	CaseFiles        []profileImportPlanCaseFile `json:"caseFiles"`
+}
+
+type profileImportPlanCaseFile struct {
+	Path string          `json:"path"`
+	Body json.RawMessage `json:"body"`
+}
+
+func runProfileImportPlan(args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing profile import-plan kind")
+	}
+	switch args[0] {
+	case "openapi":
+		return runProfileOpenAPIImportPlan(args[1:])
+	case "http-capture":
+		return runProfileHTTPCaptureImportPlan(args[1:])
+	default:
+		return fmt.Errorf("unknown profile import-plan kind: %s", args[0])
+	}
+}
+
+func runProfileOpenAPIImportPlan(args []string) error {
+	flags := flag.NewFlagSet("profile import-plan openapi", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	sourcePath := flags.String("from", "", "OpenAPI JSON document path")
+	serviceID := flags.String("service-id", "", "Service ID for generated draft assets")
+	evidenceDir := flags.String("evidence-dir", "", "Evidence directory for generated draft API cases")
+	outputDir := flags.String("output-dir", "", "Write a reviewable import plan file tree")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*sourcePath) == "" {
+		return errors.New("missing --from")
+	}
+	raw, err := os.ReadFile(*sourcePath)
+	if err != nil {
+		return fmt.Errorf("read openapi document: %w", err)
+	}
+	plan, err := profileimportopenapi.Plan(raw, profileimportopenapi.Options{
+		ServiceID:   *serviceID,
+		EvidenceDir: *evidenceDir,
+	})
+	if err != nil {
+		return err
+	}
+	report := profileImportPlanReport{
+		Kind:       "openapi",
+		SourcePath: *sourcePath,
+		Plan:       importPlanAssetsFromOpenAPI(plan),
+	}
+	if strings.TrimSpace(*outputDir) != "" {
+		report.OutputDir = *outputDir
+		writtenFiles, err := writeProfileImportPlanOutput(*outputDir, report)
+		if err != nil {
+			return err
+		}
+		report.WrittenFiles = writtenFiles
+		if err := writeProfileImportPlanManifest(*outputDir, report); err != nil {
+			return err
+		}
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printProfileImportPlan("OpenAPI Import Plan", report)
+	return nil
+}
+
+func runProfileHTTPCaptureImportPlan(args []string) error {
+	flags := flag.NewFlagSet("profile import-plan http-capture", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	sourcePath := flags.String("from", "", "HTTP capture JSON document path")
+	serviceID := flags.String("service-id", "", "Service ID for generated draft assets")
+	evidenceDir := flags.String("evidence-dir", "", "Evidence directory for generated draft API cases")
+	outputDir := flags.String("output-dir", "", "Write a reviewable import plan file tree")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*sourcePath) == "" {
+		return errors.New("missing --from")
+	}
+	raw, err := os.ReadFile(*sourcePath)
+	if err != nil {
+		return fmt.Errorf("read http capture document: %w", err)
+	}
+	plan, err := profileimporthttpcapture.Plan(raw, profileimporthttpcapture.Options{
+		ServiceID:   *serviceID,
+		EvidenceDir: *evidenceDir,
+	})
+	if err != nil {
+		return err
+	}
+	report := profileImportPlanReport{
+		Kind:       "http-capture",
+		SourcePath: *sourcePath,
+		Plan:       importPlanAssetsFromHTTPCapture(plan),
+	}
+	if strings.TrimSpace(*outputDir) != "" {
+		report.OutputDir = *outputDir
+		writtenFiles, err := writeProfileImportPlanOutput(*outputDir, report)
+		if err != nil {
+			return err
+		}
+		report.WrittenFiles = writtenFiles
+		if err := writeProfileImportPlanManifest(*outputDir, report); err != nil {
+			return err
+		}
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printProfileImportPlan("HTTP Capture Import Plan", report)
+	return nil
+}
+
+func printProfileImportPlan(title string, report profileImportPlanReport) {
+	fmt.Println(title)
+	fmt.Printf("Source: %s\n", report.SourcePath)
+	fmt.Printf("Service: %s\n", report.Plan.Service.ID)
+	fmt.Printf("Interface Nodes: %d\n", len(report.Plan.InterfaceNodes))
+	fmt.Printf("Request Templates: %d\n", len(report.Plan.RequestTemplates))
+	fmt.Printf("API Cases: %d\n", len(report.Plan.APICases))
+	fmt.Printf("Case Files: %d\n", len(report.Plan.CaseFiles))
+	if strings.TrimSpace(report.OutputDir) != "" {
+		fmt.Printf("Output Dir: %s\n", report.OutputDir)
+		fmt.Printf("Written Files: %d\n", len(report.WrittenFiles))
+	}
+}
+
+func importPlanAssetsFromOpenAPI(plan profileimportopenapi.PlanResult) profileImportPlanAssets {
+	files := make([]profileImportPlanCaseFile, 0, len(plan.CaseFiles))
+	for _, item := range plan.CaseFiles {
+		files = append(files, profileImportPlanCaseFile{Path: item.Path, Body: item.Body})
+	}
+	return profileImportPlanAssets{
+		Service:          plan.Service,
+		InterfaceNodes:   plan.InterfaceNodes,
+		RequestTemplates: plan.RequestTemplates,
+		APICases:         plan.APICases,
+		CaseFiles:        files,
+	}
+}
+
+func importPlanAssetsFromHTTPCapture(plan profileimporthttpcapture.PlanResult) profileImportPlanAssets {
+	files := make([]profileImportPlanCaseFile, 0, len(plan.CaseFiles))
+	for _, item := range plan.CaseFiles {
+		files = append(files, profileImportPlanCaseFile{Path: item.Path, Body: item.Body})
+	}
+	return profileImportPlanAssets{
+		Service:          plan.Service,
+		InterfaceNodes:   plan.InterfaceNodes,
+		RequestTemplates: plan.RequestTemplates,
+		APICases:         plan.APICases,
+		CaseFiles:        files,
+	}
+}
+
+func writeProfileImportPlanOutput(outputDir string, report profileImportPlanReport) ([]string, error) {
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create import plan output directory: %w", err)
+	}
+	written := []string{"import-plan.json"}
+	for _, item := range []profile.Service{report.Plan.Service} {
+		relative := filepath.Join("services", safeImportPlanFileName(item.ID)+".json")
+		if err := writeImportPlanJSON(outputDir, relative, item); err != nil {
+			return nil, err
+		}
+		written = append(written, filepath.ToSlash(relative))
+	}
+	for _, item := range report.Plan.InterfaceNodes {
+		relative := filepath.Join("interface-nodes", safeImportPlanFileName(item.ID)+".json")
+		if err := writeImportPlanJSON(outputDir, relative, item); err != nil {
+			return nil, err
+		}
+		written = append(written, filepath.ToSlash(relative))
+	}
+	for _, item := range report.Plan.RequestTemplates {
+		relative := filepath.Join("request-templates", safeImportPlanFileName(item.ID)+".json")
+		if err := writeImportPlanJSON(outputDir, relative, item); err != nil {
+			return nil, err
+		}
+		written = append(written, filepath.ToSlash(relative))
+	}
+	for _, item := range report.Plan.APICases {
+		relative := filepath.Join("cases", safeImportPlanFileName(item.ID)+".json")
+		if err := writeImportPlanJSON(outputDir, relative, item); err != nil {
+			return nil, err
+		}
+		written = append(written, filepath.ToSlash(relative))
+	}
+	for _, item := range report.Plan.CaseFiles {
+		relative, err := safeBundleRelativePath(item.Path)
+		if err != nil {
+			return nil, err
+		}
+		if err := writeImportPlanRawJSON(outputDir, relative, item.Body); err != nil {
+			return nil, err
+		}
+		written = append(written, filepath.ToSlash(relative))
+	}
+	sort.Strings(written)
+	return written, nil
+}
+
+func writeProfileImportPlanManifest(outputDir string, report profileImportPlanReport) error {
+	return writeImportPlanJSON(outputDir, "import-plan.json", report)
+}
+
+func writeImportPlanJSON(outputDir string, relative string, value any) error {
+	raw, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeImportPlanRawJSON(outputDir, relative, append(raw, '\n'))
+}
+
+func writeImportPlanRawJSON(outputDir string, relative string, raw []byte) error {
+	relative, err := safeBundleRelativePath(relative)
+	if err != nil {
+		return err
+	}
+	target := filepath.Join(outputDir, relative)
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return fmt.Errorf("create import plan output directory %s: %w", filepath.Dir(target), err)
+	}
+	if err := os.WriteFile(target, raw, 0o644); err != nil {
+		return fmt.Errorf("write import plan output %s: %w", target, err)
+	}
+	return nil
+}
+
+func safeImportPlanFileName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "asset"
+	}
+	var builder strings.Builder
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.' {
+			builder.WriteRune(r)
+			continue
+		}
+		builder.WriteByte('-')
+	}
+	if builder.Len() == 0 {
+		return "asset"
+	}
+	return builder.String()
 }
 
 func runProfileInit(args []string) error {
@@ -387,6 +1050,7 @@ func initProfileBundle(outputPath string, profileID string, displayName string, 
 		"workflows",
 		"interface-nodes",
 		"cases",
+		"executors",
 		"request-templates",
 		"case-dependencies",
 		"workflow-bindings",
@@ -4245,6 +4909,9 @@ func printCaseSuiteQuality(report casesuite.QualityReport) {
 	fmt.Println("Case Suite Quality")
 	fmt.Printf("OK: %t\n", report.OK)
 	fmt.Printf("Nodes: %d Without Cases: %d Cases: %d Complete: %d Incomplete: %d\n", report.Counts.Nodes, report.Counts.NodesWithoutCases, report.Counts.Cases, report.Counts.CompleteCases, report.Counts.IncompleteCases)
+	if report.Counts.InvalidStatus > 0 || report.Counts.NonExecutableLifecycle > 0 {
+		fmt.Printf("Lifecycle: non-executable=%d invalid=%d\n", report.Counts.NonExecutableLifecycle, report.Counts.InvalidStatus)
+	}
 	for _, item := range report.Nodes {
 		fmt.Printf("- node %s\n", item.NodeID)
 		for _, issue := range item.Issues {
@@ -4310,11 +4977,13 @@ func runCaseSuiteQualityPlan(ctx context.Context, args []string) error {
 func printCaseSuiteQualityPlan(report casesuite.QualityPlanReport) {
 	fmt.Println("Case Suite Quality Plan")
 	fmt.Printf("OK: %t\n", report.OK)
-	fmt.Printf("Total: %d Draft Case: %d Complete Metadata: %d Add Runnable: %d Add Execution: %d\n", report.Counts.Total, report.Counts.DraftCase, report.Counts.CompleteMetadata, report.Counts.AddRunnable, report.Counts.AddExecution)
+	fmt.Printf("Total: %d Draft Case: %d Complete Metadata: %d Review Lifecycle: %d Add Runnable: %d Add Execution: %d\n", report.Counts.Total, report.Counts.DraftCase, report.Counts.CompleteMetadata, report.Counts.ReviewLifecycle, report.Counts.AddRunnable, report.Counts.AddExecution)
 	for _, item := range report.Actions {
 		switch item.Type {
 		case "draft-case":
 			fmt.Printf("- draft %s for node %s\n", item.SuggestedCaseID, item.NodeID)
+		case "review-case-lifecycle":
+			fmt.Printf("- review lifecycle %s\n", item.CaseID)
 		default:
 			fmt.Printf("- %s %s\n", item.Type, item.CaseID)
 		}

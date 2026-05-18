@@ -2,7 +2,7 @@
 
 API Cases are reviewable JSON files that describe one HTTP interaction, the
 assertions to check, and the Evidence files a run should produce. They are
-profile-neutral: domain language belongs in external profile bundles and
+import bundle-neutral: domain language belongs in external import bundle bundles and
 example data, not in the core runner.
 
 ## Case File
@@ -73,6 +73,16 @@ Every run writes the request and runtime response Evidence:
 Evidence files are the detailed runtime record. Store rows are indexes and
 summaries that point back to these files.
 
+Store Evidence records also carry attachment metadata inspired by the reference
+feature backlog's Allure and ReportPortal evidence model:
+
+- `category`: local grouping such as `http-exchange`, `assertion-result`,
+  `run-summary`, or `runtime-attachment`.
+- `visibility`: whether the attachment is intended for normal report surfaces.
+  API case runner records use `public`.
+- `labels`: JSON labels such as case id, run id, and Evidence kind for
+  agent-friendly filtering and future report categories.
+
 ## Store Indexing
 
 When `otsandbox case run` receives `--store-url`, it records:
@@ -81,9 +91,9 @@ When `otsandbox case run` receives `--store-url`, it records:
 - one `api_case_runs` row keyed by the run id and case id;
 - one `evidence_records` row for each Evidence file produced.
 
-The profile id comes from `--profile` and defaults to `default`. Store indexing
+The import bundle id comes from `--import bundle` and defaults to `default`. Store indexing
 does not replace the Evidence bundle; it makes local runs searchable and
-connects them to profile or workflow records.
+connects them to import bundle or workflow records.
 
 ## Async Batch Runs
 
@@ -107,7 +117,7 @@ Content-Type: application/json
 }
 ```
 
-Use `nodeIds` to run all profile API cases attached to one or more interface
+Use `nodeIds` to run all import bundle API cases attached to one or more interface
 nodes. To run a workflow-shaped regression, send `workflowId` instead:
 
 ```json
@@ -119,7 +129,7 @@ nodes. To run a workflow-shaped regression, send `workflowId` instead:
 
 The response is `202 Accepted` and contains a `batchRunId`, JSON `reportUrl`,
 and temporary HTML `htmlReportUrl`. The batch runner selects every matching
-profile API case, returns immediately, and executes the selected cases in the
+import bundle API case, returns immediately, and executes the selected cases in the
 background. Workflow selection follows `workflowBindings` sorted by
 `sortOrder` and `stepId`. Each finished case is still recorded as a normal API
 case run with Evidence and Store rows.

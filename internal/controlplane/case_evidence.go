@@ -361,6 +361,9 @@ func caseEvidenceLogs(records []store.EvidenceRecord, item store.APICaseRun) []m
 			"mediaType": record.MediaType,
 			"summary":   summary,
 		}
+		if attachment := evidenceAttachmentMetadata(record); len(attachment) > 0 {
+			payload["attachment"] = attachment
+		}
 		if !record.CreatedAt.IsZero() {
 			payload["createdAt"] = record.CreatedAt
 		}
@@ -499,6 +502,9 @@ func caseEvidenceRequest(records []store.EvidenceRecord, caseRunID string, fallb
 			}
 		}
 		request["evidence_uri"] = record.URI
+		if attachment := evidenceAttachmentMetadata(record); len(attachment) > 0 {
+			request["attachment"] = attachment
+		}
 		break
 	}
 	return request
@@ -529,9 +535,27 @@ func caseEvidenceResponse(records []store.EvidenceRecord, caseRunID string) map[
 			}
 		}
 		response["evidence_uri"] = record.URI
+		if attachment := evidenceAttachmentMetadata(record); len(attachment) > 0 {
+			response["attachment"] = attachment
+		}
 		break
 	}
 	return response
+}
+
+func evidenceAttachmentMetadata(record store.EvidenceRecord) map[string]any {
+	out := map[string]any{}
+	if strings.TrimSpace(record.Category) != "" {
+		out["category"] = record.Category
+	}
+	if strings.TrimSpace(record.Visibility) != "" {
+		out["visibility"] = record.Visibility
+	}
+	labels := jsonObject(record.LabelsJSON)
+	if len(labels) > 0 {
+		out["labels"] = labels
+	}
+	return out
 }
 
 func evidenceRecordObject(record store.EvidenceRecord) (map[string]any, bool) {
