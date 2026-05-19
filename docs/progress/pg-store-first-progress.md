@@ -1042,3 +1042,24 @@ Incomplete work:
 - The final proof remains the external live validation run with PostgreSQL DSN,
   `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, a real SkyWalking GraphQL endpoint,
   and real 10-step trace ids.
+
+## 2026-05-20 Named PostgreSQL Sandbox Start Coverage
+
+Estimated PostgreSQL mainline progress: 99.92%.
+
+Completed evidence:
+
+- Added env-gated named PostgreSQL daily-path coverage for `sandbox start`
+  behind `OTSANDBOX_TEST_PG_DSN`.
+- The test writes startup commands into the active named PostgreSQL Store,
+  invokes `sandbox start --service ... --json` without per-command `--store`,
+  and verifies the local startup side effect plus JSON report.
+- This gives the local execution entrypoint the same active named PostgreSQL
+  proof as the broader daily CLI families, while SQLite remains covered only as
+  compatibility behavior in the adjacent test.
+
+Incomplete work:
+
+- The test is env-gated and skipped without `OTSANDBOX_TEST_PG_DSN`; final
+  release proof still requires the external live validation run with PostgreSQL
+  DSN and real SkyWalking trace ids.

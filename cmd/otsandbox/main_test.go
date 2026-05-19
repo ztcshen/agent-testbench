@@ -635,6 +635,62 @@ func TestSandboxStartCommandRunsStartupCommandsFromStore(t *testing.T) {
 	}
 }
 
+func TestSandboxStartUsesNamedPostgreSQLActiveStore(t *testing.T) {
+	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-sandbox-start-pg")
+	dir := t.TempDir()
+	startedPath := filepath.Join(dir, "started-pg.txt")
+	suffix := time.Now().UTC().Format("20060102150405.000000000")
+	serviceID := "entry-service-pg-" + suffix
+
+	ctx := context.Background()
+	s, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open active PostgreSQL Store: %v", err)
+	}
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "sandbox-pg-" + suffix,
+		IndexedAt: time.Now().UTC(),
+		Services: []store.CatalogService{
+			{
+				ID:             serviceID,
+				DisplayName:    "Entry Service PG",
+				Kind:           "app",
+				StartupCommand: fmt.Sprintf("printf %s > %q", serviceID, startedPath),
+				Status:         "active",
+			},
+		},
+	}); err != nil {
+		_ = s.Close()
+		t.Fatalf("replace PostgreSQL catalog: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close PostgreSQL Store: %v", err)
+	}
+
+	out := runCLI(t, "sandbox", "start", "--service", serviceID, "--json")
+	var report struct {
+		OK       bool `json:"ok"`
+		Services []struct {
+			ID       string `json:"id"`
+			ExitCode int    `json:"exitCode"`
+			Skipped  bool   `json:"skipped"`
+		} `json:"services"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode PostgreSQL sandbox start report: %v\n%s", err, out)
+	}
+	if !report.OK || len(report.Services) != 1 || report.Services[0].ID != serviceID || report.Services[0].ExitCode != 0 || report.Services[0].Skipped {
+		t.Fatalf("PostgreSQL sandbox start report = %#v", report)
+	}
+	started, err := os.ReadFile(startedPath)
+	if err != nil {
+		t.Fatalf("read PostgreSQL startup side effect: %v", err)
+	}
+	if string(started) != serviceID {
+		t.Fatalf("PostgreSQL startup command wrote %q want %q", started, serviceID)
+	}
+}
+
 func TestSandboxRegisterCommandsWriteStoreCatalog(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 
