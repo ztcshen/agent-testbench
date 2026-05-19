@@ -27,6 +27,16 @@ import (
 	"open-test-sandbox/internal/store/sqlstore"
 )
 
+func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
+	out := runCLI(t)
+	if !strings.Contains(out, "--store NAME_OR_DSN") {
+		t.Fatalf("top-level help should show Store-first flag, got %q", out)
+	}
+	if strings.Contains(out, "--store-url PATH") {
+		t.Fatalf("top-level help should not promote deprecated store-url path flag:\n%s", out)
+	}
+}
+
 func TestStoreUpgradeAndStatusCommands(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
 
