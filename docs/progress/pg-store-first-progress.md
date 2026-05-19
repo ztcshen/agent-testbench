@@ -1147,3 +1147,21 @@ Incomplete work:
 
 - Final proof still requires a real PostgreSQL release-check and live
   SkyWalking run with all 10 trace ids supplied by the external environment.
+
+## 2026-05-20 Strict Live Trace ID Parsing
+
+Estimated PostgreSQL mainline progress: 99.98%.
+
+Completed evidence:
+
+- Release-check live SkyWalking mode now parses `OTS_SMOKE_TRACE_IDS` using the
+  same accepted JSON object or comma-separated `step=trace` formats as the
+  smoke harness instead of relying on raw substring matches.
+- Empty per-step trace ids are rejected before expensive gates run.
+- The smoke test suite now covers partial trace-id mappings and empty step
+  values for the 10-step workflow preflight.
+
+Incomplete work:
+
+- This is still a release preflight hardening slice. The remaining external
+  proof is the real PostgreSQL plus live SkyWalking 10-step run.
