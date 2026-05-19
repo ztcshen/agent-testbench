@@ -727,3 +727,34 @@ Incomplete work:
 - Remaining PG-line gaps are now mostly `evidence import` as an explicit
   migration path, CLI/API parity polish, release preparation, and live
   SkyWalking endpoint validation with real trace ids.
+
+## 2026-05-20 Named PostgreSQL Evidence Import Target Coverage
+
+Estimated PostgreSQL mainline progress: 98.7%.
+
+Completed evidence:
+
+- Added env-gated named PostgreSQL coverage for `evidence import` behind
+  `OTSANDBOX_TEST_PG_DSN`.
+- The new test keeps `evidence import` correctly scoped as a legacy SQLite
+  runtime migration path, but proves the target Store can be the active named
+  PostgreSQL Store without passing per-command `--store`.
+- The test imports a legacy runtime SQLite database into active PostgreSQL,
+  then verifies the PostgreSQL Store contains the imported workflow run, parent
+  run, API case run, and Evidence record.
+- After import, the test runs `evidence list --run ... --json` without
+  `--store` to prove daily Evidence reads see the imported PG-backed data.
+- The legacy runtime fixture now supports unique imported run ids so repeated
+  PostgreSQL validation runs do not collide in a shared test database.
+- Light validation passed:
+  `go test ./cmd/otsandbox -run 'Test(EvidenceImportUsesNamedPostgreSQLActiveStore|EvidenceImportCommandCanEmitJSONReport|EvidenceListCommandCanEmitJSON)$' -count=1`,
+  `tools/guardrails/check_store_first_contracts.sh`, `git diff --check`, and
+  `rg -n -i 'fall''back' . --glob '!node_modules/**'`.
+
+Incomplete work:
+
+- The evidence import PG target coverage is env-gated and skipped without
+  `OTSANDBOX_TEST_PG_DSN`; it does not replace the later human-machine
+  PostgreSQL validation pass.
+- Remaining PG-line gaps are now mostly CLI/API parity polish, release
+  preparation, and live SkyWalking endpoint validation with real trace ids.
