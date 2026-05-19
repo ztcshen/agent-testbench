@@ -1042,7 +1042,7 @@ func TestProfileAuditCommandAcceptsPackedArchive(t *testing.T) {
 	runCLI(t, "profile", "pack", "--profile", profileDir, "--output", archivePath)
 	profileHome := filepath.Join(t.TempDir(), "profile-home")
 
-	out := runCLI(t, "profile", "audit", "--profile", archivePath, "--profile-home", profileHome, "--json")
+	out := runCLI(t, "profile", "audit", "--profile", archivePath, "--offline-template-package", "--profile-home", profileHome, "--json")
 
 	var report struct {
 		ProfileID string `json:"profileId"`
@@ -1934,7 +1934,7 @@ func TestProfileAuditCommandEmitsJSONWithStoreState(t *testing.T) {
 	runCLI(t, "profile", "import", "--from", profileDir, "--store-url", storePath)
 	runCLI(t, "case", "run", "--case", alphaPath, "--base-url", server.URL, "--run-id", "run-alpha", "--store-url", storePath, "--profile", "sample")
 
-	out := runCLI(t, "profile", "audit", "--profile", profileDir, "--store-url", storePath, "--json")
+	out := runCLI(t, "profile", "audit", "--profile", profileDir, "--offline-template-package", "--store-url", storePath, "--json")
 
 	var report struct {
 		OK         bool `json:"ok"`
@@ -1999,7 +1999,7 @@ func TestProfileAuditPlanCommandSuggestsRepairActions(t *testing.T) {
   "fixtures": [{"id":"fixture.bad","kind":"json","dataJson":"{\"broken\":"}]
 }`)
 
-	out := runCLI(t, "profile", "audit-plan", "--profile", profileDir, "--json")
+	out := runCLI(t, "profile", "audit-plan", "--profile", profileDir, "--offline-template-package", "--json")
 	var report struct {
 		OK          bool   `json:"ok"`
 		ProfileID   string `json:"profileId"`
@@ -2035,7 +2035,7 @@ func TestProfileAuditPlanCommandSuggestsRepairActions(t *testing.T) {
 		t.Fatalf("audit plan first action = %#v", report.Actions[0])
 	}
 
-	textOut := runCLI(t, "profile", "audit-plan", "--profile", profileDir)
+	textOut := runCLI(t, "profile", "audit-plan", "--profile", profileDir, "--offline-template-package")
 	for _, want := range []string{"Profile Audit Repair Plan: sample", "Actions: 4", "update-reference-or-add-asset", "api-case-node-missing", "fix-invalid-json"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("audit plan text missing %q:\n%s", want, textOut)
@@ -2742,13 +2742,14 @@ func TestWorkflowAuditCommandEmitsJSONWithScopedStoreState(t *testing.T) {
   ],
   "requestTemplates": [{"id":"template.alpha","nodeId":"node.alpha","method":"POST","path":"/v1/items"}],
   "caseDependencies": [{"id":"dependency.beta","caseId":"case.beta","fixtureId":"fixture.missing"}],
-  "workflowBindings": [
+	"workflowBindings": [
     {"workflowId":"workflow.alpha","stepId":"step.one","nodeId":"node.alpha","caseId":"case.alpha","required":true},
     {"workflowId":"workflow.alpha","stepId":"step.two","nodeId":"node.alpha","caseId":"case.beta","required":true}
   ],
   "fixtures": []
 }`)
 	storePath := filepath.Join(dir, "store.sqlite")
+	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -2807,7 +2808,7 @@ func TestWorkflowAuditCommandEmitsJSONWithScopedStoreState(t *testing.T) {
 		t.Fatalf("close store: %v", err)
 	}
 
-	out := runCLI(t, "workflow", "audit", "--profile", profileDir, "--workflow", "workflow.alpha", "--store", "sqlite://"+storePath, "--json")
+	out := runCLI(t, "workflow", "audit", "--workflow", "workflow.alpha", "--store", "sqlite://"+storePath, "--json")
 
 	var report struct {
 		OK         bool   `json:"ok"`
@@ -2866,8 +2867,10 @@ func TestWorkflowAuditCommandEmitsJSONWithScopedStoreState(t *testing.T) {
 func TestWorkflowAuditCommandPrintsTextSummary(t *testing.T) {
 	dir := t.TempDir()
 	writeWorkflowProfile(t, dir)
+	storePath := filepath.Join(t.TempDir(), "workflow-audit.sqlite")
+	runCLI(t, "config", "publish", "--from", dir, "--store-url", storePath)
 
-	out := runCLI(t, "workflow", "audit", "--profile", dir, "--workflow", "workflow.alpha")
+	out := runCLI(t, "workflow", "audit", "--store", "sqlite://"+storePath, "--workflow", "workflow.alpha")
 
 	for _, want := range []string{
 		"Workflow Audit: workflow.alpha",
@@ -2879,6 +2882,24 @@ func TestWorkflowAuditCommandPrintsTextSummary(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("workflow audit output missing %q: %q", want, out)
 		}
+	}
+}
+
+func TestWorkflowAuditAllowsExplicitOfflineTemplatePackage(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkflowProfile(t, dir)
+
+	out := runCLI(t, "workflow", "audit", "--profile", dir, "--offline-template-package", "--workflow", "workflow.alpha", "--json")
+	var report struct {
+		OK         bool   `json:"ok"`
+		WorkflowID string `json:"workflowId"`
+		IssueCount int    `json:"issueCount"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode offline workflow audit json: %v\n%s", err, out)
+	}
+	if !report.OK || report.WorkflowID != "workflow.alpha" || report.IssueCount != 0 {
+		t.Fatalf("offline workflow audit report = %#v", report)
 	}
 }
 
@@ -3716,6 +3737,46 @@ func TestExecutorAndTemplateCommandsRequireStoreBeforeProfileLoad(t *testing.T) 
 			out := runCLIFailsWithEnv(t, env, tt.args...)
 			if !strings.Contains(out, errNoActiveStoreConfigured.Error()) {
 				t.Fatalf("%s output = %q", tt.name, out)
+			}
+			if strings.Contains(out, "missing-profile") {
+				t.Fatalf("%s loaded profile before Store binding: %q", tt.name, out)
+			}
+		})
+	}
+}
+
+func TestAuditCommandsRequireExplicitStoreOrOfflineReviewBeforeProfileLoad(t *testing.T) {
+	missingProfile := filepath.Join(t.TempDir(), "missing-profile")
+	tests := []struct {
+		name       string
+		args       []string
+		wantPieces []string
+	}{
+		{
+			name:       "workflow audit",
+			args:       []string{"workflow", "audit", "--profile", missingProfile, "--workflow", "workflow.alpha", "--json"},
+			wantPieces: []string{"--offline-template-package", "--store"},
+		},
+		{
+			name:       "profile audit",
+			args:       []string{"profile", "audit", "--profile", missingProfile, "--json"},
+			wantPieces: []string{"--offline-template-package"},
+		},
+		{
+			name:       "profile audit-plan",
+			args:       []string{"profile", "audit-plan", "--profile", missingProfile, "--json"},
+			wantPieces: []string{"--offline-template-package"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}
+			out := runCLIFailsWithEnv(t, env, tt.args...)
+			for _, want := range tt.wantPieces {
+				if !strings.Contains(out, want) {
+					t.Fatalf("%s output missing %q: %q", tt.name, want, out)
+				}
 			}
 			if strings.Contains(out, "missing-profile") {
 				t.Fatalf("%s loaded profile before Store binding: %q", tt.name, out)
