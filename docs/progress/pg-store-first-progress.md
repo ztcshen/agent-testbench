@@ -250,3 +250,40 @@ Risk:
 - The headline progress remains 84% because the PostgreSQL-first backbone is in
   place and many daily read paths are now gated, but breadth and full-release
   proof are still incomplete.
+
+## 2026-05-19 Subagent Progress Check
+
+Estimated PostgreSQL mainline progress: 84%.
+
+Completed evidence:
+
+- Independent subagent review confirmed the current branch is `test`, the
+  worktree is clean, and the branch is ahead of `origin/test` by six commits.
+- The subagent agreed with the 84% headline estimate, with a working range of
+  83-85% and 84% as the optimistic center.
+- PostgreSQL Store-first wiring is established: the release gate requires a
+  PostgreSQL smoke DSN, and the smoke/demo paths include PostgreSQL active
+  Store coverage with SQLite disabled.
+- Recent local commits have gated active or named SQLite Store configs across
+  environment catalog, Evidence reads, workflow run reads, and case reads.
+- The exact-word guardrail scan has no matches in the current worktree.
+
+Incomplete work:
+
+- More daily or near-daily command families still need explicit resolver
+  classification or PostgreSQL proof: sandbox interface/start, executor plan,
+  trace topology collect, profile catalog/verify/import/config publish,
+  interface-node discover/coverage/report, workflow discover/plan/audit/report,
+  baseline get/set, template render, case discover, case suite,
+  case incomplete-batches, and serve.
+- Latest HEAD still needs a fresh isolated PostgreSQL `npm run release-check`
+  before this state can be treated as release-ready.
+- Test coverage still contains broad explicit SQLite compatibility cases, so
+  daily-path tests need continued migration to named PostgreSQL Stores.
+
+Risk:
+
+- The project is past the architecture backbone stage, but not yet in final
+  release hardening. Remaining work is mostly breadth, parity, and proof:
+  finishing daily command gating, validating the core 10-step workflow end to
+  end, and proving real Evidence plus SkyWalking topology behavior.
