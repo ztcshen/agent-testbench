@@ -64,6 +64,20 @@ if ! rg -q -i 'synthetic smoke is not live topology proof' tools/release-check.s
   violations=1
 fi
 
+generic_resolver_count=$(rg -n 'resolveStoreReference\(' cmd/otsandbox/main.go | wc -l | tr -d ' ')
+if [[ "$generic_resolver_count" != "4" ]]; then
+  echo "Daily command code must not add generic Store resolver calls; use resolveRequiredDailyStoreReference unless the path is Store maintenance, offline review, or migration." >&2
+  rg -n 'resolveStoreReference\(' cmd/otsandbox/main.go >&2 || true
+  violations=1
+fi
+
+compat_required_resolver_count=$(rg -n 'resolveRequiredStoreReference\(' cmd/otsandbox/main.go | wc -l | tr -d ' ')
+if [[ "$compat_required_resolver_count" != "1" ]]; then
+  echo "Only explicit migration/compatibility commands may use resolveRequiredStoreReference in CLI handlers." >&2
+  rg -n 'resolveRequiredStoreReference\(' cmd/otsandbox/main.go >&2 || true
+  violations=1
+fi
+
 blocked_a="fall"
 blocked_b="back"
 blocked_word="${blocked_a}${blocked_b}"

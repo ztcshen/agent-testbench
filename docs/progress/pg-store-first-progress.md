@@ -888,3 +888,24 @@ Incomplete work:
 - The remaining gap is still execution evidence against a live SkyWalking
   GraphQL endpoint with real trace ids; this guardrail only prevents contract
   drift while the PG path is being finalized.
+
+## 2026-05-20 Daily Store Resolver Guardrail
+
+Estimated PostgreSQL mainline progress: 99.3%.
+
+Completed evidence:
+
+- Audited the remaining generic Store resolver calls in CLI handlers. The
+  remaining direct `resolveStoreReference` uses are Store maintenance,
+  offline template package review, or an optional Store context inside an
+  offline audit path.
+- The only direct `resolveRequiredStoreReference` use in CLI handlers is
+  `evidence import`, which is the explicit legacy runtime migration path.
+- Store-first guardrails now count these generic resolver call sites so new
+  daily commands cannot bypass `resolveRequiredDailyStoreReference` unnoticed.
+
+Incomplete work:
+
+- This adds drift protection for daily Store resolution. The final unresolved
+  proof remains a live PostgreSQL release gate plus real SkyWalking 10-step
+  validation with real trace ids.
