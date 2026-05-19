@@ -4230,16 +4230,9 @@ func TestDiscoverCommandsRejectActiveSQLiteStore(t *testing.T) {
 }
 
 func TestDiscoverCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("OTSANDBOX_TEST_PG_DSN"))
-	if dsn == "" {
-		t.Skip("set OTSANDBOX_TEST_PG_DSN to run named PostgreSQL daily path coverage")
-	}
-	t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	configureNamedPostgreSQLActiveStore(t, "daily-pg")
 
 	profileDir := writeInterfaceNodeBatchReportProfile(t)
-	runCLI(t, "store", "config", "set", "daily-pg", "--url", dsn)
-	runCLI(t, "store", "use", "daily-pg")
-	runCLI(t, "store", "upgrade")
 	runCLI(t, "config", "publish", "--from", profileDir)
 
 	caseOut := runCLI(t, "case", "discover", "--filter", "variant", "--json")
@@ -4266,6 +4259,115 @@ func TestDiscoverCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 	}
 	if len(nodeReport.Items) != 1 || nodeReport.Items[0].ID != "node.alpha" {
 		t.Fatalf("interface-node discover via active PostgreSQL Store = %#v", nodeReport.Items)
+	}
+}
+
+func TestDailyWorkflowCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
+	configureNamedPostgreSQLActiveStore(t, "daily-workflow-pg")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/first":
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, `{"item_id":"item-001"}`)
+		case "/second":
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, `{"status":"ok"}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Query string `json:"query"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode provider request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if !strings.Contains(payload.Query, "queryTrace") {
+			t.Fatalf("unexpected provider query: %s", payload.Query)
+		}
+		_, _ = w.Write([]byte(`{"data":{"queryTrace":{"spans":[{"traceId":"trace.pg.daily","segmentId":"segment.entry","spanId":0,"parentSpanId":-1,"refs":[],"serviceCode":"service.entry","endpointName":"/first","type":"Entry","component":"Tomcat"},{"traceId":"trace.pg.daily","segmentId":"segment.worker","spanId":0,"parentSpanId":-1,"refs":[{"traceId":"trace.pg.daily","parentSegmentId":"segment.entry","parentSpanId":0,"type":"CrossProcess"}],"serviceCode":"service.worker","endpointName":"GET:/first","type":"Entry","component":"Server"}]}}}`))
+	}))
+	defer provider.Close()
+
+	profileDir := writeWorkflowBatchReportProfile(t)
+	runCLI(t, "config", "publish", "--from", profileDir)
+	workflowOut := runCLI(t, "workflow", "discover", "--filter", "Workflow Alpha", "--json")
+	var workflowList struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(workflowOut), &workflowList); err != nil {
+		t.Fatalf("decode workflow discover json: %v\n%s", err, workflowOut)
+	}
+	if len(workflowList.Items) != 1 || workflowList.Items[0].ID != "workflow.alpha" {
+		t.Fatalf("workflow discover via active PostgreSQL Store = %#v", workflowList.Items)
+	}
+
+	planOut := runCLI(t, "workflow", "plan", "--workflow", "workflow.alpha", "--json")
+	var plan struct {
+		Counts struct {
+			Steps int `json:"steps"`
+		} `json:"counts"`
+	}
+	if err := json.Unmarshal([]byte(planOut), &plan); err != nil {
+		t.Fatalf("decode workflow plan json: %v\n%s", err, planOut)
+	}
+	if plan.Counts.Steps != 2 {
+		t.Fatalf("workflow plan via active PostgreSQL Store = %#v", plan)
+	}
+
+	runCLI(t, "baseline", "set", "--profile", "sample", "--subject", "workflow.alpha", "--status", "passed", "--required")
+	baselineOut := runCLI(t, "baseline", "get", "--profile", "sample", "--subject", "workflow.alpha")
+	if !strings.Contains(baselineOut, "Status: passed") || !strings.Contains(baselineOut, "Required: true") {
+		t.Fatalf("baseline get via active PostgreSQL Store = %q", baselineOut)
+	}
+
+	reportOut := runCLI(t,
+		"workflow", "report",
+		"--workflow", "workflow.alpha",
+		"--base-url", server.URL,
+		"--output-dir", filepath.Join(t.TempDir(), "workflow-report"),
+		"--json",
+	)
+	var report struct {
+		OK     bool   `json:"ok"`
+		RunID  string `json:"runId"`
+		Counts struct {
+			Total  int `json:"total"`
+			Passed int `json:"passed"`
+			Failed int `json:"failed"`
+		} `json:"counts"`
+	}
+	if err := json.Unmarshal([]byte(reportOut), &report); err != nil {
+		t.Fatalf("decode workflow report json: %v\n%s", err, reportOut)
+	}
+	if !report.OK || report.RunID == "" || report.Counts.Total != 2 || report.Counts.Passed != 2 || report.Counts.Failed != 0 {
+		t.Fatalf("workflow report via active PostgreSQL Store = %#v", report)
+	}
+
+	caseRunsOut := runCLI(t, "case", "runs", "--run", report.RunID, "--json")
+	if !strings.Contains(caseRunsOut, "case.first") || !strings.Contains(caseRunsOut, "case.second") {
+		t.Fatalf("case runs via active PostgreSQL Store = %s", caseRunsOut)
+	}
+	traceOut := runCLI(t, "trace", "topology", "collect",
+		"--trace-graphql-url", provider.URL,
+		"--run", report.RunID,
+		"--step", "first",
+		"--case", "case.first",
+		"--request", "request.pg.daily",
+		"--trace-id", "trace.pg.daily",
+		"--json",
+	)
+	if !strings.Contains(traceOut, `"provider":"skywalking"`) || !strings.Contains(traceOut, `"status":"complete"`) || !strings.Contains(traceOut, "trace.pg.daily") {
+		t.Fatalf("trace topology via active PostgreSQL Store = %s", traceOut)
+	}
+	evidenceOut := runCLI(t, "case", "evidence", "--run", report.RunID, "--case-id", "case.first", "--step-id", "first", "--json")
+	if !strings.Contains(evidenceOut, `"provider":"skywalking"`) || !strings.Contains(evidenceOut, "trace.pg.daily") {
+		t.Fatalf("case evidence via active PostgreSQL Store = %s", evidenceOut)
 	}
 }
 
@@ -5730,6 +5832,18 @@ func runCLI(t *testing.T, args ...string) string {
 		t.Fatalf("go run . %s failed: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	return string(out)
+}
+
+func configureNamedPostgreSQLActiveStore(t *testing.T, name string) {
+	t.Helper()
+	dsn := strings.TrimSpace(os.Getenv("OTSANDBOX_TEST_PG_DSN"))
+	if dsn == "" {
+		t.Skip("set OTSANDBOX_TEST_PG_DSN to run named PostgreSQL daily path coverage")
+	}
+	t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	runCLI(t, "store", "config", "set", name, "--url", dsn)
+	runCLI(t, "store", "use", name)
+	runCLI(t, "store", "upgrade")
 }
 
 func runCLIWithEnv(t *testing.T, env []string, args ...string) string {

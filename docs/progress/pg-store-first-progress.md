@@ -461,3 +461,35 @@ Incomplete work:
   not execute the external endpoint validation.
 - Named PostgreSQL daily-path test migration remains broad and incomplete
   beyond the current env-gated discovery coverage.
+
+## 2026-05-19 Named PostgreSQL Workflow Daily Coverage
+
+Estimated PostgreSQL mainline progress: 96%.
+
+Completed evidence:
+
+- Added env-gated named PostgreSQL coverage for a daily workflow path behind
+  `OTSANDBOX_TEST_PG_DSN`. The test configures an active named PostgreSQL
+  Store, upgrades it, publishes workflow config, and then runs daily commands
+  without per-command `--store` flags.
+- The covered no-flag daily commands now include workflow discovery, workflow
+  planning, baseline set/get, workflow report execution, case run listing, trace
+  topology collection, and case Evidence lookup against the active named
+  PostgreSQL Store.
+- The new workflow daily coverage also validates SkyWalking topology persistence
+  through the CLI path by collecting topology for the PostgreSQL-backed workflow
+  run and then reading it back through case Evidence.
+- The previous named PostgreSQL discovery coverage now shares the same helper
+  for active Store setup, keeping PG daily-path tests consistent.
+- Light validation passed:
+  `go test ./cmd/otsandbox -run 'Test(DiscoverCommandsUseNamedPostgreSQLActiveStore|DailyWorkflowCommandsUseNamedPostgreSQLActiveStore)$' -count=1`,
+  `tools/guardrails/check_store_first_contracts.sh`, `git diff --check`, and
+  `rg -n -i 'fall''back' . --glob '!node_modules/**'`.
+
+Incomplete work:
+
+- The new coverage is env-gated and skipped without `OTSANDBOX_TEST_PG_DSN`; it
+  does not replace a full release-check or live SkyWalking validation.
+- Many product-like CLI tests still use explicit `--store sqlite://...` as
+  compatibility coverage. More daily-path suites should move to named
+  PostgreSQL Store coverage over time.
