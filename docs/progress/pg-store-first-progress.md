@@ -1063,3 +1063,25 @@ Incomplete work:
 - The test is env-gated and skipped without `OTSANDBOX_TEST_PG_DSN`; final
   release proof still requires the external live validation run with PostgreSQL
   DSN and real SkyWalking trace ids.
+
+## 2026-05-20 Named PostgreSQL Sandbox Registration Coverage
+
+Estimated PostgreSQL mainline progress: 99.94%.
+
+Completed evidence:
+
+- Added env-gated named PostgreSQL daily-path coverage for
+  `sandbox service register` and `sandbox interface register`.
+- The new test configures an active named PostgreSQL Store, runs both
+  registration commands without per-command `--store`, and verifies the service,
+  interface node, generated request template, and API case are persisted in the
+  PostgreSQL catalog.
+- This closes the remaining local execution registration proof beside
+  `sandbox start`, while the existing SQLite test remains scoped to
+  compatibility coverage.
+
+Incomplete work:
+
+- The new coverage is env-gated behind `OTSANDBOX_TEST_PG_DSN`; final release
+  proof still requires the external PostgreSQL release-check plus live
+  SkyWalking trace validation.

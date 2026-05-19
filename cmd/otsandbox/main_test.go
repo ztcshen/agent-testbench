@@ -743,6 +743,88 @@ func TestSandboxRegisterCommandsWriteStoreCatalog(t *testing.T) {
 	}
 }
 
+func TestSandboxRegisterCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
+	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-sandbox-register-pg")
+	suffix := time.Now().UTC().Format("20060102150405.000000000")
+	serviceID := "service.gateway.pg." + suffix
+	nodeID := "node.create-order.pg." + suffix
+	caseID := "case.create-order.pg." + suffix
+
+	serviceOut := runCLI(t, "sandbox", "service", "register",
+		"--id", serviceID,
+		"--display-name", "Gateway PG",
+		"--kind", "http",
+		"--service-port", "18080",
+		"--health-url", "http://127.0.0.1:18080/health",
+	)
+	if !strings.Contains(serviceOut, "Registered service: "+serviceID) {
+		t.Fatalf("PostgreSQL service register output = %q", serviceOut)
+	}
+
+	interfaceOut := runCLI(t, "sandbox", "interface", "register",
+		"--id", nodeID,
+		"--service-id", serviceID,
+		"--method", "POST",
+		"--path", "/orders",
+		"--case-id", caseID,
+		"--case-title", "Create order",
+		"--required-for-admission",
+	)
+	if !strings.Contains(interfaceOut, "Registered interface: "+nodeID) || !strings.Contains(interfaceOut, "Case: "+caseID) {
+		t.Fatalf("PostgreSQL interface register output = %q", interfaceOut)
+	}
+
+	s, err := openStore(context.Background(), storeRef)
+	if err != nil {
+		t.Fatalf("open PostgreSQL Store: %v", err)
+	}
+	defer s.Close()
+	catalog, err := s.GetProfileCatalog(context.Background())
+	if err != nil {
+		t.Fatalf("get PostgreSQL catalog: %v", err)
+	}
+	serviceFound := false
+	for _, service := range catalog.Services {
+		if service.ID == serviceID {
+			serviceFound = true
+			break
+		}
+	}
+	if !serviceFound {
+		t.Fatalf("PostgreSQL catalog services = %#v", catalog.Services)
+	}
+	nodeFound := false
+	for _, node := range catalog.InterfaceNodes {
+		if node.ID == nodeID && node.ServiceID == serviceID {
+			nodeFound = true
+			break
+		}
+	}
+	if !nodeFound {
+		t.Fatalf("PostgreSQL catalog interface nodes = %#v", catalog.InterfaceNodes)
+	}
+	templateFound := false
+	for _, template := range catalog.RequestTemplates {
+		if template.NodeID == nodeID {
+			templateFound = true
+			break
+		}
+	}
+	if !templateFound {
+		t.Fatalf("PostgreSQL catalog request templates = %#v", catalog.RequestTemplates)
+	}
+	caseFound := false
+	for _, apiCase := range catalog.APICases {
+		if apiCase.ID == caseID && apiCase.RequiredForAdmission {
+			caseFound = true
+			break
+		}
+	}
+	if !caseFound {
+		t.Fatalf("PostgreSQL catalog api cases = %#v", catalog.APICases)
+	}
+}
+
 func TestProfileInitCommandWritesExternalBundle(t *testing.T) {
 	profileDir := filepath.Join(t.TempDir(), "external-profile")
 
