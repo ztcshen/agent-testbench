@@ -73,6 +73,10 @@ function run(args) {
   });
 }
 
+function isPostgreSQLStore(reference) {
+  return /^postgres(?:ql)?:\/\//i.test(String(reference || ""));
+}
+
 async function main() {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "otsandbox-api-case-demo-"));
   const { server, baseURL } = await freeServer();
@@ -80,6 +84,10 @@ async function main() {
   try {
     const evidenceDir = path.join(tempDir, "evidence");
     const storePath = path.join(tempDir, "store.sqlite");
+    const storeRef = process.env.OTSANDBOX_DEMO_STORE || process.env.OTSANDBOX_SMOKE_STORE_DSN || `sqlite://${storePath}`;
+    if (isPostgreSQLStore(storeRef)) {
+      await run(["store", "upgrade", "--store", storeRef]);
+    }
     const output = await run([
       "case",
       "run",
@@ -92,7 +100,7 @@ async function main() {
       "--evidence-dir",
       evidenceDir,
       "--store",
-      `sqlite://${storePath}`,
+      storeRef,
     ]);
 
     console.log(output);

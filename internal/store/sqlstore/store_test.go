@@ -221,6 +221,20 @@ func TestStoreRecordsRuntimeEvidenceTopologyAndPostProcessThroughDatabaseSQL(t *
 	if evidence.CreatedAt.IsZero() || exec.args[0] != "evidence-001" || exec.args[12] != `{"phase":"request"}` {
 		t.Fatalf("evidence record/args = %#v %#v", evidence, exec.args)
 	}
+	emptyLabels, err := s.RecordEvidence(ctx, store.EvidenceRecord{
+		ID:        "evidence-empty-labels",
+		RunID:     "run-001",
+		CaseRunID: "case-run-001",
+		Kind:      "http",
+		CreatedAt: createdAt,
+	})
+	if err != nil {
+		t.Fatalf("record evidence with empty labels: %v", err)
+	}
+	exec = state.lastExec(t)
+	if emptyLabels.LabelsJSON != "{}" || exec.args[12] != "{}" {
+		t.Fatalf("empty evidence labels should be normalized for SQL JSON columns: %#v %#v", emptyLabels, exec.args)
+	}
 
 	state.queueRows(fakeRows{
 		columns: []string{"id", "run_id", "case_run_id", "step_id", "kind", "uri", "media_type", "sha256", "size_bytes", "summary", "category", "visibility", "labels_json", "created_at"},

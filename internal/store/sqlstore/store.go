@@ -150,6 +150,9 @@ func (s *Store) RecordEvidence(ctx context.Context, r store.EvidenceRecord) (sto
 	if r.CreatedAt.IsZero() {
 		r.CreatedAt = utcNow()
 	}
+	if strings.TrimSpace(r.LabelsJSON) == "" {
+		r.LabelsJSON = "{}"
+	}
 	query := fmt.Sprintf(`
 insert into evidence_records (id, run_id, case_run_id, step_id, kind, uri, media_type, sha256, size_bytes, summary, category, visibility, labels_json, created_at)
 values (%s);`, s.bindVars(14))
