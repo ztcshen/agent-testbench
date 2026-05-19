@@ -78,3 +78,53 @@ Reference pattern:
   engine as explicit configuration and keep engine-specific settings behind
   that selected type. Open Test Sandbox should follow the same direction:
   explicit Store selection, no implicit engine substitution in the active path.
+
+## 2026-05-19 Active SQLite Daily Gate Check
+
+Estimated PostgreSQL mainline progress: 80%.
+
+Completed evidence:
+
+- Subagent review independently estimated the goal at about 78%, or about 80%
+  when the current uncommitted Store validation slice is counted.
+- Current branch is `test`; HEAD remains `c71850c` and the active local slice
+  modifies `cmd/otsandbox/main.go`, `cmd/otsandbox/main_test.go`, and
+  `cmd/otsandbox/store_config.go`.
+- Current local slice adds `resolveRequiredDailyStoreReference`, rejects
+  active or named SQLite Store configs for selected daily commands, and keeps
+  direct `sqlite://` references available only for explicit compatibility
+  paths.
+- Targeted tests passed for the active/named SQLite rejection and adjacent CLI
+  behavior.
+- The required exact-word guardrail scan passed with no matches:
+  `rg -n -i 'fall''back' . --glob '!node_modules/**'`.
+- Full release gate passed in the main thread using an isolated temporary
+  PostgreSQL instance:
+  `OTSANDBOX_CONFIG_HOME=/tmp/... OTSANDBOX_SMOKE_STORE_DSN=postgres://zlh@127.0.0.1:55432/otsandbox_release_pg_smoke?sslmode=disable npm run release-check`.
+- Release gate evidence included Go tests, API case demo, React build, frontend
+  model tests, smoke harness tests, PostgreSQL active Store CLI smoke, and
+  PostgreSQL-only browser smoke.
+- Smoke harness evidence now covers the core 10-step Store-backed workflow
+  shape and Store-backed Evidence plus SkyWalking topology assertions.
+
+Incomplete work:
+
+- Only selected daily commands have been switched to
+  `resolveRequiredDailyStoreReference`; more CLI/API daily paths still use the
+  generic compatibility resolver.
+- `--store-url` remains as a compatibility flag in several commands and still
+  needs tighter scoping so bare paths cannot look like a normal daily path.
+- Many CLI tests still exercise SQLite for product-like behavior; future slices
+  should move daily-path coverage to named PostgreSQL Stores and leave SQLite
+  tests for migration/compatibility.
+- Environment Catalog has CLI/API pieces, but one-command bootstrap, local
+  Docker orchestration, verified discovery proof, CLI/API parity, Evidence and
+  report model polish, and release preparation remain incomplete.
+
+Risk:
+
+- The main risk is breadth: the PostgreSQL Store-first backbone and smoke gates
+  are working, but every daily command family still needs either PostgreSQL
+  proof or explicit compatibility labeling.
+- The current percentage assumes this daily Store validation slice remains
+  valid as later command families adopt the same rule.

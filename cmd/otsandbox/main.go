@@ -957,7 +957,7 @@ func runSandboxServiceRegister(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -7799,7 +7799,7 @@ func runCaseRun(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
 	}

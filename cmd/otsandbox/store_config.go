@@ -36,6 +36,16 @@ func activeStoreRequiredError() error {
 	return fmt.Errorf("%w; run `otsandbox store config set NAME --url postgres://...` then `otsandbox store use NAME`", errNoActiveStoreConfigured)
 }
 
+func dailyStoreRequiresPostgresError(name string, backend string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "active Store"
+	} else {
+		name = fmt.Sprintf("Store config %q", name)
+	}
+	return fmt.Errorf("%s uses %s; daily commands require PostgreSQL Store. Use `otsandbox store config set NAME --url postgres://...` and `otsandbox store use NAME`, or use SQLite only through migration/compatibility commands", name, backend)
+}
+
 func runStoreConfig(args []string) error {
 	if len(args) == 0 {
 		return errors.New("missing store config command")
@@ -266,6 +276,36 @@ func resolveRequiredStoreReference(storeRef string, legacyStoreURL string) (stri
 		return "", errNoActiveStoreConfigured
 	}
 	return resolved, nil
+}
+
+func resolveRequiredDailyStoreReference(storeRef string, legacyStoreURL string) (string, error) {
+	resolved, err := resolveRequiredStoreReference(storeRef, legacyStoreURL)
+	if err != nil {
+		return "", err
+	}
+	configName, checkConfiguredStore := configuredStoreName(storeRef, legacyStoreURL)
+	if !checkConfiguredStore {
+		return resolved, nil
+	}
+	backend, err := storeBackendFromURL(resolved)
+	if err != nil {
+		return "", err
+	}
+	if backend != "postgres" {
+		return "", dailyStoreRequiresPostgresError(configName, "SQLite")
+	}
+	return resolved, nil
+}
+
+func configuredStoreName(storeRef string, legacyStoreURL string) (string, bool) {
+	storeRef = strings.TrimSpace(storeRef)
+	if storeRef == "" {
+		return "", strings.TrimSpace(legacyStoreURL) == ""
+	}
+	if _, err := storeBackendFromURL(storeRef); err == nil {
+		return "", false
+	}
+	return storeRef, true
 }
 
 func resolveOptionalBundleStoreReference(profileRef string, storeRef string, legacyStoreURL string) (string, error) {

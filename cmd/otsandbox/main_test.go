@@ -180,6 +180,28 @@ func TestLegacyStoreURLPathIsExplicitSQLiteCompatibility(t *testing.T) {
 	}
 }
 
+func TestDailyStoreReferenceRejectsNamedSQLiteConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(dir, "config"))
+	if err := saveStoreConfig(storeConfigFile{
+		Stores: map[string]storeConfigEntry{
+			"legacy-local": {Name: "legacy-local", URL: "sqlite://" + filepath.Join(dir, "store.sqlite"), Backend: "sqlite"},
+		},
+	}); err != nil {
+		t.Fatalf("save store config: %v", err)
+	}
+
+	_, err := resolveRequiredDailyStoreReference("legacy-local", "")
+	if err == nil {
+		t.Fatal("daily Store reference should reject named SQLite config")
+	}
+	for _, want := range []string{`Store config "legacy-local"`, "daily commands require PostgreSQL Store", "SQLite", "postgres://"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("daily Store reference error missing %q: %v", want, err)
+		}
+	}
+}
+
 func TestEnvironmentCommandsGateVerifiedDiscovery(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	storeRef := "sqlite://" + storePath
@@ -3198,6 +3220,39 @@ func TestCaseRunCommandRequiresActiveStoreBeforeFileExecution(t *testing.T) {
 	}
 	if called {
 		t.Fatal("case run executed request before resolving active Store")
+	}
+}
+
+func TestCaseRunCommandRejectsActiveSQLiteStoreBeforeFileExecution(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"status":"created"}`)
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	casePath := filepath.Join(dir, "case.json")
+	writeAPICaseFile(t, casePath)
+	t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(dir, "config"))
+	storePath := filepath.Join(dir, "store.sqlite")
+	if err := saveStoreConfig(storeConfigFile{
+		Active: "legacy-local",
+		Stores: map[string]storeConfigEntry{
+			"legacy-local": {Name: "legacy-local", URL: "sqlite://" + storePath, Backend: "sqlite"},
+		},
+	}); err != nil {
+		t.Fatalf("save store config: %v", err)
+	}
+
+	out := runCLIFails(t, "case", "run", "--case", casePath, "--base-url", server.URL, "--run-id", "case-run-active-sqlite")
+	for _, want := range []string{"daily commands require PostgreSQL Store", "SQLite", "postgres://"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("case run with active SQLite store output missing %q: %q", want, out)
+		}
+	}
+	if called {
+		t.Fatal("case run executed request before rejecting active SQLite Store")
 	}
 }
 
