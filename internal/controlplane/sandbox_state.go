@@ -1,8 +1,10 @@
 package controlplane
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -11,6 +13,17 @@ import (
 )
 
 const currentSandboxStoreID = "current"
+
+var (
+	errSandboxStoreRequired       = errors.New("store runtime is required")
+	errSandboxInvalidRegistration = errors.New("invalid sandbox registration")
+)
+
+type SandboxServiceRegistrationRequest = sandboxServiceRegistrationRequest
+type SandboxServiceRegistrationResponse = sandboxServiceRegistrationResponse
+type SandboxInterfaceRegistrationRequest = sandboxInterfaceRegistrationRequest
+type SandboxInterfaceRegistrationResponse = sandboxInterfaceRegistrationResponse
+type SandboxInterfaceCase = sandboxInterfaceCase
 
 type sandboxServiceRegistrationRequest struct {
 	ID                  string   `json:"id"`
@@ -117,26 +130,32 @@ type sandboxServiceRegistrationView struct {
 }
 
 func handleSandboxServiceRegistration(w http.ResponseWriter, r *http.Request, runtime store.Store) {
-	if runtime == nil {
-		writeJSONStatus(w, http.StatusNotImplemented, map[string]any{"ok": false, "error": "store runtime is required"})
-		return
-	}
 	var request sandboxServiceRegistrationRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "decode sandbox service request: " + err.Error()})
 		return
 	}
-	service, err := catalogServiceFromRegistration(request)
+	response, err := RegisterSandboxService(r.Context(), runtime, request)
 	if err != nil {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+		writeSandboxRegistrationError(w, err)
 		return
 	}
+	writeJSON(w, response)
+}
 
-	catalog, err := runtime.GetProfileCatalog(r.Context())
+func RegisterSandboxService(ctx context.Context, runtime store.Store, request SandboxServiceRegistrationRequest) (SandboxServiceRegistrationResponse, error) {
+	if runtime == nil {
+		return SandboxServiceRegistrationResponse{}, errSandboxStoreRequired
+	}
+	service, err := catalogServiceFromRegistration(request)
+	if err != nil {
+		return SandboxServiceRegistrationResponse{}, fmt.Errorf("%w: %w", errSandboxInvalidRegistration, err)
+	}
+
+	catalog, err := runtime.GetProfileCatalog(ctx)
 	if err != nil {
 		if !errors.Is(err, store.ErrNotFound) {
-			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
-			return
+			return SandboxServiceRegistrationResponse{}, err
 		}
 		catalog = store.ProfileCatalog{ProfileID: currentSandboxStoreID}
 	}
@@ -145,38 +164,43 @@ func handleSandboxServiceRegistration(w http.ResponseWriter, r *http.Request, ru
 	}
 	catalog.IndexedAt = time.Now().UTC()
 	catalog.Services = upsertCatalogService(catalog.Services, service)
-	if err := runtime.ReplaceProfileCatalog(r.Context(), catalog); err != nil {
-		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
-		return
+	if err := runtime.ReplaceProfileCatalog(ctx, catalog); err != nil {
+		return SandboxServiceRegistrationResponse{}, err
 	}
-	writeJSON(w, sandboxServiceRegistrationResponse{
+	return SandboxServiceRegistrationResponse{
 		OK:      true,
 		StoreID: catalog.ProfileID,
 		Service: sandboxServiceView(service),
 		Counts:  map[string]int{"services": len(catalog.Services)},
-	})
+	}, nil
 }
 
 func handleSandboxInterfaceRegistration(w http.ResponseWriter, r *http.Request, runtime store.Store) {
-	if runtime == nil {
-		writeJSONStatus(w, http.StatusNotImplemented, map[string]any{"ok": false, "error": "store runtime is required"})
-		return
-	}
 	var request sandboxInterfaceRegistrationRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "decode sandbox interface request: " + err.Error()})
 		return
 	}
-	node, template, apiCase, config, err := catalogInterfacePartsFromRegistration(request)
+	response, err := RegisterSandboxInterface(r.Context(), runtime, request)
 	if err != nil {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+		writeSandboxRegistrationError(w, err)
 		return
 	}
-	catalog, err := runtime.GetProfileCatalog(r.Context())
+	writeJSON(w, response)
+}
+
+func RegisterSandboxInterface(ctx context.Context, runtime store.Store, request SandboxInterfaceRegistrationRequest) (SandboxInterfaceRegistrationResponse, error) {
+	if runtime == nil {
+		return SandboxInterfaceRegistrationResponse{}, errSandboxStoreRequired
+	}
+	node, template, apiCase, config, err := catalogInterfacePartsFromRegistration(request)
+	if err != nil {
+		return SandboxInterfaceRegistrationResponse{}, fmt.Errorf("%w: %w", errSandboxInvalidRegistration, err)
+	}
+	catalog, err := runtime.GetProfileCatalog(ctx)
 	if err != nil {
 		if !errors.Is(err, store.ErrNotFound) {
-			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
-			return
+			return SandboxInterfaceRegistrationResponse{}, err
 		}
 		catalog = store.ProfileCatalog{ProfileID: currentSandboxStoreID}
 	}
@@ -184,19 +208,17 @@ func handleSandboxInterfaceRegistration(w http.ResponseWriter, r *http.Request, 
 		catalog.ProfileID = currentSandboxStoreID
 	}
 	if !catalogHasService(catalog.Services, node.ServiceID) {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "entry service is not registered: " + node.ServiceID})
-		return
+		return SandboxInterfaceRegistrationResponse{}, fmt.Errorf("%w: entry service is not registered: %s", errSandboxInvalidRegistration, node.ServiceID)
 	}
 	catalog.IndexedAt = time.Now().UTC()
 	catalog.InterfaceNodes = upsertCatalogInterfaceNode(catalog.InterfaceNodes, node)
 	catalog.RequestTemplates = upsertCatalogRequestTemplate(catalog.RequestTemplates, template)
 	catalog.APICases = upsertCatalogAPICase(catalog.APICases, apiCase)
 	catalog.TemplateConfigs = upsertCatalogTemplateConfig(catalog.TemplateConfigs, config)
-	if err := runtime.ReplaceProfileCatalog(r.Context(), catalog); err != nil {
-		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
-		return
+	if err := runtime.ReplaceProfileCatalog(ctx, catalog); err != nil {
+		return SandboxInterfaceRegistrationResponse{}, err
 	}
-	writeJSON(w, sandboxInterfaceRegistrationResponse{
+	return SandboxInterfaceRegistrationResponse{
 		OK:        true,
 		StoreID:   catalog.ProfileID,
 		Interface: sandboxInterfaceView(node, apiCase),
@@ -206,7 +228,18 @@ func handleSandboxInterfaceRegistration(w http.ResponseWriter, r *http.Request, 
 			"apiCases":         len(catalog.APICases),
 			"templateConfigs":  len(catalog.TemplateConfigs),
 		},
-	})
+	}, nil
+}
+
+func writeSandboxRegistrationError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errSandboxStoreRequired):
+		writeJSONStatus(w, http.StatusNotImplemented, map[string]any{"ok": false, "error": err.Error()})
+	case errors.Is(err, errSandboxInvalidRegistration):
+		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": strings.TrimPrefix(err.Error(), errSandboxInvalidRegistration.Error()+": ")})
+	default:
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+	}
 }
 
 func catalogServiceFromRegistration(request sandboxServiceRegistrationRequest) (store.CatalogService, error) {

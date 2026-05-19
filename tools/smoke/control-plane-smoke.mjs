@@ -531,7 +531,11 @@ async function main() {
   const traceProviderServer = await startSmokeTraceProvider(traceProviderPort);
   const profileDir = await writeSmokeProfile(tempDir, targetPort);
   const profileHome = path.join(tempDir, "profile-home");
-  const storePath = path.join(tempDir, "store.sqlite");
+  const smokeStoreDSN = process.env.OTSANDBOX_SMOKE_STORE_DSN || process.env.OTSANDBOX_SMOKE_STORE || "";
+  if (!smokeStoreDSN && /^(1|true|yes|on)$/i.test(process.env.OTSANDBOX_DISABLE_SQLITE_STORE || "")) {
+    throw new Error("OTSANDBOX_DISABLE_SQLITE_STORE is enabled; set OTSANDBOX_SMOKE_STORE_DSN to a PostgreSQL Store DSN for smoke validation");
+  }
+  const storeRef = smokeStoreDSN || `sqlite://${path.join(tempDir, "store.sqlite")}`;
   const port = await freePort();
   const baseURL = `http://127.0.0.1:${port}`;
   const server = spawn("go", [
@@ -542,8 +546,8 @@ async function main() {
     profileDir,
     "--profile-home",
     profileHome,
-    "--store-url",
-    storePath,
+    "--store",
+    storeRef,
     "--host",
     "127.0.0.1",
     "--port",
@@ -565,10 +569,10 @@ async function main() {
   });
 
   try {
-    const profile = await waitForJSON(`${baseURL}/api/profile`);
-    if (profile.id !== "smoke") throw new Error(`unexpected profile payload: ${JSON.stringify(profile)}`);
+    const profile = await waitForJSON(`${baseURL}/api/template-packages/current`);
+    if (profile.templatePackageId !== "smoke") throw new Error(`unexpected template package payload: ${JSON.stringify(profile)}`);
 
-    const imported = await postJSON(`${baseURL}/api/template-packages/import`, { path: profileDir });
+    const imported = await postJSON(`${baseURL}/api/template-packages/import`, { templatePackagePath: profileDir });
     if (imported.profileId !== "smoke") throw new Error(`unexpected import payload: ${JSON.stringify(imported)}`);
 
     const index = await waitForJSON(`${baseURL}/api/template-packages/catalog-index`);

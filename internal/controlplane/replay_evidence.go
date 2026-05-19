@@ -1,17 +1,17 @@
 package controlplane
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 )
 
-func handleReplayEvidence(w http.ResponseWriter, r *http.Request) {
-	traceID := strings.TrimSpace(r.URL.Query().Get("traceId"))
+func ReplayEvidencePayload(traceID string) (map[string]any, error) {
+	traceID = strings.TrimSpace(traceID)
 	if traceID == "" {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "traceId is required"})
-		return
+		return nil, errors.New("traceId is required")
 	}
-	writeJSON(w, map[string]any{
+	return map[string]any{
 		"ok": true,
 		"run": map[string]any{
 			"traceId":     traceID,
@@ -31,5 +31,14 @@ func handleReplayEvidence(w http.ResponseWriter, r *http.Request) {
 			},
 			"systems": []map[string]any{},
 		},
-	})
+	}, nil
+}
+
+func handleReplayEvidence(w http.ResponseWriter, r *http.Request) {
+	payload, err := ReplayEvidencePayload(r.URL.Query().Get("traceId"))
+	if err != nil {
+		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, payload)
 }

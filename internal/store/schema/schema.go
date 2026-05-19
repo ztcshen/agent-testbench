@@ -6,7 +6,7 @@ type Change struct {
 	SQL     string
 }
 
-const CurrentVersion = 13
+const CurrentVersion = 14
 
 func All() []Change {
 	return []Change{
@@ -472,6 +472,15 @@ alter table interface_node_case add column executor_id text not null default '';
 
 create index if not exists idx_interface_node_case_executor
   on interface_node_case(executor_id, source_kind, status, sort_order, id);`,
+		},
+		{
+			Version: 14,
+			Name:    "add evidence step relation",
+			SQL: `
+alter table evidence_records add column step_id text not null default '';
+
+create index if not exists idx_evidence_records_step
+  on evidence_records(run_id, step_id, case_run_id, created_at, id);`,
 		},
 	}
 }

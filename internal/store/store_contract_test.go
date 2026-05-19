@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +32,18 @@ func TestSQLiteStoreUsesDefaultPathWhenURLIsEmpty(t *testing.T) {
 
 	if resolved.Path != filepath.Join(cfg.BaseDir, "runtime", "store.sqlite") {
 		t.Fatalf("default sqlite path = %q", resolved.Path)
+	}
+}
+
+func TestSQLiteStoreCanBeDisabledForPostgresOnlyValidation(t *testing.T) {
+	t.Setenv("OTSANDBOX_DISABLE_SQLITE_STORE", "1")
+
+	_, err := sqlite.Open(context.Background(), sqlite.Config{Path: filepath.Join(t.TempDir(), "store.sqlite")})
+	if err == nil {
+		t.Fatal("expected sqlite store open to fail when disabled")
+	}
+	if got := err.Error(); got == "" || !strings.Contains(got, "SQLite Store is disabled") {
+		t.Fatalf("sqlite disabled error = %q", got)
 	}
 }
 
@@ -107,6 +120,7 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 		ID:         "evidence-001",
 		RunID:      "run-001",
 		CaseRunID:  "case-run-001",
+		StepID:     "step.health",
 		Kind:       "http-response",
 		URI:        "evidence/run-001/response.json",
 		MediaType:  "application/json",
@@ -136,6 +150,9 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	}
 	if evidenceRecords[0].Category != "runtime-attachment" || evidenceRecords[0].Visibility != "public" || evidenceRecords[0].LabelsJSON != `{"owner":"qa","severity":"critical"}` {
 		t.Fatalf("evidence attachment metadata = %#v", evidenceRecords[0])
+	}
+	if evidenceRecords[0].StepID != "step.health" {
+		t.Fatalf("evidence step relation = %#v", evidenceRecords[0])
 	}
 
 	taskStarted := time.Now().UTC().Add(-150 * time.Millisecond)

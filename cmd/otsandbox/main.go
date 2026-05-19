@@ -33,6 +33,8 @@ import (
 	"open-test-sandbox/internal/redaction"
 	"open-test-sandbox/internal/requesttemplate"
 	"open-test-sandbox/internal/store"
+	storeopen "open-test-sandbox/internal/store/open"
+	"open-test-sandbox/internal/store/postgres"
 	"open-test-sandbox/internal/store/sqlite"
 	"open-test-sandbox/internal/workflowaudit"
 )
@@ -67,6 +69,13 @@ type profileCatalogIndex struct {
 	ProfileID string                    `json:"profileId"`
 	IndexedAt time.Time                 `json:"indexedAt"`
 	Counts    profileCatalogIndexCounts `json:"counts"`
+}
+
+type profileCatalogIndexReport struct {
+	ProfileID     string                `json:"profileId"`
+	IndexedAt     time.Time             `json:"indexedAt"`
+	Counts        profileImportCounts   `json:"counts"`
+	ConfigVersion *profileConfigVersion `json:"configVersion,omitempty"`
 }
 
 type profileCatalogIndexCounts struct {
@@ -148,6 +157,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
+	case "template-package", "template-packages":
+		if err := runTemplatePackage(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 	case "config":
 		if err := runConfig(context.Background(), os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -155,6 +169,16 @@ func main() {
 		}
 	case "evidence":
 		if err := runEvidence(context.Background(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	case "trace":
+		if err := runTrace(context.Background(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	case "replay":
+		if err := runReplay(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
@@ -205,9 +229,20 @@ func printHelp() {
 
 Usage:
   otsandbox version
-  otsandbox store status [--store-url PATH]
-  otsandbox store upgrade [--store-url PATH]
+  otsandbox store config set NAME --url postgres://...
+  otsandbox store config list [--json]
+  otsandbox store use NAME
+  otsandbox store current [--json]
+  otsandbox store status [--store NAME_OR_DSN] [--store-url PATH]
+  otsandbox store upgrade [--store NAME_OR_DSN] [--store-url PATH]
   otsandbox sandbox start [--store-url PATH] [--service ID] [--kind KIND] [--timeout-seconds N] [--json]
+  otsandbox sandbox service register --id ID [--store-url PATH] [--display-name NAME] [--kind KIND] [--service-port N] [--health-url URL] [--json]
+  otsandbox sandbox interface register --id ID --service-id ID --path PATH [--store-url PATH] [--method METHOD] [--case-id ID] [--case-title TEXT] [--required-for-admission] [--json]
+  otsandbox template-package install --from PATH [--profile-home PATH] [--force]
+  otsandbox template-package inspect --template-package PATH_OR_ID [--profile-home PATH]
+  otsandbox template-package catalog-index [--store-url PATH] [--json]
+  otsandbox template-package verify --template-package PATH_OR_ID [--profile-home PATH] [--store-url PATH] [--require-case-runs] [--require-workflow-runs] [--json] [--force]
+  otsandbox template-package import --from PATH_OR_ID [--profile-home PATH] [--store-url PATH] [--json] [--audit] [--require-audit-ok] [--force]
   otsandbox profile init --output PATH [--id ID] [--display-name NAME] [--force]
   otsandbox profile install --from PATH [--profile-home PATH] [--force]
   otsandbox profile pack --profile PATH_OR_ID --output PATH [--profile-home PATH] [--force]
@@ -225,19 +260,27 @@ Usage:
   otsandbox evidence import --from PATH --profile ID [--store-url PATH]
   otsandbox evidence list [--store-url PATH] [--run ID] [--json]
   otsandbox evidence tasks --store-url PATH --run ID [--step ID] [--case ID] [--kind KIND] [--status STATUS] [--json]
-  otsandbox workflow discover [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--json]
-  otsandbox workflow plan --profile PATH --workflow ID
+  otsandbox trace topology collect --run ID [--store-url PATH] --trace-graphql-url URL [--step ID] [--case ID] [--request ID] [--endpoint TEXT] [--trace-id ID] [--json]
+  otsandbox replay evidence --trace-id ID [--json]
+  otsandbox workflow discover [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--filter TEXT] [--json]
+  otsandbox workflow plan [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] --workflow ID [--json]
   otsandbox workflow audit --profile PATH --workflow ID [--store-url PATH] [--json]
+  otsandbox workflow runs [--store-url PATH] [--json]
+  otsandbox workflow run --run ID [--store-url PATH] [--json]
+  otsandbox workflow step --run ID --step ID [--store-url PATH] [--json]
+  otsandbox workflow latest-step --workflow ID --step ID [--store-url PATH] [--json]
   otsandbox workflow report --workflow ID [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--base-url URL] [--output-dir PATH] [--json]
   otsandbox baseline get --profile ID --subject ID [--store-url PATH]
   otsandbox baseline set --profile ID --subject ID --status STATUS [--required] [--store-url PATH]
   otsandbox template render --profile PATH --template ID [--fixture ID]
-  otsandbox interface-node discover [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--json]
+  otsandbox interface-node discover [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--filter TEXT] [--json]
+  otsandbox interface-node coverage [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--workflow ID] [--json]
+  otsandbox interface-node coverage-gaps [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--workflow ID] [--json]
   otsandbox interface-node case audit --profile PATH --node ID [--json]
   otsandbox interface-node case draft --profile PATH --node ID --case-id ID [--title TEXT] [--case-path PATH] [--method METHOD] [--path PATH] [--tag TAG] [--priority PRIORITY] [--owner OWNER] [--output PATH] [--json]
   otsandbox interface-node case apply --profile PATH --file PATH [--json]
   otsandbox interface-node case report --node ID [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
-  otsandbox case discover [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
+  otsandbox case discover [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
   otsandbox case suite report [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
   otsandbox case suite coverage [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
   otsandbox case suite stability [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--json]
@@ -250,9 +293,12 @@ Usage:
   otsandbox case suite plan [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
   otsandbox case suite impact [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
   otsandbox case suite impact-report [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
+  otsandbox case runs [--store-url PATH] [--run ID] [--json]
+  otsandbox case evidence [--store-url PATH] [--case-run ID | --run ID [--case-id ID] [--step-id ID]] [--json]
+  otsandbox case timing [--store-url PATH] [--kind KIND] [--max-age-minutes N] [--json]
   otsandbox case run --case PATH --base-url URL [--override KEY=VALUE] [--evidence-dir PATH]
   otsandbox case incomplete-batches --profile PATH [--store-url PATH] [--json]
-  otsandbox serve [--profile PATH_OR_ID] [--profile-home PATH] [--host HOST] [--port PORT] [--store-url PATH]
+  otsandbox serve [--profile PATH_OR_ID] [--profile-home PATH] [--host HOST] [--port PORT] [--store NAME_OR_DSN] [--store-url PATH]
   otsandbox help
 
 Serve reads profile catalog data from the local Store. When --profile is set,
@@ -264,14 +310,52 @@ func runStore(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("missing store command")
 	}
+	switch args[0] {
+	case "config":
+		return runStoreConfig(args[1:])
+	case "use":
+		return runStoreUse(args[1:])
+	case "current":
+		return runStoreCurrent(args[1:])
+	}
 
 	flags := flag.NewFlagSet("store "+args[0], flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", "SQLite store URL or path")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
-	cfg, err := sqlite.ParseConfigFromURL(*storeURL)
+	resolvedStoreURL, err := resolveStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	if backend, _ := storeBackendFromURL(resolvedStoreURL); backend == "postgres" {
+		cfg, err := postgres.ParseConfigFromURL(resolvedStoreURL)
+		if err != nil {
+			return err
+		}
+		switch args[0] {
+		case "status":
+			status, err := postgres.SchemaStatus(ctx, cfg)
+			if err != nil {
+				return err
+			}
+			printPostgresStoreStatus(status)
+		case "upgrade":
+			status, err := postgres.UpgradeSchema(ctx, cfg)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Upgraded store schema to version %d\n", status.CurrentVersion)
+			fmt.Printf("Applied: %d\n", status.AppliedCount)
+			fmt.Printf("URL: %s\n", maskStoreURL(status.URL))
+		default:
+			return fmt.Errorf("unknown store command: %s", args[0])
+		}
+		return nil
+	}
+	cfg, err := sqlite.ParseConfigFromURL(resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -304,6 +388,18 @@ func printStoreStatus(status sqlite.SchemaStatusResult) {
 	}
 	fmt.Println("Store: sqlite")
 	fmt.Printf("Path: %s\n", status.Path)
+	fmt.Printf("Version: %d\n", status.CurrentVersion)
+	fmt.Printf("Target: %d\n", status.TargetVersion)
+	fmt.Printf("Pending: %d\n", pending)
+}
+
+func printPostgresStoreStatus(status postgres.SchemaStatusResult) {
+	pending := status.TargetVersion - status.CurrentVersion
+	if pending < 0 {
+		pending = 0
+	}
+	fmt.Println("Store: postgres")
+	fmt.Printf("URL: %s\n", maskStoreURL(status.URL))
 	fmt.Printf("Version: %d\n", status.CurrentVersion)
 	fmt.Printf("Target: %d\n", status.TargetVersion)
 	fmt.Printf("Pending: %d\n", pending)
@@ -345,9 +441,139 @@ func runSandbox(ctx context.Context, args []string) error {
 	switch args[0] {
 	case "start":
 		return runSandboxStart(ctx, args[1:])
+	case "service":
+		return runSandboxService(ctx, args[1:])
+	case "interface":
+		return runSandboxInterface(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown sandbox command: %s", args[0])
 	}
+}
+
+func runSandboxService(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing sandbox service command")
+	}
+	switch args[0] {
+	case "register":
+		return runSandboxServiceRegister(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown sandbox service command: %s", args[0])
+	}
+}
+
+func runSandboxInterface(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing sandbox interface command")
+	}
+	switch args[0] {
+	case "register":
+		return runSandboxInterfaceRegister(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown sandbox interface command: %s", args[0])
+	}
+}
+
+func runSandboxServiceRegister(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("sandbox service register", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	id := flags.String("id", "", "Service id")
+	displayName := flags.String("display-name", "", "Service display name")
+	kind := flags.String("kind", "", "Service kind")
+	servicePort := flags.Int("service-port", 0, "Service port")
+	managementPort := flags.Int("management-port", 0, "Management port")
+	startupCommand := flags.String("startup-command", "", "Startup command")
+	healthURL := flags.String("health-url", "", "Health URL")
+	status := flags.String("status", "", "Service status")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	runtime, err := openStore(ctx, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer runtime.Close()
+	response, err := controlplane.RegisterSandboxService(ctx, runtime, controlplane.SandboxServiceRegistrationRequest{
+		ID:             *id,
+		DisplayName:    *displayName,
+		Kind:           *kind,
+		ServicePort:    *servicePort,
+		ManagementPort: *managementPort,
+		StartupCommand: *startupCommand,
+		HealthURL:      *healthURL,
+		Status:         *status,
+	})
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(response)
+	}
+	fmt.Printf("Registered service: %s\n", response.Service.ID)
+	fmt.Printf("Store: %s\n", response.StoreID)
+	fmt.Printf("Kind: %s\n", response.Service.Kind)
+	if response.Service.ServicePort > 0 {
+		fmt.Printf("Port: %d\n", response.Service.ServicePort)
+	}
+	return nil
+}
+
+func runSandboxInterfaceRegister(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("sandbox interface register", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	id := flags.String("id", "", "Interface id")
+	displayName := flags.String("display-name", "", "Interface display name")
+	serviceID := flags.String("service-id", "", "Entry service id")
+	operation := flags.String("operation", "", "Operation name")
+	method := flags.String("method", "", "HTTP method")
+	path := flags.String("path", "", "HTTP path")
+	templateID := flags.String("template-id", "", "Request template id")
+	caseID := flags.String("case-id", "", "API case id")
+	caseTitle := flags.String("case-title", "", "API case title")
+	requiredForAdmission := flags.Bool("required-for-admission", false, "Require this case for interface admission")
+	timeoutMs := flags.Int("timeout-ms", 0, "Interface timeout in milliseconds")
+	timeoutSeconds := flags.Int("timeout-seconds", 0, "Case timeout in seconds")
+	status := flags.String("status", "", "Interface status")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	runtime, err := openStore(ctx, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer runtime.Close()
+	response, err := controlplane.RegisterSandboxInterface(ctx, runtime, controlplane.SandboxInterfaceRegistrationRequest{
+		ID:          *id,
+		DisplayName: *displayName,
+		ServiceID:   *serviceID,
+		Operation:   *operation,
+		Method:      *method,
+		Path:        *path,
+		TemplateID:  *templateID,
+		TimeoutMs:   *timeoutMs,
+		Status:      *status,
+		Case: controlplane.SandboxInterfaceCase{
+			ID:                   *caseID,
+			DisplayName:          *caseTitle,
+			RequiredForAdmission: *requiredForAdmission,
+			TimeoutSeconds:       *timeoutSeconds,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(response)
+	}
+	fmt.Printf("Registered interface: %s\n", response.Interface.ID)
+	fmt.Printf("Store: %s\n", response.StoreID)
+	fmt.Printf("Service: %s\n", response.Interface.ServiceID)
+	fmt.Printf("Case: %s\n", response.Interface.CaseID)
+	return nil
 }
 
 func runSandboxStart(ctx context.Context, args []string) error {
@@ -514,6 +740,8 @@ func runProfile(args []string) error {
 		return runProfileGenerationPlan(args[1:])
 	case "import-plan":
 		return runProfileImportPlan(args[1:])
+	case "catalog-index":
+		return runProfileCatalogIndex(context.Background(), args[1:])
 	case "import":
 		return runProfileImport(context.Background(), args[1:])
 	case "verify":
@@ -521,6 +749,19 @@ func runProfile(args []string) error {
 	default:
 		return fmt.Errorf("unknown profile command: %s", args[0])
 	}
+}
+
+func runTemplatePackage(args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing template-package command")
+	}
+	if err := runProfile(args); err != nil {
+		if strings.HasPrefix(err.Error(), "unknown profile command:") {
+			return fmt.Errorf("unknown template-package command: %s", args[0])
+		}
+		return err
+	}
+	return nil
 }
 
 func runConfig(ctx context.Context, args []string) error {
@@ -596,6 +837,132 @@ func printExecutorPlan(report executor.PlanReport) {
 	for _, warning := range report.Warnings {
 		fmt.Printf("Warning: %s\n", warning)
 	}
+}
+
+func runTrace(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing trace command")
+	}
+	switch args[0] {
+	case "topology":
+		return runTraceTopology(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown trace command: %s", args[0])
+	}
+}
+
+func runTraceTopology(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing trace topology command")
+	}
+	switch args[0] {
+	case "collect":
+		return runTraceTopologyCollect(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown trace topology command: %s", args[0])
+	}
+}
+
+func runTraceTopologyCollect(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("trace topology collect", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	graphQLURL := flags.String("trace-graphql-url", os.Getenv("OTS_TRACE_GRAPHQL_URL"), "Trace provider GraphQL URL")
+	runID := flags.String("run", "", "Workflow run id")
+	stepID := flags.String("step", "", "Workflow step id")
+	caseID := flags.String("case", "", "API case id")
+	requestID := flags.String("request", "", "Request id")
+	endpoint := flags.String("endpoint", "", "Trace endpoint")
+	traceID := flags.String("trace-id", "", "Trace id")
+	startedAt := flags.String("started-at", "", "Run started timestamp")
+	finishedAt := flags.String("finished-at", "", "Run finished timestamp")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*runID) == "" {
+		return errors.New("--run is required")
+	}
+	runtime, err := openStore(ctx, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer runtime.Close()
+	payload := map[string]any{
+		"runId":      *runID,
+		"stepId":     *stepID,
+		"caseId":     *caseID,
+		"requestId":  *requestID,
+		"endpoint":   *endpoint,
+		"traceId":    *traceID,
+		"startedAt":  *startedAt,
+		"finishedAt": *finishedAt,
+	}
+	response, err := controlplane.CollectTraceTopologyPayload(ctx, runtime, controlplane.TraceCollector{GraphQLURL: *graphQLURL}, payload)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(response)
+	}
+	printTraceTopologyCollect(response)
+	return nil
+}
+
+func printTraceTopologyCollect(response map[string]any) {
+	row := mapFromReportAny(response["traceTopology"])
+	topology := mapFromReportAny(response["topology"])
+	fmt.Println("Trace Topology Collect")
+	fmt.Printf("Run: %s\n", valueString(row["workflowRunId"]))
+	fmt.Printf("Trace: %s\n", valueString(row["traceId"]))
+	fmt.Printf("Status: %s\n", valueString(row["status"]))
+	fmt.Printf("Spans: %s\n", valueString(topology["spanCount"]))
+	if edges, ok := topology["confirmedEdges"].([]any); ok {
+		fmt.Printf("Confirmed Edges: %d\n", len(edges))
+	}
+}
+
+func runReplay(args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing replay command")
+	}
+	switch args[0] {
+	case "evidence":
+		return runReplayEvidence(args[1:])
+	default:
+		return fmt.Errorf("unknown replay command: %s", args[0])
+	}
+}
+
+func runReplayEvidence(args []string) error {
+	flags := flag.NewFlagSet("replay evidence", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	traceID := flags.String("trace-id", "", "Trace id")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	payload, err := controlplane.ReplayEvidencePayload(*traceID)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(payload)
+	}
+	run := mapFromReportAny(payload["run"])
+	evidence := mapFromReportAny(payload["evidence"])
+	fmt.Println("Replay Evidence")
+	fmt.Printf("Trace: %s\n", valueString(run["traceId"]))
+	if systems, ok := evidence["systems"].([]map[string]any); ok {
+		fmt.Printf("Systems: %d\n", len(systems))
+		return nil
+	}
+	if systems, ok := evidence["systems"].([]any); ok {
+		fmt.Printf("Systems: %d\n", len(systems))
+		return nil
+	}
+	fmt.Println("Systems: 0")
+	return nil
 }
 
 type profileGenerationPlanReport struct {
@@ -1138,6 +1505,7 @@ func runProfilePack(args []string) error {
 	flags := flag.NewFlagSet("profile pack", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	profileRef := flags.String("profile", "", "Profile bundle path or installed profile id")
+	templatePackageRef := flags.String("template-package", "", "Template package path or installed template package id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
 	outputPath := flags.String("output", "", "Archive output path")
 	force := flags.Bool("force", false, "Replace an existing archive")
@@ -1145,7 +1513,7 @@ func runProfilePack(args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	report, err := packProfileBundle(*profileRef, *profileHome, *outputPath, *force)
+	report, err := packProfileBundle(templatePackageReference(*templatePackageRef, *profileRef), *profileHome, *outputPath, *force)
 	if err != nil {
 		return err
 	}
@@ -1209,6 +1577,13 @@ func resolveProfileReference(value string, profileHome string) (string, error) {
 	return profilehome.ResolveReference(value, profileHome)
 }
 
+func templatePackageReference(storeFirst string, legacy string) string {
+	if value := strings.TrimSpace(storeFirst); value != "" {
+		return value
+	}
+	return legacy
+}
+
 func materializeProfileReference(value string, profileHome string, force bool) (string, error) {
 	resolved, err := resolveProfileReference(value, profileHome)
 	if err != nil {
@@ -1232,11 +1607,12 @@ func runProfileInspect(args []string) error {
 	flags := flag.NewFlagSet("profile inspect", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path")
+	templatePackagePath := flags.String("template-package", "", "Template package path or installed template package id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	resolvedProfilePath, err := resolveProfileReference(*profilePath, *profileHome)
+	resolvedProfilePath, err := resolveProfileReference(templatePackageReference(*templatePackagePath, *profilePath), *profileHome)
 	if err != nil {
 		return err
 	}
@@ -1248,10 +1624,30 @@ func runProfileInspect(args []string) error {
 	return nil
 }
 
+func runProfileCatalogIndex(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("profile catalog-index", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	report, err := readProfileCatalogIndex(ctx, *storeURL)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printProfileCatalogIndex(report)
+	return nil
+}
+
 func runProfileVerify(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("profile verify", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path")
+	templatePackagePath := flags.String("template-package", "", "Template package path or installed template package id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
 	storeURL := flags.String("store-url", "", "SQLite store URL or path")
 	requireCaseRuns := flags.Bool("require-case-runs", false, "Require every API Case in the profile to have a latest passed Store run")
@@ -1271,7 +1667,7 @@ func runProfileVerify(ctx context.Context, args []string) error {
 		return err
 	}
 	defer s.Close()
-	resolvedProfilePath, err := materializeProfileReference(*profilePath, *profileHome, *force)
+	resolvedProfilePath, err := materializeProfileReference(templatePackageReference(*templatePackagePath, *profilePath), *profileHome, *force)
 	if err != nil {
 		return err
 	}
@@ -1716,6 +2112,52 @@ func printProfileImportAudit(report profileaudit.Report) {
 	}
 }
 
+func readProfileCatalogIndex(ctx context.Context, storeURL string) (profileCatalogIndexReport, error) {
+	runtime, err := openStore(ctx, storeURL)
+	if err != nil {
+		return profileCatalogIndexReport{}, err
+	}
+	defer runtime.Close()
+	index, err := runtime.GetProfileCatalogIndex(ctx)
+	if err != nil {
+		return profileCatalogIndexReport{}, err
+	}
+	report := profileCatalogIndexReport{
+		ProfileID: index.ProfileID,
+		IndexedAt: index.IndexedAt,
+		Counts: profileImportCounts{
+			Services:         index.Counts.Services,
+			Workflows:        index.Counts.Workflows,
+			InterfaceNodes:   index.Counts.InterfaceNodes,
+			APICases:         index.Counts.APICases,
+			RequestTemplates: index.Counts.RequestTemplates,
+			CaseDependencies: index.Counts.CaseDependencies,
+			WorkflowBindings: index.Counts.WorkflowBindings,
+			Fixtures:         index.Counts.Fixtures,
+		},
+	}
+	if version, err := runtime.GetActiveConfigVersion(ctx); err == nil {
+		value := profileConfigVersionFromStore(version)
+		report.ConfigVersion = &value
+	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return profileCatalogIndexReport{}, err
+	}
+	return report, nil
+}
+
+func printProfileCatalogIndex(report profileCatalogIndexReport) {
+	fmt.Printf("Template Package Catalog Index: %s\n", report.ProfileID)
+	fmt.Printf("Indexed At: %s\n", report.IndexedAt.Format(time.RFC3339))
+	fmt.Printf("Services: %d\n", report.Counts.Services)
+	fmt.Printf("Workflows: %d\n", report.Counts.Workflows)
+	fmt.Printf("Interface Nodes: %d\n", report.Counts.InterfaceNodes)
+	fmt.Printf("API Cases: %d\n", report.Counts.APICases)
+	fmt.Printf("Request Templates: %d\n", report.Counts.RequestTemplates)
+	if report.ConfigVersion != nil {
+		fmt.Printf("Config Version: %s\n", report.ConfigVersion.ID)
+	}
+}
+
 func printProfileVerify(report profileVerifyReport) {
 	fmt.Printf("Profile Verification: %s\n", report.ProfileID)
 	fmt.Printf("OK: %t\n", report.OK)
@@ -1756,6 +2198,7 @@ func runProfileAudit(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("profile audit", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path")
+	templatePackagePath := flags.String("template-package", "", "Template package path or installed template package id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
 	storeURL := flags.String("store-url", "", "SQLite store URL or path")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
@@ -1763,7 +2206,7 @@ func runProfileAudit(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	resolvedProfilePath, err := materializeProfileReference(*profilePath, *profileHome, *force)
+	resolvedProfilePath, err := materializeProfileReference(templatePackageReference(*templatePackagePath, *profilePath), *profileHome, *force)
 	if err != nil {
 		return err
 	}
@@ -1802,6 +2245,7 @@ func runProfileAuditPlan(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("profile audit-plan", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path")
+	templatePackagePath := flags.String("template-package", "", "Template package path or installed template package id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
 	storeURL := flags.String("store-url", "", "SQLite store URL or path")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
@@ -1809,7 +2253,7 @@ func runProfileAuditPlan(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	report, err := profileAuditRepairPlan(ctx, *profilePath, *profileHome, *storeURL, *force)
+	report, err := profileAuditRepairPlan(ctx, templatePackageReference(*templatePackagePath, *profilePath), *profileHome, *storeURL, *force)
 	if err != nil {
 		return err
 	}
@@ -1970,6 +2414,12 @@ func runInterfaceNode(args []string) error {
 	if args[0] == "discover" {
 		return runInterfaceNodeDiscover(context.Background(), args[1:])
 	}
+	if args[0] == "coverage" {
+		return runInterfaceNodeCoverage(context.Background(), args[1:], false)
+	}
+	if args[0] == "coverage-gaps" {
+		return runInterfaceNodeCoverage(context.Background(), args[1:], true)
+	}
 	if args[0] != "case" {
 		return fmt.Errorf("unknown interface-node command: %s", args[0])
 	}
@@ -1995,13 +2445,18 @@ func runInterfaceNodeDiscover(ctx context.Context, args []string) error {
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated SQLite store URL or path")
 	filter := flags.String("filter", "", "Filter by id, display name, or operation")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	bundle, _, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	resolvedStoreURL, err := resolveOptionalBundleStoreReference(*profilePath, *storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	bundle, _, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -2014,6 +2469,66 @@ func runInterfaceNodeDiscover(ctx context.Context, args []string) error {
 		fmt.Printf("%s\t%s\t%d\n", item.ID, item.DisplayName, item.CaseCount)
 	}
 	return nil
+}
+
+func runInterfaceNodeCoverage(ctx context.Context, args []string, gapsOnly bool) error {
+	name := "interface-node coverage"
+	if gapsOnly {
+		name = "interface-node coverage-gaps"
+	}
+	flags := flag.NewFlagSet(name, flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	workflowID := flags.String("workflow", "", "Workflow id")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	bundle, runtime, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	var payload map[string]any
+	if gapsOnly {
+		payload, err = controlplane.InterfaceNodeCoverageGapsPayload(ctx, bundle, *workflowID, runtime)
+	} else {
+		payload, err = controlplane.InterfaceNodeCoveragePayload(ctx, bundle, *workflowID, runtime)
+	}
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(payload)
+	}
+	printInterfaceNodeCoverage(payload, gapsOnly)
+	return nil
+}
+
+func printInterfaceNodeCoverage(payload map[string]any, gapsOnly bool) {
+	if gapsOnly {
+		fmt.Printf("Interface Node Coverage Gaps: %s\n", valueString(payload["workflowId"]))
+		summary := mapFromReportAny(payload["summary"])
+		fmt.Printf("Total Steps: %d\n", intFromReportAny(summary["totalSteps"]))
+		fmt.Printf("Gaps: %d\n", intFromReportAny(summary["gapCount"]))
+		for _, item := range listFromReportAny(payload["gaps"]) {
+			row := mapFromReportAny(item)
+			fmt.Printf("Gap: %s Node: %s Case: %s\n", valueString(row["stepId"]), valueString(row["nodeId"]), valueString(row["caseId"]))
+		}
+		return
+	}
+	fmt.Printf("Interface Node Coverage: %s\n", valueString(payload["workflowId"]))
+	summary := mapFromReportAny(payload["summary"])
+	fmt.Printf("Total Steps: %d\n", intFromReportAny(summary["totalSteps"]))
+	fmt.Printf("Mapped Steps: %d\n", intFromReportAny(summary["mappedSteps"]))
+	fmt.Printf("Unmapped Steps: %d\n", intFromReportAny(summary["unmappedSteps"]))
+	for _, item := range listFromReportAny(payload["rows"]) {
+		row := mapFromReportAny(item)
+		fmt.Printf("Step: %s Node: %s Mapped: %t Admission: %s\n", valueString(row["stepId"]), valueString(row["nodeId"]), boolFromReportAny(row["mapped"]), valueString(row["admissionStatus"]))
+	}
 }
 
 func interfaceNodeList(bundle profile.Bundle, filter string) interfaceNodeListReport {
@@ -2759,9 +3274,9 @@ func runInterfaceNodeCaseReport(ctx context.Context, args []string) error {
 	return nil
 }
 
-func loadInterfaceNodeReportBundle(ctx context.Context, profileRef string, profileHomeRef string, storeURL string) (profile.Bundle, *sqlite.Store, func(), error) {
+func loadInterfaceNodeReportBundle(ctx context.Context, profileRef string, profileHomeRef string, storeURL string) (profile.Bundle, store.Store, func(), error) {
 	cleanup := func() {}
-	var sourceStore *sqlite.Store
+	var sourceStore store.Store
 	if strings.TrimSpace(storeURL) != "" {
 		opened, err := openStore(ctx, storeURL)
 		if err != nil {
@@ -2784,7 +3299,7 @@ func loadInterfaceNodeReportBundle(ctx context.Context, profileRef string, profi
 		return bundle, sourceStore, cleanup, nil
 	}
 	if sourceStore == nil {
-		return profile.Bundle{}, nil, cleanup, errors.New("--profile or --store-url is required")
+		return profile.Bundle{}, nil, cleanup, errors.New("--profile, --store, --store-url, or an active Store is required")
 	}
 	bundle, err := serveBundle(ctx, sourceStore)
 	if err != nil {
@@ -2966,7 +3481,7 @@ func mergeExpectedConfigIntoExecution(execution map[string]any, expectedJSON str
 	}
 }
 
-func executeInterfaceNodeCaseReport(ctx context.Context, bundle profile.Bundle, node profile.InterfaceNode, cases []profile.APICase, derived []profile.TemplateConfig, sourceStore *sqlite.Store, sourceStoreURL string, baseURL string, outputDir string, timeoutSeconds int) (interfaceNodeCaseReport, error) {
+func executeInterfaceNodeCaseReport(ctx context.Context, bundle profile.Bundle, node profile.InterfaceNode, cases []profile.APICase, derived []profile.TemplateConfig, sourceStore store.Store, sourceStoreURL string, baseURL string, outputDir string, timeoutSeconds int) (interfaceNodeCaseReport, error) {
 	started := time.Now()
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return interfaceNodeCaseReport{}, err
@@ -3156,6 +3671,24 @@ func mapFromReportAny(value any) map[string]any {
 	return typed
 }
 
+func listFromReportAny(value any) []any {
+	switch typed := value.(type) {
+	case []any:
+		if typed == nil {
+			return []any{}
+		}
+		return typed
+	case []map[string]any:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, item)
+		}
+		return out
+	default:
+		return []any{}
+	}
+}
+
 func rawJSONObject(value string) map[string]any {
 	out := map[string]any{}
 	if strings.TrimSpace(value) == "" {
@@ -3292,10 +3825,184 @@ func runWorkflow(args []string) error {
 		return runWorkflowPlan(args[1:])
 	case "audit":
 		return runWorkflowAudit(context.Background(), args[1:])
+	case "runs":
+		return runWorkflowRuns(context.Background(), args[1:])
+	case "run":
+		return runWorkflowRun(context.Background(), args[1:])
+	case "step":
+		return runWorkflowStep(context.Background(), args[1:])
+	case "latest-step":
+		return runWorkflowLatestStep(context.Background(), args[1:])
 	case "report":
 		return runWorkflowReport(context.Background(), args[1:])
 	default:
 		return fmt.Errorf("unknown workflow command: %s", args[0])
+	}
+}
+
+func runWorkflowStep(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("workflow step", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	runID := flags.String("run", "", "Workflow run id")
+	stepID := flags.String("step", "", "Workflow step id")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*runID) == "" || strings.TrimSpace(*stepID) == "" {
+		return errors.New("--run and --step are required")
+	}
+	runtime, err := openStore(ctx, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer runtime.Close()
+	payload, ok, err := controlplane.WorkflowStepRunPayload(ctx, runtime, *runID, *stepID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("workflow run step not found: %s %s", strings.TrimSpace(*runID), strings.TrimSpace(*stepID))
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(payload)
+	}
+	printWorkflowStep(payload)
+	return nil
+}
+
+func runWorkflowLatestStep(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("workflow latest-step", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	workflowID := flags.String("workflow", "", "Workflow id")
+	stepID := flags.String("step", "", "Workflow step id")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*workflowID) == "" || strings.TrimSpace(*stepID) == "" {
+		return errors.New("--workflow and --step are required")
+	}
+	runtime, err := openStore(ctx, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer runtime.Close()
+	payload, ok, err := controlplane.LatestWorkflowStepRunPayload(ctx, runtime, *workflowID, *stepID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("workflow run step not found: %s %s", strings.TrimSpace(*workflowID), strings.TrimSpace(*stepID))
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(payload)
+	}
+	printWorkflowStep(payload)
+	return nil
+}
+
+func printWorkflowStep(payload map[string]any) {
+	run := mapFromReportAny(payload["run"])
+	summary := mapFromReportAny(payload["summary"])
+	fmt.Println("Workflow Step")
+	fmt.Printf("Run: %s\n", valueString(run["id"]))
+	fmt.Printf("Workflow: %s\n", valueString(run["workflowId"]))
+	steps, _ := summary["steps"].([]any)
+	if len(steps) > 0 {
+		step := mapFromReportAny(steps[0])
+		fmt.Printf("Step: %s\n", valueString(step["stepId"]))
+		fmt.Printf("Case: %s\n", valueString(step["caseId"]))
+		fmt.Printf("Status: %s\n", valueString(step["status"]))
+	}
+}
+
+func runWorkflowRuns(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("workflow runs", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	runtime, err := openStore(ctx, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer runtime.Close()
+	payload, err := controlplane.WorkflowRunsPayload(ctx, runtime)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(payload)
+	}
+	printWorkflowRuns(payload)
+	return nil
+}
+
+func runWorkflowRun(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("workflow run", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	runID := flags.String("run", "", "Workflow run id")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*runID) == "" {
+		return errors.New("--run is required")
+	}
+	runtime, err := openStore(ctx, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer runtime.Close()
+	payload, ok, err := controlplane.WorkflowRunPayload(ctx, runtime, *runID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("workflow run not found: %s", strings.TrimSpace(*runID))
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(payload)
+	}
+	printWorkflowRun(payload)
+	return nil
+}
+
+func printWorkflowRuns(payload map[string]any) {
+	items, _ := payload["workflowRuns"].([]map[string]any)
+	if items == nil {
+		if rawItems, ok := payload["workflowRuns"].([]any); ok {
+			for _, raw := range rawItems {
+				if item := mapFromReportAny(raw); len(item) > 0 {
+					items = append(items, item)
+				}
+			}
+		}
+	}
+	fmt.Println("Workflow Runs")
+	fmt.Printf("Total: %d\n", len(items))
+	for _, item := range items {
+		fmt.Printf("- %s [%s] %s steps=%s\n", valueString(item["id"]), valueString(item["status"]), valueString(item["workflowId"]), valueString(item["stepCount"]))
+	}
+}
+
+func printWorkflowRun(payload map[string]any) {
+	run := mapFromReportAny(payload["run"])
+	summary := mapFromReportAny(payload["summary"])
+	fmt.Println("Workflow Run")
+	fmt.Printf("Run: %s\n", valueString(run["id"]))
+	fmt.Printf("Workflow: %s\n", valueString(run["workflowId"]))
+	fmt.Printf("Status: %s\n", valueString(run["status"]))
+	if count := valueString(run["stepCount"]); count != "" {
+		fmt.Printf("Steps: %s\n", count)
+	} else if steps, ok := summary["steps"].([]any); ok {
+		fmt.Printf("Steps: %d\n", len(steps))
 	}
 }
 
@@ -3318,13 +4025,18 @@ func runWorkflowDiscover(ctx context.Context, args []string) error {
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated SQLite store URL or path")
 	filter := flags.String("filter", "", "Filter by id, display name, or description")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	bundle, _, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	resolvedStoreURL, err := resolveOptionalBundleStoreReference(*profilePath, *storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	bundle, _, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -3445,7 +4157,7 @@ func runWorkflowReport(ctx context.Context, args []string) error {
 	return nil
 }
 
-func executeWorkflowCaseReport(ctx context.Context, bundle profile.Bundle, sourceStore *sqlite.Store, workflowID string, outputDir string, baseURL string) (workflowCaseReport, error) {
+func executeWorkflowCaseReport(ctx context.Context, bundle profile.Bundle, sourceStore store.Store, workflowID string, outputDir string, baseURL string) (workflowCaseReport, error) {
 	started := time.Now()
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return workflowCaseReport{}, err
@@ -3886,30 +4598,43 @@ func printWorkflowAudit(report workflowaudit.Report) {
 func runWorkflowPlan(args []string) error {
 	flags := flag.NewFlagSet("workflow plan", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path")
+	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
 	workflowID := flags.String("workflow", "", "Workflow id")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	bundle, err := profile.Load(*profilePath)
+	bundle, runtime, cleanup, err := loadInterfaceNodeReportBundle(context.Background(), *profilePath, *profileHome, *storeURL)
 	if err != nil {
 		return err
 	}
-	if _, ok := findWorkflow(bundle, *workflowID); !ok {
+	defer cleanup()
+	var planStore store.Store
+	if runtime != nil {
+		planStore = runtime
+	}
+	payload, ok, err := controlplane.WorkflowPlanPayload(context.Background(), bundle, *workflowID, planStore)
+	if err != nil {
+		return err
+	}
+	if !ok {
 		return fmt.Errorf("workflow not found: %s", *workflowID)
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(payload)
 	}
 
 	fmt.Printf("Workflow: %s\n", *workflowID)
-	for _, binding := range bundle.WorkflowBindings {
-		if binding.WorkflowID != *workflowID {
-			continue
+	for _, raw := range listFromReportAny(payload["steps"]) {
+		step := mapFromReportAny(raw)
+		fmt.Printf("Step: %s\n", valueString(step["stepId"]))
+		fmt.Printf("Node: %s\n", valueString(step["nodeId"]))
+		if caseID := valueString(step["caseId"]); caseID != "" {
+			fmt.Printf("Case: %s\n", caseID)
 		}
-		fmt.Printf("Step: %s\n", binding.StepID)
-		fmt.Printf("Node: %s\n", binding.NodeID)
-		if binding.CaseID != "" {
-			fmt.Printf("Case: %s\n", binding.CaseID)
-		}
-		fmt.Printf("Required: %t\n", binding.Required)
+		fmt.Printf("Required: %t\n", boolFromReportAny(step["required"]))
 	}
 	return nil
 }
@@ -3998,12 +4723,8 @@ func runBaselineSet(ctx context.Context, args []string) error {
 	return nil
 }
 
-func openStore(ctx context.Context, storeURL string) (*sqlite.Store, error) {
-	cfg, err := sqlite.ParseConfigFromURL(storeURL)
-	if err != nil {
-		return nil, err
-	}
-	return sqlite.Open(ctx, cfg)
+func openStore(ctx context.Context, storeURL string) (store.Store, error) {
+	return storeopen.Open(ctx, storeURL)
 }
 
 func printBaselineGate(gate store.BaselineGate) {
@@ -4084,7 +4805,7 @@ func runEvidenceList(ctx context.Context, args []string) error {
 	}
 	defer s.Close()
 
-	report, err := evidenceList(ctx, s, *runID)
+	report, err := controlplane.EvidenceList(ctx, s, *runID)
 	if err != nil {
 		return err
 	}
@@ -4097,67 +4818,7 @@ func runEvidenceList(ctx context.Context, args []string) error {
 	return nil
 }
 
-type evidenceListReport struct {
-	Runs []evidenceRunReport `json:"runs"`
-}
-
-type evidenceRunReport struct {
-	ID              string                 `json:"id"`
-	ProfileID       string                 `json:"profileId"`
-	WorkflowID      string                 `json:"workflowId"`
-	Status          string                 `json:"status"`
-	EvidenceRoot    string                 `json:"evidenceRoot"`
-	APICaseRunCount int                    `json:"apiCaseRunCount"`
-	EvidenceCount   int                    `json:"evidenceCount"`
-	APICaseRuns     []store.APICaseRun     `json:"apiCaseRuns"`
-	EvidenceRecords []store.EvidenceRecord `json:"evidenceRecords"`
-}
-
-func evidenceList(ctx context.Context, s store.Store, runID string) (evidenceListReport, error) {
-	runs, err := evidenceListRuns(ctx, s, runID)
-	if err != nil {
-		return evidenceListReport{}, err
-	}
-	report := evidenceListReport{Runs: make([]evidenceRunReport, 0, len(runs))}
-	for _, run := range runs {
-		caseRuns, err := s.ListAPICaseRuns(ctx, run.ID)
-		if err != nil {
-			return evidenceListReport{}, err
-		}
-		records, err := s.ListEvidence(ctx, run.ID)
-		if err != nil {
-			return evidenceListReport{}, err
-		}
-		report.Runs = append(report.Runs, evidenceRunReport{
-			ID:              run.ID,
-			ProfileID:       run.ProfileID,
-			WorkflowID:      run.WorkflowID,
-			Status:          run.Status,
-			EvidenceRoot:    run.EvidenceRoot,
-			APICaseRunCount: len(caseRuns),
-			EvidenceCount:   len(records),
-			APICaseRuns:     caseRuns,
-			EvidenceRecords: records,
-		})
-	}
-	return report, nil
-}
-
-func evidenceListRuns(ctx context.Context, s store.Store, runID string) ([]store.Run, error) {
-	if strings.TrimSpace(runID) == "" {
-		return s.ListRuns(ctx)
-	}
-	run, err := s.GetRun(ctx, runID)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return nil, fmt.Errorf("run not found: %s", runID)
-		}
-		return nil, err
-	}
-	return []store.Run{run}, nil
-}
-
-func printEvidenceList(report evidenceListReport) {
+func printEvidenceList(report controlplane.EvidenceListReport) {
 	for _, run := range report.Runs {
 		fmt.Printf("Run: %s\n", run.ID)
 		fmt.Printf("Profile: %s\n", run.ProfileID)
@@ -4169,6 +4830,9 @@ func printEvidenceList(report evidenceListReport) {
 		}
 		for _, record := range run.EvidenceRecords {
 			fmt.Printf("Evidence: %s %s\n", record.Kind, record.URI)
+			if record.StepID != "" {
+				fmt.Printf("  Step: %s\n", record.StepID)
+			}
 		}
 	}
 }
@@ -4194,19 +4858,22 @@ type evidenceTaskCounts struct {
 }
 
 type evidenceTaskItem struct {
-	ID          string    `json:"id"`
-	RunID       string    `json:"runId"`
-	WorkflowID  string    `json:"workflowId,omitempty"`
-	StepID      string    `json:"stepId,omitempty"`
-	CaseID      string    `json:"caseId,omitempty"`
-	Kind        string    `json:"kind"`
-	Status      string    `json:"status"`
-	StartedAt   time.Time `json:"startedAt"`
-	FinishedAt  time.Time `json:"finishedAt"`
-	DurationMs  int64     `json:"durationMs"`
-	Error       string    `json:"error,omitempty"`
-	SummaryJSON string    `json:"summaryJson,omitempty"`
-	CreatedAt   time.Time `json:"createdAt"`
+	ID            string    `json:"id"`
+	RunID         string    `json:"runId"`
+	WorkflowID    string    `json:"workflowId,omitempty"`
+	StepID        string    `json:"stepId,omitempty"`
+	CaseID        string    `json:"caseId,omitempty"`
+	Kind          string    `json:"kind"`
+	Status        string    `json:"status"`
+	Outcome       string    `json:"outcome"`
+	Reason        string    `json:"reason"`
+	DisplayStatus string    `json:"displayStatus"`
+	StartedAt     time.Time `json:"startedAt"`
+	FinishedAt    time.Time `json:"finishedAt"`
+	DurationMs    int64     `json:"durationMs"`
+	Error         string    `json:"error,omitempty"`
+	SummaryJSON   string    `json:"summaryJson,omitempty"`
+	CreatedAt     time.Time `json:"createdAt"`
 }
 
 type evidenceTaskFilter struct {
@@ -4287,20 +4954,24 @@ func evidenceTasks(ctx context.Context, s store.Store, filter evidenceTaskFilter
 		if !postProcessTaskMatches(row, filter) {
 			continue
 		}
+		readable := controlplane.PostProcessTaskReadableStatus(row)
 		report.Tasks = append(report.Tasks, evidenceTaskItem{
-			ID:          row.ID,
-			RunID:       row.RunID,
-			WorkflowID:  row.WorkflowID,
-			StepID:      row.StepID,
-			CaseID:      row.CaseID,
-			Kind:        row.Kind,
-			Status:      row.Status,
-			StartedAt:   row.StartedAt,
-			FinishedAt:  row.FinishedAt,
-			DurationMs:  row.DurationMs,
-			Error:       row.Error,
-			SummaryJSON: row.SummaryJSON,
-			CreatedAt:   row.CreatedAt,
+			ID:            row.ID,
+			RunID:         row.RunID,
+			WorkflowID:    row.WorkflowID,
+			StepID:        row.StepID,
+			CaseID:        row.CaseID,
+			Kind:          row.Kind,
+			Status:        row.Status,
+			Outcome:       readable.Outcome,
+			Reason:        readable.Reason,
+			DisplayStatus: readable.DisplayStatus,
+			StartedAt:     row.StartedAt,
+			FinishedAt:    row.FinishedAt,
+			DurationMs:    row.DurationMs,
+			Error:         row.Error,
+			SummaryJSON:   row.SummaryJSON,
+			CreatedAt:     row.CreatedAt,
 		})
 		report.Counts.Total++
 		report.Counts.DurationMs += row.DurationMs
@@ -4338,12 +5009,15 @@ func printEvidenceTasks(report evidenceTaskReport) {
 	fmt.Printf("Post Process Tasks: %s\n", report.RunID)
 	fmt.Printf("Total: %d Passed: %d Failed: %d Running: %d Skipped: %d Duration: %d ms\n", report.Counts.Total, report.Counts.Passed, report.Counts.Failed, report.Counts.Running, report.Counts.Skipped, report.Counts.DurationMs)
 	for _, task := range report.Tasks {
-		fmt.Printf("- %s %s [%s] %d ms\n", task.ID, task.Kind, task.Status, task.DurationMs)
+		fmt.Printf("- %s %s [%s] %d ms\n", task.ID, task.Kind, task.DisplayStatus, task.DurationMs)
 		if task.StepID != "" {
 			fmt.Printf("  Step: %s\n", task.StepID)
 		}
 		if task.CaseID != "" {
 			fmt.Printf("  Case: %s\n", task.CaseID)
+		}
+		if task.Reason != "" {
+			fmt.Printf("  Reason: %s\n", task.Reason)
 		}
 		if task.Error != "" {
 			fmt.Printf("  Error: %s\n", task.Error)
@@ -4413,6 +5087,12 @@ func runCase(ctx context.Context, args []string) error {
 		return runCaseSuite(ctx, args[1:])
 	case "run":
 		return runCaseRun(ctx, args[1:])
+	case "runs":
+		return runCaseRuns(ctx, args[1:])
+	case "evidence":
+		return runCaseEvidence(ctx, args[1:])
+	case "timing":
+		return runCaseTiming(ctx, args[1:])
 	case "incomplete-batches":
 		return runCaseIncompleteBatches(ctx, args[1:])
 	default:
@@ -4488,12 +5168,234 @@ type caseListItem struct {
 	HasExecutionConfig   bool     `json:"hasExecutionConfig"`
 }
 
+func runCaseTiming(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("case timing", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	kind := flags.String("kind", "", "Timing kind")
+	maxAgeMinutes := flags.String("max-age-minutes", "", "Only include case runs created within this many minutes")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	runtime, err := openStore(ctx, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer runtime.Close()
+	payload, err := controlplane.CaseTimingPayload(ctx, runtime, *kind, *maxAgeMinutes)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(payload)
+	}
+	printCaseTiming(payload)
+	return nil
+}
+
+func printCaseTiming(payload map[string]any) {
+	summary := mapFromReportAny(payload["summary"])
+	fmt.Println("Case Timing")
+	fmt.Printf("Case Runs: %s\n", valueString(summary["caseRunCount"]))
+	fmt.Printf("Measured: %s\n", valueString(summary["durationMeasuredCount"]))
+	fmt.Printf("Max Duration: %s ms\n", valueString(summary["maxDurationMs"]))
+	if slowest := mapFromReportAny(summary["slowestRows"]); len(slowest) > 0 {
+		if row := mapFromReportAny(slowest["caseRun"]); len(row) > 0 {
+			fmt.Printf("Slowest: %s %s ms\n", valueString(row["id"]), valueString(row["durationMs"]))
+		}
+	}
+}
+
+func runCaseEvidence(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("case evidence", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	caseRunID := flags.String("case-run", "", "Case run id")
+	runID := flags.String("run", "", "Run id")
+	caseID := flags.String("case-id", "", "Case id within the run")
+	stepID := flags.String("step-id", "", "Workflow step id within the run")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	payload, err := readCaseEvidence(ctx, *storeURL, *caseRunID, *runID, *caseID, *stepID)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(payload)
+	}
+	printCaseEvidence(payload)
+	return nil
+}
+
+func readCaseEvidence(ctx context.Context, storeURL string, caseRunID string, runID string, caseID string, stepID string) (map[string]any, error) {
+	runtime, err := openStore(ctx, storeURL)
+	if err != nil {
+		return nil, err
+	}
+	defer runtime.Close()
+	var payload map[string]any
+	var ok bool
+	if strings.TrimSpace(caseRunID) != "" {
+		payload, ok, err = controlplane.CaseEvidencePayloadForCaseRunID(ctx, runtime, caseRunID)
+	} else if strings.TrimSpace(runID) != "" {
+		payload, ok, err = controlplane.CaseEvidencePayloadForRunID(ctx, runtime, runID, caseID, stepID)
+	} else {
+		return nil, errors.New("--case-run or --run is required")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("case evidence not found")
+	}
+	return payload, nil
+}
+
+func printCaseEvidence(payload map[string]any) {
+	evidence := mapFromReportAny(payload["evidence"])
+	summary := mapFromReportAny(evidence["summary"])
+	fmt.Println("Case Evidence")
+	fmt.Printf("Case Run: %s\n", valueString(summary["case_run_id"]))
+	fmt.Printf("Case: %s\n", valueString(summary["case_id"]))
+	fmt.Printf("Run: %s\n", valueString(summary["run_id"]))
+	fmt.Printf("Status: %s\n", valueString(summary["status"]))
+	fmt.Printf("Operation: %s\n", valueString(summary["operation"]))
+	if evidencePath := valueString(summary["evidence_path"]); evidencePath != "" {
+		fmt.Printf("Evidence: %s\n", evidencePath)
+	}
+}
+
+type caseRunsCLIReport struct {
+	OK       bool              `json:"ok"`
+	CaseRuns []caseRunsCLIItem `json:"caseRuns"`
+	Warnings []string          `json:"warnings"`
+}
+
+type caseRunsCLIItem struct {
+	ID            string    `json:"id"`
+	RunID         string    `json:"runId"`
+	CaseID        string    `json:"caseId"`
+	Status        string    `json:"status"`
+	Operation     string    `json:"operation"`
+	EvidencePath  string    `json:"evidencePath"`
+	EvidenceCount int       `json:"evidenceCount"`
+	UpdatedAt     time.Time `json:"updatedAt"`
+}
+
+func runCaseRuns(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("case runs", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	runFilter := flags.String("run", "", "Only list case runs for one run id")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	report, err := listCaseRunsFromStore(ctx, *storeURL, *runFilter)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printCaseRuns(report)
+	return nil
+}
+
+func listCaseRunsFromStore(ctx context.Context, storeURL string, runFilter string) (caseRunsCLIReport, error) {
+	runtime, err := openStore(ctx, storeURL)
+	if err != nil {
+		return caseRunsCLIReport{}, err
+	}
+	defer runtime.Close()
+	runs, err := runtime.ListRuns(ctx)
+	if err != nil {
+		return caseRunsCLIReport{}, err
+	}
+	filter := strings.TrimSpace(runFilter)
+	report := caseRunsCLIReport{OK: true, Warnings: []string{}}
+	for i := len(runs) - 1; i >= 0; i-- {
+		run := runs[i]
+		if filter != "" && run.ID != filter {
+			continue
+		}
+		caseRuns, err := runtime.ListAPICaseRuns(ctx, run.ID)
+		if err != nil {
+			return caseRunsCLIReport{}, err
+		}
+		evidence, err := runtime.ListEvidence(ctx, run.ID)
+		if err != nil {
+			return caseRunsCLIReport{}, err
+		}
+		for j := len(caseRuns) - 1; j >= 0; j-- {
+			report.CaseRuns = append(report.CaseRuns, caseRunsCLIItemFrom(run, caseRuns[j], evidence))
+		}
+	}
+	return report, nil
+}
+
+func caseRunsCLIItemFrom(run store.Run, item store.APICaseRun, evidence []store.EvidenceRecord) caseRunsCLIItem {
+	evidenceCount := 0
+	for _, record := range evidence {
+		if record.CaseRunID == item.ID {
+			evidenceCount++
+		}
+	}
+	request := rawJSONObject(item.RequestSummaryJSON)
+	return caseRunsCLIItem{
+		ID:            item.ID,
+		RunID:         item.RunID,
+		CaseID:        item.CaseID,
+		Status:        item.Status,
+		Operation:     caseRunOperationFromRequest(request, item.CaseID),
+		EvidencePath:  run.EvidenceRoot,
+		EvidenceCount: evidenceCount,
+		UpdatedAt:     firstNonZeroTime(item.CreatedAt, run.UpdatedAt, run.CreatedAt),
+	}
+}
+
+func caseRunOperationFromRequest(request map[string]any, fallback string) string {
+	method := strings.ToUpper(strings.TrimSpace(valueString(request["method"])))
+	path := strings.TrimSpace(valueString(request["path"]))
+	if method != "" && path != "" {
+		return method + " " + path
+	}
+	if method != "" {
+		return method
+	}
+	if path != "" {
+		return path
+	}
+	return fallback
+}
+
+func firstNonZeroTime(values ...time.Time) time.Time {
+	for _, value := range values {
+		if !value.IsZero() {
+			return value
+		}
+	}
+	return time.Time{}
+}
+
+func printCaseRuns(report caseRunsCLIReport) {
+	fmt.Println("Case Runs")
+	fmt.Printf("Total: %d\n", len(report.CaseRuns))
+	for _, item := range report.CaseRuns {
+		fmt.Printf("- %s [%s] %s %s evidence=%d\n", item.ID, item.Status, item.CaseID, item.Operation, item.EvidenceCount)
+	}
+}
+
 func runCaseDiscover(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("case discover", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated SQLite store URL or path")
 	filter := flags.String("filter", "", "Filter by id, display name, scenario, description, tag, owner, or priority")
 	nodeID := flags.String("node", "", "Only include cases attached to this interface node id")
 	status := flags.String("status", "", "Only include cases with this status")
@@ -4505,7 +5407,11 @@ func runCaseDiscover(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	resolvedStoreURL, err := resolveOptionalBundleStoreReference(*profilePath, *storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -5064,7 +5970,7 @@ func runCaseSuiteQualityReport(ctx context.Context, args []string) error {
 	return nil
 }
 
-func executeCaseSuiteQualityReport(ctx context.Context, bundle profile.Bundle, sourceStore *sqlite.Store, sourceStoreURL string, filters caseListFilter, cases []profile.APICase, outputDir string) (caseSuiteQualityReport, error) {
+func executeCaseSuiteQualityReport(ctx context.Context, bundle profile.Bundle, sourceStore store.Store, sourceStoreURL string, filters caseListFilter, cases []profile.APICase, outputDir string) (caseSuiteQualityReport, error) {
 	started := time.Now()
 	plan, err := casesuite.QualityPlan(ctx, bundle, sourceStore, caseSuiteFilter(filters), cases)
 	if err != nil {
@@ -5629,7 +6535,7 @@ func deriveCaseSuiteConfigs(bundle profile.Bundle, cases []profile.APICase) []pr
 	return out
 }
 
-func executeCaseSuiteReport(ctx context.Context, bundle profile.Bundle, cases []profile.APICase, derived []profile.TemplateConfig, sourceStore *sqlite.Store, sourceStoreURL string, filters caseListFilter, baseURL string, outputDir string, timeoutSeconds int) (caseSuiteReport, error) {
+func executeCaseSuiteReport(ctx context.Context, bundle profile.Bundle, cases []profile.APICase, derived []profile.TemplateConfig, sourceStore store.Store, sourceStoreURL string, filters caseListFilter, baseURL string, outputDir string, timeoutSeconds int) (caseSuiteReport, error) {
 	started := time.Now()
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return caseSuiteReport{}, err
@@ -6435,6 +7341,7 @@ type serveConfig struct {
 	profileHome     string
 	host            string
 	port            int
+	storeRef        string
 	storeURL        string
 	traceGraphQLURL string
 }
@@ -6454,21 +7361,25 @@ func serveConfigFromArgs(args []string) (serveConfig, error) {
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
 	host := flags.String("host", "127.0.0.1", "HTTP host")
 	port := flags.Int("port", 18191, "HTTP port")
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated SQLite store URL or path")
 	traceGraphQLURL := flags.String("trace-graphql-url", os.Getenv("OTS_TRACE_GRAPHQL_URL"), "Trace provider GraphQL URL")
 	if err := flags.Parse(args); err != nil {
 		return serveConfig{}, err
 	}
-	return serveConfig{profilePath: *profilePath, profileHome: *profileHome, host: *host, port: *port, storeURL: *storeURL, traceGraphQLURL: *traceGraphQLURL}, nil
+	return serveConfig{profilePath: *profilePath, profileHome: *profileHome, host: *host, port: *port, storeRef: *storeRef, storeURL: *storeURL, traceGraphQLURL: *traceGraphQLURL}, nil
 }
 
 func serveHandler(cfg serveConfig) (http.Handler, func() error, error) {
-	storeCfg, err := sqlite.ParseConfigFromURL(cfg.storeURL)
+	resolvedStoreURL, err := resolveStoreReference(cfg.storeRef, cfg.storeURL)
 	if err != nil {
 		return nil, nil, err
 	}
-	storeCfg = storeCfg.Resolve()
-	runtime, err := sqlite.Open(context.Background(), storeCfg)
+	storeLabel := resolvedStoreURL
+	if strings.TrimSpace(storeLabel) == "" {
+		storeLabel = "active/default"
+	}
+	runtime, err := storeopen.Open(context.Background(), resolvedStoreURL)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -6479,7 +7390,7 @@ func serveHandler(cfg serveConfig) (http.Handler, func() error, error) {
 			_ = runtime.Close()
 			return nil, nil, err
 		}
-		if _, err := publishProfileBundleToStore(ctx, runtime, profilePath, storeCfg.Path, false, false); err != nil {
+		if _, err := publishProfileBundleToStore(ctx, runtime, profilePath, storeLabel, false, false); err != nil {
 			_ = runtime.Close()
 			return nil, nil, err
 		}

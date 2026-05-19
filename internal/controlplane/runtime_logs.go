@@ -25,7 +25,9 @@ func enrichWorkflowStepLogs(ctx context.Context, runtime store.Store, run store.
 		return
 	}
 	stepID := strings.TrimSpace(valueString(step["stepId"]))
-	if cached, ok := cachedWorkflowStepRuntimeLogs(ctx, runtime, run.ID, stepID); ok {
+	cacheCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	if cached, ok := cachedWorkflowStepRuntimeLogs(cacheCtx, runtime, run.ID, stepID); ok {
 		trace["systems"] = cached
 		step["trace"] = trace
 		return

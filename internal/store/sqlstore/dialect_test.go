@@ -1,0 +1,87 @@
+package sqlstore_test
+
+import (
+	"testing"
+
+	"open-test-sandbox/internal/store/sqlstore"
+)
+
+func TestDialectRegistryRecognizesOpenSourceDatabaseFamilies(t *testing.T) {
+	tests := []struct {
+		name       string
+		reference  string
+		wantName   string
+		wantDriver string
+	}{
+		{name: "postgres", reference: "postgres://user:pass@localhost:5432/otsandbox", wantName: "postgres", wantDriver: "pgx"},
+		{name: "postgresql", reference: "postgresql://user:pass@localhost:5432/otsandbox", wantName: "postgres", wantDriver: "pgx"},
+		{name: "mysql", reference: "mysql://user:pass@localhost:3306/otsandbox", wantName: "mysql", wantDriver: "mysql"},
+		{name: "sqlite", reference: "sqlite:///tmp/otsandbox.sqlite", wantName: "sqlite", wantDriver: "sqlite"},
+		{name: "file", reference: "file:/tmp/otsandbox.sqlite", wantName: "sqlite", wantDriver: "sqlite"},
+		{name: "path", reference: "/tmp/otsandbox.sqlite", wantName: "sqlite", wantDriver: "sqlite"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dialect, err := sqlstore.DialectFromReference(tt.reference)
+			if err != nil {
+				t.Fatalf("dialect from reference: %v", err)
+			}
+			if dialect.Name() != tt.wantName || dialect.DriverName() != tt.wantDriver {
+				t.Fatalf("dialect = %s/%s want %s/%s", dialect.Name(), dialect.DriverName(), tt.wantName, tt.wantDriver)
+			}
+		})
+	}
+}
+
+func TestDialectCapturesSQLDifferences(t *testing.T) {
+	tests := []struct {
+		name        string
+		dialect     sqlstore.Dialect
+		wantBind3   string
+		wantJSON    string
+		wantTime    string
+		wantUpsert  string
+		wantQuoteID string
+	}{
+		{name: "postgres", dialect: sqlstore.PostgresDialect{}, wantBind3: "$3", wantJSON: "jsonb", wantTime: "timestamptz", wantUpsert: "on conflict(id) do update set name = excluded.name", wantQuoteID: `"runs"`},
+		{name: "mysql", dialect: sqlstore.MySQLDialect{}, wantBind3: "?", wantJSON: "json", wantTime: "datetime(6)", wantUpsert: "on duplicate key update name = values(name)", wantQuoteID: "`runs`"},
+		{name: "sqlite", dialect: sqlstore.SQLiteDialect{}, wantBind3: "?", wantJSON: "text", wantTime: "text", wantUpsert: "on conflict(id) do update set name = excluded.name", wantQuoteID: `"runs"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.dialect.BindVar(3); got != tt.wantBind3 {
+				t.Fatalf("bind var = %q want %q", got, tt.wantBind3)
+			}
+			if got := tt.dialect.JSONType(); got != tt.wantJSON {
+				t.Fatalf("json type = %q want %q", got, tt.wantJSON)
+			}
+			if got := tt.dialect.TimeType(); got != tt.wantTime {
+				t.Fatalf("time type = %q want %q", got, tt.wantTime)
+			}
+			if got := tt.dialect.UpsertClause("id", []string{"name"}); got != tt.wantUpsert {
+				t.Fatalf("upsert = %q want %q", got, tt.wantUpsert)
+			}
+			if got := tt.dialect.QuoteIdent("runs"); got != tt.wantQuoteID {
+				t.Fatalf("quote ident = %q want %q", got, tt.wantQuoteID)
+			}
+		})
+	}
+}
+
+func TestConfigFromReferenceCarriesDialectAndDSN(t *testing.T) {
+	cfg, err := sqlstore.ConfigFromReference("postgres://user:pass@localhost:5432/otsandbox?sslmode=disable")
+	if err != nil {
+		t.Fatalf("config from reference: %v", err)
+	}
+	if cfg.Backend != "postgres" || cfg.DriverName != "pgx" || cfg.DSN != "postgres://user:pass@localhost:5432/otsandbox?sslmode=disable" {
+		t.Fatalf("postgres config = %#v", cfg)
+	}
+
+	sqliteCfg, err := sqlstore.ConfigFromReference("/tmp/otsandbox.sqlite")
+	if err != nil {
+		t.Fatalf("sqlite config from path: %v", err)
+	}
+	if sqliteCfg.Backend != "sqlite" || sqliteCfg.DriverName != "sqlite" || sqliteCfg.DSN != "/tmp/otsandbox.sqlite" {
+		t.Fatalf("sqlite path config = %#v", sqliteCfg)
+	}
+}

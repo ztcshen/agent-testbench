@@ -17,6 +17,15 @@ import (
 )
 
 func handleRuns(w http.ResponseWriter, r *http.Request, runtime store.Store) {
+	payload, err := WorkflowRunsPayload(r.Context(), runtime)
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, payload)
+}
+
+func WorkflowRunsPayload(ctx context.Context, runtime store.Store) (map[string]any, error) {
 	payload := runsPayload{
 		OK:           true,
 		WorkflowRuns: []map[string]any{},
@@ -24,18 +33,16 @@ func handleRuns(w http.ResponseWriter, r *http.Request, runtime store.Store) {
 		ProbeRuns:    []map[string]any{},
 	}
 	if runtime == nil {
-		writeJSON(w, payload)
-		return
+		return map[string]any{"ok": payload.OK, "workflowRuns": payload.WorkflowRuns, "replayRuns": payload.ReplayRuns, "probeRuns": payload.ProbeRuns}, nil
 	}
-	runs, err := catalogRunHeaders(r.Context(), runtime)
+	runs, err := catalogRunHeaders(ctx, runtime)
 	if err != nil {
-		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
-		return
+		return nil, err
 	}
 	for i := len(runs) - 1; i >= 0; i-- {
 		payload.WorkflowRuns = append(payload.WorkflowRuns, workflowRunListItem(runs[i]))
 	}
-	writeJSON(w, payload)
+	return map[string]any{"ok": payload.OK, "workflowRuns": payload.WorkflowRuns, "replayRuns": payload.ReplayRuns, "probeRuns": payload.ProbeRuns}, nil
 }
 
 func handleWorkflowRun(w http.ResponseWriter, r *http.Request, runtime store.Store) {
@@ -57,7 +64,27 @@ func handleWorkflowRun(w http.ResponseWriter, r *http.Request, runtime store.Sto
 		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	writeWorkflowRunPayload(w, r.Context(), runtime, run)
+	payload, err := WorkflowRunPayloadForRun(r.Context(), runtime, run)
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, payload)
+}
+
+func WorkflowRunPayload(ctx context.Context, runtime store.Store, id string) (map[string]any, bool, error) {
+	run, err := runtime.GetRun(ctx, strings.TrimSpace(id))
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	payload, err := WorkflowRunPayloadForRun(ctx, runtime, run)
+	if err != nil {
+		return nil, false, err
+	}
+	return payload, true, nil
 }
 
 func handleWorkflowStepRun(w http.ResponseWriter, r *http.Request, runtime store.Store) {
@@ -452,46 +479,122 @@ func workflowStepAssertionSummary(step map[string]any, status string) map[string
 }
 
 func writeWorkflowRunPayload(w http.ResponseWriter, ctx context.Context, runtime store.Store, run store.Run) {
+	payload, err := WorkflowRunPayloadForRun(ctx, runtime, run)
+	if err != nil {
+		if strings.HasPrefix(err.Error(), "invalid workflow summary JSON") {
+			writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, payload)
+}
+
+func WorkflowRunPayloadForRun(ctx context.Context, runtime store.Store, run store.Run) (map[string]any, error) {
 	summary, err := workflowRunSummary(run.SummaryJSON)
 	if err != nil {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
-		return
+		return nil, err
 	}
 	stepTimeouts, workflowTimeoutMs, err := workflowTimeoutConfigFromStore(ctx, runtime, run.WorkflowID)
 	if err != nil {
-		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
-		return
+		return nil, err
 	}
 	applyWorkflowRunTimeouts(summary, stepTimeouts, workflowTimeoutMs)
 	topologies, err := workflowRunTraceTopologies(ctx, runtime, run.ID, "")
 	if err != nil {
-		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
-		return
+		return nil, err
 	}
-	writeJSON(w, map[string]any{
+	return map[string]any{
 		"ok":              true,
 		"run":             workflowRunListItem(run),
 		"summary":         summary,
 		"traceTopologies": topologies,
-	})
+	}, nil
 }
 
 func writeWorkflowStepRunPayload(w http.ResponseWriter, ctx context.Context, runtime store.Store, run store.Run, stepID string) {
+	payload, ok, err := WorkflowStepRunPayloadForRun(ctx, runtime, run, stepID)
+	if err != nil {
+		if strings.HasPrefix(err.Error(), "invalid workflow summary JSON") {
+			writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	if !ok {
+		writeJSONStatus(w, http.StatusNotFound, map[string]any{"ok": false, "error": "workflow run step not found"})
+		return
+	}
+	writeJSON(w, payload)
+}
+
+func WorkflowStepRunPayload(ctx context.Context, runtime store.Store, runID string, stepID string) (map[string]any, bool, error) {
+	run, err := runtime.GetRun(ctx, strings.TrimSpace(runID))
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return WorkflowStepRunPayloadForRun(ctx, runtime, run, stepID)
+}
+
+func LatestWorkflowStepRunPayload(ctx context.Context, runtime store.Store, workflowID string, stepID string) (map[string]any, bool, error) {
+	workflowID = strings.TrimSpace(workflowID)
+	stepID = strings.TrimSpace(stepID)
+	if fast, ok := runtime.(latestWorkflowStepRunStore); ok {
+		run, err := fast.LatestWorkflowStepRun(ctx, workflowID, stepID, true)
+		if errors.Is(err, store.ErrNotFound) {
+			run, err = fast.LatestWorkflowStepRun(ctx, workflowID, stepID, false)
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, false, nil
+		}
+		if err != nil {
+			return nil, false, err
+		}
+		return WorkflowStepRunPayloadForRun(ctx, runtime, run, stepID)
+	}
+	runs, err := runtime.ListRuns(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	var fallback *store.Run
+	for i := len(runs) - 1; i >= 0; i-- {
+		run := runs[i]
+		if run.WorkflowID != workflowID || !workflowRunSummaryContainsStep(run.SummaryJSON, stepID) {
+			continue
+		}
+		if fallback == nil {
+			candidate := run
+			fallback = &candidate
+		}
+		if !workflowRunSummaryStepHasHTTPResult(run.SummaryJSON, stepID) {
+			continue
+		}
+		return WorkflowStepRunPayloadForRun(ctx, runtime, run, stepID)
+	}
+	if fallback != nil {
+		return WorkflowStepRunPayloadForRun(ctx, runtime, *fallback, stepID)
+	}
+	return nil, false, nil
+}
+
+func WorkflowStepRunPayloadForRun(ctx context.Context, runtime store.Store, run store.Run, stepID string) (map[string]any, bool, error) {
 	summary, err := workflowRunSummary(run.SummaryJSON)
 	if err != nil {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
-		return
+		return nil, false, err
 	}
 	stepTimeouts, workflowTimeoutMs, err := workflowTimeoutConfigFromStore(ctx, runtime, run.WorkflowID)
 	if err != nil {
-		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
-		return
+		return nil, false, err
 	}
 	applyWorkflowRunTimeouts(summary, stepTimeouts, workflowTimeoutMs)
 	step, ok := workflowRunStep(summary, stepID)
 	if !ok {
-		writeJSONStatus(w, http.StatusNotFound, map[string]any{"ok": false, "error": "workflow run step not found"})
-		return
+		return nil, false, nil
 	}
 	stepSummary := map[string]any{"steps": []map[string]any{step}}
 	if nested, ok := summary["summary"].(map[string]any); ok {
@@ -503,36 +606,32 @@ func writeWorkflowStepRunPayload(w http.ResponseWriter, ctx context.Context, run
 	}
 	topologies, err := workflowRunTraceTopologies(ctx, runtime, run.ID, stepID)
 	if err != nil {
-		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
-		return
+		return nil, false, err
 	}
 	if len(topologies) == 0 {
 		topologies, err = copyWorkflowStepTraceTopologiesFromSources(ctx, runtime, run.ID, run.WorkflowID, step, time.Now().UTC())
 		if err != nil {
-			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
-			return
+			return nil, false, err
 		}
 	}
 	enrichWorkflowStepLogs(ctx, runtime, run, step, topologies)
 	tasks, err := workflowRunPostProcessTasks(ctx, runtime, run.ID, stepID)
 	if err != nil {
-		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
-		return
+		return nil, false, err
 	}
 	if len(tasks) == 0 {
 		tasks, err = copyWorkflowStepPostProcessTasksFromSources(ctx, runtime, run.ID, run.WorkflowID, step, time.Now().UTC())
 		if err != nil {
-			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
-			return
+			return nil, false, err
 		}
 	}
-	writeJSON(w, map[string]any{
+	return map[string]any{
 		"ok":               true,
 		"run":              workflowRunStepItem(run),
 		"summary":          stepSummary,
 		"traceTopologies":  topologies,
 		"postProcessTasks": tasks,
-	})
+	}, true, nil
 }
 
 func applyWorkflowRunTimeouts(summary map[string]any, stepTimeouts map[string]int, workflowTimeoutMs int) {

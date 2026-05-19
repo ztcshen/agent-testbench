@@ -1,6 +1,7 @@
 package controlplane
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,29 +11,34 @@ import (
 )
 
 func handleCaseTiming(w http.ResponseWriter, r *http.Request, runtime store.Store) {
-	if runtime == nil {
-		writeJSON(w, emptyCaseTimingPayload())
-		return
-	}
-	kind := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("kind")))
-	if kind == "" {
-		kind = "all"
-	}
-	if kind == "candidate" {
-		writeJSON(w, emptyCaseTimingPayload())
-		return
-	}
-	maxAge := maxAgeDuration(r.URL.Query().Get("maxAgeMinutes"))
-	rows, err := caseTimingRows(r, runtime, maxAge)
+	payload, err := CaseTimingPayload(r.Context(), runtime, r.URL.Query().Get("kind"), r.URL.Query().Get("maxAgeMinutes"))
 	if err != nil {
 		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	writeJSON(w, caseTimingPayload(rows))
+	writeJSON(w, payload)
 }
 
-func caseTimingRows(r *http.Request, runtime store.Store, maxAge time.Duration) ([]map[string]any, error) {
-	runs, err := runtime.ListRuns(r.Context())
+func CaseTimingPayload(ctx context.Context, runtime store.Store, kindValue string, maxAgeMinutes string) (map[string]any, error) {
+	if runtime == nil {
+		return emptyCaseTimingPayload(), nil
+	}
+	kind := strings.ToLower(strings.TrimSpace(kindValue))
+	if kind == "" {
+		kind = "all"
+	}
+	if kind == "candidate" {
+		return emptyCaseTimingPayload(), nil
+	}
+	rows, err := caseTimingRows(ctx, runtime, maxAgeDuration(maxAgeMinutes))
+	if err != nil {
+		return nil, err
+	}
+	return caseTimingPayload(rows), nil
+}
+
+func caseTimingRows(ctx context.Context, runtime store.Store, maxAge time.Duration) ([]map[string]any, error) {
+	runs, err := runtime.ListRuns(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +48,7 @@ func caseTimingRows(r *http.Request, runtime store.Store, maxAge time.Duration) 
 	}
 	rows := make([]map[string]any, 0)
 	for _, run := range runs {
-		caseRuns, err := runtime.ListAPICaseRuns(r.Context(), run.ID)
+		caseRuns, err := runtime.ListAPICaseRuns(ctx, run.ID)
 		if err != nil {
 			return nil, err
 		}

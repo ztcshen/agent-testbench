@@ -30,25 +30,519 @@ func TestServerExposesProfileAPI(t *testing.T) {
 	server := httptest.NewServer(controlplane.New(bundle))
 	defer server.Close()
 
-	resp, err := http.Get(server.URL + "/api/profile")
+	resp, err := http.Get(server.URL + "/api/template-packages/current")
 	if err != nil {
-		t.Fatalf("get profile api: %v", err)
+		t.Fatalf("get template package current api: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("profile api status = %d", resp.StatusCode)
+		t.Fatalf("template package current api status = %d", resp.StatusCode)
 	}
 
 	var payload struct {
-		ID          string         `json:"id"`
-		DisplayName string         `json:"displayName"`
-		Counts      profile.Counts `json:"counts"`
+		TemplatePackageID string         `json:"templatePackageId"`
+		ID                string         `json:"id"`
+		DisplayName       string         `json:"displayName"`
+		Counts            profile.Counts `json:"counts"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode profile api: %v", err)
+		t.Fatalf("decode template package current api: %v", err)
 	}
-	if payload.ID != "empty" || payload.DisplayName != "Empty Profile" || payload.Counts.Workflows != 0 {
-		t.Fatalf("profile api payload = %#v", payload)
+	if payload.TemplatePackageID != "empty" || payload.ID != "empty" || payload.DisplayName != "Empty Profile" || payload.Counts.Workflows != 0 {
+		t.Fatalf("template package current api payload = %#v", payload)
+	}
+}
+
+func TestServerExposesExecutorPlanAPI(t *testing.T) {
+	server := httptest.NewServer(controlplane.New(profile.Bundle{
+		ID: "sample",
+		Executors: []profile.ExecutorDescriptor{
+			{ID: "executor.command", DisplayName: "No-op command", Kind: "custom-command", Command: "true", Status: "active"},
+			{ID: "executor.pytest", DisplayName: "Pytest suite", Kind: "pytest", Status: "active"},
+		},
+	}))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/executor/plan", http.StatusOK)
+	if payload["ok"] != false || payload["profileId"] != "sample" {
+		t.Fatalf("executor plan payload = %#v", payload)
+	}
+	counts := payload["counts"].(map[string]any)
+	if counts["total"] != float64(2) || counts["ready"] != float64(1) || counts["blocked"] != float64(1) {
+		t.Fatalf("executor plan counts = %#v", counts)
+	}
+	items := payload["items"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("executor plan items = %#v", items)
+	}
+	first := items[0].(map[string]any)
+	second := items[1].(map[string]any)
+	if first["id"] != "executor.command" || first["ready"] != true || first["runMode"] != "dry-run" {
+		t.Fatalf("ready executor item = %#v", first)
+	}
+	issues := second["issues"].([]any)
+	if second["id"] != "executor.pytest" || second["ready"] != false || len(issues) != 1 || issues[0] != "missing-source-path" {
+		t.Fatalf("blocked executor item = %#v", second)
+	}
+}
+
+func TestServerExposesOpenAPIImportPlanAPI(t *testing.T) {
+	specPath := filepath.Join(t.TempDir(), "catalog-openapi.json")
+	if err := os.WriteFile(specPath, []byte(`{
+  "openapi": "3.0.3",
+  "info": {"title": "Catalog API"},
+  "paths": {
+    "/items": {
+      "get": {
+        "operationId": "listItems",
+        "summary": "List items",
+        "tags": ["catalog"],
+        "responses": {"200": {"description": "OK"}}
+      },
+      "post": {
+        "operationId": "createItem",
+        "summary": "Create item",
+        "tags": ["catalog", "write"],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {"id": "item-001", "name": "Example Item"}
+            }
+          }
+        },
+        "responses": {"201": {"description": "Created"}}
+      }
+    }
+  }
+}`), 0o644); err != nil {
+		t.Fatalf("write openapi spec: %v", err)
+	}
+	server := httptest.NewServer(controlplane.New(profile.Bundle{ID: "sample"}))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/template-packages/import-plan/openapi", "application/json", strings.NewReader(fmt.Sprintf(`{"sourcePath":%q,"serviceId":"service.catalog","evidenceDir":".runtime/openapi"}`, specPath)))
+	if err != nil {
+		t.Fatalf("post import plan: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read import plan: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("import plan status = %d body=%s", resp.StatusCode, raw)
+	}
+	var payload struct {
+		OK         bool   `json:"ok"`
+		Kind       string `json:"kind"`
+		SourcePath string `json:"sourcePath"`
+		Plan       struct {
+			Service struct {
+				ID     string `json:"id"`
+				Status string `json:"status"`
+			} `json:"service"`
+			InterfaceNodes []struct {
+				ID     string `json:"id"`
+				Method string `json:"method"`
+				Path   string `json:"path"`
+				Status string `json:"status"`
+			} `json:"interfaceNodes"`
+			APICases []struct {
+				ID          string   `json:"id"`
+				CasePath    string   `json:"casePath"`
+				EvidenceDir string   `json:"evidenceDir"`
+				Tags        []string `json:"tags"`
+				Status      string   `json:"status"`
+			} `json:"apiCases"`
+			CaseFiles []struct {
+				Path string          `json:"path"`
+				Body json.RawMessage `json:"body"`
+			} `json:"caseFiles"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode import plan: %v body=%s", err, raw)
+	}
+	if !payload.OK || payload.Kind != "openapi" || payload.SourcePath != specPath || payload.Plan.Service.ID != "service.catalog" || payload.Plan.Service.Status != "draft" {
+		t.Fatalf("import plan summary = %#v", payload)
+	}
+	if len(payload.Plan.InterfaceNodes) != 2 || len(payload.Plan.APICases) != 2 || len(payload.Plan.CaseFiles) != 2 {
+		t.Fatalf("import plan counts = nodes:%d cases:%d files:%d", len(payload.Plan.InterfaceNodes), len(payload.Plan.APICases), len(payload.Plan.CaseFiles))
+	}
+	if payload.Plan.InterfaceNodes[0].ID != "node.service.catalog.list-items" || payload.Plan.InterfaceNodes[0].Method != "GET" || payload.Plan.InterfaceNodes[0].Path != "/items" || payload.Plan.InterfaceNodes[0].Status != "draft" {
+		t.Fatalf("first node = %#v", payload.Plan.InterfaceNodes[0])
+	}
+	if payload.Plan.APICases[1].ID != "case.service.catalog.create-item" || payload.Plan.APICases[1].CasePath != "api-cases/case.service.catalog.create-item.json" || payload.Plan.APICases[1].EvidenceDir != ".runtime/openapi" || strings.Join(payload.Plan.APICases[1].Tags, ",") != "openapi,catalog,write" {
+		t.Fatalf("second case = %#v", payload.Plan.APICases[1])
+	}
+}
+
+func TestServerExposesHTTPCaptureImportPlanAPI(t *testing.T) {
+	capturePath := filepath.Join(t.TempDir(), "traffic.json")
+	if err := os.WriteFile(capturePath, []byte(`{
+  "name": "Catalog Traffic",
+  "captures": [
+    {
+      "id": "createItem",
+      "name": "Create item from traffic",
+      "request": {
+        "method": "POST",
+        "path": "/items",
+        "headers": {"Content-Type": "application/json"},
+        "body": {"id": "item-001", "name": "Example"}
+      },
+      "response": {"status": 201, "body": {"id": "item-001"}}
+    }
+  ]
+}`), 0o644); err != nil {
+		t.Fatalf("write capture: %v", err)
+	}
+	server := httptest.NewServer(controlplane.New(profile.Bundle{ID: "sample"}))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/template-packages/import-plan/http-capture", "application/json", strings.NewReader(fmt.Sprintf(`{"sourcePath":%q,"serviceId":"service.catalog","evidenceDir":".runtime/replay"}`, capturePath)))
+	if err != nil {
+		t.Fatalf("post capture plan: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read capture plan: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("capture plan status = %d body=%s", resp.StatusCode, raw)
+	}
+	var payload struct {
+		OK         bool   `json:"ok"`
+		Kind       string `json:"kind"`
+		SourcePath string `json:"sourcePath"`
+		Plan       struct {
+			Service struct {
+				ID     string `json:"id"`
+				Status string `json:"status"`
+			} `json:"service"`
+			InterfaceNodes []struct {
+				ID     string `json:"id"`
+				Method string `json:"method"`
+				Path   string `json:"path"`
+			} `json:"interfaceNodes"`
+			APICases []struct {
+				ID          string   `json:"id"`
+				CasePath    string   `json:"casePath"`
+				EvidenceDir string   `json:"evidenceDir"`
+				Tags        []string `json:"tags"`
+			} `json:"apiCases"`
+			CaseFiles []struct {
+				Path string          `json:"path"`
+				Body json.RawMessage `json:"body"`
+			} `json:"caseFiles"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode capture plan: %v body=%s", err, raw)
+	}
+	if !payload.OK || payload.Kind != "http-capture" || payload.SourcePath != capturePath || payload.Plan.Service.ID != "service.catalog" || payload.Plan.Service.Status != "draft" {
+		t.Fatalf("capture plan summary = %#v", payload)
+	}
+	if len(payload.Plan.InterfaceNodes) != 1 || len(payload.Plan.APICases) != 1 || len(payload.Plan.CaseFiles) != 1 {
+		t.Fatalf("capture plan counts = nodes:%d cases:%d files:%d", len(payload.Plan.InterfaceNodes), len(payload.Plan.APICases), len(payload.Plan.CaseFiles))
+	}
+	if payload.Plan.InterfaceNodes[0].ID != "node.service.catalog.create-item" || payload.Plan.InterfaceNodes[0].Method != "POST" || payload.Plan.InterfaceNodes[0].Path != "/items" {
+		t.Fatalf("capture node = %#v", payload.Plan.InterfaceNodes[0])
+	}
+	if payload.Plan.APICases[0].ID != "case.service.catalog.create-item" || payload.Plan.APICases[0].CasePath != "api-cases/case.service.catalog.create-item.json" || payload.Plan.APICases[0].EvidenceDir != ".runtime/replay" || strings.Join(payload.Plan.APICases[0].Tags, ",") != "recorded,replay" {
+		t.Fatalf("capture case = %#v", payload.Plan.APICases[0])
+	}
+}
+
+func TestServerExposesOpenAPIGenerationPlanAPI(t *testing.T) {
+	specPath := filepath.Join(t.TempDir(), "catalog-openapi.json")
+	if err := os.WriteFile(specPath, []byte(`{
+  "openapi": "3.0.3",
+  "info": {"title": "Catalog API"},
+  "paths": {
+    "/items": {
+      "post": {
+        "operationId": "createItem",
+        "summary": "Create item",
+        "tags": ["catalog"],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                  "id": {"type": "string", "example": "item-001"},
+                  "name": {"type": "string", "example": "Example Item"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {"description": "Created"},
+          "400": {"description": "Bad request"}
+        }
+      }
+    }
+  }
+}`), 0o644); err != nil {
+		t.Fatalf("write openapi spec: %v", err)
+	}
+	server := httptest.NewServer(controlplane.New(profile.Bundle{ID: "sample"}))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/template-packages/generation-plan/openapi", "application/json", strings.NewReader(fmt.Sprintf(`{"sourcePath":%q,"serviceId":"service.catalog","evidenceDir":".runtime/generated"}`, specPath)))
+	if err != nil {
+		t.Fatalf("post generation plan: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read generation plan: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("generation plan status = %d body=%s", resp.StatusCode, raw)
+	}
+	var payload struct {
+		OK         bool   `json:"ok"`
+		Kind       string `json:"kind"`
+		SourcePath string `json:"sourcePath"`
+		Plan       struct {
+			OK         bool `json:"ok"`
+			Candidates []struct {
+				ID     string `json:"id"`
+				Kind   string `json:"kind"`
+				Field  string `json:"field"`
+				CaseID string `json:"caseId"`
+			} `json:"candidates"`
+			APICases []struct {
+				ID          string   `json:"id"`
+				Status      string   `json:"status"`
+				CasePath    string   `json:"casePath"`
+				EvidenceDir string   `json:"evidenceDir"`
+				Tags        []string `json:"tags"`
+			} `json:"apiCases"`
+			CaseFiles []struct {
+				Path string          `json:"path"`
+				Body json.RawMessage `json:"body"`
+			} `json:"caseFiles"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode generation plan: %v body=%s", err, raw)
+	}
+	if !payload.OK || payload.Kind != "openapi" || payload.SourcePath != specPath || !payload.Plan.OK || len(payload.Plan.Candidates) != 1 || len(payload.Plan.APICases) != 1 || len(payload.Plan.CaseFiles) != 1 {
+		t.Fatalf("generation plan summary = %#v", payload)
+	}
+	if payload.Plan.Candidates[0].Kind != "missing-required-field" || payload.Plan.Candidates[0].Field != "id" || payload.Plan.Candidates[0].CaseID != "case.service.catalog.create-item.missing-id" {
+		t.Fatalf("generation candidate = %#v", payload.Plan.Candidates[0])
+	}
+	if payload.Plan.APICases[0].Status != "draft" || payload.Plan.APICases[0].EvidenceDir != ".runtime/generated" || strings.Join(payload.Plan.APICases[0].Tags, ",") != "generated,schema,negative,catalog" {
+		t.Fatalf("generated api case = %#v", payload.Plan.APICases[0])
+	}
+}
+
+func TestServerExposesEvidenceListAPI(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	_, err = s.CreateRun(ctx, store.Run{
+		ID:           "run.alpha",
+		ProfileID:    "sample",
+		WorkflowID:   "workflow.alpha",
+		Status:       store.StatusPassed,
+		EvidenceRoot: ".runtime/evidence/run.alpha",
+		SummaryJSON:  "{}",
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	_, err = s.RecordAPICaseRun(ctx, store.APICaseRun{
+		ID:                   "run.alpha.case",
+		RunID:                "run.alpha",
+		CaseID:               "case.alpha",
+		Status:               store.StatusPassed,
+		RequestSummaryJSON:   `{"method":"GET","path":"/alpha"}`,
+		AssertionSummaryJSON: `{"status":"passed"}`,
+	})
+	if err != nil {
+		t.Fatalf("record api case run: %v", err)
+	}
+	_, err = s.RecordEvidence(ctx, store.EvidenceRecord{
+		ID:         "run.alpha.response",
+		RunID:      "run.alpha",
+		CaseRunID:  "run.alpha.case",
+		StepID:     "step.alpha",
+		Kind:       "response",
+		URI:        ".runtime/evidence/run.alpha/response.json",
+		MediaType:  "application/json",
+		SHA256:     "sha256-alpha",
+		SizeBytes:  42,
+		Summary:    `{"statusCode":200}`,
+		Category:   "http-response",
+		Visibility: "public",
+		LabelsJSON: `{"stepId":"step.alpha"}`,
+	})
+	if err != nil {
+		t.Fatalf("record evidence: %v", err)
+	}
+
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample"}, s))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/evidence/list?run=run.alpha", http.StatusOK)
+	if payload["ok"] != true {
+		t.Fatalf("evidence list payload should expose ok envelope: %#v", payload)
+	}
+	runs := payload["runs"].([]any)
+	if len(runs) != 1 {
+		t.Fatalf("evidence list runs = %#v", runs)
+	}
+	run := runs[0].(map[string]any)
+	if run["id"] != "run.alpha" || run["profileId"] != "sample" || run["workflowId"] != "workflow.alpha" {
+		t.Fatalf("evidence list run identity = %#v", run)
+	}
+	if run["apiCaseRunCount"] != float64(1) || run["evidenceCount"] != float64(1) {
+		t.Fatalf("evidence list counts = %#v", run)
+	}
+	records := run["evidenceRecords"].([]any)
+	if len(records) != 1 {
+		t.Fatalf("evidence records = %#v", records)
+	}
+	record := records[0].(map[string]any)
+	if _, ok := record["Kind"]; ok {
+		t.Fatalf("evidence record should not leak Go field names: %#v", record)
+	}
+	if record["id"] != "run.alpha.response" || record["runId"] != "run.alpha" || record["caseRunId"] != "run.alpha.case" || record["stepId"] != "step.alpha" || record["kind"] != "response" {
+		t.Fatalf("evidence record identity = %#v", record)
+	}
+	if record["mediaType"] != "application/json" || record["sha256"] != "sha256-alpha" || record["sizeBytes"] != float64(42) {
+		t.Fatalf("evidence record metadata = %#v", record)
+	}
+	if record["category"] != "http-response" || record["visibility"] != "public" {
+		t.Fatalf("evidence record attachment classification = %#v", record)
+	}
+	labels := record["labels"].(map[string]any)
+	if labels["stepId"] != "step.alpha" {
+		t.Fatalf("evidence record labels = %#v", labels)
+	}
+}
+
+func TestServerExposesEvidenceImportAPI(t *testing.T) {
+	ctx := context.Background()
+	sourcePath := filepath.Join(t.TempDir(), "legacy.sqlite")
+	createLegacyRuntimeDB(t, sourcePath)
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample"}, s))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/evidence/import", fmt.Sprintf(`{"sourcePath":%q,"profileId":"sample"}`, sourcePath), http.StatusOK)
+	if payload["ok"] != true || payload["sourcePath"] != sourcePath || payload["profileId"] != "sample" {
+		t.Fatalf("evidence import payload = %#v", payload)
+	}
+	if payload["runCount"] != float64(2) || payload["apiCaseRunCount"] != float64(1) || payload["evidenceCount"] != float64(1) {
+		t.Fatalf("evidence import counts = %#v", payload)
+	}
+
+	run, err := s.GetRun(ctx, "legacy-workflow-7")
+	if err != nil {
+		t.Fatalf("get imported workflow run: %v", err)
+	}
+	if run.ProfileID != "sample" || run.WorkflowID != "workflow.alpha" || run.Status != store.StatusPassed {
+		t.Fatalf("imported workflow run = %#v", run)
+	}
+	records, err := s.ListEvidence(ctx, "case-run-parent")
+	if err != nil {
+		t.Fatalf("list imported evidence: %v", err)
+	}
+	if len(records) != 1 || records[0].URI != ".runtime/cases/case-run-parent" {
+		t.Fatalf("imported evidence = %#v", records)
+	}
+}
+
+func TestServerExposesBaselineGateAPI(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample"}, s))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/baseline/gate", `{
+		"profileId":"sample",
+		"subjectId":"workflow.alpha",
+		"status":"passed",
+		"required":true,
+		"summaryJson":"{\"source\":\"api\"}"
+	}`, http.StatusOK)
+	if payload["ok"] != true {
+		t.Fatalf("baseline set payload should expose ok envelope: %#v", payload)
+	}
+	gate := payload["baselineGate"].(map[string]any)
+	if gate["profileId"] != "sample" || gate["subjectId"] != "workflow.alpha" || gate["status"] != "passed" || gate["required"] != true {
+		t.Fatalf("baseline set gate = %#v", gate)
+	}
+	if gate["summaryJson"] != `{"source":"api"}` {
+		t.Fatalf("baseline set summary = %#v", gate)
+	}
+
+	loaded := decodeJSONResponse(t, server.URL+"/api/baseline/gate?profileId=sample&subjectId=workflow.alpha", http.StatusOK)
+	loadedGate := loaded["baselineGate"].(map[string]any)
+	if loaded["ok"] != true || loadedGate["status"] != "passed" || loadedGate["required"] != true {
+		t.Fatalf("baseline get payload = %#v", loaded)
+	}
+
+	missing := decodeJSONResponse(t, server.URL+"/api/baseline/gate?profileId=sample&subjectId=workflow.missing", http.StatusNotFound)
+	if missing["ok"] != false || !strings.Contains(fmt.Sprint(missing["error"]), "baseline gate not found") {
+		t.Fatalf("missing baseline payload = %#v", missing)
+	}
+}
+
+func TestServerExposesTemplateRenderAPI(t *testing.T) {
+	server := httptest.NewServer(controlplane.New(profile.Bundle{
+		ID: "sample",
+		RequestTemplates: []profile.RequestTemplate{
+			{
+				ID:           "template.create",
+				Method:       "POST",
+				Path:         "/v1/items/{{.itemId}}",
+				TemplateJSON: `{"id":"{{.itemId}}","quantity":{{.quantity}}}`,
+			},
+		},
+		Fixtures: []profile.Fixture{
+			{
+				ID:       "fixture.item",
+				DataJSON: `{"itemId":"item-001","quantity":3}`,
+			},
+		},
+	}))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/template/render", `{"templateId":"template.create","fixtureId":"fixture.item"}`, http.StatusOK)
+	if payload["ok"] != true {
+		t.Fatalf("template render payload should expose ok envelope: %#v", payload)
+	}
+	rendered := payload["request"].(map[string]any)
+	body := rendered["body"].(map[string]any)
+	if rendered["method"] != "POST" || rendered["path"] != "/v1/items/item-001" {
+		t.Fatalf("rendered request identity = %#v", rendered)
+	}
+	if body["id"] != "item-001" || body["quantity"] != float64(3) {
+		t.Fatalf("rendered request body = %#v", body)
 	}
 }
 
@@ -86,23 +580,27 @@ func TestServerExposesProfileAssetLists(t *testing.T) {
 	server := httptest.NewServer(controlplane.New(bundle))
 	defer server.Close()
 
-	resp, err := http.Get(server.URL + "/api/profile/assets")
+	resp, err := http.Get(server.URL + "/api/template-packages/assets")
 	if err != nil {
-		t.Fatalf("get profile assets api: %v", err)
+		t.Fatalf("get template package assets api: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("profile assets api status = %d", resp.StatusCode)
+		t.Fatalf("template package assets api status = %d", resp.StatusCode)
 	}
 
 	var payload struct {
-		Services       []profile.Service       `json:"services"`
-		Workflows      []profile.Workflow      `json:"workflows"`
-		InterfaceNodes []profile.InterfaceNode `json:"interfaceNodes"`
-		APICases       []profile.APICase       `json:"apiCases"`
+		TemplatePackageID string                  `json:"templatePackageId"`
+		Services          []profile.Service       `json:"services"`
+		Workflows         []profile.Workflow      `json:"workflows"`
+		InterfaceNodes    []profile.InterfaceNode `json:"interfaceNodes"`
+		APICases          []profile.APICase       `json:"apiCases"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode profile assets api: %v", err)
+		t.Fatalf("decode template package assets api: %v", err)
+	}
+	if payload.TemplatePackageID != "sample" {
+		t.Fatalf("template package assets identity = %#v", payload)
 	}
 	if len(payload.Services) != 1 || payload.Services[0].ID != "service.alpha" {
 		t.Fatalf("services payload = %#v", payload.Services)
@@ -172,14 +670,45 @@ func TestServerTemplatePackageAliasesImportIntoRuntimeStore(t *testing.T) {
 	defer server.Close()
 	profileDir := writeEmptyProfileBundle(t)
 
-	payload := postJSONResponse(t, server.URL+"/api/template-packages/import", fmt.Sprintf(`{"path":%q}`, profileDir), http.StatusOK)
+	payload := postJSONResponse(t, server.URL+"/api/template-packages/import", fmt.Sprintf(`{"templatePackagePath":%q}`, profileDir), http.StatusOK)
 
-	if payload["profileId"] != "empty" || payload["bundlePath"] != profileDir {
+	if payload["templatePackageId"] != "empty" || payload["templatePackagePath"] != profileDir {
 		t.Fatalf("template package import payload identity = %#v", payload)
+	}
+	if payload["profileId"] != "empty" || payload["bundlePath"] != profileDir {
+		t.Fatalf("legacy profile import fields should remain available: %#v", payload)
 	}
 	catalogIndex := decodeJSONResponse(t, server.URL+"/api/template-packages/catalog-index", http.StatusOK)
 	if catalogIndex["profileId"] != "empty" || catalogIndex["indexedAt"] == "" {
 		t.Fatalf("template package catalog index = %#v", catalogIndex)
+	}
+	verify := postJSONResponse(t, server.URL+"/api/template-packages/verify", fmt.Sprintf(`{"templatePackagePath":%q}`, profileDir), http.StatusOK)
+	if verify["templatePackageId"] != "empty" || verify["ok"] != true {
+		t.Fatalf("template package verify payload = %#v", verify)
+	}
+	repairPlan := postJSONResponse(t, server.URL+"/api/template-packages/audit-plan", fmt.Sprintf(`{"templatePackagePath":%q}`, profileDir), http.StatusOK)
+	if repairPlan["profileId"] != "empty" {
+		t.Fatalf("template package audit plan payload = %#v", repairPlan)
+	}
+}
+
+func TestServerTemplatePackageInstallAcceptsTemplatePackagePath(t *testing.T) {
+	profileHome := t.TempDir()
+	sourceDir := writeEmptyProfileBundle(t)
+	server := httptest.NewServer(controlplane.NewWithOptions(loadEmptyProfile(t), controlplane.Options{ProfileHome: profileHome}))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/template-packages/install", `{"templatePackagePath":`+mustJSON(t, sourceDir)+`}`, http.StatusOK)
+	if payload["templatePackageId"] != "empty" || payload["id"] != "empty" {
+		t.Fatalf("template package install payload = %#v", payload)
+	}
+	list := decodeJSONResponse(t, server.URL+"/api/template-packages/installed", http.StatusOK)
+	if list["templatePackageHome"] != profileHome {
+		t.Fatalf("template package home = %#v", list)
+	}
+	items := list["templatePackages"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["templatePackageId"] != "empty" {
+		t.Fatalf("template package list = %#v", list)
 	}
 }
 
@@ -1216,6 +1745,28 @@ func TestServerExposesInterfaceNodesForService(t *testing.T) {
 	}
 	if payload.Items[0].Href == "" || payload.Items[0].AdmissionStatus != "pending" || payload.Items[0].ValidationStatus != "valid" || payload.Items[0].RequiredCaseCount != 0 {
 		t.Fatalf("interface node link/status = %#v", payload.Items[0])
+	}
+}
+
+func TestServerFiltersInterfaceNodesBySearchText(t *testing.T) {
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha", ServiceID: "service.alpha", Operation: "Create item"},
+			{ID: "node.beta", DisplayName: "Node Beta", ServiceID: "service.beta", Operation: "Delete item"},
+		},
+	}
+	server := httptest.NewServer(controlplane.New(bundle))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/interface-nodes?filter=delete", http.StatusOK)
+	filters := payload["filters"].(map[string]any)
+	if filters["filter"] != "delete" {
+		t.Fatalf("interface node filters = %#v", filters)
+	}
+	items := payload["items"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["id"] != "node.beta" {
+		t.Fatalf("filtered interface nodes = %#v", payload)
 	}
 }
 
@@ -3416,6 +3967,118 @@ func TestServerExposesWorkflowAuditWithoutStore(t *testing.T) {
 	}
 }
 
+func TestServerExposesWorkflowPlanAPI(t *testing.T) {
+	bundle := profile.Bundle{
+		ID: "sample",
+		Workflows: []profile.Workflow{
+			{ID: "workflow.alpha", DisplayName: "Workflow Alpha"},
+		},
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.alpha", DisplayName: "Node Alpha"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha"},
+		},
+		WorkflowBindings: []profile.WorkflowBinding{
+			{WorkflowID: "workflow.alpha", StepID: "step.one", NodeID: "node.alpha", CaseID: "case.alpha", Required: true, SortOrder: 1},
+		},
+	}
+	server := httptest.NewServer(controlplane.New(bundle))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/workflow-plan?workflowId=workflow.alpha", http.StatusOK)
+	if payload["ok"] != true || payload["workflowId"] != "workflow.alpha" {
+		t.Fatalf("workflow plan summary = %#v", payload)
+	}
+	workflow := payload["workflow"].(map[string]any)
+	if workflow["id"] != "workflow.alpha" || workflow["displayName"] != "Workflow Alpha" {
+		t.Fatalf("workflow plan workflow = %#v", workflow)
+	}
+	counts := payload["counts"].(map[string]any)
+	if counts["steps"] != float64(1) || counts["requiredSteps"] != float64(1) {
+		t.Fatalf("workflow plan counts = %#v", counts)
+	}
+	steps := payload["steps"].([]any)
+	if len(steps) != 1 {
+		t.Fatalf("workflow plan steps = %#v", payload)
+	}
+	step := steps[0].(map[string]any)
+	if step["stepId"] != "step.one" || step["nodeId"] != "node.alpha" || step["caseId"] != "case.alpha" || step["required"] != true {
+		t.Fatalf("workflow plan step = %#v", step)
+	}
+	if node := step["node"].(map[string]any); node["displayName"] != "Node Alpha" {
+		t.Fatalf("workflow plan step node = %#v", node)
+	}
+	if item := step["case"].(map[string]any); item["displayName"] != "Case Alpha" {
+		t.Fatalf("workflow plan step case = %#v", item)
+	}
+}
+
+func TestServerExposesWorkflowDiscoveryAPI(t *testing.T) {
+	bundle := profile.Bundle{
+		ID: "sample",
+		Workflows: []profile.Workflow{
+			{ID: "workflow.alpha", DisplayName: "Workflow Alpha", Description: "Primary smoke path"},
+			{ID: "workflow.beta", DisplayName: "Workflow Beta"},
+		},
+		WorkflowBindings: []profile.WorkflowBinding{
+			{WorkflowID: "workflow.alpha", StepID: "step.one", NodeID: "node.alpha", CaseID: "case.alpha", Required: true},
+			{WorkflowID: "workflow.alpha", StepID: "step.two", NodeID: "node.beta", CaseID: "case.beta", Required: true},
+		},
+	}
+	server := httptest.NewServer(controlplane.New(bundle))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/workflows?filter=smoke", http.StatusOK)
+	if payload["ok"] != true || payload["profileId"] != "sample" || payload["count"] != float64(1) {
+		t.Fatalf("workflow discovery summary = %#v", payload)
+	}
+	items := payload["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("workflow discovery items = %#v", payload)
+	}
+	item := items[0].(map[string]any)
+	if item["id"] != "workflow.alpha" || item["displayName"] != "Workflow Alpha" || item["stepCount"] != float64(2) {
+		t.Fatalf("workflow discovery item = %#v", item)
+	}
+}
+
+func TestServerExposesWorkflowDiscoveryAPIFromStore(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "store-profile",
+		Workflows: []store.CatalogWorkflow{
+			{ID: "workflow.store", DisplayName: "Store Workflow", Description: "Store smoke path"},
+			{ID: "workflow.other", DisplayName: "Other Workflow"},
+		},
+		WorkflowBindings: []store.CatalogWorkflowBinding{
+			{WorkflowID: "workflow.store", StepID: "step.one", NodeID: "node.store", CaseID: "case.store", Required: true},
+		},
+	}); err != nil {
+		t.Fatalf("replace profile catalog: %v", err)
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "bundle-profile"}, s))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/workflows?filter=store", http.StatusOK)
+	if payload["ok"] != true || payload["profileId"] != "store-profile" || payload["count"] != float64(1) {
+		t.Fatalf("workflow discovery store summary = %#v", payload)
+	}
+	source := payload["source"].(map[string]any)
+	if source["kind"] != "store" {
+		t.Fatalf("workflow discovery source = %#v", source)
+	}
+	item := payload["items"].([]any)[0].(map[string]any)
+	if item["id"] != "workflow.store" || item["stepCount"] != float64(1) {
+		t.Fatalf("workflow discovery store item = %#v", item)
+	}
+}
+
 func TestServerExposesWorkflowAuditStoreState(t *testing.T) {
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
@@ -4214,6 +4877,37 @@ func TestServerExposesPostProcessTasks(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("record task: %v", err)
 	}
+	if _, err := s.RecordPostProcessTask(ctx, store.PostProcessTask{
+		ID:          "task.logs",
+		RunID:       "run.tasks",
+		WorkflowID:  "workflow.alpha",
+		StepID:      "step-b",
+		CaseID:      "case.beta",
+		Kind:        "runtime_log_collect",
+		Status:      store.StatusFailed,
+		StartedAt:   base.Add(200 * time.Millisecond),
+		FinishedAt:  base.Add(500 * time.Millisecond),
+		Error:       "log source missing",
+		SummaryJSON: `{"source":"runtime-log"}`,
+		CreatedAt:   base.Add(200 * time.Millisecond),
+	}); err != nil {
+		t.Fatalf("record failed task: %v", err)
+	}
+	if _, err := s.RecordPostProcessTask(ctx, store.PostProcessTask{
+		ID:          "task.trace.skip",
+		RunID:       "run.tasks",
+		WorkflowID:  "workflow.alpha",
+		StepID:      "step-c",
+		CaseID:      "case.gamma",
+		Kind:        "trace_topology_collect",
+		Status:      store.StatusSkipped,
+		StartedAt:   base.Add(600 * time.Millisecond),
+		FinishedAt:  base.Add(600 * time.Millisecond),
+		SummaryJSON: `{"reason":"SkyWalking provider unavailable"}`,
+		CreatedAt:   base.Add(600 * time.Millisecond),
+	}); err != nil {
+		t.Fatalf("record skipped task: %v", err)
+	}
 
 	server := httptest.NewServer(controlplane.NewWithOptions(profile.Bundle{ID: "sample"}, controlplane.Options{Runtime: s}))
 	defer server.Close()
@@ -4233,6 +4927,26 @@ func TestServerExposesPostProcessTasks(t *testing.T) {
 	task := tasks[0].(map[string]any)
 	if task["id"] != "task.trace" || task["kind"] != "trace_topology_collect" || task["stepId"] != "step-a" {
 		t.Fatalf("post process task = %#v", task)
+	}
+	if task["outcome"] != "success" || task["reason"] != "completed" || task["displayStatus"] != "passed: completed" {
+		t.Fatalf("post process task readable status = %#v", task)
+	}
+
+	all := decodeJSONResponse(t, server.URL+"/api/post-process-tasks?runId=run.tasks", http.StatusOK)
+	allTasks := all["tasks"].([]any)
+	if len(allTasks) != 3 {
+		t.Fatalf("all post process tasks = %#v", allTasks)
+	}
+	byID := map[string]map[string]any{}
+	for _, raw := range allTasks {
+		task := raw.(map[string]any)
+		byID[task["id"].(string)] = task
+	}
+	if byID["task.logs"]["outcome"] != "failed" || byID["task.logs"]["reason"] != "log source missing" || byID["task.logs"]["displayStatus"] != "failed: log source missing" {
+		t.Fatalf("failed task readable status = %#v", byID["task.logs"])
+	}
+	if byID["task.trace.skip"]["outcome"] != "skipped" || byID["task.trace.skip"]["reason"] != "SkyWalking provider unavailable" || byID["task.trace.skip"]["displayStatus"] != "skipped: SkyWalking provider unavailable" {
+		t.Fatalf("skipped task readable status = %#v", byID["task.trace.skip"])
 	}
 
 	missing := decodeJSONResponse(t, server.URL+"/api/post-process-tasks", http.StatusBadRequest)
@@ -5245,20 +5959,23 @@ func TestServerExposesCaseEvidenceFromStore(t *testing.T) {
 	}
 	evidenceDir := t.TempDir()
 	requestPath := filepath.Join(evidenceDir, "request.json")
-	if err := os.WriteFile(requestPath, []byte(`{"method":"POST","path":"/alpha","headers":{"Content-Type":"application/json"},"body":{"id":"item-001"}}`), 0o644); err != nil {
+	if err := os.WriteFile(requestPath, []byte(`{"method":"POST","path":"/alpha?token=query-secret","headers":{"Content-Type":"application/json","Authorization":"Bearer request-secret"},"body":{"id":"item-001","token":"request-token"}}`), 0o644); err != nil {
 		t.Fatalf("write request evidence: %v", err)
 	}
 	responsePath := filepath.Join(evidenceDir, "response.json")
-	if err := os.WriteFile(responsePath, []byte(`{"statusCode":200,"headers":{"Content-Type":"application/json"},"body":"{\"ok\":true}"}`), 0o644); err != nil {
+	if err := os.WriteFile(responsePath, []byte(`{"statusCode":200,"headers":{"Content-Type":"application/json","Set-Cookie":"session=response-cookie"},"body":"{\"ok\":true,\"password\":\"response-secret\"}"}`), 0o644); err != nil {
 		t.Fatalf("write response evidence: %v", err)
 	}
 	_, err = s.RecordEvidence(ctx, store.EvidenceRecord{
 		ID:         "run.alpha.request",
 		RunID:      "run.alpha",
 		CaseRunID:  "run.alpha.case",
+		StepID:     "step.alpha",
 		Kind:       "request",
 		URI:        requestPath,
 		MediaType:  "application/json",
+		SHA256:     "sha256-request",
+		SizeBytes:  128,
 		Summary:    `{"method":"POST","path":"/alpha","hasBody":true}`,
 		Category:   "http-exchange",
 		Visibility: "public",
@@ -5289,23 +6006,44 @@ func TestServerExposesCaseEvidenceFromStore(t *testing.T) {
 	request := evidence["request"].(map[string]any)
 	response := evidence["response"].(map[string]any)
 	assertions := evidence["assertions"].(map[string]any)
-	if summary["case_id"] != "case.alpha" || request["method"] != "POST" || request["path"] != "/alpha" {
+	if summary["case_id"] != "case.alpha" || request["method"] != "POST" || request["path"] != "/alpha?token=%5BREDACTED%5D" {
 		t.Fatalf("case evidence request = %#v", payload)
 	}
 	requestBody := request["body"].(map[string]any)
 	if requestBody["id"] != "item-001" {
 		t.Fatalf("case evidence request body = %#v", request)
 	}
+	redactedRequest, _ := json.Marshal(request)
+	for _, leaked := range []string{"query-secret", "request-secret", "request-token"} {
+		if strings.Contains(string(redactedRequest), leaked) {
+			t.Fatalf("case evidence request leaked %q: %s", leaked, redactedRequest)
+		}
+	}
+	if !strings.Contains(string(redactedRequest), "[REDACTED]") {
+		t.Fatalf("case evidence request was not redacted: %s", redactedRequest)
+	}
 	if response["http_code"] != float64(200) || assertions["status"] != "passed" {
 		t.Fatalf("case evidence response/assertions = %#v", payload)
 	}
-	if response["body"] != `{"ok":true}` {
+	redactedResponse, _ := json.Marshal(response)
+	for _, leaked := range []string{"response-secret", "response-cookie"} {
+		if strings.Contains(string(redactedResponse), leaked) {
+			t.Fatalf("case evidence response leaked %q: %s", leaked, redactedResponse)
+		}
+	}
+	if !strings.Contains(fmt.Sprint(response["body"]), "[REDACTED]") {
 		t.Fatalf("case evidence response body = %#v", response)
 	}
 	attachment := request["attachment"].(map[string]any)
 	labels := attachment["labels"].(map[string]any)
 	if attachment["category"] != "http-exchange" || attachment["visibility"] != "public" || labels["owner"] != "qa" {
 		t.Fatalf("case evidence attachment metadata = %#v", request)
+	}
+	if attachment["id"] != "run.alpha.request" || attachment["runId"] != "run.alpha" || attachment["caseRunId"] != "run.alpha.case" || attachment["stepId"] != "step.alpha" || attachment["kind"] != "request" {
+		t.Fatalf("case evidence attachment identity = %#v", attachment)
+	}
+	if attachment["uri"] != requestPath || attachment["mediaType"] != "application/json" || attachment["sha256"] != "sha256-request" || attachment["sizeBytes"] != float64(128) {
+		t.Fatalf("case evidence attachment file metadata = %#v", attachment)
 	}
 }
 
@@ -6948,7 +7686,7 @@ type apiCaseBatchReportForTest struct {
 
 func waitAPICaseBatchReport(t *testing.T, reportURL string) apiCaseBatchReportForTest {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for {
 		resp, err := http.Get(reportURL)
 		if err != nil {
@@ -7014,6 +7752,40 @@ func writeEmptyProfileBundle(t *testing.T) string {
 		t.Fatalf("write empty profile: %v", err)
 	}
 	return dir
+}
+
+func createLegacyRuntimeDB(t *testing.T, path string) {
+	t.Helper()
+	statement := `
+create table workflow_runs (
+  id integer primary key,
+  workflow_id text not null,
+  status text not null,
+  summary_json text not null default '',
+  created_at text not null
+);
+create table interface_node_case_run (
+  id integer primary key,
+  node_id text not null,
+  case_id text not null,
+  run_id text not null,
+  status text not null,
+  failure_kind text not null default '',
+  failure_reason text not null default '',
+  evidence_path text not null default '',
+  elapsed_ms integer not null default 0,
+  summary_json text not null default '',
+  created_at text not null
+);
+insert into workflow_runs(id, workflow_id, status, summary_json, created_at)
+values (7, 'workflow.alpha', 'passed', '{"steps":1}', '2026-05-14T01:02:03Z');
+insert into interface_node_case_run(id, node_id, case_id, run_id, status, evidence_path, summary_json, created_at)
+values (11, 'node.alpha', 'case.alpha', 'case-run-parent', 'failed', '.runtime/cases/case-run-parent', '{"failure":"expected"}', '2026-05-14T01:03:03Z');
+`
+	cmd := exec.Command("sqlite3", path, statement)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("create legacy db: %v\n%s", err, out)
+	}
 }
 
 func decodeJSONResponse(t *testing.T, url string, wantStatus int) map[string]any {

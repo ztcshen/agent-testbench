@@ -80,6 +80,7 @@ type EvidenceRecord struct {
 	ID         string
 	RunID      string
 	CaseRunID  string
+	StepID     string
 	Kind       string
 	URI        string
 	MediaType  string

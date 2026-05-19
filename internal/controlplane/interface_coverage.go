@@ -54,6 +54,10 @@ func interfaceNodeCoveragePayloadFromBundleWithStore(ctx context.Context, bundle
 	return interfaceNodeCoveragePayloadFromBundle(bundle, workflowID), nil
 }
 
+func InterfaceNodeCoveragePayload(ctx context.Context, bundle profile.Bundle, workflowID string, runtime store.Store) (map[string]any, error) {
+	return interfaceNodeCoveragePayloadFromBundleWithStore(ctx, bundle, workflowID, runtime)
+}
+
 func interfaceNodeCoverageGapsPayloadFromBundleWithStore(ctx context.Context, bundle profile.Bundle, workflowID string, runtime store.Store) (map[string]any, error) {
 	if runtime == nil {
 		return interfaceNodeCoverageGapsPayloadFromBundle(bundle, workflowID), nil
@@ -73,6 +77,10 @@ func interfaceNodeCoverageGapsPayloadFromBundleWithStore(ctx context.Context, bu
 		return interfaceNodeCoverageGapsPayloadFromCatalog(catalog, workflowID), nil
 	}
 	return interfaceNodeCoverageGapsPayloadFromBundle(bundle, workflowID), nil
+}
+
+func InterfaceNodeCoverageGapsPayload(ctx context.Context, bundle profile.Bundle, workflowID string, runtime store.Store) (map[string]any, error) {
+	return interfaceNodeCoverageGapsPayloadFromBundleWithStore(ctx, bundle, workflowID, runtime)
 }
 
 func InterfaceNodeCoverageReadModelKey(workflowID string) string {

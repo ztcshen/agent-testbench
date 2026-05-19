@@ -268,7 +268,7 @@ func startAPICaseBatchRun(ctx context.Context, bundle profile.Bundle, runtime st
 	}
 	runner.save(report)
 
-	go runner.run(context.Background(), batchRunID, bundle.ID, plans, runtime, bundle.FailureCategories)
+	go runner.run(context.Background(), batchRunID, bundle.ID, request.WorkflowID, plans, runtime, bundle.FailureCategories)
 	return report, http.StatusAccepted, nil
 }
 
@@ -319,7 +319,7 @@ func handleAPICaseBatchRunReport(w http.ResponseWriter, r *http.Request, runner 
 	writeJSON(w, report)
 }
 
-func (r *apiCaseBatchRunner) run(ctx context.Context, batchRunID string, profileID string, plans []apiCaseBatchCasePlan, runtime store.Store, rules []profile.FailureCategoryRule) {
+func (r *apiCaseBatchRunner) run(ctx context.Context, batchRunID string, profileID string, workflowID string, plans []apiCaseBatchCasePlan, runtime store.Store, rules []profile.FailureCategoryRule) {
 	for index, plan := range plans {
 		caseCtx := ctx
 		var cancel context.CancelFunc
@@ -364,7 +364,11 @@ func (r *apiCaseBatchRunner) run(ctx context.Context, batchRunID string, profile
 			item.Error = apiCaseBatchFailureMessage(result)
 			item.FailureCategory = apiCaseBatchApplyFailureCategoryRules(rules, item.Status, apiCaseBatchFailureCategory(result), item.Error)
 			if runtime != nil {
-				if err := recordAPICaseRun(ctx, runtime, profileID, result); err != nil {
+				if err := recordAPICaseRunWithContext(ctx, runtime, recordAPICaseRunContext{
+					ProfileID:  profileID,
+					WorkflowID: workflowID,
+					StepID:     plan.StepID,
+				}, result); err != nil {
 					item.Status = store.StatusFailed
 					item.Error = err.Error()
 					item.FailureCategory = apiCaseBatchApplyFailureCategoryRules(rules, item.Status, apiCaseBatchFailureCategoryFromError(err), item.Error)

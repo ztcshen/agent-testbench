@@ -82,6 +82,12 @@ feature backlog's Allure and ReportPortal evidence model:
   API case runner records use `public`.
 - `labels`: JSON labels such as case id, run id, and Evidence kind for
   agent-friendly filtering and future report categories.
+- `stepId`: optional first-class workflow step relation for Store-backed
+  workflow and topology evidence.
+
+Case Evidence detail APIs redact common sensitive JSON keys, sensitive headers,
+and URL query parameters before returning request, response, log, and summary
+payloads for normal report surfaces.
 
 ## Store Indexing
 

@@ -61,7 +61,7 @@ func TestWorkflowStepLogsReturnPendingAndPersistInBackground(t *testing.T) {
 
 	started := time.Now()
 	enrichWorkflowStepLogs(ctx, s, run, step, topologies)
-	if elapsed := time.Since(started); elapsed > 50*time.Millisecond {
+	if elapsed := time.Since(started); elapsed > 150*time.Millisecond {
 		t.Fatalf("enrichWorkflowStepLogs blocked on runtime collection for %s", elapsed)
 	}
 	pending := listFromAny(mapFromAny(step["trace"])["systems"])

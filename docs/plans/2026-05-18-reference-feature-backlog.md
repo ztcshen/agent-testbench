@@ -52,11 +52,20 @@ read-model assertions. No runtime network calls should be required.
 
 Implementation progress:
 OpenAPI 3.x JSON import planning now exists in
-`internal/import bundleimport/openapi`. The CLI exposes it as
-`otsandbox import bundle import-plan openapi`, with optional `--output-dir` export for
-reviewable split import bundle assets and runnable `api-cases/*.json` case files.
-This keeps generated assets draft-only and outside any existing import bundle until a
-reviewer applies them.
+`internal/profileimport/openapi`. The CLI exposes it as
+`otsandbox template-package import-plan openapi` through the Store-first command
+alias, with optional `--output-dir` export for reviewable split template package
+assets and runnable `api-cases/*.json` case files. The control-plane API also
+exposes the same planner as `POST /api/template-packages/import-plan/openapi`
+for API-operated review flows. Static HTTP capture import planning follows the
+same review-only pattern through `internal/profileimport/httpcapture`,
+`otsandbox template-package import-plan http-capture`, and
+`POST /api/template-packages/import-plan/http-capture`. OpenAPI negative-case
+generation is likewise exposed through `internal/profilegenerate/openapi`,
+`otsandbox template-package generation-plan openapi`, and
+`POST /api/template-packages/generation-plan/openapi`. This keeps generated
+assets draft-only and outside any existing template package until a reviewer
+applies them.
 
 ### 2. Executor Model for Existing Test Tools
 
@@ -169,11 +178,21 @@ Add Store schema tests, redaction tests, batch report golden tests, and API
 payload tests for artifact manifests and failure summaries.
 
 Implementation progress:
-Evidence records now carry attachment category, visibility, and labels
-metadata, and batch failure summaries expose local failure categories. Import Bundle
-bundles also support ordered `failureCategories` rules for report-facing
-failure buckets; rule matching follows the Allure category constraint that the
-first matching rule wins. The implemented matcher surface is intentionally
+Evidence records now carry attachment category, visibility, labels, and
+first-class `stepId` relation metadata. `/api/evidence/list` now serializes
+records through a stable lowerCamel attachment payload instead of raw Store
+structs, including `runId`, `caseRunId`, `stepId`, `mediaType`, `sizeBytes`,
+`sha256`, `category`, `visibility`, and parsed `labels`; `/api/case/evidence`
+and `/api/case-run/evidence` now use the same attachment metadata for request,
+response, and log evidence details. Batch failure summaries expose local
+failure categories. Case Evidence details now use shared structured redaction
+for sensitive JSON keys, headers, JSON string bodies, and URL query parameters.
+Post-process task API and CLI payloads now expose readable Evidence collection
+`outcome`, `reason`, and `displayStatus` fields for passed, skipped, failed,
+and running tasks. Import Bundle bundles also support ordered
+`failureCategories` rules for report-facing failure buckets; rule matching
+follows the Allure category constraint that the first matching rule wins. The
+implemented matcher surface is intentionally
 local and small: status, built-in failure category, and message substring.
 
 ### 5. Record/Replay Import Path

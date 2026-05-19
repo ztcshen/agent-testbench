@@ -17,6 +17,7 @@ import (
 )
 
 type profileImportRequest struct {
+	TemplatePackagePath string `json:"templatePackagePath"`
 	Path                string `json:"path"`
 	Audit               bool   `json:"audit"`
 	RequireAuditOK      bool   `json:"requireAuditOk"`
@@ -26,25 +27,30 @@ type profileImportRequest struct {
 }
 
 type profileInstallRequest struct {
-	Path  string `json:"path"`
-	Force bool   `json:"force"`
+	TemplatePackagePath string `json:"templatePackagePath"`
+	Path                string `json:"path"`
+	Force               bool   `json:"force"`
 }
 
 type profileAuditPlanRequest struct {
-	Path  string `json:"path"`
-	Force bool   `json:"force"`
+	TemplatePackagePath string `json:"templatePackagePath"`
+	Path                string `json:"path"`
+	Force               bool   `json:"force"`
 }
 
 type profileImportResponse struct {
-	ProfileID     string                     `json:"profileId"`
-	BundlePath    string                     `json:"bundlePath"`
-	BundleDigest  string                     `json:"bundleDigest"`
-	ImportedAt    time.Time                  `json:"importedAt"`
-	Counts        profileImportCounts        `json:"counts"`
-	Store         profileImportStore         `json:"store"`
-	ConfigVersion profileImportConfigVersion `json:"configVersion"`
-	ReadModels    []string                   `json:"readModels"`
-	Audit         *profileaudit.Report       `json:"audit,omitempty"`
+	TemplatePackageID     string                     `json:"templatePackageId"`
+	TemplatePackagePath   string                     `json:"templatePackagePath"`
+	TemplatePackageDigest string                     `json:"templatePackageDigest"`
+	ProfileID             string                     `json:"profileId"`
+	BundlePath            string                     `json:"bundlePath"`
+	BundleDigest          string                     `json:"bundleDigest"`
+	ImportedAt            time.Time                  `json:"importedAt"`
+	Counts                profileImportCounts        `json:"counts"`
+	Store                 profileImportStore         `json:"store"`
+	ConfigVersion         profileImportConfigVersion `json:"configVersion"`
+	ReadModels            []string                   `json:"readModels"`
+	Audit                 *profileaudit.Report       `json:"audit,omitempty"`
 }
 
 type profileImportCounts struct {
@@ -59,31 +65,38 @@ type profileImportCounts struct {
 }
 
 type profileImportStore struct {
-	ProfileID    string    `json:"profileId"`
-	BundlePath   string    `json:"bundlePath"`
-	BundleDigest string    `json:"bundleDigest"`
-	ImportedAt   time.Time `json:"importedAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	TemplatePackageID     string    `json:"templatePackageId"`
+	TemplatePackagePath   string    `json:"templatePackagePath"`
+	TemplatePackageDigest string    `json:"templatePackageDigest"`
+	ProfileID             string    `json:"profileId"`
+	BundlePath            string    `json:"bundlePath"`
+	BundleDigest          string    `json:"bundleDigest"`
+	ImportedAt            time.Time `json:"importedAt"`
+	UpdatedAt             time.Time `json:"updatedAt"`
 }
 
 type profileImportConfigVersion struct {
-	ID           string    `json:"id"`
-	ProfileID    string    `json:"profileId"`
-	SourcePath   string    `json:"sourcePath"`
-	BundleDigest string    `json:"bundleDigest"`
-	Active       bool      `json:"active"`
-	PublishedAt  time.Time `json:"publishedAt"`
-	CreatedAt    time.Time `json:"createdAt"`
+	ID                    string    `json:"id"`
+	TemplatePackageID     string    `json:"templatePackageId"`
+	TemplatePackagePath   string    `json:"templatePackagePath"`
+	TemplatePackageDigest string    `json:"templatePackageDigest"`
+	ProfileID             string    `json:"profileId"`
+	SourcePath            string    `json:"sourcePath"`
+	BundleDigest          string    `json:"bundleDigest"`
+	Active                bool      `json:"active"`
+	PublishedAt           time.Time `json:"publishedAt"`
+	CreatedAt             time.Time `json:"createdAt"`
 }
 
 type profileVerifyResponse struct {
-	OK        bool                  `json:"ok"`
-	Error     string                `json:"error,omitempty"`
-	ProfileID string                `json:"profileId"`
-	Audit     profileaudit.Report   `json:"audit"`
-	Publish   profileImportResponse `json:"publish"`
-	Summary   profileVerifySummary  `json:"summary"`
-	Checks    []profileVerifyCheck  `json:"checks"`
+	OK                bool                  `json:"ok"`
+	Error             string                `json:"error,omitempty"`
+	TemplatePackageID string                `json:"templatePackageId"`
+	ProfileID         string                `json:"profileId"`
+	Audit             profileaudit.Report   `json:"audit"`
+	Publish           profileImportResponse `json:"publish"`
+	Summary           profileVerifySummary  `json:"summary"`
+	Checks            []profileVerifyCheck  `json:"checks"`
 }
 
 type profileVerifySummary struct {
@@ -106,6 +119,13 @@ type profileVerifyOptions struct {
 	RequireWorkflowRuns bool
 }
 
+func templatePackageRequestPath(templatePackagePath string, legacyPath string) string {
+	if value := strings.TrimSpace(templatePackagePath); value != "" {
+		return value
+	}
+	return strings.TrimSpace(legacyPath)
+}
+
 func handleProfileImport(w http.ResponseWriter, r *http.Request, runtime store.Store, activate func(profile.Bundle), profileHome string) {
 	if runtime == nil {
 		writeJSONStatus(w, http.StatusNotImplemented, map[string]any{"ok": false, "error": "runtime store is not configured"})
@@ -118,7 +138,7 @@ func handleProfileImport(w http.ResponseWriter, r *http.Request, runtime store.S
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json"})
 		return
 	}
-	req.Path = strings.TrimSpace(req.Path)
+	req.Path = templatePackageRequestPath(req.TemplatePackagePath, req.Path)
 	if req.Path == "" {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "path is required"})
 		return
@@ -160,7 +180,7 @@ func handleProfileVerify(w http.ResponseWriter, r *http.Request, runtime store.S
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json"})
 		return
 	}
-	req.Path = strings.TrimSpace(req.Path)
+	req.Path = templatePackageRequestPath(req.TemplatePackagePath, req.Path)
 	if req.Path == "" {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "path is required"})
 		return
@@ -208,7 +228,7 @@ func handleProfileAuditPlan(w http.ResponseWriter, r *http.Request, runtime stor
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json"})
 		return
 	}
-	req.Path = strings.TrimSpace(req.Path)
+	req.Path = templatePackageRequestPath(req.TemplatePackagePath, req.Path)
 	if req.Path == "" {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "path is required"})
 		return
@@ -268,7 +288,7 @@ func handleProfileInstall(w http.ResponseWriter, r *http.Request, profileHome st
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json"})
 		return
 	}
-	req.Path = strings.TrimSpace(req.Path)
+	req.Path = templatePackageRequestPath(req.TemplatePackagePath, req.Path)
 	if req.Path == "" {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "path is required"})
 		return
@@ -340,17 +360,23 @@ func importProfileBundle(ctx context.Context, runtime store.Store, req profileIm
 		return profile.Bundle{}, profileImportResponse{}, err
 	}
 	response := profileImportResponse{
-		ProfileID:    bundle.ID,
-		BundlePath:   req.Path,
-		BundleDigest: digest,
-		ImportedAt:   importedAt,
-		Counts:       profileImportCountsFrom(counts),
+		TemplatePackageID:     bundle.ID,
+		TemplatePackagePath:   req.Path,
+		TemplatePackageDigest: digest,
+		ProfileID:             bundle.ID,
+		BundlePath:            req.Path,
+		BundleDigest:          digest,
+		ImportedAt:            importedAt,
+		Counts:                profileImportCountsFrom(counts),
 		Store: profileImportStore{
-			ProfileID:    index.ProfileID,
-			BundlePath:   index.BundlePath,
-			BundleDigest: index.BundleDigest,
-			ImportedAt:   index.ImportedAt,
-			UpdatedAt:    index.UpdatedAt,
+			TemplatePackageID:     index.ProfileID,
+			TemplatePackagePath:   index.BundlePath,
+			TemplatePackageDigest: index.BundleDigest,
+			ProfileID:             index.ProfileID,
+			BundlePath:            index.BundlePath,
+			BundleDigest:          index.BundleDigest,
+			ImportedAt:            index.ImportedAt,
+			UpdatedAt:             index.UpdatedAt,
 		},
 		ConfigVersion: profileImportConfigVersionFromStore(configVersion),
 		ReadModels:    readModelKeys,
@@ -397,12 +423,13 @@ func verifyProfileBundle(ctx context.Context, runtime store.Store, path string, 
 		return profile.Bundle{}, profileVerifyResponse{}, err
 	}
 	report := profileVerifyResponse{
-		OK:        profileVerifyChecksOK(checks),
-		ProfileID: bundle.ID,
-		Audit:     *publish.Audit,
-		Publish:   publish,
-		Summary:   summarizeProfileVerification(checks, options),
-		Checks:    checks,
+		OK:                profileVerifyChecksOK(checks),
+		TemplatePackageID: bundle.ID,
+		ProfileID:         bundle.ID,
+		Audit:             *publish.Audit,
+		Publish:           publish,
+		Summary:           summarizeProfileVerification(checks, options),
+		Checks:            checks,
 	}
 	if !report.OK {
 		report.Error = fmt.Sprintf("profile verification failed for profile %q: %s", bundle.ID, firstFailedProfileVerifyCheck(checks))
@@ -619,12 +646,15 @@ func profileImportConfigVersionID(profileID string, publishedAt time.Time) strin
 
 func profileImportConfigVersionFromStore(item store.ConfigVersion) profileImportConfigVersion {
 	return profileImportConfigVersion{
-		ID:           item.ID,
-		ProfileID:    item.ProfileID,
-		SourcePath:   item.SourcePath,
-		BundleDigest: item.BundleDigest,
-		Active:       item.Active,
-		PublishedAt:  item.PublishedAt,
-		CreatedAt:    item.CreatedAt,
+		ID:                    item.ID,
+		TemplatePackageID:     item.ProfileID,
+		TemplatePackagePath:   item.SourcePath,
+		TemplatePackageDigest: item.BundleDigest,
+		ProfileID:             item.ProfileID,
+		SourcePath:            item.SourcePath,
+		BundleDigest:          item.BundleDigest,
+		Active:                item.Active,
+		PublishedAt:           item.PublishedAt,
+		CreatedAt:             item.CreatedAt,
 	}
 }

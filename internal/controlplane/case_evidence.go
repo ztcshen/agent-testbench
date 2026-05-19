@@ -9,8 +9,11 @@ import (
 	"sort"
 	"strings"
 
+	"open-test-sandbox/internal/redaction"
 	"open-test-sandbox/internal/store"
 )
+
+var ErrCaseEvidenceNotFound = errors.New("case evidence not found")
 
 func handleCaseEvidence(w http.ResponseWriter, r *http.Request, runtime store.Store) {
 	if runtime == nil {
@@ -66,7 +69,7 @@ func handleCaseRunEvidence(w http.ResponseWriter, r *http.Request, runtime store
 }
 
 func writeCaseEvidenceForCaseRunID(w http.ResponseWriter, r *http.Request, runtime store.Store, caseRunID string) {
-	run, selected, caseRuns, ok, err := findCaseEvidenceRunByCaseRunID(r.Context(), runtime, caseRunID)
+	payload, ok, err := CaseEvidencePayloadForCaseRunID(r.Context(), runtime, caseRunID)
 	if err != nil {
 		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 		return
@@ -75,7 +78,7 @@ func writeCaseEvidenceForCaseRunID(w http.ResponseWriter, r *http.Request, runti
 		writeJSONStatus(w, http.StatusNotFound, map[string]any{"ok": false, "error": "case evidence not found"})
 		return
 	}
-	writeCaseEvidencePayload(w, r, runtime, run, selected, caseRuns)
+	writeJSON(w, payload)
 }
 
 func writeCaseEvidencePayload(w http.ResponseWriter, r *http.Request, runtime store.Store, run store.Run, selected store.APICaseRun, caseRuns []store.APICaseRun) {
@@ -94,6 +97,49 @@ func writeCaseEvidencePayload(w http.ResponseWriter, r *http.Request, runtime st
 		return
 	}
 	writeJSON(w, caseEvidencePayload(run, selected, caseRuns, records, catalog, topologies))
+}
+
+func CaseEvidencePayloadForCaseRunID(ctx context.Context, runtime store.Store, caseRunID string) (map[string]any, bool, error) {
+	run, selected, caseRuns, ok, err := findCaseEvidenceRunByCaseRunID(ctx, runtime, caseRunID)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	return CaseEvidencePayloadForRun(ctx, runtime, run, selected, caseRuns)
+}
+
+func CaseEvidencePayloadForRunID(ctx context.Context, runtime store.Store, runID string, caseID string, stepID string) (map[string]any, bool, error) {
+	run, err := runtime.GetRun(ctx, strings.TrimSpace(runID))
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	caseRuns, err := runtime.ListAPICaseRuns(ctx, run.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	selected, ok := selectCaseEvidenceRun(caseRuns, "", caseID, stepID, run.SummaryJSON)
+	if !ok {
+		return nil, false, nil
+	}
+	return CaseEvidencePayloadForRun(ctx, runtime, run, selected, caseRuns)
+}
+
+func CaseEvidencePayloadForRun(ctx context.Context, runtime store.Store, run store.Run, selected store.APICaseRun, caseRuns []store.APICaseRun) (map[string]any, bool, error) {
+	records, err := runtime.ListEvidence(ctx, run.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	catalog, catalogErr := runtime.GetProfileCatalog(ctx)
+	if catalogErr != nil {
+		catalog = store.ProfileCatalog{}
+	}
+	topologies, err := runtime.ListTraceTopologies(ctx, run.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	return caseEvidencePayload(run, selected, caseRuns, records, catalog, topologies), true, nil
 }
 
 func findCaseEvidenceRunByCaseRunID(ctx context.Context, runtime store.Store, caseRunID string) (store.Run, store.APICaseRun, []store.APICaseRun, bool, error) {
@@ -189,7 +235,7 @@ func caseEvidencePayload(run store.Run, item store.APICaseRun, caseRuns []store.
 		summary["failure_reason"] = reason
 	}
 	assertions["passed"] = strings.EqualFold(valueString(assertions["status"]), store.StatusPassed)
-	return map[string]any{
+	evidence := map[string]any{
 		"ok": true,
 		"evidence": map[string]any{
 			"summary":    summary,
@@ -204,6 +250,8 @@ func caseEvidencePayload(run store.Run, item store.APICaseRun, caseRuns []store.
 			"topology":   topology,
 		},
 	}
+	evidence["evidence"] = redaction.Value(evidence["evidence"])
+	return evidence
 }
 
 func caseEvidenceSeedData(caseID string, catalog store.ProfileCatalog, run store.Run, caseRuns []store.APICaseRun) map[string]any {
@@ -390,7 +438,7 @@ func caseEvidenceLogRecordMatches(record store.EvidenceRecord, item store.APICas
 	if record.CaseRunID == item.ID || record.CaseRunID == item.CaseID {
 		return true
 	}
-	if stepID != "" && record.CaseRunID == stepID {
+	if stepID != "" && (record.CaseRunID == stepID || evidenceRecordStepID(record) == stepID) {
 		return true
 	}
 	summary := jsonObject(record.Summary)
@@ -544,7 +592,25 @@ func caseEvidenceResponse(records []store.EvidenceRecord, caseRunID string) map[
 }
 
 func evidenceAttachmentMetadata(record store.EvidenceRecord) map[string]any {
-	out := map[string]any{}
+	out := map[string]any{
+		"id":        record.ID,
+		"runId":     record.RunID,
+		"caseRunId": record.CaseRunID,
+		"kind":      record.Kind,
+		"uri":       record.URI,
+	}
+	if stepID := evidenceRecordStepID(record); stepID != "" {
+		out["stepId"] = stepID
+	}
+	if strings.TrimSpace(record.MediaType) != "" {
+		out["mediaType"] = record.MediaType
+	}
+	if strings.TrimSpace(record.SHA256) != "" {
+		out["sha256"] = record.SHA256
+	}
+	if record.SizeBytes > 0 {
+		out["sizeBytes"] = record.SizeBytes
+	}
 	if strings.TrimSpace(record.Category) != "" {
 		out["category"] = record.Category
 	}

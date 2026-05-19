@@ -46,7 +46,11 @@ func handleAPICaseRun(w http.ResponseWriter, r *http.Request, bundle profile.Bun
 		return
 	}
 	if runtime != nil {
-		if err := recordAPICaseRun(r.Context(), runtime, bundle.ID, result); err != nil {
+		if err := recordAPICaseRunWithContext(r.Context(), runtime, recordAPICaseRunContext{
+			ProfileID:  bundle.ID,
+			WorkflowID: valueString(payload["workflowId"]),
+			StepID:     valueString(payload["stepId"]),
+		}, result); err != nil {
 			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
@@ -60,7 +64,17 @@ func handleAPICaseRun(w http.ResponseWriter, r *http.Request, bundle profile.Bun
 	})
 }
 
+type recordAPICaseRunContext struct {
+	ProfileID  string
+	WorkflowID string
+	StepID     string
+}
+
 func recordAPICaseRun(ctx context.Context, runtime store.Store, profileID string, result apicase.RunResult) error {
+	return recordAPICaseRunWithContext(ctx, runtime, recordAPICaseRunContext{ProfileID: profileID}, result)
+}
+
+func recordAPICaseRunWithContext(ctx context.Context, runtime store.Store, runContext recordAPICaseRunContext, result apicase.RunResult) error {
 	now := time.Now().UTC()
 	startedAt := apiCaseResultTime(result.StartedAt, now)
 	finishedAt := apiCaseResultTime(result.FinishedAt, now)
@@ -71,12 +85,27 @@ func recordAPICaseRun(ctx context.Context, runtime store.Store, profileID string
 	if err != nil {
 		return err
 	}
+	workflowID := strings.TrimSpace(runContext.WorkflowID)
+	stepID := strings.TrimSpace(runContext.StepID)
+	if stepID != "" {
+		requestSummary = compactJSONObjectWithFields(requestSummary, map[string]any{"stepId": stepID})
+	}
+	runSummary := apiCaseRunReport(result)
+	if workflowID != "" {
+		runSummary["workflow_id"] = workflowID
+		runSummary["workflowId"] = workflowID
+	}
+	if stepID != "" {
+		runSummary["step_id"] = stepID
+		runSummary["stepId"] = stepID
+	}
 	if _, err := runtime.CreateRun(ctx, store.Run{
 		ID:           result.RunID,
-		ProfileID:    profileID,
+		ProfileID:    runContext.ProfileID,
+		WorkflowID:   workflowID,
 		Status:       result.Status,
 		EvidenceRoot: result.EvidencePath,
-		SummaryJSON:  compactJSON(apiCaseRunReport(result)),
+		SummaryJSON:  compactJSON(runSummary),
 		StartedAt:    startedAt,
 		FinishedAt:   finishedAt,
 		CreatedAt:    startedAt,
@@ -112,10 +141,19 @@ func recordAPICaseRun(ctx context.Context, runtime store.Store, profileID string
 		if err != nil {
 			return err
 		}
+		labels := map[string]any{
+			"caseId": result.CaseID,
+			"kind":   kind,
+			"runId":  result.RunID,
+		}
+		if stepID != "" {
+			labels["stepId"] = stepID
+		}
 		if _, err := runtime.RecordEvidence(ctx, store.EvidenceRecord{
 			ID:         result.RunID + "." + name,
 			RunID:      result.RunID,
 			CaseRunID:  caseRunID,
+			StepID:     stepID,
 			Kind:       kind,
 			URI:        path,
 			MediaType:  "application/json",
@@ -123,17 +161,23 @@ func recordAPICaseRun(ctx context.Context, runtime store.Store, profileID string
 			Summary:    summary,
 			Category:   apiCaseEvidenceCategory(kind),
 			Visibility: "public",
-			LabelsJSON: compactJSON(map[string]any{
-				"caseId": result.CaseID,
-				"kind":   kind,
-				"runId":  result.RunID,
-			}),
-			CreatedAt: finishedAt,
+			LabelsJSON: compactJSON(labels),
+			CreatedAt:  finishedAt,
 		}); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func compactJSONObjectWithFields(raw string, fields map[string]any) string {
+	out := jsonObject(raw)
+	for key, value := range fields {
+		if strings.TrimSpace(valueString(value)) != "" {
+			out[key] = value
+		}
+	}
+	return compactJSON(out)
 }
 
 func apiCaseEvidenceCategory(kind string) string {

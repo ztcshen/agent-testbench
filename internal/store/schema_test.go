@@ -70,6 +70,19 @@ func TestSQLiteSchemaIncludesTemplateConfigModel(t *testing.T) {
 	}
 }
 
+func TestSQLiteSchemaIncludesEvidenceStepRelation(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
+	if _, err := sqlite.UpgradeSchema(ctx, sqlite.Config{Path: dbPath}); err != nil {
+		t.Fatalf("upgrade schema: %v", err)
+	}
+
+	columns := sqliteTableColumns(t, dbPath, "evidence_records")
+	if !columns["step_id"] {
+		t.Fatalf("missing evidence_records.step_id in %#v", columns)
+	}
+}
+
 func sqliteTableNames(t *testing.T, dbPath string) map[string]bool {
 	t.Helper()
 	out, err := exec.Command("sqlite3", "-json", dbPath, `select name from sqlite_master where type = 'table';`).CombinedOutput()
@@ -87,4 +100,23 @@ func sqliteTableNames(t *testing.T, dbPath string) map[string]bool {
 		tables[row.Name] = true
 	}
 	return tables
+}
+
+func sqliteTableColumns(t *testing.T, dbPath string, table string) map[string]bool {
+	t.Helper()
+	out, err := exec.Command("sqlite3", "-json", dbPath, `pragma table_info(`+table+`);`).CombinedOutput()
+	if err != nil {
+		t.Fatalf("list sqlite columns: %v: %s", err, out)
+	}
+	var rows []struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(out, &rows); err != nil {
+		t.Fatalf("decode sqlite columns: %v: %s", err, out)
+	}
+	columns := map[string]bool{}
+	for _, row := range rows {
+		columns[row.Name] = true
+	}
+	return columns
 }

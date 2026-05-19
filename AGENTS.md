@@ -24,6 +24,11 @@ API-operated, Store-first, and local-first.
 - Runtime Evidence, logs, and local databases must not be committed.
 - Prefer small, verifiable slices with tests and a commit per slice.
 - Use headless/background verification for local browser checks.
+- For any moderately large change, first do web research and ground the design
+  in mature open-source projects before editing. This is mandatory when the
+  change is expected to touch 3 or more files or exceed roughly 200 lines of
+  code. Do not rely on pure inference to generate substantial architecture,
+  API, persistence, migration, or workflow code.
 
 ## Project Shape
 

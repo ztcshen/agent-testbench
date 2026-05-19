@@ -221,7 +221,7 @@ function ServiceHealth({ snapshot }) {
   );
 }
 
-function ProfileImportPanel({ onImported }) {
+function TemplatePackageImportPanel({ onImported }) {
   const [path, setPath] = useState("/path/to/template-package");
   const [audit, setAudit] = useState(true);
   const [requireAuditOk, setRequireAuditOk] = useState(false);
@@ -230,17 +230,17 @@ function ProfileImportPanel({ onImported }) {
   const [installForce, setInstallForce] = useState(false);
   const [message, setMessage] = useState("ready");
   const [report, setReport] = useState(null);
-  const [installedProfiles, setInstalledProfiles] = useState([]);
-  const [profileHome, setProfileHome] = useState("");
+  const [installedTemplatePackages, setInstalledTemplatePackages] = useState([]);
+  const [templatePackageHome, setTemplatePackageHome] = useState("");
 
-  async function loadInstalledProfiles() {
+  async function loadInstalledTemplatePackages() {
     try {
       const payload = await fetchJSON("/api/template-packages/installed");
-      setInstalledProfiles(payload.profiles || []);
-      setProfileHome(payload.profileHome || "");
+      setInstalledTemplatePackages(payload.templatePackages || payload.profiles || []);
+      setTemplatePackageHome(payload.templatePackageHome || payload.profileHome || "");
     } catch (error) {
-      setInstalledProfiles([]);
-      setProfileHome(error.message);
+      setInstalledTemplatePackages([]);
+      setTemplatePackageHome(error.message);
     }
   }
 
@@ -248,7 +248,7 @@ function ProfileImportPanel({ onImported }) {
     setMessage("importing...");
     setReport(null);
     try {
-      const nextReport = await postJSON("/api/template-packages/import", { path, audit, requireAuditOk, force: installForce });
+      const nextReport = await postJSON("/api/template-packages/import", { templatePackagePath: path, audit, requireAuditOk, force: installForce });
       setReport(nextReport);
       setMessage("imported");
       onImported?.();
@@ -261,11 +261,11 @@ function ProfileImportPanel({ onImported }) {
     setMessage("installing...");
     setReport(null);
     try {
-      const installReport = await postJSON("/api/template-packages/install", { path, force: installForce });
-      setPath(installReport.id || path);
-      setReport({ profileId: installReport.id, bundleDigest: installReport.bundleDigest, counts: {} });
+      const installReport = await postJSON("/api/template-packages/install", { templatePackagePath: path, force: installForce });
+      setPath(installReport.templatePackageId || installReport.id || path);
+      setReport({ templatePackageId: installReport.templatePackageId || installReport.id, templatePackageDigest: installReport.templatePackageDigest || installReport.bundleDigest, counts: {} });
       setMessage("installed");
-      await loadInstalledProfiles();
+      await loadInstalledTemplatePackages();
     } catch (error) {
       setMessage(error.message);
     }
@@ -275,7 +275,7 @@ function ProfileImportPanel({ onImported }) {
     setMessage("verifying...");
     setReport(null);
     try {
-      const nextReport = await postJSON("/api/template-packages/verify", { path, requireCaseRuns, requireWorkflowRuns, force: installForce });
+      const nextReport = await postJSON("/api/template-packages/verify", { templatePackagePath: path, requireCaseRuns, requireWorkflowRuns, force: installForce });
       setReport(nextReport);
       setMessage(nextReport.ok ? "verified" : "verification failed");
       onImported?.();
@@ -293,10 +293,10 @@ function ProfileImportPanel({ onImported }) {
   }
 
   useEffect(() => {
-    loadInstalledProfiles();
+    loadInstalledTemplatePackages();
   }, []);
 
-  const reportProfileId = report?.profileId || report?.publish?.profileId || "";
+  const reportTemplatePackageId = report?.templatePackageId || report?.profileId || report?.publish?.templatePackageId || report?.publish?.profileId || "";
   const reportCounts = report?.counts || report?.publish?.counts || {};
   const reportAudit = report?.audit;
   const reportVersion = report?.configVersion?.id || report?.publish?.configVersion?.id || "";
@@ -305,7 +305,7 @@ function ProfileImportPanel({ onImported }) {
   const passedChecks = reportSummary?.passedChecks ?? reportChecks.filter((item) => item.ok).length;
   const totalChecks = reportSummary?.totalChecks ?? reportChecks.length;
   const failedChecks = reportSummary?.failedChecks ?? Math.max(totalChecks - passedChecks, 0);
-  const selectedInstalledProfile = installedProfiles.find((item) => item.id === path)?.id || "";
+  const selectedInstalledTemplatePackage = installedTemplatePackages.find((item) => item.id === path)?.id || "";
 
   return (
     <section className="services">
@@ -320,9 +320,9 @@ function ProfileImportPanel({ onImported }) {
         </label>
         <label className="workflow-filter">
           <span>已安装</span>
-          <select value={selectedInstalledProfile} onChange={(event) => event.target.value && setPath(event.target.value)} title={profileHome || "template package home"}>
+          <select value={selectedInstalledTemplatePackage} onChange={(event) => event.target.value && setPath(event.target.value)} title={templatePackageHome || "template package home"}>
             <option value="">选择模板包</option>
-            {installedProfiles.map((item) => (
+            {installedTemplatePackages.map((item) => (
               <option value={item.id} key={item.id} disabled={item.valid === false}>
                 {item.valid === false ? `${item.id} · invalid` : `${item.id} · ${item.counts?.workflows || 0} workflows`}
               </option>
@@ -356,7 +356,7 @@ function ProfileImportPanel({ onImported }) {
       {report ? (
         <div className="profile-verify-report">
           <div className="profile-verify-summary">
-            {`${reportProfileId} · ${reportCounts.apiCases || 0} cases · ${reportCounts.workflows || 0} workflows${reportAudit ? ` · issues ${reportAudit.issueCount || 0}` : ""}${totalChecks ? ` · checks ${passedChecks}/${totalChecks}` : ""}${reportVersion ? ` · ${reportVersion}` : ""}`}
+            {`${reportTemplatePackageId} · ${reportCounts.apiCases || 0} cases · ${reportCounts.workflows || 0} workflows${reportAudit ? ` · issues ${reportAudit.issueCount || 0}` : ""}${totalChecks ? ` · checks ${passedChecks}/${totalChecks}` : ""}${reportVersion ? ` · ${reportVersion}` : ""}`}
           </div>
           {reportSummary ? (
             <div className="profile-verify-metrics">
@@ -456,7 +456,7 @@ function SandboxWorkbenchApp() {
           <RunHistory runs={runs} caseRuns={caseRuns} onRefresh={refreshRuns} />
         </div>
         <aside className="sandbox-workbench-side">
-          <ProfileImportPanel onImported={refresh} />
+          <TemplatePackageImportPanel onImported={refresh} />
           <Topology catalog={catalog} />
           <EvidenceLinks runs={runs} />
           <ServiceHealth snapshot={snapshot} />

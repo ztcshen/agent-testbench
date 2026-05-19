@@ -15,11 +15,14 @@ import (
 )
 
 type InstallReport struct {
-	ID           string `json:"id"`
-	DisplayName  string `json:"displayName"`
-	SourcePath   string `json:"sourcePath"`
-	TargetPath   string `json:"targetPath"`
-	BundleDigest string `json:"bundleDigest"`
+	TemplatePackageID     string `json:"templatePackageId"`
+	TemplatePackagePath   string `json:"templatePackagePath"`
+	TemplatePackageDigest string `json:"templatePackageDigest"`
+	ID                    string `json:"id"`
+	DisplayName           string `json:"displayName"`
+	SourcePath            string `json:"sourcePath"`
+	TargetPath            string `json:"targetPath"`
+	BundleDigest          string `json:"bundleDigest"`
 }
 
 type PackReport struct {
@@ -32,18 +35,23 @@ type PackReport struct {
 }
 
 type ListReport struct {
-	ProfileHome string     `json:"profileHome"`
-	Profiles    []ListItem `json:"profiles"`
+	TemplatePackageHome string     `json:"templatePackageHome"`
+	TemplatePackages    []ListItem `json:"templatePackages"`
+	ProfileHome         string     `json:"profileHome"`
+	Profiles            []ListItem `json:"profiles"`
 }
 
 type ListItem struct {
-	ID           string `json:"id"`
-	DisplayName  string `json:"displayName"`
-	Path         string `json:"path"`
-	BundleDigest string `json:"bundleDigest"`
-	Counts       Counts `json:"counts"`
-	Valid        bool   `json:"valid"`
-	Error        string `json:"error,omitempty"`
+	TemplatePackageID     string `json:"templatePackageId"`
+	TemplatePackagePath   string `json:"templatePackagePath"`
+	TemplatePackageDigest string `json:"templatePackageDigest"`
+	ID                    string `json:"id"`
+	DisplayName           string `json:"displayName"`
+	Path                  string `json:"path"`
+	BundleDigest          string `json:"bundleDigest"`
+	Counts                Counts `json:"counts"`
+	Valid                 bool   `json:"valid"`
+	Error                 string `json:"error,omitempty"`
 }
 
 type Counts struct {
@@ -144,11 +152,14 @@ func Install(from string, homeValue string, force bool) (InstallReport, error) {
 		return InstallReport{}, err
 	}
 	return InstallReport{
-		ID:           bundle.ID,
-		DisplayName:  bundle.DisplayName,
-		SourcePath:   originalSourcePath,
-		TargetPath:   targetPath,
-		BundleDigest: digest,
+		TemplatePackageID:     bundle.ID,
+		TemplatePackagePath:   targetPath,
+		TemplatePackageDigest: digest,
+		ID:                    bundle.ID,
+		DisplayName:           bundle.DisplayName,
+		SourcePath:            originalSourcePath,
+		TargetPath:            targetPath,
+		BundleDigest:          digest,
 	}, nil
 }
 
@@ -213,7 +224,7 @@ func List(homeValue string) (ListReport, error) {
 	if err != nil {
 		return ListReport{}, err
 	}
-	report := ListReport{ProfileHome: home, Profiles: []ListItem{}}
+	report := ListReport{TemplatePackageHome: home, TemplatePackages: []ListItem{}, ProfileHome: home, Profiles: []ListItem{}}
 	entries, err := os.ReadDir(home)
 	if errors.Is(err, os.ErrNotExist) {
 		return report, nil
@@ -243,17 +254,21 @@ func List(homeValue string) (ListReport, error) {
 			continue
 		}
 		report.Profiles = append(report.Profiles, ListItem{
-			ID:           bundle.ID,
-			DisplayName:  bundle.DisplayName,
-			Path:         path,
-			BundleDigest: digest,
-			Counts:       countsFrom(bundle.Counts()),
-			Valid:        true,
+			TemplatePackageID:     bundle.ID,
+			TemplatePackagePath:   path,
+			TemplatePackageDigest: digest,
+			ID:                    bundle.ID,
+			DisplayName:           bundle.DisplayName,
+			Path:                  path,
+			BundleDigest:          digest,
+			Counts:                countsFrom(bundle.Counts()),
+			Valid:                 true,
 		})
 	}
 	sort.Slice(report.Profiles, func(i, j int) bool {
 		return report.Profiles[i].ID < report.Profiles[j].ID
 	})
+	report.TemplatePackages = report.Profiles
 	return report, nil
 }
 
@@ -443,10 +458,12 @@ func findExtractedProfileRoot(tempDir string) (string, error) {
 
 func invalidListItem(id string, path string, err error) ListItem {
 	return ListItem{
-		ID:    strings.TrimSpace(id),
-		Path:  path,
-		Valid: false,
-		Error: err.Error(),
+		TemplatePackageID:   strings.TrimSpace(id),
+		TemplatePackagePath: path,
+		ID:                  strings.TrimSpace(id),
+		Path:                path,
+		Valid:               false,
+		Error:               err.Error(),
 	}
 }
 

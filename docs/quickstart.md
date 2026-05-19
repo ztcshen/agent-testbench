@@ -31,17 +31,38 @@ Demo output is kept under the system temp directory so you can inspect it after
 the command exits. Set `OTSANDBOX_CLEAN_DEMO_OUTPUT=1` to remove it
 automatically.
 
-## Create a Local Store
+## Configure a PostgreSQL Store
+
+```sh
+./bin/otsandbox.sh store config set local-personal \
+  --url "postgres://user:pass@host:5432/otsandbox_local?sslmode=disable"
+./bin/otsandbox.sh store use local-personal
+./bin/otsandbox.sh store status --store local-personal
+./bin/otsandbox.sh store upgrade --store local-personal
+```
+
+Use a private PostgreSQL database for unverified local work and a separate
+shared database for verified team environments. SQLite is kept only for legacy
+compatibility while PostgreSQL rollout continues.
+
+Daily discovery commands do not change when you switch between a local
+PostgreSQL Store and a remote team PostgreSQL Store. Use `store use NAME` to
+change the active Store, or `--store NAME_OR_DSN` for a one-off read:
+
+```sh
+./bin/otsandbox.sh case discover --filter "login"
+./bin/otsandbox.sh workflow discover --store team-verified --filter "smoke"
+./bin/otsandbox.sh interface-node discover --store local-personal --filter "POST /orders"
+```
+
+For sample commands that have not yet migrated to `--store NAME_OR_DSN`, create
+a temporary compatibility Store:
 
 ```sh
 tmpdir=$(mktemp -d)
 store="$tmpdir/store.sqlite"
-./bin/otsandbox.sh store status --store-url "$store"
 ./bin/otsandbox.sh store upgrade --store-url "$store"
 ```
-
-SQLite is the default local Store. It is runtime state and should not be
-committed.
 
 ## Create and Install a Import Bundle
 
@@ -71,6 +92,10 @@ API cases, templates, fixtures, and bindings.
 ```
 
 Open `http://127.0.0.1:18191/`.
+
+The PostgreSQL Store is the target for daily testing workflows. Some sample
+commands still show the legacy `--store-url` compatibility path until all
+runtime write paths are migrated to `--store NAME_OR_DSN`.
 
 ## Next Steps
 

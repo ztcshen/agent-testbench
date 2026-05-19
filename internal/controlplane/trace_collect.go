@@ -17,18 +17,28 @@ type traceCollector struct {
 	GraphQLURL string
 }
 
+type TraceCollector = traceCollector
+
 func handleTraceTopologyCollect(w http.ResponseWriter, r *http.Request, runtime store.Store, collector traceCollector) {
 	payload, err := readJSONPayload(r)
 	if err != nil {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json"})
 		return
 	}
-	row, topology, err := collectTraceTopology(r.Context(), runtime, collector, payload)
+	response, err := CollectTraceTopologyPayload(r.Context(), runtime, collector, payload)
 	if err != nil {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	writeJSON(w, map[string]any{"ok": true, "traceTopology": traceTopologyPayload(row), "topology": topology})
+	writeJSON(w, response)
+}
+
+func CollectTraceTopologyPayload(ctx context.Context, runtime store.Store, collector TraceCollector, payload map[string]any) (map[string]any, error) {
+	row, topology, err := collectTraceTopology(ctx, runtime, collector, payload)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"ok": true, "traceTopology": traceTopologyPayload(row), "topology": topology}, nil
 }
 
 func collectTraceTopology(ctx context.Context, runtime store.Store, collector traceCollector, payload map[string]any) (store.TraceTopology, traceTopology, error) {

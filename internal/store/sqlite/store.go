@@ -76,6 +76,9 @@ type Store struct {
 }
 
 func Open(ctx context.Context, cfg Config) (*Store, error) {
+	if sqliteStoreDisabled() {
+		return nil, errors.New("SQLite Store is disabled by OTSANDBOX_DISABLE_SQLITE_STORE; use a PostgreSQL Store for this run")
+	}
 	s, err := openRaw(ctx, cfg)
 	if err != nil {
 		return nil, err
@@ -98,6 +101,9 @@ func (r SchemaStatusResult) HasPending() bool {
 }
 
 func SchemaStatus(ctx context.Context, cfg Config) (SchemaStatusResult, error) {
+	if sqliteStoreDisabled() {
+		return SchemaStatusResult{}, errors.New("SQLite Store is disabled by OTSANDBOX_DISABLE_SQLITE_STORE; use a PostgreSQL Store for this run")
+	}
 	s, err := openRaw(ctx, cfg)
 	if err != nil {
 		return SchemaStatusResult{}, err
@@ -107,12 +113,20 @@ func SchemaStatus(ctx context.Context, cfg Config) (SchemaStatusResult, error) {
 }
 
 func UpgradeSchema(ctx context.Context, cfg Config) (SchemaStatusResult, error) {
+	if sqliteStoreDisabled() {
+		return SchemaStatusResult{}, errors.New("SQLite Store is disabled by OTSANDBOX_DISABLE_SQLITE_STORE; use a PostgreSQL Store for this run")
+	}
 	s, err := openRaw(ctx, cfg)
 	if err != nil {
 		return SchemaStatusResult{}, err
 	}
 	defer s.Close()
 	return s.upgradeSchema(ctx)
+}
+
+func sqliteStoreDisabled() bool {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv("OTSANDBOX_DISABLE_SQLITE_STORE")))
+	return value == "1" || value == "true" || value == "yes" || value == "on"
 }
 
 func openRaw(ctx context.Context, cfg Config) (*Store, error) {
@@ -481,9 +495,9 @@ func (s *Store) RecordEvidence(ctx context.Context, r store.EvidenceRecord) (sto
 		r.LabelsJSON = "{}"
 	}
 	if err := s.exec(ctx, fmt.Sprintf(`
-insert into evidence_records (id, run_id, case_run_id, kind, uri, media_type, sha256, size_bytes, summary, category, visibility, labels_json, created_at)
-values (%s, %s, %s, %s, %s, %s, %s, %d, %s, %s, %s, %s, %s);`,
-		sqlString(r.ID), sqlString(r.RunID), sqlString(r.CaseRunID), sqlString(r.Kind), sqlString(r.URI),
+insert into evidence_records (id, run_id, case_run_id, step_id, kind, uri, media_type, sha256, size_bytes, summary, category, visibility, labels_json, created_at)
+values (%s, %s, %s, %s, %s, %s, %s, %s, %d, %s, %s, %s, %s, %s);`,
+		sqlString(r.ID), sqlString(r.RunID), sqlString(r.CaseRunID), sqlString(r.StepID), sqlString(r.Kind), sqlString(r.URI),
 		sqlString(r.MediaType), sqlString(r.SHA256), r.SizeBytes, sqlString(r.Summary), sqlString(r.Category),
 		sqlString(r.Visibility), sqlString(r.LabelsJSON), sqlString(encodeTime(r.CreatedAt)))); err != nil {
 		return store.EvidenceRecord{}, fmt.Errorf("record evidence %q: %w", r.ID, err)
@@ -494,7 +508,7 @@ values (%s, %s, %s, %s, %s, %s, %s, %d, %s, %s, %s, %s, %s);`,
 func (s *Store) ListEvidence(ctx context.Context, runID string) ([]store.EvidenceRecord, error) {
 	var rows []evidenceRecordRow
 	if err := s.query(ctx, fmt.Sprintf(`
-select id, run_id, case_run_id, kind, uri, media_type, sha256, size_bytes, summary, category, visibility, labels_json, created_at
+select id, run_id, case_run_id, step_id, kind, uri, media_type, sha256, size_bytes, summary, category, visibility, labels_json, created_at
 from evidence_records where run_id = %s order by created_at, id;`, sqlString(runID)), &rows); err != nil {
 		return nil, err
 	}
@@ -1384,6 +1398,7 @@ type evidenceRecordRow struct {
 	ID         string `json:"id"`
 	RunID      string `json:"run_id"`
 	CaseRunID  string `json:"case_run_id"`
+	StepID     string `json:"step_id"`
 	Kind       string `json:"kind"`
 	URI        string `json:"uri"`
 	MediaType  string `json:"media_type"`
@@ -1401,6 +1416,7 @@ func (r evidenceRecordRow) toStore() store.EvidenceRecord {
 		ID:         r.ID,
 		RunID:      r.RunID,
 		CaseRunID:  r.CaseRunID,
+		StepID:     r.StepID,
 		Kind:       r.Kind,
 		URI:        r.URI,
 		MediaType:  r.MediaType,

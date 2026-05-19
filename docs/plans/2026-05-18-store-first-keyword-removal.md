@@ -64,3 +64,21 @@ or migration. They are not the daily testing surface.
 - The React workbench and headless smoke use the Store-first
   `/api/template-packages/*` routes for daily import, install, verify, and
   catalog-index flows.
+- The React workbench template package panel now uses Store-first component and
+  state names internally while still reading legacy response aliases during
+  migration.
+- Import, verify, install, and installed-list responses now expose
+  `templatePackage*` field aliases while retaining legacy `profile*` and
+  `bundle*` fields for compatibility.
+- Import, verify, audit-plan, and install requests now accept
+  `templatePackagePath` as the Store-first input field while retaining legacy
+  `path` only as a compatibility alias.
+- Current summary and asset-list aliases now live at
+  `/api/template-packages/current` and `/api/template-packages/assets`, with
+  legacy `/api/profile` and `/api/profile/assets` retained.
+- CLI now accepts `template-package` and `template-packages` as Store-first
+  lifecycle aliases for the existing template package commands. The legacy
+  `profile` command remains available while output text and flags are migrated.
+- CLI inspect, pack, audit, audit-plan, and verify commands now accept the
+  Store-first `--template-package` selector while retaining `--profile` as a
+  compatibility flag.
