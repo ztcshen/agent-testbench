@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,14 +13,18 @@ import (
 
 	"open-test-sandbox/internal/store"
 	"open-test-sandbox/internal/store/schema"
+	"open-test-sandbox/internal/store/sqlstore"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 type Config struct {
-	URL string
+	URL        string
+	DriverName string
 }
 
 type Store struct {
-	url string
+	core *sqlstore.Store
 }
 
 func ParseConfigFromURL(storeURL string) (Config, error) {
@@ -33,70 +38,85 @@ func ParseConfigFromURL(storeURL string) (Config, error) {
 	}
 	switch strings.ToLower(parsed.Scheme) {
 	case "postgres", "postgresql":
-		return Config{URL: storeURL}, nil
+		return Config{URL: storeURL, DriverName: sqlstore.PostgresDialect{}.DriverName()}, nil
 	default:
 		return Config{}, fmt.Errorf("unsupported postgres store backend %q", parsed.Scheme)
 	}
 }
 
 func Open(ctx context.Context, cfg Config) (*Store, error) {
-	return nil, errors.New("postgres store open is not implemented yet")
+	driverName := strings.TrimSpace(cfg.DriverName)
+	if driverName == "" {
+		driverName = sqlstore.PostgresDialect{}.DriverName()
+	}
+	db, err := sql.Open(driverName, cfg.URL)
+	if err != nil {
+		return nil, fmt.Errorf("open postgres store: %w", err)
+	}
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("ping postgres store: %w", err)
+	}
+	return &Store{core: sqlstore.New(db, sqlstore.PostgresDialect{})}, nil
 }
 
 func (s *Store) Close() error {
-	return nil
+	if s == nil || s.core == nil {
+		return nil
+	}
+	return s.core.Close()
 }
 
-func (s *Store) CreateRun(context.Context, store.Run) (store.Run, error) {
-	return store.Run{}, errPostgresStoreNotImplemented()
+func (s *Store) CreateRun(ctx context.Context, r store.Run) (store.Run, error) {
+	return s.core.CreateRun(ctx, r)
 }
 
-func (s *Store) GetRun(context.Context, string) (store.Run, error) {
-	return store.Run{}, errPostgresStoreNotImplemented()
+func (s *Store) GetRun(ctx context.Context, id string) (store.Run, error) {
+	return s.core.GetRun(ctx, id)
 }
 
-func (s *Store) ListRuns(context.Context) ([]store.Run, error) {
-	return nil, errPostgresStoreNotImplemented()
+func (s *Store) ListRuns(ctx context.Context) ([]store.Run, error) {
+	return s.core.ListRuns(ctx)
 }
 
-func (s *Store) RecordAPICaseRun(context.Context, store.APICaseRun) (store.APICaseRun, error) {
-	return store.APICaseRun{}, errPostgresStoreNotImplemented()
+func (s *Store) RecordAPICaseRun(ctx context.Context, r store.APICaseRun) (store.APICaseRun, error) {
+	return s.core.RecordAPICaseRun(ctx, r)
 }
 
-func (s *Store) ListAPICaseRuns(context.Context, string) ([]store.APICaseRun, error) {
-	return nil, errPostgresStoreNotImplemented()
+func (s *Store) ListAPICaseRuns(ctx context.Context, runID string) ([]store.APICaseRun, error) {
+	return s.core.ListAPICaseRuns(ctx, runID)
 }
 
-func (s *Store) RecordEvidence(context.Context, store.EvidenceRecord) (store.EvidenceRecord, error) {
-	return store.EvidenceRecord{}, errPostgresStoreNotImplemented()
+func (s *Store) RecordEvidence(ctx context.Context, r store.EvidenceRecord) (store.EvidenceRecord, error) {
+	return s.core.RecordEvidence(ctx, r)
 }
 
-func (s *Store) ListEvidence(context.Context, string) ([]store.EvidenceRecord, error) {
-	return nil, errPostgresStoreNotImplemented()
+func (s *Store) ListEvidence(ctx context.Context, runID string) ([]store.EvidenceRecord, error) {
+	return s.core.ListEvidence(ctx, runID)
 }
 
-func (s *Store) SaveTraceTopology(context.Context, store.TraceTopology) (store.TraceTopology, error) {
-	return store.TraceTopology{}, errPostgresStoreNotImplemented()
+func (s *Store) SaveTraceTopology(ctx context.Context, r store.TraceTopology) (store.TraceTopology, error) {
+	return s.core.SaveTraceTopology(ctx, r)
 }
 
-func (s *Store) ListTraceTopologies(context.Context, string) ([]store.TraceTopology, error) {
-	return nil, errPostgresStoreNotImplemented()
+func (s *Store) ListTraceTopologies(ctx context.Context, workflowRunID string) ([]store.TraceTopology, error) {
+	return s.core.ListTraceTopologies(ctx, workflowRunID)
 }
 
-func (s *Store) RecordPostProcessTask(context.Context, store.PostProcessTask) (store.PostProcessTask, error) {
-	return store.PostProcessTask{}, errPostgresStoreNotImplemented()
+func (s *Store) RecordPostProcessTask(ctx context.Context, r store.PostProcessTask) (store.PostProcessTask, error) {
+	return s.core.RecordPostProcessTask(ctx, r)
 }
 
-func (s *Store) ListPostProcessTasks(context.Context, string) ([]store.PostProcessTask, error) {
-	return nil, errPostgresStoreNotImplemented()
+func (s *Store) ListPostProcessTasks(ctx context.Context, runID string) ([]store.PostProcessTask, error) {
+	return s.core.ListPostProcessTasks(ctx, runID)
 }
 
-func (s *Store) UpsertBaselineGate(context.Context, store.BaselineGate) (store.BaselineGate, error) {
-	return store.BaselineGate{}, errPostgresStoreNotImplemented()
+func (s *Store) UpsertBaselineGate(ctx context.Context, r store.BaselineGate) (store.BaselineGate, error) {
+	return s.core.UpsertBaselineGate(ctx, r)
 }
 
-func (s *Store) GetBaselineGate(context.Context, string, string) (store.BaselineGate, error) {
-	return store.BaselineGate{}, errPostgresStoreNotImplemented()
+func (s *Store) GetBaselineGate(ctx context.Context, profileID string, subjectID string) (store.BaselineGate, error) {
+	return s.core.GetBaselineGate(ctx, profileID, subjectID)
 }
 
 func (s *Store) UpsertProfileIndex(context.Context, store.ProfileIndex) (store.ProfileIndex, error) {
