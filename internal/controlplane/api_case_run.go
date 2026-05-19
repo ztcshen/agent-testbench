@@ -207,7 +207,7 @@ func apiCaseEvidenceSummaries(result apicase.RunResult) (string, string, error) 
 	return requestSummary, assertionSummary, err
 }
 
-func apiCaseEvidenceSummary(path string, kind string, fallbackSize int64) (string, error) {
+func apiCaseEvidenceSummary(path string, kind string, defaultSize int64) (string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
@@ -240,10 +240,10 @@ func apiCaseEvidenceSummary(path string, kind string, fallbackSize int64) (strin
 			"errorCount": len(errorsValue),
 		}), nil
 	default:
-		if fallbackSize == 0 {
-			fallbackSize = int64(len(raw))
+		if defaultSize == 0 {
+			defaultSize = int64(len(raw))
 		}
-		return compactJSON(map[string]any{"kind": kind, "sizeBytes": fallbackSize}), nil
+		return compactJSON(map[string]any{"kind": kind, "sizeBytes": defaultSize}), nil
 	}
 }
 
@@ -285,13 +285,13 @@ func apiCaseRunRecordID(runID string) string {
 	return runID + ".case"
 }
 
-func apiCaseResultTime(value string, fallback time.Time) time.Time {
+func apiCaseResultTime(value string, defaultValue time.Time) time.Time {
 	if strings.TrimSpace(value) == "" {
-		return fallback
+		return defaultValue
 	}
 	parsed, err := time.Parse(time.RFC3339Nano, value)
 	if err != nil {
-		return fallback
+		return defaultValue
 	}
 	return parsed.UTC()
 }

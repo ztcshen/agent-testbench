@@ -155,6 +155,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
+	case "environment":
+		if err := runEnvironment(context.Background(), os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 	case "profile":
 		if err := runProfile(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -238,69 +243,75 @@ Usage:
   otsandbox store current [--json]
   otsandbox store status [--store NAME_OR_DSN] [--store-url PATH]
   otsandbox store upgrade [--store NAME_OR_DSN] [--store-url PATH]
-  otsandbox sandbox start [--store-url PATH] [--service ID] [--kind KIND] [--timeout-seconds N] [--json]
-  otsandbox sandbox service register --id ID [--store-url PATH] [--display-name NAME] [--kind KIND] [--service-port N] [--health-url URL] [--json]
-  otsandbox sandbox interface register --id ID --service-id ID --path PATH [--store-url PATH] [--method METHOD] [--case-id ID] [--case-title TEXT] [--required-for-admission] [--json]
+  otsandbox environment register --id ID [--store NAME_OR_DSN] [--display-name NAME] [--service ID] [--repo SERVICE=PATH] [--branch SERVICE=BRANCH] [--checkout SERVICE=PATH] [--compose-file PATH] [--start-command TEXT] [--health-url URL] [--verification-workflow ID] [--json]
+  otsandbox environment discover [--store NAME_OR_DSN] [--all] [--json]
+  otsandbox environment inspect ENV_ID [--store NAME_OR_DSN] [--json]
+  otsandbox environment bootstrap ENV_ID [--store NAME_OR_DSN] [--json]
+  otsandbox environment verify ENV_ID --run ID --status STATUS [--evidence-complete] [--topology-complete] [--store NAME_OR_DSN] [--json]
+  otsandbox environment publish-verified ENV_ID [--store NAME_OR_DSN] [--json]
+  otsandbox sandbox start [--store NAME_OR_DSN] [--store-url PATH] [--service ID] [--kind KIND] [--timeout-seconds N] [--json]
+  otsandbox sandbox service register --id ID [--store NAME_OR_DSN] [--store-url PATH] [--display-name NAME] [--kind KIND] [--service-port N] [--health-url URL] [--json]
+  otsandbox sandbox interface register --id ID --service-id ID --path PATH [--store NAME_OR_DSN] [--store-url PATH] [--method METHOD] [--case-id ID] [--case-title TEXT] [--required-for-admission] [--json]
   otsandbox template-package install --from PATH [--profile-home PATH] [--force]
   otsandbox template-package inspect --template-package PATH_OR_ID [--profile-home PATH]
-  otsandbox template-package catalog-index [--store-url PATH] [--json]
-  otsandbox template-package verify --template-package PATH_OR_ID [--profile-home PATH] [--store-url PATH] [--require-case-runs] [--require-workflow-runs] [--json] [--force]
-  otsandbox template-package import --from PATH_OR_ID [--profile-home PATH] [--store-url PATH] [--json] [--audit] [--require-audit-ok] [--force]
+  otsandbox template-package catalog-index [--store NAME_OR_DSN] [--store-url PATH] [--json]
+  otsandbox template-package verify --template-package PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--require-case-runs] [--require-workflow-runs] [--json] [--force]
+  otsandbox template-package import --from PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--json] [--audit] [--require-audit-ok] [--force]
   otsandbox profile init --output PATH [--id ID] [--display-name NAME] [--force]
   otsandbox profile install --from PATH [--profile-home PATH] [--force]
   otsandbox profile pack --profile PATH_OR_ID --output PATH [--profile-home PATH] [--force]
   otsandbox profile list [--profile-home PATH] [--json]
   otsandbox profile inspect --profile PATH_OR_ID [--profile-home PATH]
-  otsandbox profile audit --profile PATH_OR_ID [--profile-home PATH] [--store-url PATH] [--json] [--force]
-  otsandbox profile audit-plan --profile PATH_OR_ID [--profile-home PATH] [--store-url PATH] [--json] [--force]
+  otsandbox profile audit --profile PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--json] [--force]
+  otsandbox profile audit-plan --profile PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--json] [--force]
   otsandbox profile generation-plan openapi --from PATH [--service-id ID] [--evidence-dir PATH] [--output-dir PATH] [--json]
   otsandbox profile import-plan openapi --from PATH [--service-id ID] [--evidence-dir PATH] [--output-dir PATH] [--json]
   otsandbox profile import-plan http-capture --from PATH [--service-id ID] [--evidence-dir PATH] [--output-dir PATH] [--json]
-  otsandbox profile verify --profile PATH_OR_ID [--profile-home PATH] [--store-url PATH] [--require-case-runs] [--require-workflow-runs] [--json] [--force]
-  otsandbox profile import --from PATH_OR_ID [--profile-home PATH] [--store-url PATH] [--json] [--audit] [--require-audit-ok] [--force]
-  otsandbox config publish --from PATH_OR_ID [--profile-home PATH] [--store-url PATH] [--json] [--audit] [--require-audit-ok] [--force]
-  otsandbox executor plan --profile PATH_OR_ID [--profile-home PATH] [--json]
-  otsandbox evidence import --from PATH --profile ID [--store-url PATH]
-  otsandbox evidence list [--store-url PATH] [--run ID] [--json]
-  otsandbox evidence tasks --store-url PATH --run ID [--step ID] [--case ID] [--kind KIND] [--status STATUS] [--json]
-  otsandbox trace topology collect --run ID [--store-url PATH] --trace-graphql-url URL [--step ID] [--case ID] [--request ID] [--endpoint TEXT] [--trace-id ID] [--json]
+  otsandbox profile verify --profile PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--require-case-runs] [--require-workflow-runs] [--json] [--force]
+  otsandbox profile import --from PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--json] [--audit] [--require-audit-ok] [--force]
+  otsandbox config publish --from PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--json] [--audit] [--require-audit-ok] [--force]
+  otsandbox executor plan [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--json]
+  otsandbox evidence import --from PATH --profile ID [--store NAME_OR_DSN] [--store-url PATH]
+  otsandbox evidence list [--store NAME_OR_DSN] [--store-url PATH] [--run ID] [--json]
+  otsandbox evidence tasks [--store NAME_OR_DSN] [--store-url PATH] --run ID [--step ID] [--case ID] [--kind KIND] [--status STATUS] [--json]
+  otsandbox trace topology collect --run ID [--store NAME_OR_DSN] [--store-url PATH] --trace-graphql-url URL [--step ID] [--case ID] [--request ID] [--endpoint TEXT] [--trace-id ID] [--json]
   otsandbox replay evidence --trace-id ID [--json]
   otsandbox workflow discover [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--filter TEXT] [--json]
-  otsandbox workflow plan [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] --workflow ID [--json]
-  otsandbox workflow audit --profile PATH --workflow ID [--store-url PATH] [--json]
-  otsandbox workflow runs [--store-url PATH] [--json]
-  otsandbox workflow run --run ID [--store-url PATH] [--json]
-  otsandbox workflow step --run ID --step ID [--store-url PATH] [--json]
-  otsandbox workflow latest-step --workflow ID --step ID [--store-url PATH] [--json]
-  otsandbox workflow report --workflow ID [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--base-url URL] [--output-dir PATH] [--json]
-  otsandbox baseline get --profile ID --subject ID [--store-url PATH]
-  otsandbox baseline set --profile ID --subject ID --status STATUS [--required] [--store-url PATH]
-  otsandbox template render --profile PATH --template ID [--fixture ID]
+  otsandbox workflow plan [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] --workflow ID [--json]
+  otsandbox workflow audit --profile PATH --workflow ID [--store NAME_OR_DSN] [--store-url PATH] [--json]
+  otsandbox workflow runs [--store NAME_OR_DSN] [--store-url PATH] [--json]
+  otsandbox workflow run --run ID [--store NAME_OR_DSN] [--store-url PATH] [--json]
+  otsandbox workflow step --run ID --step ID [--store NAME_OR_DSN] [--store-url PATH] [--json]
+  otsandbox workflow latest-step --workflow ID --step ID [--store NAME_OR_DSN] [--store-url PATH] [--json]
+  otsandbox workflow report --workflow ID [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--base-url URL] [--output-dir PATH] [--json]
+  otsandbox baseline get --profile ID --subject ID [--store NAME_OR_DSN] [--store-url PATH]
+  otsandbox baseline set --profile ID --subject ID --status STATUS [--required] [--store NAME_OR_DSN] [--store-url PATH]
+  otsandbox template render [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] --template ID [--fixture ID]
   otsandbox interface-node discover [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--filter TEXT] [--json]
-  otsandbox interface-node coverage [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--workflow ID] [--json]
-  otsandbox interface-node coverage-gaps [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--workflow ID] [--json]
+  otsandbox interface-node coverage [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--workflow ID] [--json]
+  otsandbox interface-node coverage-gaps [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--workflow ID] [--json]
   otsandbox interface-node case audit --profile PATH --node ID [--json]
   otsandbox interface-node case draft --profile PATH --node ID --case-id ID [--title TEXT] [--case-path PATH] [--method METHOD] [--path PATH] [--tag TAG] [--priority PRIORITY] [--owner OWNER] [--output PATH] [--json]
   otsandbox interface-node case apply --profile PATH --file PATH [--json]
-  otsandbox interface-node case report --node ID [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
+  otsandbox interface-node case report --node ID [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
   otsandbox case discover [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
-  otsandbox case suite report [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
-  otsandbox case suite coverage [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
-  otsandbox case suite stability [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--json]
-  otsandbox case suite priority [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
-  otsandbox case suite brief [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--stability-limit N] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
-  otsandbox case suite quality [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
-  otsandbox case suite quality-plan [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
-  otsandbox case suite quality-report [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--output-dir PATH] [--json]
-  otsandbox case suite inspect [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
-  otsandbox case suite plan [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
-  otsandbox case suite impact [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
-  otsandbox case suite impact-report [--profile PATH_OR_ID] [--profile-home PATH] [--store-url PATH] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
-  otsandbox case runs [--store-url PATH] [--run ID] [--json]
-  otsandbox case evidence [--store-url PATH] [--case-run ID | --run ID [--case-id ID] [--step-id ID]] [--json]
-  otsandbox case timing [--store-url PATH] [--kind KIND] [--max-age-minutes N] [--json]
-  otsandbox case run --case PATH --base-url URL [--override KEY=VALUE] [--evidence-dir PATH]
-  otsandbox case incomplete-batches --profile PATH [--store-url PATH] [--json]
+  otsandbox case suite report [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
+  otsandbox case suite coverage [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
+  otsandbox case suite stability [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--json]
+  otsandbox case suite priority [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
+  otsandbox case suite brief [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--stability-limit N] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
+  otsandbox case suite quality [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
+  otsandbox case suite quality-plan [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
+  otsandbox case suite quality-report [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--output-dir PATH] [--json]
+  otsandbox case suite inspect [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
+  otsandbox case suite plan [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
+  otsandbox case suite impact [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
+  otsandbox case suite impact-report [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--store-url PATH] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
+  otsandbox case runs [--store NAME_OR_DSN] [--store-url PATH] [--run ID] [--json]
+  otsandbox case evidence [--store NAME_OR_DSN] [--store-url PATH] [--case-run ID | --run ID [--case-id ID] [--step-id ID]] [--json]
+  otsandbox case timing [--store NAME_OR_DSN] [--store-url PATH] [--kind KIND] [--max-age-minutes N] [--json]
+  otsandbox case run (--case PATH | --case-id ID) [--base-url URL] [--override KEY=VALUE] [--evidence-dir PATH] [--store NAME_OR_DSN] [--store-url PATH] [--run-id ID] [--json]
+  otsandbox case incomplete-batches [--profile PATH_OR_ID] [--store NAME_OR_DSN] [--store-url PATH] [--json]
   otsandbox serve [--profile PATH_OR_ID] [--profile-home PATH] [--host HOST] [--port PORT] [--store NAME_OR_DSN] [--store-url PATH]
   otsandbox help
 
@@ -325,7 +336,7 @@ func runStore(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("store "+args[0], flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -382,6 +393,451 @@ func runStore(ctx context.Context, args []string) error {
 		return fmt.Errorf("unknown store command: %s", args[0])
 	}
 	return nil
+}
+
+func runEnvironment(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing environment command")
+	}
+	switch args[0] {
+	case "register":
+		return runEnvironmentRegister(ctx, args[1:])
+	case "discover":
+		return runEnvironmentDiscover(ctx, args[1:])
+	case "inspect":
+		return runEnvironmentInspect(ctx, args[1:])
+	case "bootstrap":
+		return runEnvironmentBootstrap(ctx, args[1:])
+	case "verify":
+		return runEnvironmentVerify(ctx, args[1:])
+	case "publish-verified":
+		return runEnvironmentPublishVerified(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown environment command: %s", args[0])
+	}
+}
+
+func runEnvironmentRegister(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("environment register", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
+	id := flags.String("id", "", "Environment id")
+	displayName := flags.String("display-name", "", "Environment display name")
+	description := flags.String("description", "", "Environment description")
+	status := flags.String("status", "draft", "Environment status")
+	verificationWorkflowID := flags.String("verification-workflow", "", "Verification workflow id")
+	composeFile := flags.String("compose-file", "", "Local compose file path")
+	startCommand := flags.String("start-command", "", "Local startup command")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	var services, repos, branches, checkouts, healthURLs stringListFlag
+	flags.Var(&services, "service", "Service id; repeat for multiple services")
+	flags.Var(&repos, "repo", "Service repo as SERVICE=PATH_OR_URL; repeat for multiple services")
+	flags.Var(&branches, "branch", "Service branch as SERVICE=BRANCH; repeat for multiple services")
+	flags.Var(&checkouts, "checkout", "Service checkout path as SERVICE=PATH; repeat for multiple services")
+	flags.Var(&healthURLs, "health-url", "Health check URL; repeat for multiple checks")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*id) == "" {
+		return errors.New("--id is required")
+	}
+	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	env := store.Environment{
+		ID:                     strings.TrimSpace(*id),
+		DisplayName:            strings.TrimSpace(*displayName),
+		Description:            strings.TrimSpace(*description),
+		Status:                 stringDefault(strings.TrimSpace(*status), "draft"),
+		ServicesJSON:           mustCompactJSON(environmentServices(services, repos, branches, checkouts)),
+		ReposJSON:              mustCompactJSON(environmentRepoMap(repos, branches, checkouts)),
+		ComposeJSON:            mustCompactJSON(map[string]any{"composeFile": strings.TrimSpace(*composeFile), "startCommand": strings.TrimSpace(*startCommand)}),
+		HealthChecksJSON:       mustCompactJSON(environmentHealthChecks(healthURLs)),
+		VerificationWorkflowID: strings.TrimSpace(*verificationWorkflowID),
+		SummaryJSON:            mustCompactJSON(map[string]any{"source": "cli"}),
+	}
+	env, err = runtime.UpsertEnvironment(ctx, env)
+	if err != nil {
+		return err
+	}
+	return printEnvironmentCommandResult(env, *jsonOutput)
+}
+
+func runEnvironmentDiscover(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("environment discover", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
+	includeAll := flags.Bool("all", false, "Include environments that are not verified")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	items, err := runtime.ListEnvironments(ctx)
+	if err != nil {
+		return err
+	}
+	filtered := make([]store.Environment, 0, len(items))
+	for _, item := range items {
+		if *includeAll || item.Verified {
+			filtered = append(filtered, item)
+		}
+	}
+	payload := map[string]any{"ok": true, "count": len(filtered), "items": environmentPayloads(filtered)}
+	if *jsonOutput {
+		return writeIndentedJSON(payload)
+	}
+	fmt.Printf("Environments: %d\n", len(filtered))
+	for _, item := range filtered {
+		fmt.Printf("- %s [%s] verified=%t workflow=%s\n", item.ID, item.Status, item.Verified, item.VerificationWorkflowID)
+	}
+	return nil
+}
+
+func runEnvironmentInspect(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("environment inspect", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	id := strings.TrimSpace(flags.Arg(0))
+	if id == "" {
+		return errors.New("environment id is required")
+	}
+	env, err := loadEnvironmentForCLI(ctx, *storeRef, *storeURL, id)
+	if err != nil {
+		return err
+	}
+	return printEnvironmentCommandResult(env, *jsonOutput)
+}
+
+func runEnvironmentBootstrap(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("environment bootstrap", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	id := strings.TrimSpace(flags.Arg(0))
+	if id == "" {
+		return errors.New("environment id is required")
+	}
+	env, err := loadEnvironmentForCLI(ctx, *storeRef, *storeURL, id)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":          true,
+		"environment": environmentPayload(env),
+		"plan": map[string]any{
+			"repos":                jsonObjectString(env.ReposJSON),
+			"compose":              jsonObjectString(env.ComposeJSON),
+			"healthChecks":         jsonArrayString(env.HealthChecksJSON),
+			"verificationWorkflow": env.VerificationWorkflowID,
+		},
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(payload)
+	}
+	fmt.Printf("Environment Bootstrap Plan: %s\n", env.ID)
+	fmt.Printf("Verification Workflow: %s\n", env.VerificationWorkflowID)
+	fmt.Printf("Repos: %s\n", env.ReposJSON)
+	fmt.Printf("Compose: %s\n", env.ComposeJSON)
+	return nil
+}
+
+func runEnvironmentVerify(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("environment verify", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
+	runID := flags.String("run", "", "Verification run id")
+	status := flags.String("status", "", "Verification status")
+	evidenceComplete := flags.Bool("evidence-complete", false, "Evidence is complete for the verification run")
+	topologyComplete := flags.Bool("topology-complete", false, "SkyWalking topology is complete for the verification run")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	id := strings.TrimSpace(flags.Arg(0))
+	if id == "" {
+		return errors.New("environment id is required")
+	}
+	if strings.TrimSpace(*runID) == "" || strings.TrimSpace(*status) == "" {
+		return errors.New("--run and --status are required")
+	}
+	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	env, err := runtime.GetEnvironment(ctx, id)
+	if err != nil {
+		return err
+	}
+	env.LastVerificationRunID = strings.TrimSpace(*runID)
+	env.LastVerificationStatus = strings.TrimSpace(*status)
+	env.EvidenceComplete = *evidenceComplete
+	env.TopologyComplete = *topologyComplete
+	env.Verified = false
+	env.Status = "verification-recorded"
+	if env.LastVerificationStatus == store.StatusPassed && env.EvidenceComplete && env.TopologyComplete {
+		env.Status = "verified-ready"
+		env.LastVerifiedAt = time.Now().UTC()
+	}
+	env, err = runtime.UpsertEnvironment(ctx, env)
+	if err != nil {
+		return err
+	}
+	return printEnvironmentCommandResult(env, *jsonOutput)
+}
+
+func runEnvironmentPublishVerified(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("environment publish-verified", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	id := strings.TrimSpace(flags.Arg(0))
+	if id == "" {
+		return errors.New("environment id is required")
+	}
+	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	env, err := runtime.GetEnvironment(ctx, id)
+	if err != nil {
+		return err
+	}
+	if env.LastVerificationStatus != store.StatusPassed || !env.EvidenceComplete || !env.TopologyComplete {
+		return fmt.Errorf("environment %s is not publishable: verification must pass with complete Evidence and SkyWalking topology", env.ID)
+	}
+	env.Verified = true
+	env.Status = "verified"
+	if env.LastVerifiedAt.IsZero() {
+		env.LastVerifiedAt = time.Now().UTC()
+	}
+	env, err = runtime.UpsertEnvironment(ctx, env)
+	if err != nil {
+		return err
+	}
+	return printEnvironmentCommandResult(env, *jsonOutput)
+}
+
+func openRequiredCLIStore(ctx context.Context, storeRef string, legacyStoreURL string) (store.Store, func(), error) {
+	resolvedStoreURL, err := resolveRequiredStoreReference(storeRef, legacyStoreURL)
+	if err != nil {
+		return nil, func() {}, err
+	}
+	runtime, err := openStore(ctx, resolvedStoreURL)
+	if err != nil {
+		return nil, func() {}, err
+	}
+	return runtime, func() { _ = runtime.Close() }, nil
+}
+
+func loadEnvironmentForCLI(ctx context.Context, storeRef string, legacyStoreURL string, id string) (store.Environment, error) {
+	runtime, cleanup, err := openRequiredCLIStore(ctx, storeRef, legacyStoreURL)
+	if err != nil {
+		return store.Environment{}, err
+	}
+	defer cleanup()
+	return runtime.GetEnvironment(ctx, id)
+}
+
+func printEnvironmentCommandResult(env store.Environment, jsonOutput bool) error {
+	payload := map[string]any{"ok": true, "environment": environmentPayload(env)}
+	if jsonOutput {
+		return writeIndentedJSON(payload)
+	}
+	fmt.Printf("Environment: %s\n", env.ID)
+	fmt.Printf("Status: %s\n", env.Status)
+	fmt.Printf("Verified: %t\n", env.Verified)
+	if env.VerificationWorkflowID != "" {
+		fmt.Printf("Verification Workflow: %s\n", env.VerificationWorkflowID)
+	}
+	if env.LastVerificationRunID != "" {
+		fmt.Printf("Last Verification Run: %s [%s]\n", env.LastVerificationRunID, env.LastVerificationStatus)
+	}
+	fmt.Printf("Evidence Complete: %t\n", env.EvidenceComplete)
+	fmt.Printf("SkyWalking Topology Complete: %t\n", env.TopologyComplete)
+	return nil
+}
+
+func environmentPayloads(items []store.Environment) []map[string]any {
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		out = append(out, environmentPayload(item))
+	}
+	return out
+}
+
+func environmentPayload(env store.Environment) map[string]any {
+	payload := map[string]any{
+		"id":                     env.ID,
+		"displayName":            env.DisplayName,
+		"description":            env.Description,
+		"status":                 env.Status,
+		"verified":               env.Verified,
+		"services":               jsonArrayString(env.ServicesJSON),
+		"repos":                  jsonObjectString(env.ReposJSON),
+		"compose":                jsonObjectString(env.ComposeJSON),
+		"healthChecks":           jsonArrayString(env.HealthChecksJSON),
+		"verificationWorkflowId": env.VerificationWorkflowID,
+		"lastVerificationRunId":  env.LastVerificationRunID,
+		"lastVerificationStatus": env.LastVerificationStatus,
+		"evidenceComplete":       env.EvidenceComplete,
+		"topologyComplete":       env.TopologyComplete,
+		"summary":                jsonObjectString(env.SummaryJSON),
+		"createdAt":              env.CreatedAt,
+		"updatedAt":              env.UpdatedAt,
+	}
+	if !env.LastVerifiedAt.IsZero() {
+		payload["lastVerifiedAt"] = env.LastVerifiedAt
+	}
+	return payload
+}
+
+func environmentServices(services stringListFlag, repos stringListFlag, branches stringListFlag, checkouts stringListFlag) []map[string]any {
+	repoByService := environmentKeyValueMap(repos)
+	branchByService := environmentKeyValueMap(branches)
+	checkoutByService := environmentKeyValueMap(checkouts)
+	ids := map[string]bool{}
+	for _, id := range services.Values() {
+		ids[id] = true
+	}
+	for id := range repoByService {
+		ids[id] = true
+	}
+	for id := range branchByService {
+		ids[id] = true
+	}
+	for id := range checkoutByService {
+		ids[id] = true
+	}
+	ordered := make([]string, 0, len(ids))
+	for id := range ids {
+		ordered = append(ordered, id)
+	}
+	sort.Strings(ordered)
+	out := make([]map[string]any, 0, len(ordered))
+	for _, id := range ordered {
+		item := map[string]any{"id": id}
+		if repo := repoByService[id]; repo != "" {
+			item["repo"] = repo
+		}
+		if branch := branchByService[id]; branch != "" {
+			item["branch"] = branch
+		}
+		if checkout := checkoutByService[id]; checkout != "" {
+			item["checkout"] = checkout
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func environmentRepoMap(repos stringListFlag, branches stringListFlag, checkouts stringListFlag) map[string]any {
+	repoByService := environmentKeyValueMap(repos)
+	branchByService := environmentKeyValueMap(branches)
+	checkoutByService := environmentKeyValueMap(checkouts)
+	ids := map[string]bool{}
+	for id := range repoByService {
+		ids[id] = true
+	}
+	for id := range branchByService {
+		ids[id] = true
+	}
+	for id := range checkoutByService {
+		ids[id] = true
+	}
+	out := map[string]any{}
+	for id := range ids {
+		item := map[string]any{}
+		if repo := repoByService[id]; repo != "" {
+			item["url"] = repo
+		}
+		if branch := branchByService[id]; branch != "" {
+			item["branch"] = branch
+		}
+		if checkout := checkoutByService[id]; checkout != "" {
+			item["checkout"] = checkout
+		}
+		out[id] = item
+	}
+	return out
+}
+
+func environmentHealthChecks(values stringListFlag) []map[string]any {
+	checks := values.Values()
+	out := make([]map[string]any, 0, len(checks))
+	for index, url := range checks {
+		out = append(out, map[string]any{"id": fmt.Sprintf("health-%02d", index+1), "url": url})
+	}
+	return out
+}
+
+func environmentKeyValueMap(values stringListFlag) map[string]string {
+	out := map[string]string{}
+	for _, value := range values.Values() {
+		key, raw, ok := strings.Cut(value, "=")
+		key = strings.TrimSpace(key)
+		raw = strings.TrimSpace(raw)
+		if !ok || key == "" || raw == "" {
+			continue
+		}
+		out[key] = raw
+	}
+	return out
+}
+
+func mustCompactJSON(value any) string {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return "{}"
+	}
+	return string(raw)
+}
+
+func jsonObjectString(raw string) map[string]any {
+	var out map[string]any
+	if err := json.Unmarshal([]byte(stringDefault(raw, "{}")), &out); err != nil || out == nil {
+		return map[string]any{}
+	}
+	return out
+}
+
+func jsonArrayString(raw string) []any {
+	var out []any
+	if err := json.Unmarshal([]byte(stringDefault(raw, "[]")), &out); err != nil || out == nil {
+		return []any{}
+	}
+	return out
+}
+
+func stringDefault(value string, defaultValue string) string {
+	if strings.TrimSpace(value) == "" {
+		return defaultValue
+	}
+	return value
 }
 
 func printStoreStatus(status sqlite.SchemaStatusResult) {
@@ -480,7 +936,8 @@ func runSandboxInterface(ctx context.Context, args []string) error {
 func runSandboxServiceRegister(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("sandbox service register", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	id := flags.String("id", "", "Service id")
 	displayName := flags.String("display-name", "", "Service display name")
 	kind := flags.String("kind", "", "Service kind")
@@ -493,7 +950,11 @@ func runSandboxServiceRegister(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	runtime, err := openStore(ctx, *storeURL)
+	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	runtime, err := openStore(ctx, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -526,7 +987,8 @@ func runSandboxServiceRegister(ctx context.Context, args []string) error {
 func runSandboxInterfaceRegister(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("sandbox interface register", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	id := flags.String("id", "", "Interface id")
 	displayName := flags.String("display-name", "", "Interface display name")
 	serviceID := flags.String("service-id", "", "Entry service id")
@@ -544,7 +1006,11 @@ func runSandboxInterfaceRegister(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	runtime, err := openStore(ctx, *storeURL)
+	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	runtime, err := openStore(ctx, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -582,7 +1048,8 @@ func runSandboxInterfaceRegister(ctx context.Context, args []string) error {
 func runSandboxStart(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("sandbox start", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	serviceID := flags.String("service", "", "Only start one registered service")
 	serviceKind := flags.String("kind", "", "Only start services of this kind; default includes all kinds")
 	timeoutSeconds := flags.Int("timeout-seconds", 300, "Per-service startup command timeout")
@@ -593,7 +1060,11 @@ func runSandboxStart(ctx context.Context, args []string) error {
 	if *timeoutSeconds <= 0 {
 		return errors.New("--timeout-seconds must be greater than 0")
 	}
-	runtime, err := openStore(ctx, *storeURL)
+	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	runtime, err := openStore(ctx, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -602,13 +1073,9 @@ func runSandboxStart(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	storeCfg, err := sqlite.ParseConfigFromURL(*storeURL)
-	if err != nil {
-		return err
-	}
 	report := sandboxStartReport{
 		OK:        true,
-		StorePath: storeCfg.Resolve().Path,
+		StorePath: maskStoreURL(resolvedStoreURL),
 	}
 	kindFilter := strings.TrimSpace(*serviceKind)
 	for _, service := range catalog.Services {
@@ -796,24 +1263,49 @@ func runExecutorPlan(ctx context.Context, args []string) error {
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	resolvedProfilePath, err := materializeProfileReference(*profilePath, *profileHome, false)
+	report, err := executorPlanReport(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
-	bundle, err := profile.Load(resolvedProfilePath)
-	if err != nil {
-		return err
-	}
-	report := executor.Plan(ctx, bundle)
 	if *jsonOutput {
 		return writeIndentedJSON(report)
 	}
 	printExecutorPlan(report)
 	return nil
+}
+
+func executorPlanReport(ctx context.Context, profileRef string, profileHomeRef string, storeRef string, legacyStoreURL string) (executor.PlanReport, error) {
+	if strings.TrimSpace(profileRef) != "" {
+		resolvedProfilePath, err := materializeProfileReference(profileRef, profileHomeRef, false)
+		if err != nil {
+			return executor.PlanReport{}, err
+		}
+		bundle, err := profile.Load(resolvedProfilePath)
+		if err != nil {
+			return executor.PlanReport{}, err
+		}
+		return executor.Plan(ctx, bundle), nil
+	}
+	resolvedStoreURL, err := resolveRequiredStoreReference(storeRef, legacyStoreURL)
+	if err != nil {
+		return executor.PlanReport{}, err
+	}
+	runtime, err := openStore(ctx, resolvedStoreURL)
+	if err != nil {
+		return executor.PlanReport{}, err
+	}
+	defer runtime.Close()
+	catalog, err := runtime.GetProfileCatalog(ctx)
+	if err != nil {
+		return executor.PlanReport{}, err
+	}
+	return executor.PlanFromCatalog(ctx, catalog), nil
 }
 
 func printExecutorPlan(report executor.PlanReport) {
@@ -869,7 +1361,8 @@ func runTraceTopology(ctx context.Context, args []string) error {
 func runTraceTopologyCollect(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("trace topology collect", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	graphQLURL := flags.String("trace-graphql-url", os.Getenv("OTS_TRACE_GRAPHQL_URL"), "Trace provider GraphQL URL")
 	runID := flags.String("run", "", "Workflow run id")
 	stepID := flags.String("step", "", "Workflow step id")
@@ -886,7 +1379,11 @@ func runTraceTopologyCollect(ctx context.Context, args []string) error {
 	if strings.TrimSpace(*runID) == "" {
 		return errors.New("--run is required")
 	}
-	runtime, err := openStore(ctx, *storeURL)
+	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	runtime, err := openStore(ctx, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -1458,7 +1955,7 @@ func initProfileBundle(outputPath string, profileID string, displayName string, 
 	}
 	readmePath := filepath.Join(outputPath, "README.md")
 	if _, err := os.Stat(readmePath); errors.Is(err, os.ErrNotExist) || force {
-		body := "# External Profile Bundle\n\nPublish this bundle into a local Store before serving it through Open Test Sandbox:\n\n```sh\notsandbox config publish --from . --store-url .runtime/store.sqlite\notsandbox serve --store-url .runtime/store.sqlite\n```\n"
+		body := "# External Profile Bundle\n\nPublish this bundle into the selected PostgreSQL Store before serving it through Open Test Sandbox:\n\n```sh\notsandbox store use local-personal\notsandbox config publish --from . --store local-personal\notsandbox serve --profile . --store local-personal\n```\n"
 		if err := os.WriteFile(readmePath, []byte(body), 0o644); err != nil {
 			return profileInitReport{}, err
 		}
@@ -1630,12 +2127,17 @@ func runProfileInspect(args []string) error {
 func runProfileCatalogIndex(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("profile catalog-index", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	report, err := readProfileCatalogIndex(ctx, *storeURL)
+	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	report, err := readProfileCatalogIndex(ctx, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -1652,7 +2154,8 @@ func runProfileVerify(ctx context.Context, args []string) error {
 	profilePath := flags.String("profile", "", "Profile bundle path")
 	templatePackagePath := flags.String("template-package", "", "Template package path or installed template package id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	requireCaseRuns := flags.Bool("require-case-runs", false, "Require every API Case in the profile to have a latest passed Store run")
 	requireWorkflowRuns := flags.Bool("require-workflow-runs", false, "Require every Workflow in the profile to have a latest passed Store run")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
@@ -1660,12 +2163,11 @@ func runProfileVerify(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	cfg, err := sqlite.ParseConfigFromURL(*storeURL)
+	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
-	cfg = cfg.Resolve()
-	s, err := sqlite.Open(ctx, cfg)
+	s, err := openStore(ctx, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -1674,7 +2176,7 @@ func runProfileVerify(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	report, err := verifyProfileBundle(ctx, s, resolvedProfilePath, cfg.Path, profileVerifyOptions{
+	report, err := verifyProfileBundle(ctx, s, resolvedProfilePath, maskStoreURL(resolvedStoreURL), profileVerifyOptions{
 		RequireCaseRuns:     *requireCaseRuns,
 		RequireWorkflowRuns: *requireWorkflowRuns,
 	})
@@ -1715,7 +2217,8 @@ func runConfigPublish(ctx context.Context, args []string) error {
 func runConfigPublishWithFlags(ctx context.Context, flags *flag.FlagSet, args []string, textPrefix string) error {
 	from := flags.String("from", "", "Profile bundle path")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	auditOutput := flags.Bool("audit", false, "Run profile audit after import")
 	requireAuditOK := flags.Bool("require-audit-ok", false, "Fail before writing the Store unless profile audit has no issues")
@@ -1723,12 +2226,11 @@ func runConfigPublishWithFlags(ctx context.Context, flags *flag.FlagSet, args []
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	cfg, err := sqlite.ParseConfigFromURL(*storeURL)
+	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
-	cfg = cfg.Resolve()
-	s, err := sqlite.Open(ctx, cfg)
+	s, err := openStore(ctx, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -1738,7 +2240,7 @@ func runConfigPublishWithFlags(ctx context.Context, flags *flag.FlagSet, args []
 	if err != nil {
 		return err
 	}
-	report, err := publishProfileBundleToStore(ctx, s, resolvedFrom, cfg.Path, *auditOutput, *requireAuditOK)
+	report, err := publishProfileBundleToStore(ctx, s, resolvedFrom, maskStoreURL(resolvedStoreURL), *auditOutput, *requireAuditOK)
 	if err != nil {
 		return err
 	}
@@ -2203,7 +2705,8 @@ func runProfileAudit(ctx context.Context, args []string) error {
 	profilePath := flags.String("profile", "", "Profile bundle path")
 	templatePackagePath := flags.String("template-package", "", "Template package path or installed template package id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	force := flags.Bool("force", false, "Replace an installed profile when --profile points to a packed archive")
 	if err := flags.Parse(args); err != nil {
@@ -2222,8 +2725,12 @@ func runProfileAudit(ctx context.Context, args []string) error {
 		Bundle:     bundle,
 		BundlePath: resolvedProfilePath,
 	}
-	if strings.TrimSpace(*storeURL) != "" {
-		s, err := openStore(ctx, *storeURL)
+	resolvedStoreURL, err := resolveStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(resolvedStoreURL) != "" {
+		s, err := openStore(ctx, resolvedStoreURL)
 		if err != nil {
 			return err
 		}
@@ -2250,13 +2757,18 @@ func runProfileAuditPlan(ctx context.Context, args []string) error {
 	profilePath := flags.String("profile", "", "Profile bundle path")
 	templatePackagePath := flags.String("template-package", "", "Template package path or installed template package id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	force := flags.Bool("force", false, "Replace an installed profile when --profile points to a packed archive")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	report, err := profileAuditRepairPlan(ctx, templatePackageReference(*templatePackagePath, *profilePath), *profileHome, *storeURL, *force)
+	resolvedStoreURL, err := resolveStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	report, err := profileAuditRepairPlan(ctx, templatePackageReference(*templatePackagePath, *profilePath), *profileHome, resolvedStoreURL, *force)
 	if err != nil {
 		return err
 	}
@@ -2449,7 +2961,7 @@ func runInterfaceNodeDiscover(ctx context.Context, args []string) error {
 	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", "Deprecated SQLite store URL or path")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	filter := flags.String("filter", "", "Filter by id, display name, or operation")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
@@ -2483,13 +2995,14 @@ func runInterfaceNodeCoverage(ctx context.Context, args []string, gapsOnly bool)
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	workflowID := flags.String("workflow", "", "Workflow id")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	bundle, runtime, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	bundle, runtime, _, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -3229,7 +3742,8 @@ func runInterfaceNodeCaseReport(ctx context.Context, args []string) error {
 	nodeID := flags.String("node", "", "Interface node id")
 	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	baseURL := flags.String("base-url", "", "Base URL for live request execution")
 	outputDir := flags.String("output-dir", "", "Report output directory")
 	timeoutSeconds := flags.Int("timeout-seconds", 3, "Timeout per API Case")
@@ -3244,7 +3758,7 @@ func runInterfaceNodeCaseReport(ctx context.Context, args []string) error {
 		return errors.New("--timeout-seconds must be greater than zero")
 	}
 
-	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	bundle, sourceStore, resolvedStoreURL, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -3266,7 +3780,7 @@ func runInterfaceNodeCaseReport(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	report, err := executeInterfaceNodeCaseReport(ctx, bundle, node, cases, derived, sourceStore, *storeURL, *baseURL, absOutputDir, *timeoutSeconds)
+	report, err := executeInterfaceNodeCaseReport(ctx, bundle, node, cases, derived, sourceStore, resolvedStoreURL, *baseURL, absOutputDir, *timeoutSeconds)
 	if err != nil {
 		return err
 	}
@@ -3310,6 +3824,18 @@ func loadInterfaceNodeReportBundle(ctx context.Context, profileRef string, profi
 		return profile.Bundle{}, nil, func() {}, err
 	}
 	return bundle, sourceStore, cleanup, nil
+}
+
+func loadInterfaceNodeReportBundleFromStoreFlags(ctx context.Context, profileRef string, profileHomeRef string, storeRef string, legacyStoreURL string) (profile.Bundle, store.Store, string, func(), error) {
+	resolvedStoreURL, err := resolveOptionalBundleStoreReference(profileRef, storeRef, legacyStoreURL)
+	if err != nil {
+		return profile.Bundle{}, nil, "", func() {}, err
+	}
+	bundle, runtime, cleanup, err := loadInterfaceNodeReportBundle(ctx, profileRef, profileHomeRef, resolvedStoreURL)
+	if err != nil {
+		return profile.Bundle{}, nil, resolvedStoreURL, cleanup, err
+	}
+	return bundle, runtime, resolvedStoreURL, cleanup, nil
 }
 
 func findInterfaceNodeByID(nodes []profile.InterfaceNode, id string) (profile.InterfaceNode, error) {
@@ -3489,11 +4015,10 @@ func executeInterfaceNodeCaseReport(ctx context.Context, bundle profile.Bundle, 
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return interfaceNodeCaseReport{}, err
 	}
-	runtime, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(outputDir, "runtime.sqlite")})
+	runtime, err := requiredReportStore(sourceStore)
 	if err != nil {
 		return interfaceNodeCaseReport{}, err
 	}
-	defer runtime.Close()
 	if err := runtime.ReplaceProfileCatalog(ctx, profilecatalog.FromBundle(bundle, time.Now().UTC())); err != nil {
 		return interfaceNodeCaseReport{}, err
 	}
@@ -3543,13 +4068,17 @@ func executeInterfaceNodeCaseReport(ctx context.Context, bundle profile.Bundle, 
 		}
 	}
 	report.OK = report.Counts.Total > 0 && report.Counts.Failed == 0
-	if sourceStore == nil {
-		report.Warnings = append(report.Warnings, "source Store was not available; report used profile bundle only")
-	}
 	if err := writeInterfaceNodeCaseReportFiles(outputDir, &report); err != nil {
 		return interfaceNodeCaseReport{}, err
 	}
 	return report, nil
+}
+
+func requiredReportStore(sourceStore store.Store) (store.Store, error) {
+	if sourceStore == nil {
+		return nil, errors.New("daily report execution requires an active Store or --store NAME_OR_DSN; hidden SQLite runtime stores are not allowed")
+	}
+	return sourceStore, nil
 }
 
 func interfaceNodeCaseReportItems(value any) []interfaceNodeCaseReportItem {
@@ -3846,7 +4375,8 @@ func runWorkflow(args []string) error {
 func runWorkflowStep(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("workflow step", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	runID := flags.String("run", "", "Workflow run id")
 	stepID := flags.String("step", "", "Workflow step id")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
@@ -3856,7 +4386,11 @@ func runWorkflowStep(ctx context.Context, args []string) error {
 	if strings.TrimSpace(*runID) == "" || strings.TrimSpace(*stepID) == "" {
 		return errors.New("--run and --step are required")
 	}
-	runtime, err := openStore(ctx, *storeURL)
+	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	runtime, err := openStore(ctx, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -3878,7 +4412,8 @@ func runWorkflowStep(ctx context.Context, args []string) error {
 func runWorkflowLatestStep(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("workflow latest-step", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	workflowID := flags.String("workflow", "", "Workflow id")
 	stepID := flags.String("step", "", "Workflow step id")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
@@ -3888,7 +4423,11 @@ func runWorkflowLatestStep(ctx context.Context, args []string) error {
 	if strings.TrimSpace(*workflowID) == "" || strings.TrimSpace(*stepID) == "" {
 		return errors.New("--workflow and --step are required")
 	}
-	runtime, err := openStore(ctx, *storeURL)
+	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	runtime, err := openStore(ctx, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -3925,12 +4464,17 @@ func printWorkflowStep(payload map[string]any) {
 func runWorkflowRuns(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("workflow runs", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	runtime, err := openStore(ctx, *storeURL)
+	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	runtime, err := openStore(ctx, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -3949,7 +4493,8 @@ func runWorkflowRuns(ctx context.Context, args []string) error {
 func runWorkflowRun(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("workflow run", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	runID := flags.String("run", "", "Workflow run id")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
@@ -3958,7 +4503,11 @@ func runWorkflowRun(ctx context.Context, args []string) error {
 	if strings.TrimSpace(*runID) == "" {
 		return errors.New("--run is required")
 	}
-	runtime, err := openStore(ctx, *storeURL)
+	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	runtime, err := openStore(ctx, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -4029,7 +4578,7 @@ func runWorkflowDiscover(ctx context.Context, args []string) error {
 	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", "Deprecated SQLite store URL or path")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	filter := flags.String("filter", "", "Filter by id, display name, or description")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
@@ -4123,7 +4672,8 @@ func runWorkflowReport(ctx context.Context, args []string) error {
 	workflowID := flags.String("workflow", "", "Workflow id")
 	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	baseURL := flags.String("base-url", "", "Base URL for live request execution")
 	outputDir := flags.String("output-dir", "", "Report output directory")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
@@ -4133,7 +4683,11 @@ func runWorkflowReport(ctx context.Context, args []string) error {
 	if strings.TrimSpace(*workflowID) == "" {
 		return errors.New("--workflow is required")
 	}
-	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	resolvedStoreURL, err := resolveOptionalBundleStoreReference(*profilePath, *storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -4165,11 +4719,10 @@ func executeWorkflowCaseReport(ctx context.Context, bundle profile.Bundle, sourc
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return workflowCaseReport{}, err
 	}
-	runtime, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(outputDir, "runtime.sqlite")})
+	runtime, err := requiredReportStore(sourceStore)
 	if err != nil {
 		return workflowCaseReport{}, err
 	}
-	defer runtime.Close()
 	if err := runtime.ReplaceProfileCatalog(ctx, profilecatalog.FromBundle(bundle, time.Now().UTC())); err != nil {
 		return workflowCaseReport{}, err
 	}
@@ -4258,16 +4811,6 @@ func executeWorkflowCaseReport(ctx context.Context, bundle profile.Bundle, sourc
 	if len(steps) > 0 {
 		if saved, err := postReportMap(server.URL+"/api/workflow-runs", snapshot); err == nil {
 			report.RunID = valueString(saved["workflowRunId"])
-			if sourceStore != nil && report.RunID != "" {
-				if run, runErr := runtime.GetRun(ctx, report.RunID); runErr == nil {
-					_, _ = sourceStore.CreateRun(ctx, run)
-				}
-				if caseRuns, caseErr := runtime.ListAPICaseRuns(ctx, report.RunID); caseErr == nil {
-					for _, item := range caseRuns {
-						_, _ = sourceStore.RecordAPICaseRun(ctx, item)
-					}
-				}
-			}
 		}
 	}
 	if err := writeWorkflowCaseReportFiles(outputDir, &report); err != nil {
@@ -4526,7 +5069,8 @@ func runWorkflowAudit(ctx context.Context, args []string) error {
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path")
 	workflowID := flags.String("workflow", "", "Workflow id")
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -4540,8 +5084,12 @@ func runWorkflowAudit(ctx context.Context, args []string) error {
 		Bundle:     bundle,
 		WorkflowID: *workflowID,
 	}
-	if strings.TrimSpace(*storeURL) != "" {
-		s, err := openStore(ctx, *storeURL)
+	resolvedStoreURL, err := resolveStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(resolvedStoreURL) != "" {
+		s, err := openStore(ctx, resolvedStoreURL)
 		if err != nil {
 			return err
 		}
@@ -4603,13 +5151,18 @@ func runWorkflowPlan(args []string) error {
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	workflowID := flags.String("workflow", "", "Workflow id")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	bundle, runtime, cleanup, err := loadInterfaceNodeReportBundle(context.Background(), *profilePath, *profileHome, *storeURL)
+	resolvedStoreURL, err := resolveOptionalBundleStoreReference(*profilePath, *storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	bundle, runtime, cleanup, err := loadInterfaceNodeReportBundle(context.Background(), *profilePath, *profileHome, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -4668,13 +5221,18 @@ func runBaseline(ctx context.Context, args []string) error {
 func runBaselineGet(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("baseline get", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	profileID := flags.String("profile", "", "Profile id")
 	subjectID := flags.String("subject", "", "Subject id")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	s, err := openStore(ctx, *storeURL)
+	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	s, err := openStore(ctx, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -4694,7 +5252,8 @@ func runBaselineGet(ctx context.Context, args []string) error {
 func runBaselineSet(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("baseline set", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	profileID := flags.String("profile", "", "Profile id")
 	subjectID := flags.String("subject", "", "Subject id")
 	status := flags.String("status", "", "Gate status")
@@ -4703,7 +5262,11 @@ func runBaselineSet(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	s, err := openStore(ctx, *storeURL)
+	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	s, err := openStore(ctx, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -4751,16 +5314,20 @@ func runTemplate(args []string) error {
 func runTemplateRender(args []string) error {
 	flags := flag.NewFlagSet("template render", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path")
+	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	templateID := flags.String("template", "", "Request template id")
 	fixtureID := flags.String("fixture", "", "Fixture id")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	bundle, err := profile.Load(*profilePath)
+	bundle, cleanup, err := loadTemplateRenderBundle(context.Background(), *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
+	defer cleanup()
 	rendered, err := requesttemplate.Render(bundle, requesttemplate.Options{
 		TemplateID: *templateID,
 		FixtureID:  *fixtureID,
@@ -4771,6 +5338,31 @@ func runTemplateRender(args []string) error {
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(rendered)
+}
+
+func loadTemplateRenderBundle(ctx context.Context, profileRef string, profileHomeRef string, storeRef string, legacyStoreURL string) (profile.Bundle, func(), error) {
+	if strings.TrimSpace(profileRef) != "" {
+		resolvedProfile, err := resolveProfileReference(profileRef, profileHomeRef)
+		if err != nil {
+			return profile.Bundle{}, func() {}, err
+		}
+		bundle, err := profile.Load(resolvedProfile)
+		return bundle, func() {}, err
+	}
+	resolvedStoreURL, err := resolveRequiredStoreReference(storeRef, legacyStoreURL)
+	if err != nil {
+		return profile.Bundle{}, func() {}, err
+	}
+	runtime, err := openStore(ctx, resolvedStoreURL)
+	if err != nil {
+		return profile.Bundle{}, func() {}, err
+	}
+	bundle, err := serveBundle(ctx, runtime)
+	if err != nil {
+		_ = runtime.Close()
+		return profile.Bundle{}, func() {}, err
+	}
+	return bundle, func() { _ = runtime.Close() }, nil
 }
 
 func runEvidence(ctx context.Context, args []string) error {
@@ -4792,17 +5384,18 @@ func runEvidence(ctx context.Context, args []string) error {
 func runEvidenceList(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("evidence list", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	runID := flags.String("run", "", "Run id")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	cfg, err := sqlite.ParseConfigFromURL(*storeURL)
+	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
-	s, err := sqlite.Open(ctx, cfg)
+	s, err := openStore(ctx, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -4890,7 +5483,8 @@ type evidenceTaskFilter struct {
 func runEvidenceTasks(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("evidence tasks", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	runID := flags.String("run", "", "Run id")
 	stepID := flags.String("step", "", "Workflow step id")
 	caseID := flags.String("case", "", "API case id")
@@ -4903,11 +5497,11 @@ func runEvidenceTasks(ctx context.Context, args []string) error {
 	if strings.TrimSpace(*runID) == "" {
 		return errors.New("--run is required")
 	}
-	cfg, err := sqlite.ParseConfigFromURL(*storeURL)
+	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
-	s, err := sqlite.Open(ctx, cfg)
+	s, err := openStore(ctx, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -5033,26 +5627,32 @@ func runEvidenceImport(ctx context.Context, args []string) error {
 	flags.SetOutput(os.Stderr)
 	from := flags.String("from", "", "Source runtime SQLite path")
 	profileID := flags.String("profile", "", "Profile id")
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	cfg, err := sqlite.ParseConfigFromURL(*storeURL)
+	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
-	result, err := evidence.ImportLegacyRuntimeSQLite(ctx, evidence.SQLiteImportOptions{
+	s, err := openStore(ctx, resolvedStoreURL)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	result, err := evidence.ImportLegacyRuntime(ctx, evidence.ImportOptions{
 		SourcePath: *from,
 		ProfileID:  *profileID,
-		TargetPath: cfg.Path,
+		Store:      s,
 	})
 	if err != nil {
 		return err
 	}
 	report := evidenceImportReport{
 		SourcePath:      *from,
-		StorePath:       cfg.Path,
+		StorePath:       resolvedStoreURL,
 		ProfileID:       *profileID,
 		RunCount:        result.RunCount,
 		APICaseRunCount: result.APICaseRunCount,
@@ -5174,14 +5774,22 @@ type caseListItem struct {
 func runCaseTiming(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("case timing", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	kind := flags.String("kind", "", "Timing kind")
 	maxAgeMinutes := flags.String("max-age-minutes", "", "Only include case runs created within this many minutes")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	runtime, err := openStore(ctx, *storeURL)
+	resolvedStoreURL, err := resolveStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	if resolvedStoreURL == "" {
+		return errNoActiveStoreConfigured
+	}
+	runtime, err := openStore(ctx, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
@@ -5213,7 +5821,8 @@ func printCaseTiming(payload map[string]any) {
 func runCaseEvidence(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("case evidence", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	caseRunID := flags.String("case-run", "", "Case run id")
 	runID := flags.String("run", "", "Run id")
 	caseID := flags.String("case-id", "", "Case id within the run")
@@ -5222,7 +5831,14 @@ func runCaseEvidence(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	payload, err := readCaseEvidence(ctx, *storeURL, *caseRunID, *runID, *caseID, *stepID)
+	resolvedStoreURL, err := resolveStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	if resolvedStoreURL == "" {
+		return errNoActiveStoreConfigured
+	}
+	payload, err := readCaseEvidence(ctx, resolvedStoreURL, *caseRunID, *runID, *caseID, *stepID)
 	if err != nil {
 		return err
 	}
@@ -5291,13 +5907,21 @@ type caseRunsCLIItem struct {
 func runCaseRuns(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("case runs", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	runFilter := flags.String("run", "", "Only list case runs for one run id")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	report, err := listCaseRunsFromStore(ctx, *storeURL, *runFilter)
+	resolvedStoreURL, err := resolveStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	if resolvedStoreURL == "" {
+		return errNoActiveStoreConfigured
+	}
+	report, err := listCaseRunsFromStore(ctx, resolvedStoreURL, *runFilter)
 	if err != nil {
 		return err
 	}
@@ -5360,7 +5984,7 @@ func caseRunsCLIItemFrom(run store.Run, item store.APICaseRun, evidence []store.
 	}
 }
 
-func caseRunOperationFromRequest(request map[string]any, fallback string) string {
+func caseRunOperationFromRequest(request map[string]any, defaultValue string) string {
 	method := strings.ToUpper(strings.TrimSpace(valueString(request["method"])))
 	path := strings.TrimSpace(valueString(request["path"]))
 	if method != "" && path != "" {
@@ -5372,7 +5996,7 @@ func caseRunOperationFromRequest(request map[string]any, fallback string) string
 	if path != "" {
 		return path
 	}
-	return fallback
+	return defaultValue
 }
 
 func firstNonZeroTime(values ...time.Time) time.Time {
@@ -5398,7 +6022,7 @@ func runCaseDiscover(ctx context.Context, args []string) error {
 	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", "Deprecated SQLite store URL or path")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	filter := flags.String("filter", "", "Filter by id, display name, scenario, description, tag, owner, or priority")
 	nodeID := flags.String("node", "", "Only include cases attached to this interface node id")
 	status := flags.String("status", "", "Only include cases with this status")
@@ -5452,7 +6076,8 @@ func runCaseSuiteCoverage(ctx context.Context, args []string) error {
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	filter := flags.String("filter", "", "Filter by id, display name, scenario, description, tag, owner, or priority")
 	nodeID := flags.String("node", "", "Only include cases attached to this interface node id")
 	status := flags.String("status", "active", "Only include cases with this status")
@@ -5464,7 +6089,7 @@ func runCaseSuiteCoverage(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	bundle, sourceStore, resolvedStoreURL, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -5478,7 +6103,7 @@ func runCaseSuiteCoverage(ctx context.Context, args []string) error {
 		Priority: *priority,
 	}
 	cases := selectedCaseSuiteCases(bundle, filters)
-	report, err := caseSuiteCoverage(ctx, bundle, sourceStore, *storeURL, filters, cases)
+	report, err := caseSuiteCoverage(ctx, bundle, sourceStore, resolvedStoreURL, filters, cases)
 	if err != nil {
 		return err
 	}
@@ -5542,7 +6167,8 @@ func runCaseSuiteStability(ctx context.Context, args []string) error {
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	filter := flags.String("filter", "", "Filter by id, display name, scenario, description, tag, owner, or priority")
 	nodeID := flags.String("node", "", "Only include cases attached to this interface node id")
 	status := flags.String("status", "active", "Only include cases with this status")
@@ -5558,7 +6184,7 @@ func runCaseSuiteStability(ctx context.Context, args []string) error {
 	if *limit <= 0 {
 		return errors.New("--limit must be greater than zero")
 	}
-	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	bundle, sourceStore, _, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -5603,7 +6229,8 @@ func runCaseSuitePriority(ctx context.Context, args []string) error {
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	filter := flags.String("filter", "", "Filter by id, display name, scenario, description, tag, owner, or priority")
 	nodeID := flags.String("node", "", "Only include cases attached to this interface node id")
 	status := flags.String("status", "active", "Only include cases with this status")
@@ -5630,7 +6257,7 @@ func runCaseSuitePriority(ctx context.Context, args []string) error {
 	if *timeoutSeconds < 0 {
 		return errors.New("--timeout-seconds cannot be negative")
 	}
-	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	bundle, sourceStore, _, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -5686,7 +6313,8 @@ func runCaseSuiteBrief(ctx context.Context, args []string) error {
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	filter := flags.String("filter", "", "Filter by id, display name, scenario, description, tag, owner, or priority")
 	nodeID := flags.String("node", "", "Only include cases attached to this interface node id")
 	status := flags.String("status", "active", "Only include cases with this status")
@@ -5717,7 +6345,7 @@ func runCaseSuiteBrief(ctx context.Context, args []string) error {
 	if *timeoutSeconds < 0 {
 		return errors.New("--timeout-seconds cannot be negative")
 	}
-	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	bundle, sourceStore, _, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -5777,7 +6405,8 @@ func runCaseSuiteQuality(ctx context.Context, args []string) error {
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	filter := flags.String("filter", "", "Filter by id, display name, scenario, description, tag, owner, or priority")
 	nodeID := flags.String("node", "", "Only include cases attached to this interface node id")
 	status := flags.String("status", "active", "Only include cases with this status")
@@ -5789,7 +6418,7 @@ func runCaseSuiteQuality(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	bundle, sourceStore, _, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -5846,7 +6475,8 @@ func runCaseSuiteQualityPlan(ctx context.Context, args []string) error {
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	filter := flags.String("filter", "", "Filter by id, display name, scenario, description, tag, owner, or priority")
 	nodeID := flags.String("node", "", "Only include cases attached to this interface node id")
 	status := flags.String("status", "active", "Only include cases with this status")
@@ -5858,7 +6488,7 @@ func runCaseSuiteQualityPlan(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	bundle, sourceStore, _, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -5928,7 +6558,8 @@ func runCaseSuiteQualityReport(ctx context.Context, args []string) error {
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	filter := flags.String("filter", "", "Filter by id, display name, scenario, description, tag, owner, or priority")
 	nodeID := flags.String("node", "", "Only include cases attached to this interface node id")
 	status := flags.String("status", "active", "Only include cases with this status")
@@ -5941,7 +6572,7 @@ func runCaseSuiteQualityReport(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	bundle, sourceStore, resolvedStoreURL, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -5962,7 +6593,7 @@ func runCaseSuiteQualityReport(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	report, err := executeCaseSuiteQualityReport(ctx, bundle, sourceStore, *storeURL, filterValue, cases, absOutputDir)
+	report, err := executeCaseSuiteQualityReport(ctx, bundle, sourceStore, resolvedStoreURL, filterValue, cases, absOutputDir)
 	if err != nil {
 		return err
 	}
@@ -6077,7 +6708,8 @@ func runCaseSuiteInspect(ctx context.Context, args []string) error {
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	filter := flags.String("filter", "", "Filter by id, display name, scenario, description, tag, owner, or priority")
 	nodeID := flags.String("node", "", "Only include cases attached to this interface node id")
 	status := flags.String("status", "active", "Only include cases with this status")
@@ -6089,7 +6721,7 @@ func runCaseSuiteInspect(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	bundle, sourceStore, _, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -6134,7 +6766,8 @@ func runCaseSuitePlan(ctx context.Context, args []string) error {
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	filter := flags.String("filter", "", "Filter by id, display name, scenario, description, tag, owner, or priority")
 	nodeID := flags.String("node", "", "Only include cases attached to this interface node id")
 	status := flags.String("status", "active", "Only include cases with this status")
@@ -6155,7 +6788,7 @@ func runCaseSuitePlan(ctx context.Context, args []string) error {
 	if *timeoutSeconds < 0 {
 		return errors.New("--timeout-seconds cannot be negative")
 	}
-	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	bundle, sourceStore, _, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -6206,7 +6839,8 @@ func runCaseSuiteImpact(ctx context.Context, args []string) error {
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	filter := flags.String("filter", "", "Additional case selector filter")
 	nodeID := flags.String("node", "", "Only include cases attached to this interface node id")
 	status := flags.String("status", "active", "Only include cases with this status")
@@ -6231,7 +6865,7 @@ func runCaseSuiteImpact(ctx context.Context, args []string) error {
 	if *timeoutSeconds < 0 {
 		return errors.New("--timeout-seconds cannot be negative")
 	}
-	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	bundle, sourceStore, _, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -6292,7 +6926,8 @@ func runCaseSuiteImpactReport(ctx context.Context, args []string) error {
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	filter := flags.String("filter", "", "Additional case selector filter")
 	nodeID := flags.String("node", "", "Only include cases attached to this interface node id")
 	status := flags.String("status", "active", "Only include cases with this status")
@@ -6318,7 +6953,7 @@ func runCaseSuiteImpactReport(ctx context.Context, args []string) error {
 		return errors.New("--timeout-seconds must be greater than zero")
 	}
 	started := time.Now()
-	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	bundle, sourceStore, resolvedStoreURL, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -6357,7 +6992,7 @@ func runCaseSuiteImpactReport(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	report, err := executeCaseSuiteReport(ctx, bundle, cases, derived, sourceStore, *storeURL, filters, *baseURL, absOutputDir, *timeoutSeconds)
+	report, err := executeCaseSuiteReport(ctx, bundle, cases, derived, sourceStore, resolvedStoreURL, filters, *baseURL, absOutputDir, *timeoutSeconds)
 	if err != nil {
 		return err
 	}
@@ -6446,7 +7081,8 @@ func runCaseSuiteReport(ctx context.Context, args []string) error {
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
 	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeURL := flags.String("store-url", filepath.Join(".runtime", "acceptance.sqlite"), "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	filter := flags.String("filter", "", "Filter by id, display name, scenario, description, tag, owner, or priority")
 	nodeID := flags.String("node", "", "Only include cases attached to this interface node id")
 	status := flags.String("status", "active", "Only include cases with this status")
@@ -6464,7 +7100,7 @@ func runCaseSuiteReport(ctx context.Context, args []string) error {
 	if *timeoutSeconds <= 0 {
 		return errors.New("--timeout-seconds must be greater than zero")
 	}
-	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, *storeURL)
+	bundle, sourceStore, resolvedStoreURL, cleanup, err := loadInterfaceNodeReportBundleFromStoreFlags(ctx, *profilePath, *profileHome, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -6490,7 +7126,7 @@ func runCaseSuiteReport(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	report, err := executeCaseSuiteReport(ctx, bundle, cases, derived, sourceStore, *storeURL, filters, *baseURL, absOutputDir, *timeoutSeconds)
+	report, err := executeCaseSuiteReport(ctx, bundle, cases, derived, sourceStore, resolvedStoreURL, filters, *baseURL, absOutputDir, *timeoutSeconds)
 	if err != nil {
 		return err
 	}
@@ -6543,11 +7179,10 @@ func executeCaseSuiteReport(ctx context.Context, bundle profile.Bundle, cases []
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return caseSuiteReport{}, err
 	}
-	runtime, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(outputDir, "runtime.sqlite")})
+	runtime, err := requiredReportStore(sourceStore)
 	if err != nil {
 		return caseSuiteReport{}, err
 	}
-	defer runtime.Close()
 	if err := runtime.ReplaceProfileCatalog(ctx, profilecatalog.FromBundle(bundle, time.Now().UTC())); err != nil {
 		return caseSuiteReport{}, err
 	}
@@ -6594,9 +7229,6 @@ func executeCaseSuiteReport(ctx context.Context, bundle profile.Bundle, cases []
 		}
 	}
 	report.OK = report.Counts.Total > 0 && report.Counts.Failed == 0
-	if sourceStore == nil {
-		report.Warnings = append(report.Warnings, "source Store was not available; report used profile bundle only")
-	}
 	if err := writeCaseSuiteReportFiles(outputDir, &report); err != nil {
 		return caseSuiteReport{}, err
 	}
@@ -6877,21 +7509,26 @@ func runCaseIncompleteBatches(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("case incomplete-batches", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path")
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	jsonOutput := flags.Bool("json", false, "Print JSON")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	bundle, err := profile.Load(*profilePath)
+	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
-	s, err := openStore(ctx, *storeURL)
+	s, err := openStore(ctx, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
 	defer s.Close()
 
+	bundle, err := incompleteCaseBundle(ctx, strings.TrimSpace(*profilePath), s)
+	if err != nil {
+		return err
+	}
 	report, err := incompleteCaseReportForStore(ctx, bundle, s)
 	if err != nil {
 		return err
@@ -6903,6 +7540,17 @@ func runCaseIncompleteBatches(ctx context.Context, args []string) error {
 	}
 	printIncompleteCaseReport(report)
 	return nil
+}
+
+func incompleteCaseBundle(ctx context.Context, profilePath string, runtime store.Store) (profile.Bundle, error) {
+	if profilePath != "" {
+		return profile.Load(profilePath)
+	}
+	catalog, err := runtime.GetProfileCatalog(ctx)
+	if err != nil {
+		return profile.Bundle{}, err
+	}
+	return profilecatalog.ToBundle(catalog), nil
 }
 
 type incompleteCaseReport struct {
@@ -7018,14 +7666,36 @@ func runCaseRun(ctx context.Context, args []string) error {
 	flags.SetOutput(os.Stderr)
 	overrides := mapFlag{}
 	casePath := flags.String("case", "", "API case file path")
+	caseID := flags.String("case-id", "", "API case id from the active Store catalog")
 	baseURL := flags.String("base-url", "", "Base URL for live request execution")
 	evidenceDir := flags.String("evidence-dir", filepath.Join(".runtime", "cases"), "Evidence output directory")
 	runID := flags.String("run-id", "", "Run id")
-	storeURL := flags.String("store-url", "", "SQLite store URL or path")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	profileID := flags.String("profile", "default", "Profile id for store records")
+	timeoutSeconds := flags.Int("timeout-seconds", 0, "Request timeout in seconds for Store catalog case execution")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	flags.Var(&overrides, "override", "Request body override as key=value; repeat for multiple values")
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(*caseID) != "" {
+		result, err := runStoreCatalogCase(ctx, resolvedStoreURL, *profileID, *caseID, *baseURL, *evidenceDir, *runID, *timeoutSeconds, overrides.Values())
+		if err != nil {
+			return err
+		}
+		if *jsonOutput {
+			return writeIndentedJSON(result)
+		}
+		printStoreCatalogCaseRun(result)
+		return nil
+	}
+	if strings.TrimSpace(*casePath) == "" {
+		return errors.New("case run requires --case PATH or --case-id ID")
 	}
 	result, err := apicase.Run(ctx, apicase.RunOptions{
 		CasePath:    *casePath,
@@ -7037,16 +7707,64 @@ func runCaseRun(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if *storeURL != "" {
-		if err := indexCaseRun(ctx, *storeURL, *profileID, result); err != nil {
-			return err
-		}
+	if err := indexCaseRun(ctx, resolvedStoreURL, *profileID, result); err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(result)
 	}
 	fmt.Printf("Case Run: %s\n", result.RunID)
 	fmt.Printf("Case: %s\n", result.CaseID)
 	fmt.Printf("Status: %s\n", result.Status)
 	fmt.Printf("Evidence: %s\n", result.EvidencePath)
 	return nil
+}
+
+func runStoreCatalogCase(ctx context.Context, storeURL string, profileID string, caseID string, baseURL string, evidenceDir string, runID string, timeoutSeconds int, overrides map[string]any) (map[string]any, error) {
+	if strings.TrimSpace(storeURL) == "" {
+		return nil, errNoActiveStoreConfigured
+	}
+	runtime, err := openStore(ctx, storeURL)
+	if err != nil {
+		return nil, err
+	}
+	defer runtime.Close()
+	handler := controlplane.NewWithStore(profile.Bundle{ID: strings.TrimSpace(profileID)}, runtime)
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	payload := map[string]any{
+		"caseId":      strings.TrimSpace(caseID),
+		"baseUrl":     strings.TrimSpace(baseURL),
+		"evidenceDir": strings.TrimSpace(evidenceDir),
+		"runId":       strings.TrimSpace(runID),
+	}
+	if timeoutSeconds > 0 {
+		payload["timeoutSeconds"] = timeoutSeconds
+	}
+	if len(overrides) > 0 {
+		payload["overrides"] = overrides
+	}
+	result, err := postReportMap(server.URL+"/api/test-kit/run", payload)
+	if err != nil {
+		return nil, err
+	}
+	status := intFromReportAny(result["httpStatus"])
+	if status < 200 || status >= 300 {
+		return nil, fmt.Errorf("case run failed with http status %d: %s", status, valueString(result["error"]))
+	}
+	return result, nil
+}
+
+func printStoreCatalogCaseRun(result map[string]any) {
+	fmt.Printf("Case Run: %s\n", valueString(result["runId"]))
+	fmt.Printf("Case: %s\n", valueString(result["caseId"]))
+	fmt.Printf("Status: %s\n", valueString(result["status"]))
+	if summary := mapFromReportAny(result["summary"]); len(summary) > 0 {
+		if target := valueString(summary["targetBaseUrl"]); target != "" {
+			fmt.Printf("Target: %s\n", target)
+		}
+	}
+	fmt.Printf("Evidence: %s\n", valueString(result["viewerUrl"]))
 }
 
 type mapFlag map[string]any
@@ -7124,11 +7842,7 @@ func normalizeStringList(values []string) []string {
 }
 
 func indexCaseRun(ctx context.Context, storeURL string, profileID string, result apicase.RunResult) error {
-	cfg, err := sqlite.ParseConfigFromURL(storeURL)
-	if err != nil {
-		return err
-	}
-	s, err := sqlite.Open(ctx, cfg)
+	s, err := openStore(ctx, storeURL)
 	if err != nil {
 		return err
 	}
@@ -7211,13 +7925,13 @@ func caseRunSummaryJSON(result apicase.RunResult) string {
 	return string(raw)
 }
 
-func runResultTime(value string, fallback time.Time) time.Time {
+func runResultTime(value string, defaultValue time.Time) time.Time {
 	if strings.TrimSpace(value) == "" {
-		return fallback
+		return defaultValue
 	}
 	parsed, err := time.Parse(time.RFC3339Nano, value)
 	if err != nil {
-		return fallback
+		return defaultValue
 	}
 	return parsed.UTC()
 }
@@ -7365,7 +8079,7 @@ func serveConfigFromArgs(args []string) (serveConfig, error) {
 	host := flags.String("host", "127.0.0.1", "HTTP host")
 	port := flags.Int("port", 18191, "HTTP port")
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", "Deprecated SQLite store URL or path")
+	storeURL := flags.String("store-url", "", "Deprecated Store URL or path")
 	traceGraphQLURL := flags.String("trace-graphql-url", os.Getenv("OTS_TRACE_GRAPHQL_URL"), "Trace provider GraphQL URL")
 	if err := flags.Parse(args); err != nil {
 		return serveConfig{}, err
@@ -7374,14 +8088,12 @@ func serveConfigFromArgs(args []string) (serveConfig, error) {
 }
 
 func serveHandler(cfg serveConfig) (http.Handler, func() error, error) {
-	resolvedStoreURL, err := resolveStoreReference(cfg.storeRef, cfg.storeURL)
+	resolvedStoreURL, err := resolveRequiredStoreReference(cfg.storeRef, cfg.storeURL)
 	if err != nil {
 		return nil, nil, err
 	}
 	storeLabel := resolvedStoreURL
-	if strings.TrimSpace(storeLabel) == "" {
-		storeLabel = "active/default"
-	}
+	storeInfo := serveStoreInfo(cfg, resolvedStoreURL)
 	runtime, err := storeopen.Open(context.Background(), resolvedStoreURL)
 	if err != nil {
 		return nil, nil, err
@@ -7403,7 +8115,7 @@ func serveHandler(cfg serveConfig) (http.Handler, func() error, error) {
 		_ = runtime.Close()
 		return nil, nil, err
 	}
-	return controlplane.NewWithOptions(bundle, controlplane.Options{Runtime: runtime, TraceGraphQLURL: cfg.traceGraphQLURL, ProfileHome: cfg.profileHome}), runtime.Close, nil
+	return controlplane.NewWithOptions(bundle, controlplane.Options{Runtime: runtime, TraceGraphQLURL: cfg.traceGraphQLURL, ProfileHome: cfg.profileHome, StoreInfo: storeInfo}), runtime.Close, nil
 }
 
 func serveBundle(ctx context.Context, runtime store.Store) (profile.Bundle, error) {
@@ -7424,4 +8136,32 @@ func serveBundle(ctx context.Context, runtime store.Store) (profile.Bundle, erro
 		}
 	}
 	return profile.EmptyBundle(), nil
+}
+
+func serveStoreInfo(cfg serveConfig, resolvedStoreURL string) controlplane.StoreInfo {
+	backend, _ := storeBackendFromURL(resolvedStoreURL)
+	info := controlplane.StoreInfo{
+		Configured: true,
+		Backend:    backend,
+		URL:        maskStoreURL(resolvedStoreURL),
+		Source:     "active-config",
+	}
+	if strings.TrimSpace(cfg.storeURL) != "" {
+		info.Source = "store-url"
+		return info
+	}
+	storeRef := strings.TrimSpace(cfg.storeRef)
+	if storeRef == "" {
+		if entry, err := activeStoreConfig(); err == nil {
+			info.Name = entry.Name
+		}
+		return info
+	}
+	if directBackend, err := storeBackendFromURL(storeRef); err == nil && directBackend != "" {
+		info.Source = "store-flag"
+		return info
+	}
+	info.Source = "store-config"
+	info.Name = storeRef
+	return info
 }

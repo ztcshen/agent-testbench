@@ -6,9 +6,9 @@ function runIDFromURL() {
   return new URLSearchParams(window.location.search).get("runId") || "";
 }
 
-function text(value, fallback = "-") {
+function text(value, defaultValue = "-") {
   const out = String(value ?? "").trim();
-  return out || fallback;
+  return out || defaultValue;
 }
 
 function tail(value, length = 12) {

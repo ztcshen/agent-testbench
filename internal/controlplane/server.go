@@ -33,6 +33,20 @@ type Options struct {
 	Runtime         store.Store
 	TraceGraphQLURL string
 	ProfileHome     string
+	StoreInfo       StoreInfo
+}
+
+type StoreInfo struct {
+	Configured bool   `json:"configured"`
+	Name       string `json:"name,omitempty"`
+	Backend    string `json:"backend,omitempty"`
+	URL        string `json:"url,omitempty"`
+	Source     string `json:"source,omitempty"`
+}
+
+type storeCurrentPayload struct {
+	OK bool `json:"ok"`
+	StoreInfo
 }
 
 func NewWithOptions(bundle profile.Bundle, options Options) http.Handler {
@@ -182,6 +196,13 @@ func NewWithOptions(bundle profile.Bundle, options Options) http.Handler {
 		}
 		writeJSON(w, statePayloadFromBundle(profiles.Current()))
 	})
+	mux.HandleFunc("/api/store/current", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSON(w, storeCurrentPayload{OK: true, StoreInfo: options.StoreInfo})
+	})
 	mux.HandleFunc("/api/sandbox/services", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -195,6 +216,12 @@ func NewWithOptions(bundle profile.Bundle, options Options) http.Handler {
 			return
 		}
 		handleSandboxInterfaceRegistration(w, r, runtime)
+	})
+	mux.HandleFunc("/api/environments/", func(w http.ResponseWriter, r *http.Request) {
+		handleEnvironmentItem(w, r, runtime)
+	})
+	mux.HandleFunc("/api/environments", func(w http.ResponseWriter, r *http.Request) {
+		handleEnvironmentCollection(w, r, runtime)
 	})
 	mux.HandleFunc("/api/dashboard", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -295,7 +322,12 @@ func NewWithOptions(bundle profile.Bundle, options Options) http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, executor.Plan(r.Context(), profiles.Current()))
+		report, err := executor.PlanWithStore(r.Context(), profiles.Current(), runtime)
+		if err != nil {
+			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, report)
 	})
 	mux.HandleFunc("/api/evidence/list", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

@@ -4,13 +4,13 @@ import { createServer } from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
-function run(command, args) {
-  const result = spawnSync(command, args, { cwd: rootDir, encoding: "utf8", stdio: "pipe" });
+function run(command, args, options = {}) {
+  const result = spawnSync(command, args, { cwd: rootDir, encoding: "utf8", stdio: "pipe", ...options });
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(" ")} failed\n${result.stdout}\n${result.stderr}`);
   }
@@ -215,6 +215,59 @@ async function writeSmokeProfile(baseDir, targetPort) {
   return profileDir;
 }
 
+export async function prepareSmokeStoreReference(tempDir, env = process.env, runCommand = run) {
+  const smokeStoreDSN = env.OTSANDBOX_SMOKE_STORE_DSN || env.OTSANDBOX_SMOKE_STORE || "";
+  if (!smokeStoreDSN && /^(1|true|yes|on)$/i.test(env.OTSANDBOX_DISABLE_SQLITE_STORE || "")) {
+    throw new Error("OTSANDBOX_DISABLE_SQLITE_STORE is enabled; set OTSANDBOX_SMOKE_STORE_DSN to a PostgreSQL Store DSN for smoke validation");
+  }
+  if (!smokeStoreDSN) {
+    return { storeRef: `sqlite://${path.join(tempDir, "store.sqlite")}`, serverEnv: env };
+  }
+  const configHome = path.join(tempDir, "store-config");
+  await mkdir(configHome, { recursive: true });
+  const serverEnv = { ...env, OTSANDBOX_CONFIG_HOME: configHome };
+  runCommand("go", ["run", "./cmd/otsandbox", "store", "config", "set", "smoke-postgres", "--url", smokeStoreDSN], { env: serverEnv });
+  runCommand("go", ["run", "./cmd/otsandbox", "store", "use", "smoke-postgres"], { env: serverEnv });
+  runCommand("go", ["run", "./cmd/otsandbox", "store", "upgrade", "--store", "smoke-postgres"], { env: serverEnv });
+  return { storeRef: "smoke-postgres", serverEnv };
+}
+
+function requireValue(value, message) {
+  if (value === undefined || value === null || value === "") {
+    throw new Error(message);
+  }
+  return value;
+}
+
+export function assertWorkflowCaseEvidence(payload, { runID, caseID, stepID }) {
+  if (!payload?.ok || !payload.evidence) {
+    throw new Error(`case evidence payload is not ok: ${JSON.stringify(payload)}`);
+  }
+  const evidence = payload.evidence;
+  const summary = evidence.summary || {};
+  if (summary.run_id !== runID || summary.case_id !== caseID || summary.step_id !== stepID || summary.status !== "passed") {
+    throw new Error(`unexpected case evidence summary: ${JSON.stringify(summary)}`);
+  }
+  const request = evidence.request || {};
+  if (request.method !== "GET" || request.path !== "/v1/items") {
+    throw new Error(`unexpected case evidence request: ${JSON.stringify(request)}`);
+  }
+  requireValue(request.evidence_uri, `request evidence missing stored URI: ${JSON.stringify(request)}`);
+  const response = evidence.response || {};
+  if (Number(response.http_code) !== 200) {
+    throw new Error(`unexpected case evidence response: ${JSON.stringify(response)}`);
+  }
+  requireValue(response.evidence_uri, `response evidence missing stored URI: ${JSON.stringify(response)}`);
+  const assertions = evidence.assertions || {};
+  if (assertions.status !== "passed" || assertions.passed !== true) {
+    throw new Error(`unexpected case evidence assertions: ${JSON.stringify(assertions)}`);
+  }
+  const topology = evidence.topology || {};
+  if (topology.provider !== "skywalking" || topology.status !== "complete" || topology.traceId !== "trace.smoke.1" || (topology.confirmedEdges || []).length < 1) {
+    throw new Error(`case evidence missing real SkyWalking topology: ${JSON.stringify(topology)}`);
+  }
+}
+
 async function checkPage(browser, baseURL, pageSpec) {
   const page = await browser.newPage();
   const errors = [];
@@ -353,6 +406,14 @@ async function checkWorkflowStepSkyWalkingTopology(browser, baseURL, runID) {
   } finally {
     await page.close();
   }
+}
+
+async function checkWorkflowRunCaseEvidence(baseURL, runID) {
+  if (!runID) {
+    throw new Error("workflow run button did not return a run id for evidence verification");
+  }
+  const payload = await waitForJSON(`${baseURL}/api/case/evidence?runId=${encodeURIComponent(runID)}&caseId=case.alpha&stepId=step.alpha`);
+  assertWorkflowCaseEvidence(payload, { runID, caseID: "case.alpha", stepID: "step.alpha" });
 }
 
 async function checkEvidenceViewerTimeline(browser, baseURL) {
@@ -531,11 +592,7 @@ async function main() {
   const traceProviderServer = await startSmokeTraceProvider(traceProviderPort);
   const profileDir = await writeSmokeProfile(tempDir, targetPort);
   const profileHome = path.join(tempDir, "profile-home");
-  const smokeStoreDSN = process.env.OTSANDBOX_SMOKE_STORE_DSN || process.env.OTSANDBOX_SMOKE_STORE || "";
-  if (!smokeStoreDSN && /^(1|true|yes|on)$/i.test(process.env.OTSANDBOX_DISABLE_SQLITE_STORE || "")) {
-    throw new Error("OTSANDBOX_DISABLE_SQLITE_STORE is enabled; set OTSANDBOX_SMOKE_STORE_DSN to a PostgreSQL Store DSN for smoke validation");
-  }
-  const storeRef = smokeStoreDSN || `sqlite://${path.join(tempDir, "store.sqlite")}`;
+  const { storeRef, serverEnv } = await prepareSmokeStoreReference(tempDir);
   const port = await freePort();
   const baseURL = `http://127.0.0.1:${port}`;
   const server = spawn("go", [
@@ -556,6 +613,7 @@ async function main() {
     `http://127.0.0.1:${traceProviderPort}`,
   ], {
     cwd: rootDir,
+    env: serverEnv,
     detached: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -610,6 +668,7 @@ async function main() {
       await checkWorkbenchVerify(browser, baseURL, profileDir);
       await checkWorkbenchInvalidInstalledProfile(browser, baseURL, profileHome);
       const runID = await checkWorkflowDetailRunButton(browser, baseURL);
+      await checkWorkflowRunCaseEvidence(baseURL, runID);
       await checkWorkflowStepSkyWalkingTopology(browser, baseURL, runID);
       const removedPage = await fetch(`${baseURL}/agent-test.html`);
       if (removedPage.status !== 404) {
@@ -630,7 +689,9 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

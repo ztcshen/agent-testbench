@@ -103,7 +103,7 @@ func runStoreConfigList(args []string) error {
 			items = append(items, map[string]any{
 				"name":    entry.Name,
 				"backend": entry.Backend,
-				"url":     entry.URL,
+				"url":     maskStoreURL(entry.URL),
 				"active":  name == cfg.Active,
 			})
 		}
@@ -184,7 +184,7 @@ func runStoreCurrent(args []string) error {
 	if err != nil {
 		return err
 	}
-	report := currentStoreReport{OK: true, Name: entry.Name, Backend: entry.Backend, URL: entry.URL}
+	report := currentStoreReport{OK: true, Name: entry.Name, Backend: entry.Backend, URL: maskStoreURL(entry.URL)}
 	if *jsonOutput {
 		return writeIndentedJSON(report)
 	}
@@ -237,6 +237,17 @@ func resolveStoreReference(storeRef string, legacyStoreURL string) (string, erro
 		return "", fmt.Errorf("store config %q not found", storeRef)
 	}
 	return entry.URL, nil
+}
+
+func resolveRequiredStoreReference(storeRef string, legacyStoreURL string) (string, error) {
+	resolved, err := resolveStoreReference(storeRef, legacyStoreURL)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(resolved) == "" {
+		return "", errNoActiveStoreConfigured
+	}
+	return resolved, nil
 }
 
 func resolveOptionalBundleStoreReference(profileRef string, storeRef string, legacyStoreURL string) (string, error) {

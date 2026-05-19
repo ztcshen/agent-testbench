@@ -6,7 +6,7 @@ Open Test Sandbox is an API-operated testing workbench. Test engineers consume
 the running sandbox through APIs and UI; they do not maintain a second local
 project or repeatedly edit external files.
 
-SQLite/Store is the active source of truth for:
+PostgreSQL Store is the active product source of truth for:
 
 - current sandbox state;
 - service and runtime registrations;
@@ -24,8 +24,9 @@ or migration. They are not the daily testing surface.
   `template-package`, `service`, `workflow`, `case`, and `runtime`.
 - New UI copy must describe actions from the test engineer viewpoint: discover,
   register once, run, inspect, verify.
-- New database changes must treat SQLite/Store as active state, not a derived
-  index of a file tree.
+- New database changes must treat PostgreSQL Store as active state, not a
+  derived index of a file tree. SQLite remains only for legacy migration,
+  compatibility, and tests.
 - Service registration and workflow/interface registration are decoupled.
   Workflows check interface availability and step binding completeness only.
   Interfaces check their own entry service availability when they execute.

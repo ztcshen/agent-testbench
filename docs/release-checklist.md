@@ -27,6 +27,9 @@ The gate verifies:
 - `README.md` points to the current quick start and public docs.
 - `CHANGELOG.md` describes notable changes.
 - New CLI, API, Store, report, or import bundle contracts are documented.
+- Environment Catalog docs describe register, discover, inspect, bootstrap,
+  verify, and publish-verified behavior, including the verified discovery gate:
+  passed workflow, indexed Evidence, and real SkyWalking topology.
 - Generated runtime output remains outside git.
 - Public examples use synthetic data only.
 - Third-party dependency licenses are reviewed.

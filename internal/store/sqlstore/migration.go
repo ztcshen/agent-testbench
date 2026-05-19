@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	CurrentSchemaVersion = 1
+	CurrentSchemaVersion = 2
 	CoreSchemaName       = "create shared sql store schema"
 )
 
@@ -233,6 +233,33 @@ create table if not exists profile_catalogs (
   templates %s not null,
   template_configs %s not null
 );`, text, timeType, jsonType, intType, intType, intType, intType, intType, intType, intType, intType, intType, intType),
+		fmt.Sprintf(`
+create table if not exists environments (
+  id %s primary key,
+  display_name %s not null,
+  description %s not null,
+  status %s not null,
+  verified %s not null,
+  services_json %s not null,
+  repos_json %s not null,
+  compose_json %s not null,
+  health_checks_json %s not null,
+  verification_workflow_id %s not null,
+  last_verification_run_id %s not null,
+  last_verification_status %s not null,
+  evidence_complete %s not null,
+  topology_complete %s not null,
+  last_verified_at %s,
+  summary_json %s not null,
+  created_at %s not null,
+  updated_at %s not null
+);`, text, text, text, text, boolType, jsonType, jsonType, jsonType, jsonType, text, text, text, boolType, boolType, timeType, jsonType, timeType, timeType),
+		`
+create index if not exists idx_environments_verified_status
+  on environments(verified, status, updated_at, id);`,
+		`
+create index if not exists idx_environments_verification
+  on environments(verification_workflow_id, last_verification_status, updated_at, id);`,
 	}
 }
 

@@ -98,7 +98,7 @@ func jsonObject(raw string) map[string]any {
 	return out
 }
 
-func caseRunOperation(summary map[string]any, fallback string) string {
+func caseRunOperation(summary map[string]any, defaultValue string) string {
 	method := strings.ToUpper(valueString(summary["method"]))
 	path := valueString(summary["path"])
 	if method != "" && path != "" {
@@ -110,7 +110,7 @@ func caseRunOperation(summary map[string]any, fallback string) string {
 	if path != "" {
 		return path
 	}
-	return fallback
+	return defaultValue
 }
 
 func caseRunFailureReason(assertion map[string]any) string {

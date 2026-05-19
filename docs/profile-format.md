@@ -54,8 +54,8 @@ Publish a bundle before serving it through the workbench:
 ```sh
 otsandbox import bundle init --output /path/to/import bundle-bundle --id sample
 otsandbox import bundle install --from /path/to/import bundle-bundle
-otsandbox import bundle verify --import bundle sample --store-url .runtime/store.sqlite
-otsandbox serve --import bundle sample --store-url .runtime/store.sqlite
+otsandbox import bundle verify --import bundle sample --store local-personal
+otsandbox serve --import bundle sample --store local-personal
 ```
 
 For local bootstrapping, `otsandbox serve --import bundle /path/to/import bundle-bundle`
@@ -65,7 +65,8 @@ indexed view.
 The init command refuses output paths under the core repository's `import bundles/`
 directory. This keeps generated bundles external even during local experiments.
 It also writes a bundle-local `.gitignore` for generated runtime state such as
-`.runtime/`, SQLite files, database sidecar files, and local logs.
+`.runtime/`, local compatibility database files, database sidecar files, and
+local logs.
 
 ## Standard Local Placement
 
@@ -79,13 +80,13 @@ otsandbox import bundle install --from /path/to/import bundle-bundle
 otsandbox import bundle list
 otsandbox import bundle pack --import bundle sample --output sample-import bundle.tar.gz
 otsandbox import bundle inspect --import bundle sample
-otsandbox import bundle verify --import bundle sample --store-url .runtime/store.sqlite
+otsandbox import bundle verify --import bundle sample --store local-personal
 ```
 
 `import bundle install` copies the external bundle into the import bundle home under the
 bundle's `id`. It accepts either a import bundle directory or a `.tar.gz` / `.tgz`
 archive created by `import bundle pack`. The copy is intentionally source-focused:
-generated runtime state, local SQLite/database files, logs, and VCS directories
+generated runtime state, local compatibility database files, logs, and VCS directories
 are skipped. Use `--force` to replace an already installed bundle. Commands
 that accept import bundle bundles (`inspect`, `audit`, `verify`, `import`, and
 `config publish`) accept either a filesystem path or an installed import bundle id.
@@ -131,8 +132,8 @@ For example, it reports a workflow binding that points to a missing workflow,
 an API Case that points to a missing interface node, or a case dependency that
 points to a missing fixture.
 
-Add `--store-url PATH` to include the local Store import bundle index and API Case run
-status in the report. Add `--json` when another tool needs a stable
+Add `--store NAME_OR_DSN` to include the selected Store import bundle index and
+API Case run status in the report. Add `--json` when another tool needs a stable
 machine-readable report.
 
 Use `--require-audit-ok` with `import bundle import` or `config publish` when the
@@ -140,8 +141,8 @@ publish step must fail before Store/read-model writes if reference integrity
 issues are found. The Control plane import API exposes the same behavior with
 `requireAuditOk: true`.
 
-Use `otsandbox import bundle verify --import bundle PATH --store-url PATH` as the standard
-local acceptance command for an external bundle. It audits the bundle, publishes
+Use `otsandbox import bundle verify --import bundle PATH --store NAME_OR_DSN` as the standard
+acceptance command for an external bundle. It audits the bundle, publishes
 it only if the audit is clean, then checks that the import bundle index, active config
 version, catalog index, and base Control plane read-models were written for the
 same published config version. The Control plane exposes the same flow through

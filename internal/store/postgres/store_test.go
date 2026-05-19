@@ -118,7 +118,7 @@ func TestSchemaStatusAndUpgradeUseConfiguredSQLDriver(t *testing.T) {
 	})
 	state.queueRows(fakePostgresRows{
 		columns: []string{"version"},
-		values:  [][]driver.Value{{int64(1)}},
+		values:  [][]driver.Value{{int64(status.TargetVersion)}},
 	})
 	upgraded, err := postgres.UpgradeSchema(ctx, cfg)
 	if err != nil {

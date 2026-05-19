@@ -91,6 +91,10 @@ func (s *Store) ListAPICaseRuns(ctx context.Context, runID string) ([]store.APIC
 	return s.core.ListAPICaseRuns(ctx, runID)
 }
 
+func (s *Store) ListLatestAPICaseRuns(ctx context.Context) ([]store.APICaseRun, error) {
+	return s.core.ListLatestAPICaseRuns(ctx)
+}
+
 func (s *Store) RecordEvidence(ctx context.Context, r store.EvidenceRecord) (store.EvidenceRecord, error) {
 	return s.core.RecordEvidence(ctx, r)
 }
@@ -157,6 +161,18 @@ func (s *Store) GetProfileCatalog(ctx context.Context) (store.ProfileCatalog, er
 
 func (s *Store) GetProfileCatalogIndex(ctx context.Context) (store.ProfileCatalogIndex, error) {
 	return s.core.GetProfileCatalogIndex(ctx)
+}
+
+func (s *Store) UpsertEnvironment(ctx context.Context, e store.Environment) (store.Environment, error) {
+	return s.core.UpsertEnvironment(ctx, e)
+}
+
+func (s *Store) GetEnvironment(ctx context.Context, id string) (store.Environment, error) {
+	return s.core.GetEnvironment(ctx, id)
+}
+
+func (s *Store) ListEnvironments(ctx context.Context) ([]store.Environment, error) {
+	return s.core.ListEnvironments(ctx)
 }
 
 type SchemaStatusResult struct {

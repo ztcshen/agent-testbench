@@ -99,8 +99,8 @@ function coverageNumber(summary, key) {
   return Number.isFinite(value) ? value : 0;
 }
 
-function workflowCopy(workflow, key, fallback) {
-  return workflow?.presentation?.copy?.[key] || fallback;
+function workflowCopy(workflow, key, defaultValue) {
+  return workflow?.presentation?.copy?.[key] || defaultValue;
 }
 
 function CoverageCard({ title, value, detail }) {

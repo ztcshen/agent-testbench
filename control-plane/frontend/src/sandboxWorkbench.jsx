@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { RefreshCw } from "lucide-react";
-import { fetchJSON } from "./api.js";
+import { bootstrapEnvironment, fetchCurrentStore, fetchJSON, inspectEnvironment, listEnvironments } from "./api.js";
 import { buildCapabilityCards } from "./sandboxWorkbenchModel.mjs";
 
-function text(value, fallback = "-") {
+function text(value, defaultValue = "-") {
   const out = String(value ?? "").trim();
-  return out || fallback;
+  return out || defaultValue;
 }
 
 function shortTime(value) {
@@ -221,6 +221,107 @@ function ServiceHealth({ snapshot }) {
   );
 }
 
+function environmentTone(environment) {
+  if (environment?.verified) return "passed";
+  if (environment?.status === "verified-ready") return "warning";
+  if (environment?.lastVerificationStatus === "failed") return "failed";
+  return "";
+}
+
+function completeLabel(value) {
+  return value ? "complete" : "missing";
+}
+
+function EnvironmentCatalogPanel({ catalog, onReload }) {
+  const [selectedID, setSelectedID] = useState("");
+  const [plan, setPlan] = useState(null);
+  const [message, setMessage] = useState("ready");
+  const verifiedItems = catalog?.verified?.items || [];
+  const allItems = catalog?.all?.items || [];
+  const selectedEnvironment = allItems.find((item) => item.id === selectedID) || allItems[0] || null;
+
+  useEffect(() => {
+    if (!selectedID && allItems.length) {
+      setSelectedID(allItems[0].id);
+    }
+  }, [allItems, selectedID]);
+
+  async function loadInspect(id) {
+    if (!id) return;
+    setMessage("inspecting...");
+    try {
+      const payload = await inspectEnvironment(id);
+      setSelectedID(payload.environment?.id || id);
+      setPlan(null);
+      setMessage("inspected");
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
+
+  async function loadBootstrapPlan(id) {
+    if (!id) return;
+    setMessage("loading plan...");
+    try {
+      const payload = await bootstrapEnvironment(id);
+      setSelectedID(payload.environment?.id || id);
+      setPlan(payload.plan || null);
+      setMessage("plan ready");
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
+
+  return (
+    <section className="services">
+      <div className="section-head">
+        <div>
+          <h2>Environment Catalog</h2>
+          <p>PostgreSQL Store-first discovery</p>
+        </div>
+        <span className="console-status-pill" role="status">{message}</span>
+      </div>
+      <div className="profile-verify-metrics">
+        <span>{`verified/default ${verifiedItems.length}`}</span>
+        <span>{`all discovery ${allItems.length}`}</span>
+        <span>{verifiedItems.length === allItems.length ? "default includes all verified entries" : "all discovery includes draft entries"}</span>
+      </div>
+      <div className="home-service-health-list">
+        {allItems.length ? allItems.slice(0, 4).map((environment) => (
+          <article className={`home-service-health-item ${environmentTone(environment)}`} key={environment.id}>
+            <div className="run-history-top">
+              <strong>{environment.displayName || environment.id}</strong>
+              <code>{environment.verified ? "verified" : environment.status || "draft"}</code>
+            </div>
+            <p>{environment.description || "Registered in the active Store for API-operated sandbox workflows."}</p>
+            <div className="profile-verify-metrics">
+              <span>{`workflow ${environment.verificationWorkflowId || "not set"}`}</span>
+              <span>{`Evidence ${completeLabel(environment.evidenceComplete)}`}</span>
+              <span>{`topology ${completeLabel(environment.topologyComplete)}`}</span>
+            </div>
+            <div className="actions">
+              <button className="button-link" type="button" onClick={() => loadInspect(environment.id)}>Inspect</button>
+              <button className="button-link primary-link" type="button" onClick={() => loadBootstrapPlan(environment.id)}>Bootstrap plan</button>
+            </div>
+          </article>
+        )) : <div className="run-history-empty">暂无 Store 环境；通过 API 注册后进入 all discovery。</div>}
+      </div>
+      {plan ? (
+        <div className="profile-verify-report">
+          <div className="profile-verify-summary">{`${selectedEnvironment?.id || selectedID} · ${plan.verificationWorkflow || "no workflow"} · health checks ${(plan.healthChecks || []).length}`}</div>
+          <div className="profile-verify-metrics">
+            <span>{`repos ${Object.keys(plan.repos || {}).length}`}</span>
+            <span>{plan.compose?.startCommand || plan.compose?.composeFile || "compose not set"}</span>
+          </div>
+        </div>
+      ) : null}
+      <div className="sandbox-link-list">
+        <button className="button-link" type="button" onClick={onReload}>Reload catalog</button>
+      </div>
+    </section>
+  );
+}
+
 function TemplatePackageImportPanel({ onImported }) {
   const [path, setPath] = useState("/path/to/template-package");
   const [audit, setAudit] = useState(true);
@@ -384,26 +485,54 @@ function TemplatePackageImportPanel({ onImported }) {
   );
 }
 
+function StorePanel({ storeInfo }) {
+  const configured = storeInfo?.configured;
+  return (
+    <section className="services">
+      <div className="section-head">
+        <h2>Active Store</h2>
+        <code>{configured ? storeInfo.backend || "store" : "missing"}</code>
+      </div>
+      <article className={`home-service-health-item ${configured ? "passed" : "warning"}`}>
+        <div className="run-history-top">
+          <strong>{storeInfo?.name || storeInfo?.backend || "Store"}</strong>
+          <code>{storeInfo?.source || "-"}</code>
+        </div>
+        <p>{storeInfo?.url || "not configured"}</p>
+      </article>
+    </section>
+  );
+}
+
 function SandboxWorkbenchApp() {
   const [snapshot, setSnapshot] = useState(null);
   const [catalog, setCatalog] = useState(null);
   const [runs, setRuns] = useState(null);
   const [caseRuns, setCaseRuns] = useState(null);
+  const [environmentCatalog, setEnvironmentCatalog] = useState(null);
+  const [storeInfo, setStoreInfo] = useState(null);
   const [message, setMessage] = useState("loading");
 
   async function refresh() {
     setMessage("refreshing...");
     try {
-      const [nextSnapshot, nextCatalog, nextRuns, nextCaseRuns] = await Promise.all([
+      const [nextSnapshot, nextCatalog, nextRuns, nextCaseRuns, nextStoreInfo] = await Promise.all([
         fetchJSON("/api/state"),
         fetchJSON("/api/catalog"),
         fetchJSON("/api/runs"),
         fetchJSON("/api/case/runs").catch((error) => ({ ok: false, caseRuns: [], warnings: [error.message] })),
+        fetchCurrentStore().catch((error) => ({ ok: false, configured: false, error: error.message })),
+      ]);
+      const [verifiedEnvironments, allEnvironments] = await Promise.all([
+        listEnvironments().catch((error) => ({ ok: false, count: 0, items: [], error: error.message })),
+        listEnvironments({ all: true }).catch((error) => ({ ok: false, count: 0, items: [], error: error.message })),
       ]);
       setSnapshot(nextSnapshot);
       setCatalog(nextCatalog);
       setRuns(nextRuns);
       setCaseRuns(nextCaseRuns);
+      setEnvironmentCatalog({ verified: verifiedEnvironments, all: allEnvironments });
+      setStoreInfo(nextStoreInfo);
       setMessage("ready");
     } catch (error) {
       setMessage(error.message);
@@ -456,6 +585,8 @@ function SandboxWorkbenchApp() {
           <RunHistory runs={runs} caseRuns={caseRuns} onRefresh={refreshRuns} />
         </div>
         <aside className="sandbox-workbench-side">
+          <StorePanel storeInfo={storeInfo} />
+          <EnvironmentCatalogPanel catalog={environmentCatalog} onReload={refresh} />
           <TemplatePackageImportPanel onImported={refresh} />
           <Topology catalog={catalog} />
           <EvidenceLinks runs={runs} />

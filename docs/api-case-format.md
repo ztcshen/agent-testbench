@@ -91,15 +91,22 @@ payloads for normal report surfaces.
 
 ## Store Indexing
 
-When `otsandbox case run` receives `--store-url`, it records:
+`otsandbox case run` can execute a case file with `--case PATH` or a Store
+catalog case with `--case-id ID`. The `--case-id` form requires the active
+Store or `--store NAME_OR_DSN`, reads the case execution adapter from that
+Store catalog, and uses the same local test-kit runner as `/api/test-kit/run`.
+
+When `otsandbox case run` receives an active Store, `--store NAME_OR_DSN`, or
+the deprecated compatibility flag `--store-url`, it records:
 
 - one `runs` row keyed by the run id;
 - one `api_case_runs` row keyed by the run id and case id;
 - one `evidence_records` row for each Evidence file produced.
 
-The import bundle id comes from `--import bundle` and defaults to `default`. Store indexing
+The profile id comes from `--profile` and defaults to `default`. Store indexing
 does not replace the Evidence bundle; it makes local runs searchable and
-connects them to import bundle or workflow records.
+connects them to the active PostgreSQL Store, import bundle, or workflow
+records.
 
 ## Async Batch Runs
 

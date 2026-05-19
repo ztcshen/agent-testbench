@@ -34,13 +34,13 @@ function pageMode() {
   return "main";
 }
 
-function text(value, fallback = "-") {
+function text(value, defaultValue = "-") {
   const out = String(value ?? "").trim();
-  return out || fallback;
+  return out || defaultValue;
 }
 
-function copyText(payload, key, fallback) {
-  return payload?.presentation?.copy?.[key] || fallback;
+function copyText(payload, key, defaultValue) {
+  return payload?.presentation?.copy?.[key] || defaultValue;
 }
 
 function tail(value, length = 12) {
@@ -217,7 +217,7 @@ function RequestTemplatePanel({ payload }) {
           {templates.length ? templates.map((template) => (
             <article className="interface-node-request-template-card" key={template.id}>
               <div className="interface-node-request-template-card-top">
-                <strong>{template.name || template.id || copyText(payload, "requestTemplateFallbackName", "公共请求模板")}</strong>
+                <strong>{template.name || template.id || copyText(payload, "requestTemplateDefaultName", "公共请求模板")}</strong>
                 <code>{[template.id || "", template.version || "", template.status || ""].filter(Boolean).join(" · ") || "-"}</code>
               </div>
               <pre>{prettyJSON(template.templateJson || template.template_json || "{}")}</pre>

@@ -2,8 +2,10 @@ package store_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -115,6 +117,18 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	if caseRuns[0].RequestSummaryJSON != `{"method":"GET"}` || caseRuns[0].AssertionSummaryJSON != `{"passed":1}` {
 		t.Fatalf("case run summaries = %#v", caseRuns[0])
 	}
+	latestCaseStore, ok := s.(interface {
+		ListLatestAPICaseRuns(context.Context) ([]store.APICaseRun, error)
+	})
+	if ok {
+		latestCaseRuns, err := latestCaseStore.ListLatestAPICaseRuns(ctx)
+		if err != nil {
+			t.Fatalf("list latest api case runs: %v", err)
+		}
+		if len(latestCaseRuns) != 1 || latestCaseRuns[0].ID != "case-run-001" || latestCaseRuns[0].CaseID != "case.health" {
+			t.Fatalf("latest case runs = %#v", latestCaseRuns)
+		}
+	}
 
 	evidence, err := s.RecordEvidence(ctx, store.EvidenceRecord{
 		ID:         "evidence-001",
@@ -213,6 +227,53 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 		t.Fatalf("trace topology payload = %#v", topologies[0])
 	}
 
+	env, err := s.UpsertEnvironment(ctx, store.Environment{
+		ID:                     "env.team.accepted",
+		DisplayName:            "Team Accepted Environment",
+		Description:            "Shared environment accepted by verification workflow",
+		Status:                 "draft",
+		ServicesJSON:           `[{"id":"service.alpha","repo":"../service-alpha"}]`,
+		ReposJSON:              `{"service.alpha":{"url":"../service-alpha","branch":"main"}}`,
+		ComposeJSON:            `{"composeFile":"docker-compose.yml","startCommand":"docker compose up -d"}`,
+		HealthChecksJSON:       `[{"id":"alpha-health","url":"http://127.0.0.1:18080/health"}]`,
+		VerificationWorkflowID: "workflow.smoke",
+		SummaryJSON:            `{"owner":"team"}`,
+	})
+	if err != nil {
+		t.Fatalf("upsert environment: %v", err)
+	}
+	if env.CreatedAt.IsZero() || env.UpdatedAt.IsZero() {
+		t.Fatalf("environment timestamps should be set: %#v", env)
+	}
+	env.LastVerificationRunID = "run-001"
+	env.LastVerificationStatus = store.StatusPassed
+	env.EvidenceComplete = true
+	env.TopologyComplete = true
+	env.Verified = true
+	env.Status = "verified"
+	env.LastVerifiedAt = started.Add(time.Minute)
+	env, err = s.UpsertEnvironment(ctx, env)
+	if err != nil {
+		t.Fatalf("update environment verification: %v", err)
+	}
+	loadedEnv, err := s.GetEnvironment(ctx, "env.team.accepted")
+	if err != nil {
+		t.Fatalf("get environment: %v", err)
+	}
+	if !loadedEnv.Verified || loadedEnv.LastVerificationStatus != store.StatusPassed || !loadedEnv.EvidenceComplete || !loadedEnv.TopologyComplete {
+		t.Fatalf("loaded environment verification = %#v", loadedEnv)
+	}
+	if !jsonEqual(loadedEnv.ReposJSON, env.ReposJSON) || loadedEnv.VerificationWorkflowID != "workflow.smoke" {
+		t.Fatalf("loaded environment catalog fields = %#v", loadedEnv)
+	}
+	environments, err := s.ListEnvironments(ctx)
+	if err != nil {
+		t.Fatalf("list environments: %v", err)
+	}
+	if len(environments) != 1 || environments[0].ID != "env.team.accepted" || !environments[0].Verified {
+		t.Fatalf("environments = %#v", environments)
+	}
+
 	gate, err := s.UpsertBaselineGate(ctx, store.BaselineGate{
 		ProfileID:   "empty",
 		SubjectID:   "workflow.smoke",
@@ -296,7 +357,7 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	if err != nil {
 		t.Fatalf("get read model: %v", err)
 	}
-	if loadedReadModel.ConfigVersionID != activeVersion.ID || loadedReadModel.PayloadJSON != `{"ok":true,"items":[]}` {
+	if loadedReadModel.ConfigVersionID != activeVersion.ID || !jsonEqual(loadedReadModel.PayloadJSON, `{"ok":true,"items":[]}`) {
 		t.Fatalf("loaded read model = %#v", loadedReadModel)
 	}
 
@@ -367,4 +428,16 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("missing run error = %v, want ErrNotFound", err)
 	}
+}
+
+func jsonEqual(left string, right string) bool {
+	var leftValue any
+	var rightValue any
+	if err := json.Unmarshal([]byte(left), &leftValue); err != nil {
+		return false
+	}
+	if err := json.Unmarshal([]byte(right), &rightValue); err != nil {
+		return false
+	}
+	return reflect.DeepEqual(leftValue, rightValue)
 }

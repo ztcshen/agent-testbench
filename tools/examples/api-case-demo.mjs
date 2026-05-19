@@ -79,6 +79,7 @@ async function main() {
 
   try {
     const evidenceDir = path.join(tempDir, "evidence");
+    const storePath = path.join(tempDir, "store.sqlite");
     const output = await run([
       "case",
       "run",
@@ -90,6 +91,8 @@ async function main() {
       "demo-create-item",
       "--evidence-dir",
       evidenceDir,
+      "--store",
+      `sqlite://${storePath}`,
     ]);
 
     console.log(output);

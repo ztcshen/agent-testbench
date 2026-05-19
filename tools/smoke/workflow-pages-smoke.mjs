@@ -1,9 +1,9 @@
 import { chromium } from "playwright";
 
-function argValue(name, fallback = "") {
+function argValue(name, defaultValue = "") {
   const prefix = `--${name}=`;
   const found = process.argv.find((item) => item.startsWith(prefix));
-  return found ? found.slice(prefix.length) : fallback;
+  return found ? found.slice(prefix.length) : defaultValue;
 }
 
 function requiredArg(name) {

@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+cd "$ROOT_DIR"
+
+paths=(
+  AGENTS.md
+  cmd/otsandbox/main.go
+  docs
+)
+
+violations=0
+
+check_pattern() {
+  local pattern=$1
+  local message=$2
+  local matches
+  matches=$(rg -n -i "$pattern" "${paths[@]}" || true)
+  if [[ -n "$matches" ]]; then
+    echo "$message" >&2
+    echo "$matches" >&2
+    violations=1
+  fi
+}
+
+check_pattern 'default sqlite|sqlite by default|默认 SQLite|SQLite is the default|保持 SQLite 默认' \
+  "Store-first docs must not describe SQLite as the default active Store."
+
+check_pattern 'store-url[[:space:]][^`"$]*\.runtime/store\.sqlite|--store-url[[:space:]]+\.runtime/store\.sqlite' \
+  "Daily workflow examples must use --store NAME_OR_DSN instead of --store-url .runtime/store.sqlite."
+
+blocked_a="fall"
+blocked_b="back"
+blocked_word="${blocked_a}${blocked_b}"
+
+repo_files=()
+while IFS= read -r -d '' path; do
+  case "$path" in
+    .git/*|.idea/*|.runtime/*|.scratch/*|node_modules/*)
+      continue
+      ;;
+    control-plane/static/assets/react/*)
+      continue
+      ;;
+  esac
+  if [[ -f "$path" ]]; then
+    repo_files+=("$path")
+  fi
+done < <(git ls-files --cached --others --exclude-standard -z)
+
+if [[ ${#repo_files[@]} -gt 0 ]]; then
+  blocked_matches=$(rg -n -i "$blocked_word" "${repo_files[@]}" || true)
+  if [[ -n "$blocked_matches" ]]; then
+    echo "Store-first repo scan found a blocked legacy term." >&2
+    echo "$blocked_matches" >&2
+    violations=1
+  fi
+fi
+
+if [[ "$violations" -ne 0 ]]; then
+  exit 1
+fi
+
+echo "Store-first contract scan passed"

@@ -2,11 +2,13 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 	"time"
 
 	"open-test-sandbox/internal/profile"
+	"open-test-sandbox/internal/store"
 )
 
 type Counts struct {
@@ -63,6 +65,82 @@ func Plan(_ context.Context, bundle profile.Bundle) PlanReport {
 		report.Items = append(report.Items, item)
 	}
 	return report
+}
+
+func PlanWithStore(ctx context.Context, bundle profile.Bundle, runtime store.Store) (PlanReport, error) {
+	if runtime != nil {
+		catalog, err := runtime.GetProfileCatalog(ctx)
+		if err == nil && strings.TrimSpace(catalog.ProfileID) != "" {
+			return PlanFromCatalog(ctx, catalog), nil
+		}
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return PlanReport{}, err
+		}
+	}
+	return Plan(ctx, bundle), nil
+}
+
+func PlanFromCatalog(_ context.Context, catalog store.ProfileCatalog) PlanReport {
+	report := PlanReport{
+		OK:          true,
+		ProfileID:   catalog.ProfileID,
+		GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Items:       []PlanItem{},
+	}
+	cases := sortedCatalogAPICases(catalog.APICases)
+	for _, apiCase := range cases {
+		item, ok := catalogCasePlanItem(apiCase)
+		if !ok {
+			continue
+		}
+		report.Counts.Total++
+		if item.Ready {
+			report.Counts.Ready++
+		} else {
+			report.Counts.Blocked++
+			report.OK = false
+		}
+		report.Items = append(report.Items, item)
+	}
+	if report.Counts.Total == 0 {
+		report.Warnings = append(report.Warnings, "store catalog has no executor-ready API cases")
+	}
+	return report
+}
+
+func sortedCatalogAPICases(values []store.CatalogAPICase) []store.CatalogAPICase {
+	out := append([]store.CatalogAPICase(nil), values...)
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].SortOrder != out[j].SortOrder {
+			return out[i].SortOrder < out[j].SortOrder
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
+func catalogCasePlanItem(apiCase store.CatalogAPICase) (PlanItem, bool) {
+	sourceKind := normalizeKind(apiCase.SourceKind)
+	sourcePath := strings.TrimSpace(apiCase.SourcePath)
+	if sourceKind == "" && strings.TrimSpace(apiCase.CasePath) != "" {
+		sourceKind = "http-case"
+		sourcePath = strings.TrimSpace(apiCase.CasePath)
+	}
+	if sourceKind == "" && sourcePath == "" && strings.TrimSpace(apiCase.ExecutorID) == "" {
+		return PlanItem{}, false
+	}
+	item := PlanItem{
+		ID:             firstNonEmpty(strings.TrimSpace(apiCase.ExecutorID), "case:"+strings.TrimSpace(apiCase.ID)),
+		DisplayName:    strings.TrimSpace(apiCase.DisplayName),
+		Kind:           sourceKind,
+		SourcePath:     sourcePath,
+		Status:         normalizeStatus(apiCase.Status),
+		RunMode:        "dry-run",
+		TimeoutSeconds: apiCase.TimeoutSeconds,
+	}
+	item.Issues = descriptorIssues(item)
+	item.Ready = len(item.Issues) == 0
+	return item, true
 }
 
 func sortedDescriptors(values []profile.ExecutorDescriptor) []profile.ExecutorDescriptor {
@@ -132,6 +210,15 @@ func normalizeStatus(value string) string {
 		return "active"
 	}
 	return value
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func supportedKind(value string) bool {

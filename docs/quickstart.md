@@ -55,26 +55,36 @@ change the active Store, or `--store NAME_OR_DSN` for a one-off read:
 ./bin/otsandbox.sh interface-node discover --store local-personal --filter "POST /orders"
 ```
 
-For sample commands that have not yet migrated to `--store NAME_OR_DSN`, create
-a temporary compatibility Store:
+## Register and Verify an Environment
+
+The Environment Catalog lives in the active Store. Register only the minimal
+facts needed to reach the service and observability endpoint, then verify before
+publishing it to the verified discovery list:
 
 ```sh
-tmpdir=$(mktemp -d)
-store="$tmpdir/store.sqlite"
-./bin/otsandbox.sh store upgrade --store-url "$store"
+./bin/otsandbox.sh environment register --store local-personal --id local-sample
+./bin/otsandbox.sh environment discover --store local-personal
+./bin/otsandbox.sh environment inspect --store local-personal --environment local-sample
+./bin/otsandbox.sh environment bootstrap --store local-personal --environment local-sample
+./bin/otsandbox.sh environment verify --store local-personal --environment local-sample
+./bin/otsandbox.sh environment publish-verified --store team-verified --environment local-sample
 ```
+
+An environment can appear in verified discovery only after its verification
+workflow passed and the Store contains indexed Evidence plus real SkyWalking
+topology for that run.
 
 ## Create and Install a Import Bundle
 
 ```sh
-import bundle_dir="$tmpdir/import bundle"
+import bundle_dir="$(mktemp -d)/import bundle"
 ./bin/otsandbox.sh import bundle init \
   --output "$import bundle_dir" \
   --id sample \
   --display-name "Sample Import Bundle"
 
 ./bin/otsandbox.sh import bundle install --from "$import bundle_dir"
-./bin/otsandbox.sh import bundle verify --import bundle sample --store-url "$store"
+./bin/otsandbox.sh import bundle verify --import bundle sample --store local-personal
 ```
 
 The core repository intentionally ships without bundled import bundles. A import bundle is
@@ -86,16 +96,17 @@ API cases, templates, fixtures, and bindings.
 ```sh
 ./bin/otsandbox.sh serve \
   --import bundle sample \
-  --store-url "$store" \
+  --store local-personal \
   --host 127.0.0.1 \
   --port 18191
 ```
 
 Open `http://127.0.0.1:18191/`.
 
-The PostgreSQL Store is the target for daily testing workflows. Some sample
-commands still show the legacy `--store-url` compatibility path until all
-runtime write paths are migrated to `--store NAME_OR_DSN`.
+The PostgreSQL Store is the target for daily testing workflows. The same CLI
+commands work for a local PostgreSQL database or a remote team PostgreSQL
+database; switch the selected Store with `store use NAME` or override one
+command with `--store NAME_OR_DSN`.
 
 ## Next Steps
 

@@ -6,9 +6,9 @@ function queryParam(name) {
   return new URLSearchParams(window.location.search).get(name) || "";
 }
 
-function text(value, fallback = "-") {
+function text(value, defaultValue = "-") {
   const out = String(value ?? "").trim();
-  return out || fallback;
+  return out || defaultValue;
 }
 
 function formatTime(value) {

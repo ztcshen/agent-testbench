@@ -1081,6 +1081,79 @@ select
 	return rows[0].toStore(), nil
 }
 
+func (s *Store) UpsertEnvironment(ctx context.Context, e store.Environment) (store.Environment, error) {
+	now := utcNow()
+	if e.CreatedAt.IsZero() {
+		e.CreatedAt = now
+	}
+	if e.UpdatedAt.IsZero() {
+		e.UpdatedAt = now
+	}
+	if err := s.exec(ctx, fmt.Sprintf(`
+insert into environments (
+  id, display_name, description, status, verified, services_json, repos_json, compose_json,
+  health_checks_json, verification_workflow_id, last_verification_run_id, last_verification_status,
+  evidence_complete, topology_complete, last_verified_at, summary_json, created_at, updated_at
+)
+values (%s, %s, %s, %s, %d, %s, %s, %s, %s, %s, %s, %s, %d, %d, %s, %s, %s, %s)
+on conflict(id) do update set
+  display_name = excluded.display_name,
+  description = excluded.description,
+  status = excluded.status,
+  verified = excluded.verified,
+  services_json = excluded.services_json,
+  repos_json = excluded.repos_json,
+  compose_json = excluded.compose_json,
+  health_checks_json = excluded.health_checks_json,
+  verification_workflow_id = excluded.verification_workflow_id,
+  last_verification_run_id = excluded.last_verification_run_id,
+  last_verification_status = excluded.last_verification_status,
+  evidence_complete = excluded.evidence_complete,
+  topology_complete = excluded.topology_complete,
+  last_verified_at = excluded.last_verified_at,
+  summary_json = excluded.summary_json,
+  updated_at = excluded.updated_at;`,
+		sqlString(e.ID), sqlString(e.DisplayName), sqlString(e.Description), sqlString(stringDefault(e.Status, "draft")),
+		boolInt(e.Verified), sqlString(stringDefault(e.ServicesJSON, "[]")), sqlString(stringDefault(e.ReposJSON, "{}")),
+		sqlString(stringDefault(e.ComposeJSON, "{}")), sqlString(stringDefault(e.HealthChecksJSON, "[]")), sqlString(e.VerificationWorkflowID),
+		sqlString(e.LastVerificationRunID), sqlString(e.LastVerificationStatus), boolInt(e.EvidenceComplete), boolInt(e.TopologyComplete),
+		sqlString(encodeTime(e.LastVerifiedAt)), sqlString(stringDefault(e.SummaryJSON, "{}")), sqlString(encodeTime(e.CreatedAt)), sqlString(encodeTime(e.UpdatedAt)))); err != nil {
+		return store.Environment{}, fmt.Errorf("upsert environment %q: %w", e.ID, err)
+	}
+	return e, nil
+}
+
+func (s *Store) GetEnvironment(ctx context.Context, id string) (store.Environment, error) {
+	var rows []environmentRow
+	if err := s.query(ctx, fmt.Sprintf(`
+select id, display_name, description, status, verified, services_json, repos_json, compose_json,
+  health_checks_json, verification_workflow_id, last_verification_run_id, last_verification_status,
+  evidence_complete, topology_complete, last_verified_at, summary_json, created_at, updated_at
+from environments where id = %s;`, sqlString(id)), &rows); err != nil {
+		return store.Environment{}, err
+	}
+	if len(rows) == 0 {
+		return store.Environment{}, store.ErrNotFound
+	}
+	return rows[0].toStore(), nil
+}
+
+func (s *Store) ListEnvironments(ctx context.Context) ([]store.Environment, error) {
+	var rows []environmentRow
+	if err := s.query(ctx, `
+select id, display_name, description, status, verified, services_json, repos_json, compose_json,
+  health_checks_json, verification_workflow_id, last_verification_run_id, last_verification_status,
+  evidence_complete, topology_complete, last_verified_at, summary_json, created_at, updated_at
+from environments order by verified desc, updated_at desc, id;`, &rows); err != nil {
+		return nil, err
+	}
+	out := make([]store.Environment, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, row.toStore())
+	}
+	return out, nil
+}
+
 func (s *Store) exec(ctx context.Context, statement string) error {
 	out, err := sqliteCommand(ctx, false, s.path, statement)
 	if err != nil {
@@ -1089,17 +1162,24 @@ func (s *Store) exec(ctx context.Context, statement string) error {
 	return nil
 }
 
-func stringDefault(value string, fallback string) string {
+func stringDefault(value string, defaultValue string) string {
 	if strings.TrimSpace(value) == "" {
-		return fallback
+		return defaultValue
 	}
 	return value
 }
 
-func jsonString(value any, fallback string) string {
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func jsonString(value any, defaultValue string) string {
 	raw, err := json.Marshal(value)
 	if err != nil {
-		return fallback
+		return defaultValue
 	}
 	return string(raw)
 }
@@ -1112,11 +1192,11 @@ func stringSliceFromJSON(raw string) []string {
 	return out
 }
 
-func firstNonZero(value int, fallback int) int {
+func firstNonZero(value int, defaultValue int) int {
 	if value != 0 {
 		return value
 	}
-	return fallback
+	return defaultValue
 }
 
 func (s *Store) query(ctx context.Context, statement string, target any) error {
@@ -1614,6 +1694,50 @@ func (r profileCatalogIndexRow) toStore() store.ProfileCatalogIndex {
 	}
 }
 
+type environmentRow struct {
+	ID                     string `json:"id"`
+	DisplayName            string `json:"display_name"`
+	Description            string `json:"description"`
+	Status                 string `json:"status"`
+	Verified               int    `json:"verified"`
+	ServicesJSON           string `json:"services_json"`
+	ReposJSON              string `json:"repos_json"`
+	ComposeJSON            string `json:"compose_json"`
+	HealthChecksJSON       string `json:"health_checks_json"`
+	VerificationWorkflowID string `json:"verification_workflow_id"`
+	LastVerificationRunID  string `json:"last_verification_run_id"`
+	LastVerificationStatus string `json:"last_verification_status"`
+	EvidenceComplete       int    `json:"evidence_complete"`
+	TopologyComplete       int    `json:"topology_complete"`
+	LastVerifiedAt         string `json:"last_verified_at"`
+	SummaryJSON            string `json:"summary_json"`
+	CreatedAt              string `json:"created_at"`
+	UpdatedAt              string `json:"updated_at"`
+}
+
+func (r environmentRow) toStore() store.Environment {
+	return store.Environment{
+		ID:                     r.ID,
+		DisplayName:            r.DisplayName,
+		Description:            r.Description,
+		Status:                 r.Status,
+		Verified:               r.Verified != 0,
+		ServicesJSON:           r.ServicesJSON,
+		ReposJSON:              r.ReposJSON,
+		ComposeJSON:            r.ComposeJSON,
+		HealthChecksJSON:       r.HealthChecksJSON,
+		VerificationWorkflowID: r.VerificationWorkflowID,
+		LastVerificationRunID:  r.LastVerificationRunID,
+		LastVerificationStatus: r.LastVerificationStatus,
+		EvidenceComplete:       r.EvidenceComplete != 0,
+		TopologyComplete:       r.TopologyComplete != 0,
+		LastVerifiedAt:         decodeTime(r.LastVerifiedAt),
+		SummaryJSON:            r.SummaryJSON,
+		CreatedAt:              decodeTime(r.CreatedAt),
+		UpdatedAt:              decodeTime(r.UpdatedAt),
+	}
+}
+
 func sqlString(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 }
@@ -1634,13 +1758,6 @@ func decodeTime(value string) time.Time {
 		return time.Time{}
 	}
 	return t
-}
-
-func boolInt(value bool) int {
-	if value {
-		return 1
-	}
-	return 0
 }
 
 func utcNow() time.Time {

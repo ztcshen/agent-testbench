@@ -10,8 +10,10 @@ below is derived from a downloaded open-source reference repository under:
 Do not promote an idea from this backlog into implementation unless the source
 feature, local evidence path, adaptation scope, and verification plan remain
 explicit. Open Test Sandbox is currently a local-first control plane with a
-SQLite Store, CLI, HTTP APIs, API-operated catalog, execution reports, and
-Evidence lookup APIs (`docs/backend-capabilities.md:3-28`).
+PostgreSQL Store-first product path, CLI, HTTP APIs, API-operated catalog,
+execution reports, and Evidence lookup APIs (`docs/backend-capabilities.md:3-28`).
+SQLite references in older backlog notes describe the historical baseline only;
+new daily testing behavior should target the selected PostgreSQL Store.
 
 ## Evidence Rules
 

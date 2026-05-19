@@ -377,7 +377,7 @@ func (r *apiCaseBatchRunner) run(ctx context.Context, batchRunID string, profile
 		}
 		r.updateCase(batchRunID, index, item)
 	}
-	r.finish(batchRunID)
+	r.finish(ctx, batchRunID, profileID, workflowID, runtime)
 }
 
 func (r *apiCaseBatchRunner) save(report apiCaseBatchRunReport) {
@@ -408,9 +408,8 @@ func (r *apiCaseBatchRunner) updateCase(batchRunID string, index int, item apiCa
 	r.runs[batchRunID] = report
 }
 
-func (r *apiCaseBatchRunner) finish(batchRunID string) {
+func (r *apiCaseBatchRunner) finish(ctx context.Context, batchRunID string, profileID string, workflowID string, runtime store.Store) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	report := r.runs[batchRunID]
 	refreshAPICaseBatchCounts(&report)
 	if report.Failed > 0 {
@@ -425,7 +424,88 @@ func (r *apiCaseBatchRunner) finish(batchRunID string) {
 	_ = writeAPICaseBatchJUnitReport(report)
 	_ = writeAPICaseBatchArtifactManifest(report)
 	_ = writeAPICaseBatchFailureSummary(report)
+	recordAPICaseBatchReportArtifacts(ctx, runtime, profileID, workflowID, report)
 	r.runs[batchRunID] = report
+	r.mu.Unlock()
+}
+
+func recordAPICaseBatchReportArtifacts(ctx context.Context, runtime store.Store, profileID string, workflowID string, report apiCaseBatchRunReport) {
+	if runtime == nil || strings.TrimSpace(report.BatchRunID) == "" {
+		return
+	}
+	startedAt := parseAPICaseBatchReportTime(report.StartedAt, time.Now().UTC())
+	finishedAt := parseAPICaseBatchReportTime(report.FinishedAt, time.Now().UTC())
+	if finishedAt.Before(startedAt) {
+		finishedAt = startedAt
+	}
+	evidenceRoot := strings.TrimSpace(filepath.Dir(report.HTMLReportPath))
+	if evidenceRoot == "." {
+		evidenceRoot = strings.TrimSpace(filepath.Dir(report.ArtifactManifestPath))
+	}
+	if evidenceRoot == "." {
+		evidenceRoot = ""
+	}
+	if _, err := runtime.CreateRun(ctx, store.Run{
+		ID:           report.BatchRunID,
+		ProfileID:    strings.TrimSpace(profileID),
+		WorkflowID:   strings.TrimSpace(workflowID),
+		Status:       report.Status,
+		EvidenceRoot: evidenceRoot,
+		SummaryJSON:  compactJSON(report),
+		StartedAt:    startedAt,
+		FinishedAt:   finishedAt,
+		CreatedAt:    startedAt,
+		UpdatedAt:    finishedAt,
+	}); err != nil {
+		return
+	}
+	for _, artifact := range apiCaseBatchReportEvidenceArtifacts(report) {
+		info, err := os.Stat(artifact.Path)
+		if err != nil {
+			continue
+		}
+		_, _ = runtime.RecordEvidence(ctx, store.EvidenceRecord{
+			ID:         report.BatchRunID + ".report." + artifact.Kind,
+			RunID:      report.BatchRunID,
+			Kind:       artifact.Kind,
+			URI:        artifact.Path,
+			MediaType:  artifact.MediaType,
+			SizeBytes:  info.Size(),
+			Summary:    artifact.Summary,
+			Category:   "report",
+			Visibility: "public",
+			LabelsJSON: compactJSON(map[string]any{
+				"batchRunId": report.BatchRunID,
+				"requestId":  report.RequestID,
+				"kind":       artifact.Kind,
+			}),
+			CreatedAt: finishedAt,
+		})
+	}
+}
+
+type apiCaseBatchReportEvidenceArtifact struct {
+	Kind      string
+	Path      string
+	MediaType string
+	Summary   string
+}
+
+func apiCaseBatchReportEvidenceArtifacts(report apiCaseBatchRunReport) []apiCaseBatchReportEvidenceArtifact {
+	return []apiCaseBatchReportEvidenceArtifact{
+		{Kind: "html", Path: report.HTMLReportPath, MediaType: "text/html", Summary: "API case batch HTML report"},
+		{Kind: "junit", Path: report.JUnitReportPath, MediaType: "application/xml", Summary: "API case batch JUnit report"},
+		{Kind: "artifact-manifest", Path: report.ArtifactManifestPath, MediaType: "application/json", Summary: "API case batch artifact manifest"},
+		{Kind: "failure-summary", Path: report.FailureSummaryPath, MediaType: "application/json", Summary: "API case batch failure summary"},
+	}
+}
+
+func parseAPICaseBatchReportTime(value string, defaultValue time.Time) time.Time {
+	parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(value))
+	if err != nil {
+		return defaultValue
+	}
+	return parsed.UTC()
 }
 
 func writeAPICaseBatchHTMLReport(report apiCaseBatchRunReport) error {

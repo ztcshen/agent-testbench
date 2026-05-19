@@ -155,15 +155,15 @@ func handleLatestWorkflowStepRun(w http.ResponseWriter, r *http.Request, runtime
 		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	var fallback *store.Run
+	var defaultValue *store.Run
 	for i := len(runs) - 1; i >= 0; i-- {
 		run := runs[i]
 		if run.WorkflowID != workflowID || !workflowRunSummaryContainsStep(run.SummaryJSON, stepID) {
 			continue
 		}
-		if fallback == nil {
+		if defaultValue == nil {
 			candidate := run
-			fallback = &candidate
+			defaultValue = &candidate
 		}
 		if !workflowRunSummaryStepHasHTTPResult(run.SummaryJSON, stepID) {
 			continue
@@ -171,8 +171,8 @@ func handleLatestWorkflowStepRun(w http.ResponseWriter, r *http.Request, runtime
 		writeWorkflowStepRunPayload(w, r.Context(), runtime, run, stepID)
 		return
 	}
-	if fallback != nil {
-		writeWorkflowStepRunPayload(w, r.Context(), runtime, *fallback, stepID)
+	if defaultValue != nil {
+		writeWorkflowStepRunPayload(w, r.Context(), runtime, *defaultValue, stepID)
 		return
 	}
 	writeJSONStatus(w, http.StatusNotFound, map[string]any{"ok": false, "error": "workflow run step not found"})
@@ -236,6 +236,10 @@ func handleSaveWorkflowRun(w http.ResponseWriter, r *http.Request, bundle profil
 		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
+	if err := copyWorkflowRunStepEvidence(r.Context(), runtime, run.ID, payload, now); err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
 	if err := copyWorkflowRunStepTraceTopologies(r.Context(), runtime, run.ID, workflowID, payload, now); err != nil {
 		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 		return
@@ -247,7 +251,7 @@ func handleSaveWorkflowRun(w http.ResponseWriter, r *http.Request, bundle profil
 	writeJSON(w, map[string]any{"ok": true, "workflowRunId": run.ID, "run": workflowRunListItem(run)})
 }
 
-func recordWorkflowRunStepCases(ctx context.Context, runtime store.Store, runID string, payload map[string]any, fallback time.Time) error {
+func recordWorkflowRunStepCases(ctx context.Context, runtime store.Store, runID string, payload map[string]any, defaultValue time.Time) error {
 	for index, raw := range workflowRunSteps(payload) {
 		step, ok := raw.(map[string]any)
 		if !ok {
@@ -259,8 +263,8 @@ func recordWorkflowRunStepCases(ctx context.Context, runtime store.Store, runID 
 		}
 		stepID := strings.TrimSpace(valueString(step["stepId"]))
 		status := workflowStepCaseStatus(step)
-		startedAt := timeFromPayload(step["startedAt"], fallback)
-		finishedAt := timeFromPayload(step["finishedAt"], startedAt, fallback)
+		startedAt := timeFromPayload(step["startedAt"], defaultValue)
+		finishedAt := timeFromPayload(step["finishedAt"], startedAt, defaultValue)
 		_, err := runtime.RecordAPICaseRun(ctx, store.APICaseRun{
 			ID:                   fmt.Sprintf("%s.case.%02d", runID, index+1),
 			RunID:                runID,
@@ -270,7 +274,7 @@ func recordWorkflowRunStepCases(ctx context.Context, runtime store.Store, runID 
 			AssertionSummaryJSON: compactJSON(workflowStepAssertionSummary(step, status)),
 			StartedAt:            startedAt,
 			FinishedAt:           finishedAt,
-			CreatedAt:            fallback,
+			CreatedAt:            defaultValue,
 		})
 		if err != nil {
 			return err
@@ -279,33 +283,109 @@ func recordWorkflowRunStepCases(ctx context.Context, runtime store.Store, runID 
 	return nil
 }
 
-func copyWorkflowRunStepTraceTopologies(ctx context.Context, runtime store.Store, runID string, workflowID string, payload map[string]any, fallback time.Time) error {
-	for _, raw := range workflowRunSteps(payload) {
+func copyWorkflowRunStepEvidence(ctx context.Context, runtime store.Store, runID string, payload map[string]any, defaultValue time.Time) error {
+	for index, raw := range workflowRunSteps(payload) {
 		step, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
-		if _, err := copyWorkflowStepTraceTopologiesFromSources(ctx, runtime, runID, workflowID, step, fallback); err != nil {
+		caseID := strings.TrimSpace(valueString(step["caseId"]))
+		if caseID == "" {
+			continue
+		}
+		caseRunID := fmt.Sprintf("%s.case.%02d", runID, index+1)
+		if _, err := copyWorkflowStepEvidenceFromSources(ctx, runtime, runID, caseRunID, step, defaultValue); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func copyWorkflowRunStepPostProcessTasks(ctx context.Context, runtime store.Store, runID string, workflowID string, payload map[string]any, fallback time.Time) error {
+func copyWorkflowRunStepTraceTopologies(ctx context.Context, runtime store.Store, runID string, workflowID string, payload map[string]any, defaultValue time.Time) error {
 	for _, raw := range workflowRunSteps(payload) {
 		step, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
-		if _, err := copyWorkflowStepPostProcessTasksFromSources(ctx, runtime, runID, workflowID, step, fallback); err != nil {
+		if _, err := copyWorkflowStepTraceTopologiesFromSources(ctx, runtime, runID, workflowID, step, defaultValue); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func copyWorkflowStepTraceTopologiesFromSources(ctx context.Context, runtime store.Store, runID string, workflowID string, step map[string]any, fallback time.Time) ([]map[string]any, error) {
+func copyWorkflowRunStepPostProcessTasks(ctx context.Context, runtime store.Store, runID string, workflowID string, payload map[string]any, defaultValue time.Time) error {
+	for _, raw := range workflowRunSteps(payload) {
+		step, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if _, err := copyWorkflowStepPostProcessTasksFromSources(ctx, runtime, runID, workflowID, step, defaultValue); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyWorkflowStepEvidenceFromSources(ctx context.Context, runtime store.Store, runID string, caseRunID string, step map[string]any, defaultValue time.Time) ([]map[string]any, error) {
+	copiedRows := []map[string]any{}
+	if runtime == nil {
+		return copiedRows, nil
+	}
+	stepID := strings.TrimSpace(valueString(step["stepId"]))
+	caseID := strings.TrimSpace(valueString(step["caseId"]))
+	for _, sourceRunID := range workflowStepSourceRunIDs(step) {
+		if sourceRunID == "" || sourceRunID == runID {
+			continue
+		}
+		rows, err := runtime.ListEvidence(ctx, sourceRunID)
+		if err != nil {
+			continue
+		}
+		for _, row := range rows {
+			if stepID != "" && row.StepID != "" && row.StepID != stepID {
+				continue
+			}
+			labels := jsonObject(row.LabelsJSON)
+			if caseID != "" && valueString(labels["caseId"]) != "" && valueString(labels["caseId"]) != caseID {
+				continue
+			}
+			copied := row
+			copied.ID = copiedWorkflowEvidenceID(runID, stepID, row)
+			copied.RunID = runID
+			copied.CaseRunID = caseRunID
+			copied.StepID = firstNonEmpty(stepID, row.StepID)
+			copied.CreatedAt = defaultValue
+			labels["runId"] = runID
+			labels["caseRunId"] = caseRunID
+			if caseID != "" {
+				labels["caseId"] = caseID
+			}
+			if copied.StepID != "" {
+				labels["stepId"] = copied.StepID
+			}
+			copied.LabelsJSON = compactJSON(labels)
+			if copied.CreatedAt.IsZero() {
+				copied.CreatedAt = time.Now().UTC()
+			}
+			saved, err := runtime.RecordEvidence(ctx, copied)
+			if err != nil {
+				return nil, err
+			}
+			copiedRows = append(copiedRows, map[string]any{
+				"id":        saved.ID,
+				"runId":     saved.RunID,
+				"caseRunId": saved.CaseRunID,
+				"stepId":    saved.StepID,
+				"kind":      saved.Kind,
+				"uri":       saved.URI,
+			})
+		}
+	}
+	return copiedRows, nil
+}
+
+func copyWorkflowStepTraceTopologiesFromSources(ctx context.Context, runtime store.Store, runID string, workflowID string, step map[string]any, defaultValue time.Time) ([]map[string]any, error) {
 	copiedRows := []map[string]any{}
 	if runtime == nil {
 		return copiedRows, nil
@@ -336,7 +416,7 @@ func copyWorkflowStepTraceTopologiesFromSources(ctx context.Context, runtime sto
 			copied.WorkflowID = firstNonEmpty(workflowID, row.WorkflowID)
 			copied.StepID = firstNonEmpty(stepID, row.StepID)
 			copied.CaseID = firstNonEmpty(caseID, row.CaseID)
-			copied.CreatedAt = fallback
+			copied.CreatedAt = defaultValue
 			if copied.CreatedAt.IsZero() {
 				copied.CreatedAt = time.Now().UTC()
 			}
@@ -350,7 +430,7 @@ func copyWorkflowStepTraceTopologiesFromSources(ctx context.Context, runtime sto
 	return copiedRows, nil
 }
 
-func copyWorkflowStepPostProcessTasksFromSources(ctx context.Context, runtime store.Store, runID string, workflowID string, step map[string]any, fallback time.Time) ([]map[string]any, error) {
+func copyWorkflowStepPostProcessTasksFromSources(ctx context.Context, runtime store.Store, runID string, workflowID string, step map[string]any, defaultValue time.Time) ([]map[string]any, error) {
 	copiedRows := []map[string]any{}
 	if runtime == nil {
 		return copiedRows, nil
@@ -379,7 +459,7 @@ func copyWorkflowStepPostProcessTasksFromSources(ctx context.Context, runtime st
 			copied.StepID = firstNonEmpty(stepID, row.StepID)
 			copied.CaseID = firstNonEmpty(caseID, row.CaseID)
 			if copied.CreatedAt.IsZero() {
-				copied.CreatedAt = fallback
+				copied.CreatedAt = defaultValue
 			}
 			if copied.CreatedAt.IsZero() {
 				copied.CreatedAt = time.Now().UTC()
@@ -429,6 +509,11 @@ func copiedWorkflowTraceTopologyID(runID string, stepID string, row store.TraceT
 
 func copiedWorkflowPostProcessTaskID(runID string, stepID string, row store.PostProcessTask) string {
 	suffix := firstNonEmpty(row.Kind, row.ID, "post-process")
+	return runID + "." + safeRuntimeLogPathSegment(stepID) + "." + safeRuntimeLogPathSegment(suffix)
+}
+
+func copiedWorkflowEvidenceID(runID string, stepID string, row store.EvidenceRecord) string {
+	suffix := firstNonEmpty(row.Kind, row.ID, "evidence")
 	return runID + "." + safeRuntimeLogPathSegment(stepID) + "." + safeRuntimeLogPathSegment(suffix)
 }
 
@@ -561,23 +646,23 @@ func LatestWorkflowStepRunPayload(ctx context.Context, runtime store.Store, work
 	if err != nil {
 		return nil, false, err
 	}
-	var fallback *store.Run
+	var defaultValue *store.Run
 	for i := len(runs) - 1; i >= 0; i-- {
 		run := runs[i]
 		if run.WorkflowID != workflowID || !workflowRunSummaryContainsStep(run.SummaryJSON, stepID) {
 			continue
 		}
-		if fallback == nil {
+		if defaultValue == nil {
 			candidate := run
-			fallback = &candidate
+			defaultValue = &candidate
 		}
 		if !workflowRunSummaryStepHasHTTPResult(run.SummaryJSON, stepID) {
 			continue
 		}
 		return WorkflowStepRunPayloadForRun(ctx, runtime, run, stepID)
 	}
-	if fallback != nil {
-		return WorkflowStepRunPayloadForRun(ctx, runtime, *fallback, stepID)
+	if defaultValue != nil {
+		return WorkflowStepRunPayloadForRun(ctx, runtime, *defaultValue, stepID)
 	}
 	return nil, false, nil
 }

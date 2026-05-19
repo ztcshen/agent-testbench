@@ -538,8 +538,8 @@ func jsonArray(raw string) []any {
 	return out
 }
 
-func caseEvidenceRequest(records []store.EvidenceRecord, caseRunID string, fallback map[string]any) map[string]any {
-	request := copyMap(fallback)
+func caseEvidenceRequest(records []store.EvidenceRecord, caseRunID string, defaultValue map[string]any) map[string]any {
+	request := copyMap(defaultValue)
 	for _, record := range records {
 		if record.CaseRunID != caseRunID || record.Kind != "request" {
 			continue

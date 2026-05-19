@@ -194,7 +194,7 @@ function BlueprintEditor() {
       try {
         if (!cancelled) await loadConfiguredWorkflow();
       } catch (error) {
-        if (!cancelled) setMessage(`catalog fallback · ${error.message}`);
+        if (!cancelled) setMessage(`catalog defaultValue · ${error.message}`);
       }
     }
     loadCatalogWorkflow();

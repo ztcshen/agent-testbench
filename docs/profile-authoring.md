@@ -16,7 +16,7 @@ agent needs to run it.
 
 ## What Stays in Core
 
-- Generic Store interfaces and SQLite implementation.
+- Generic Store interfaces, PostgreSQL implementation, and compatibility backends.
 - Import Bundle loading, auditing, installation, packing, and publishing.
 - API case execution and Evidence indexing.
 - Control plane APIs and React workbench pages.
@@ -61,7 +61,7 @@ which makes review and generated diffs predictable.
    ```sh
    otsandbox import bundle verify \
      --import bundle /path/to/team-import bundle \
-     --store-url .runtime/store.sqlite \
+     --store local-personal \
      --require-case-runs \
      --require-workflow-runs
    ```

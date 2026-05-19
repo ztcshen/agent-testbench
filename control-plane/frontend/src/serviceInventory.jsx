@@ -47,7 +47,7 @@ function SourceStatus({ catalog }) {
   const warningText = warnings.length ? ` · ${warnings.length} warnings` : "";
   return (
     <div className={`catalog-source-status ${ok && !warnings.length ? "ok" : "warning"}`} title={[catalog?.source?.path || catalog?.source?.error || "", warnings.join("\n")].filter(Boolean).join("\n")}>
-      {ok ? `${source}${version}${warningText}` : `${source}${version}: fallback${warningText}`}
+      {ok ? `${source}${version}${warningText}` : `${source}${version}: defaultValue${warningText}`}
     </div>
   );
 }

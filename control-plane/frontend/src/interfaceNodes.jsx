@@ -4,13 +4,13 @@ import { RefreshCw } from "lucide-react";
 import { fetchJSON } from "./api.js";
 import { buildInterfaceNodeDirectoryContext, interfaceNodeDetailHref } from "./interfaceNodesModel.mjs";
 
-function text(value, fallback = "-") {
+function text(value, defaultValue = "-") {
   const out = String(value ?? "").trim();
-  return out || fallback;
+  return out || defaultValue;
 }
 
-function copyText(payload, key, fallback) {
-  return payload?.presentation?.copy?.[key] || fallback;
+function copyText(payload, key, defaultValue) {
+  return payload?.presentation?.copy?.[key] || defaultValue;
 }
 
 function duration(ms) {
@@ -65,7 +65,7 @@ function Attention({ items, payload, directoryContext }) {
     <div className="interface-node-directory-attention-list">
       {attention.length ? attention.map((item) => (
         <a className="interface-node-directory-attention-item" href={interfaceNodeDetailHref(item, directoryContext) || item.href || `/interface-node.html?id=${encodeURIComponent(item.id || "")}`} key={item.id}>
-          <strong>{item.displayName || item.id || copyText(payload, "fallbackNodeName", "接口节点")}</strong>
+          <strong>{item.displayName || item.id || copyText(payload, "defaultValueNodeName", "接口节点")}</strong>
           <span>{[item.admissionStatus || "pending", item.validationStatus === "invalid" ? `${item.validationIssueCount ?? 0} validation` : "", item.serviceId].filter(Boolean).join(" · ")}</span>
         </a>
       )) : <p className="dashboard-empty compact">{copyText(payload, "attentionEmpty", "当前没有待处理接口。")}</p>}
@@ -77,7 +77,7 @@ function NodeCard({ item, payload, directoryContext }) {
   return (
     <a className="interface-node-directory-card" href={interfaceNodeDetailHref(item, directoryContext) || item.href || `/interface-node.html?id=${encodeURIComponent(item.id || "")}`}>
       <div className="interface-node-directory-card-top">
-        <strong>{item.displayName || item.id || copyText(payload, "fallbackNodeName", "接口节点")}</strong>
+        <strong>{item.displayName || item.id || copyText(payload, "defaultValueNodeName", "接口节点")}</strong>
         <span className={`react-pill ${statusClass(item)}`}>{item.admissionStatus || "pending"}</span>
       </div>
       <code>{[item.id, item.serviceId, item.operation].filter(Boolean).join(" · ") || "-"}</code>

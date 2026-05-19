@@ -19,6 +19,14 @@ Verification baseline: this page was checked against `cmd/otsandbox/main.go`,
   daily maintenance surface.
 - SQLite is retained only for legacy compatibility and old local runtime import
   paths during the PostgreSQL rollout.
+- Daily CLI/API commands read and write the active Store by default, or the
+  Store named by `--store NAME_OR_DSN` for a single command. SQLite paths are
+  limited to legacy, compatibility, and import-test work.
+- Environment Catalog operations are Store-first: register, discover, inspect,
+  bootstrap, verify, and publish-verified must share the selected Store contract
+  across CLI, API, and UI.
+- Verified environment discovery is gated by a passed verification workflow plus
+  complete Evidence indexes and stored real SkyWalking topology.
 - Docker runtime management is local-only for now. The parity target is local
   workflow operation, not remote Docker orchestration.
 - API parity is required for daily testing operations: Store configuration
@@ -26,13 +34,18 @@ Verification baseline: this page was checked against `cmd/otsandbox/main.go`,
   case registration/execution, run reports, Evidence, post-process status, and
   real topology lookup. Offline package authoring commands may remain CLI-only
   when they are review/migration utilities rather than workbench operations.
+- Daily execution and report commands use the selected Store engine end to end.
+  When PostgreSQL is selected, commands must not create hidden SQLite runtime
+  databases; missing Store configuration fails with clear guidance instead of
+  switching engines.
 
 ## CLI Surface
 
 | Area | CLI commands |
 | --- | --- |
 | General | `version`, `help` |
-| Store | `store status`, `store upgrade` |
+| Store | `store config set/list/remove`, `store use`, `store current`, `store status`, `store upgrade` |
+| Environment catalog | `environment register`, `environment discover`, `environment inspect`, `environment bootstrap`, `environment verify`, `environment publish-verified` |
 | Sandbox runtime | `sandbox start`, `sandbox service register`, `sandbox interface register` |
 | Template package lifecycle | `template-package ...` / `template-packages ...` aliases for `profile init`, `profile install`, `profile pack`, `profile list`, `profile inspect`, `profile audit`, `profile audit-plan`, `profile verify`, `profile import` |
 | Template package generation/import planning | `template-package generation-plan openapi`, `template-package import-plan openapi`, `template-package import-plan http-capture` aliases for the legacy `profile ...` commands |
@@ -63,8 +76,15 @@ Verification baseline: this page was checked against `cmd/otsandbox/main.go`,
 | `POST` | `/api/template-packages/generation-plan/openapi` | Produce a review-only OpenAPI generation plan for draft negative API case candidates. |
 | `GET` | `/api/template-packages/catalog-index` | Return active Store catalog index and config version. Legacy alias: `/api/profile/catalog-index`. |
 | `GET` | `/api/state` | Return dashboard-friendly state from the active profile. |
+| `GET` | `/api/store/current` | Return the running control plane's selected Store metadata with the DSN password masked. |
 | `POST` | `/api/sandbox/services` | Register or update a Store-backed sandbox service. |
 | `POST` | `/api/sandbox/interfaces` | Register or update a Store-backed interface node, request template, API case, and execution config. |
+| `POST` | `/api/environments` | Register or update an Environment Catalog entry in the active Store. |
+| `GET` | `/api/environments` | Discover Environment Catalog entries from the active Store; verified discovery only returns entries promoted by `publish-verified`. |
+| `GET` | `/api/environments/{environmentId}` | Inspect one environment, including runtime facts, workflow coverage, Evidence health, and verification status. |
+| `GET` | `/api/environments/{environmentId}/bootstrap` | Return the local clone/fetch, compose/start, health-check, and verification workflow plan for the environment. |
+| `POST` | `/api/environments/{environmentId}/verify` | Persist verification run status after the configured acceptance workflow has run, including Evidence completeness and real SkyWalking topology completeness. |
+| `POST` | `/api/environments/{environmentId}/publish-verified` | Promote an environment into verified discovery only after the verification workflow passed and Evidence plus real SkyWalking topology are complete. |
 | `GET` | `/api/dashboard` | Return dashboard summary, Store-aware when available. |
 | `GET` | `/api/catalog` | Return catalog payload, Store-aware when available. |
 | `GET` | `/api/interface-nodes` | List interface nodes; accepts `serviceId`, `operation`, and `filter`, matching `interface-node discover`. |
@@ -134,54 +154,56 @@ reference is needed for inspect, pack, audit, audit-plan, and verify. Legacy
 | --- | --- | --- | --- |
 | Serve control plane | `serve` | Not applicable | CLI-only bootstrap. |
 | Version/help | `version`, `help` | None | CLI-only. |
+| Store selection visibility | `store current` | `/api/store/current` | Paired as read-only visibility. CLI reports the active named Store; API reports the Store selected when `serve` started. Neither surface exposes raw DSN passwords. |
 | Store status and schema upgrade | `store status`, `store upgrade` | None | CLI-only. |
-| Start registered sandbox service | `sandbox start` | None | CLI-only. |
-| Register sandbox service/interface in Store | `sandbox service register`, `sandbox interface register` | `/api/sandbox/services`, `/api/sandbox/interfaces` | Paired. CLI and API share the same Store catalog registration path. |
+| Environment catalog lifecycle | `environment register`, `environment discover`, `environment inspect`, `environment bootstrap`, `environment verify`, `environment publish-verified` | `/api/environments`, `/api/environments/{environmentId}`, `GET /api/environments/{environmentId}/bootstrap`, `/api/environments/{environmentId}/verify`, `/api/environments/{environmentId}/publish-verified` | Paired. CLI and API use the active Store or `--store NAME_OR_DSN`; verified discovery only returns environments with passed workflow verification, indexed Evidence, and real SkyWalking topology. |
+| Start registered sandbox service | `sandbox start` | None | CLI-only local execution. CLI accepts active Store or `--store NAME_OR_DSN`; local and remote PostgreSQL Stores use the same command. |
+| Register sandbox service/interface in Store | `sandbox service register`, `sandbox interface register` | `/api/sandbox/services`, `/api/sandbox/interfaces` | Paired. CLI and API share the same Store catalog registration path; CLI accepts active Store or `--store NAME_OR_DSN`. |
 | Template package install/list | `template-package install`, `template-package list` (`profile ...` legacy alias) | `/api/template-packages/install`, `/api/template-packages/installed` | Mostly paired through Store-first aliases; legacy `/api/profile/*` routes remain. |
 | Current template package summary/assets | `template-package inspect` (`profile inspect` legacy alias) | `/api/template-packages/current`, `/api/template-packages/assets` | Partial. CLI inspects a package/reference; API reports the active served template package. Legacy `/api/profile*` routes remain. |
-| Template package import/publish | `template-package import`, `config publish` (`profile import` legacy alias) | `/api/template-packages/import` | Mostly paired through Store-first aliases. CLI can also audit/require audit ok. |
-| Template package verify | `template-package verify` (`profile verify` legacy alias) | `/api/template-packages/verify` | Paired through Store-first aliases. |
-| Template package audit repair plan | `template-package audit-plan` (`profile audit-plan` legacy alias) | `/api/template-packages/audit-plan` | Paired through Store-first aliases. |
+| Template package import/publish | `template-package import`, `config publish` (`profile import` legacy alias) | `/api/template-packages/import` | Mostly paired through Store-first aliases. CLI accepts active Store or `--store NAME_OR_DSN` and can also audit/require audit ok. |
+| Template package verify | `template-package verify` (`profile verify` legacy alias) | `/api/template-packages/verify` | Paired through Store-first aliases. CLI accepts active Store or `--store NAME_OR_DSN`; local and remote PostgreSQL Stores use the same command. |
+| Template package audit repair plan | `template-package audit-plan` (`profile audit-plan` legacy alias) | `/api/template-packages/audit-plan` | Paired through Store-first aliases. CLI accepts active Store or `--store NAME_OR_DSN`. |
 | Template package init/pack/audit | `template-package init`, `template-package pack`, `template-package audit` (`profile ...` legacy aliases) | None | CLI-only package authoring. |
 | Template package import/generation planning | `template-package import-plan openapi`, `template-package import-plan http-capture`, `template-package generation-plan openapi` (`profile ...` legacy aliases) | `/api/template-packages/import-plan/openapi`, `/api/template-packages/import-plan/http-capture`, `/api/template-packages/generation-plan/openapi` | Paired for current OpenAPI import, static HTTP capture import, and OpenAPI generation planners. |
-| Template package catalog index | `template-package catalog-index` (`profile catalog-index` legacy alias) | `/api/template-packages/catalog-index` | Paired through Store-first alias; legacy `/api/profile/catalog-index` remains. |
+| Template package catalog index | `template-package catalog-index` (`profile catalog-index` legacy alias) | `/api/template-packages/catalog-index` | Paired through Store-first alias; CLI accepts active Store or `--store NAME_OR_DSN`. Legacy `/api/profile/catalog-index` remains. |
 | Catalog/dashboard/state | Roughly `profile inspect`, discovery commands | `/api/state`, `/api/dashboard`, `/api/catalog` | API-first UI payloads; no exact CLI. |
 | Interface-node discovery/list | `interface-node discover` | `/api/interface-nodes`, `/api/interface-node` | Paired for discovery filters and detail lookup. CLI accepts active Store or `--store NAME_OR_DSN`; local and remote PostgreSQL Stores use the same command. API also keeps `serviceId`/`operation` list filters. |
-| Interface-node coverage | `interface-node coverage`, `interface-node coverage-gaps` | `/api/interface-node/coverage`, `/api/interface-node/coverage-gaps` | Paired. CLI and API share the same coverage payloads. |
+| Interface-node coverage | `interface-node coverage`, `interface-node coverage-gaps` | `/api/interface-node/coverage`, `/api/interface-node/coverage-gaps` | Paired. CLI and API share the same coverage payloads. CLI accepts active Store or `--store NAME_OR_DSN`. |
 | Interface-node case authoring | `interface-node case audit/draft/apply` | None | CLI-only package authoring. |
-| Single interface report | `interface-node case report` | `/api/cases/batch-runs` with `nodeIds` | Partial. CLI is synchronous and writes report files; API is async and process-local. |
+| Single interface report | `interface-node case report` | `/api/cases/batch-runs` with `nodeIds` | Partial. CLI is synchronous and writes report files; API is async and process-local. CLI accepts active Store or `--store NAME_OR_DSN`. |
 | Case discovery/capabilities | `case discover` | `/api/cases/capabilities`, `/api/catalog` | Partial. CLI accepts active Store or `--store NAME_OR_DSN`; local and remote PostgreSQL Stores use the same command. CLI has richer maintenance filters. |
-| Single case run by file | `case run --case PATH` | `/api/cases/run` with `casePath` | Paired. |
-| Single case run by catalog id | None | `/api/test-kit/run` with `caseId` | API-only. |
+| Single case run by file | `case run --case PATH` | `/api/cases/run` with `casePath` | Paired. CLI writes Store records through the active Store or `--store NAME_OR_DSN`; local and remote PostgreSQL Stores use the same command. |
+| Single case run by catalog id | `case run --case-id ID` | `/api/test-kit/run` with `caseId` | Paired. CLI and API execute the Store catalog case through the same test-kit runner, write run/case/Evidence indexes to the active Store, and accept the same command shape for local and remote PostgreSQL Stores. |
 | Case batch run | `case suite report`, `workflow report`, `interface-node case report` | `/api/cases/batch-runs`, `/api/test-kit/run-batch` | Partial. CLI variants are synchronous reports; API variants are async or test-kit oriented. |
-| Case run list | `case runs` | `/api/case/runs` | Paired. CLI reads Store runs, API case runs, and Evidence counts. |
-| Case evidence detail | `case evidence` | `/api/case/evidence`, `/api/case-run/evidence` | Paired. CLI reuses the control-plane case Evidence payload. |
-| Case timing | `case timing` | `/api/case/timing` | Paired. CLI reuses the control-plane timing summary payload. |
-| Incomplete case batches | `case incomplete-batches` | `/api/case/incomplete-batches` | Paired. |
-| Suite coverage | `case suite coverage` | `/api/case/suite-coverage` | Paired. |
-| Suite inspection | `case suite inspect` | `/api/case/suite-inspection` | Paired. |
-| Suite plan | `case suite plan` | `/api/case/suite-plan` | Paired. |
-| Suite stability | `case suite stability` | `/api/case/suite-stability` | Paired. |
-| Suite priority | `case suite priority` | `/api/case/suite-priority` | Paired. |
-| Suite brief | `case suite brief` | `/api/case/suite-brief` | Paired. |
-| Suite quality | `case suite quality` | `/api/case/suite-quality` | Paired. |
-| Suite quality plan | `case suite quality-plan` | `/api/case/suite-quality-plan` | Paired. |
-| Suite quality HTML/JSON report | `case suite quality-report` | None | CLI-only artifact generation. |
-| Suite impact plan | `case suite impact` | `/api/case/suite-impact` | Paired. |
-| Suite impact run/report | `case suite impact-report` | `/api/case/suite-impact-runs` | Partial. CLI is synchronous report generation; API starts async execution. |
+| Case run list | `case runs` | `/api/case/runs` | Paired. CLI reads Store runs, API case runs, and Evidence counts through the active Store or `--store NAME_OR_DSN`. |
+| Case evidence detail | `case evidence` | `/api/case/evidence`, `/api/case-run/evidence` | Paired. CLI reuses the control-plane case Evidence payload and accepts active Store or `--store NAME_OR_DSN`. |
+| Case timing | `case timing` | `/api/case/timing` | Paired. CLI reuses the control-plane timing summary payload and accepts active Store or `--store NAME_OR_DSN`. |
+| Incomplete case batches | `case incomplete-batches` | `/api/case/incomplete-batches` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Suite coverage | `case suite coverage` | `/api/case/suite-coverage` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Suite inspection | `case suite inspect` | `/api/case/suite-inspection` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Suite plan | `case suite plan` | `/api/case/suite-plan` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Suite stability | `case suite stability` | `/api/case/suite-stability` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Suite priority | `case suite priority` | `/api/case/suite-priority` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Suite brief | `case suite brief` | `/api/case/suite-brief` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Suite quality | `case suite quality` | `/api/case/suite-quality` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Suite quality plan | `case suite quality-plan` | `/api/case/suite-quality-plan` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Suite quality HTML/JSON report | `case suite quality-report` | None | CLI-only artifact generation; CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Suite impact plan | `case suite impact` | `/api/case/suite-impact` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Suite impact run/report | `case suite impact-report` | `/api/case/suite-impact-runs` | Partial. CLI is synchronous report generation; API starts async execution. CLI accepts active Store or `--store NAME_OR_DSN`. |
 | Workflow discovery | `workflow discover` | `/api/workflows` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`; local and remote PostgreSQL Stores use the same command. API and CLI both expose filtered workflow discovery with Store catalog precedence. |
-| Workflow plan | `workflow plan` | `/api/workflow-plan` | Paired. CLI and API share the same workflow-bound step payload; CLI accepts `--store-url` for Store-first plans. |
-| Workflow audit | `workflow audit` | `/api/workflow-audit` | Paired. |
-| Workflow report/run | `workflow report` | `/api/cases/batch-runs` with `workflowId`, `/api/workflow-runs` | Partial. API has async execution and persisted run snapshots, not the same synchronous report command. |
-| Workflow run lookup | `workflow runs`, `workflow run`, `workflow step`, `workflow latest-step` | `/api/runs`, `/api/workflow-runs/*` | Paired for run list/detail and step-level lookup. |
-| Trace topology collection | `trace topology collect` | `/api/trace-topology/collect` | Paired. CLI and API share the same SkyWalking GraphQL collection path. |
+| Workflow plan | `workflow plan` | `/api/workflow-plan` | Paired. CLI and API share the same workflow-bound step payload; CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Workflow audit | `workflow audit` | `/api/workflow-audit` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Workflow report/run | `workflow report` | `/api/cases/batch-runs` with `workflowId`, `/api/workflow-runs` | Partial. API has async execution and persisted run snapshots, not the same synchronous report command. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Workflow run lookup | `workflow runs`, `workflow run`, `workflow step`, `workflow latest-step` | `/api/runs`, `/api/workflow-runs/*` | Paired for run list/detail and step-level lookup. CLI accepts active Store or `--store NAME_OR_DSN`; local and remote PostgreSQL Stores use the same command. |
+| Trace topology collection | `trace topology collect` | `/api/trace-topology/collect` | Paired. CLI and API share the same SkyWalking GraphQL collection path. CLI writes topology rows through active Store or `--store NAME_OR_DSN`. |
 | Replay evidence shell | `replay evidence` | `/api/replay/evidence` | Paired. CLI and API share the same replay shell payload. |
-| Post-process task lookup | `evidence tasks` | `/api/post-process-tasks` | Paired. |
-| Evidence import | `evidence import` | `/api/evidence/import` | Paired. API imports into the active control-plane Store. |
-| Evidence list | `evidence list` | `/api/evidence/list` | Paired. CLI and API share the same Store Evidence listing helper. |
-| Executor plan | `executor plan` | `/api/executor/plan` | Paired. API uses the active served template package. |
-| Baseline get/set | `baseline get`, `baseline set` | `/api/baseline/gate` | Paired. CLI and API read/write the same Store baseline gate. |
-| Template render | `template render` | `/api/template/render` | Paired. API renders against the active served template package. |
+| Post-process task lookup | `evidence tasks` | `/api/post-process-tasks` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Evidence import | `evidence import` | `/api/evidence/import` | Paired. API imports into the active control-plane Store; CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Evidence list | `evidence list` | `/api/evidence/list` | Paired. CLI and API share the same Store Evidence listing helper; CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Executor plan | `executor plan` | `/api/executor/plan` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`; API prefers the active Store catalog and uses the served template package only when no Store catalog is available. |
+| Baseline get/set | `baseline get`, `baseline set` | `/api/baseline/gate` | Paired. CLI and API read/write the same Store baseline gate through active Store or `--store NAME_OR_DSN`. |
+| Template render | `template render` | `/api/template/render` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`; API renders against the active served Store-backed template package. |
 
 ## Main Differences
 

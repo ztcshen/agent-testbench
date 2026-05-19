@@ -653,11 +653,11 @@ func renderCaseToken(token string, overrides map[string]any) string {
 	token = strings.TrimSpace(token)
 	if strings.HasPrefix(token, "override:") {
 		body := strings.TrimPrefix(token, "override:")
-		key, fallback, _ := strings.Cut(body, "|")
+		key, defaultValue, _ := strings.Cut(body, "|")
 		if value := strings.TrimSpace(valueString(overrides[strings.TrimSpace(key)])); value != "" {
 			return value
 		}
-		return renderFallbackValue(fallback)
+		return renderDefaultValue(defaultValue)
 	}
 	if strings.HasPrefix(token, "serial:") {
 		return serialValue(strings.TrimPrefix(token, "serial:"))
@@ -668,7 +668,7 @@ func renderCaseToken(token string, overrides map[string]any) string {
 	return "{{" + token + "}}"
 }
 
-func renderFallbackValue(value string) string {
+func renderDefaultValue(value string) string {
 	if strings.HasPrefix(value, "serial:") {
 		return serialValue(strings.TrimPrefix(value, "serial:"))
 	}
@@ -756,13 +756,17 @@ func recordTestKitRunWithContext(ctx context.Context, bundle profile.Bundle, run
 	}
 	now := time.Now().UTC()
 	startedAt, finishedAt := testKitResultTimes(result, now)
-	runID := workflowRunID(now)
+	runID := firstNonEmpty(valueString(payload["runId"]), workflowRunID(now))
+	evidenceRoot, err := writeTestKitEvidenceFiles(result, status, valueString(payload["evidenceDir"]), runID)
+	if err != nil {
+		return "", err
+	}
 	_, err = runtime.CreateRun(ctx, store.Run{
 		ID:           runID,
 		ProfileID:    bundle.ID,
 		WorkflowID:   workflowID,
 		Status:       status,
-		EvidenceRoot: "",
+		EvidenceRoot: evidenceRoot,
 		SummaryJSON:  string(raw),
 		StartedAt:    startedAt,
 		FinishedAt:   finishedAt,
@@ -787,7 +791,93 @@ func recordTestKitRunWithContext(ctx context.Context, bundle profile.Bundle, run
 		FinishedAt:           finishedAt,
 		CreatedAt:            startedAt,
 	})
-	return runID, err
+	if err != nil {
+		return "", err
+	}
+	if err := recordTestKitEvidence(ctx, runtime, runID, runID+".case", valueString(payload["stepId"]), caseID, evidenceRoot, finishedAt); err != nil {
+		return "", err
+	}
+	return runID, nil
+}
+
+func writeTestKitEvidenceFiles(result map[string]any, status string, evidenceDir string, runID string) (string, error) {
+	root := ""
+	var err error
+	if strings.TrimSpace(evidenceDir) != "" {
+		root = filepath.Join(evidenceDir, runID)
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			return "", fmt.Errorf("create test-kit evidence directory: %w", err)
+		}
+	} else {
+		root, err = os.MkdirTemp("", "otsandbox-test-kit-evidence-*")
+		if err != nil {
+			return "", fmt.Errorf("create test-kit evidence dir: %w", err)
+		}
+	}
+	request := mapFromAny(mapFromAny(result["result"])["request"])
+	response := mapFromAny(mapFromAny(result["result"])["response"])
+	assertions := map[string]any{
+		"status": status,
+		"passed": status == store.StatusPassed,
+	}
+	if reason := strings.TrimSpace(valueString(result["failureReason"])); reason != "" {
+		assertions["errors"] = []string{reason}
+	}
+	for name, payload := range map[string]map[string]any{
+		"request.json":    request,
+		"response.json":   response,
+		"assertions.json": assertions,
+	} {
+		raw, err := json.MarshalIndent(payload, "", "  ")
+		if err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(filepath.Join(root, name), append(raw, '\n'), 0o644); err != nil {
+			return "", err
+		}
+	}
+	return root, nil
+}
+
+func recordTestKitEvidence(ctx context.Context, runtime store.Store, runID string, caseRunID string, stepID string, caseID string, evidenceRoot string, createdAt time.Time) error {
+	for _, name := range []string{"request.json", "response.json", "assertions.json"} {
+		path := filepath.Join(evidenceRoot, name)
+		info, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		kind := strings.TrimSuffix(name, ".json")
+		summary, err := apiCaseEvidenceSummary(path, kind, info.Size())
+		if err != nil {
+			return err
+		}
+		labels := map[string]any{
+			"caseId": caseID,
+			"kind":   kind,
+			"runId":  runID,
+		}
+		if strings.TrimSpace(stepID) != "" {
+			labels["stepId"] = stepID
+		}
+		if _, err := runtime.RecordEvidence(ctx, store.EvidenceRecord{
+			ID:         runID + "." + name,
+			RunID:      runID,
+			CaseRunID:  caseRunID,
+			StepID:     stepID,
+			Kind:       kind,
+			URI:        path,
+			MediaType:  "application/json",
+			SizeBytes:  info.Size(),
+			Summary:    summary,
+			Category:   apiCaseEvidenceCategory(kind),
+			Visibility: "public",
+			LabelsJSON: compactJSON(labels),
+			CreatedAt:  createdAt,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func testKitResultTimes(result map[string]any, finishedAt time.Time) (time.Time, time.Time) {
@@ -1064,7 +1154,7 @@ func findCaseExecutionConfig(ctx context.Context, runtime store.Store, caseID st
 func findCaseExecutionConfigFromCatalog(catalog store.ProfileCatalog, caseID string, payload map[string]any) *caseExecutionConfig {
 	workflowID := valueString(payload["workflowId"])
 	stepID := valueString(payload["stepId"])
-	var fallback *caseExecutionConfig
+	var defaultValue *caseExecutionConfig
 	for _, config := range catalog.TemplateConfigs {
 		if config.Status != "" && config.Status != "active" {
 			continue
@@ -1083,11 +1173,11 @@ func findCaseExecutionConfigFromCatalog(catalog store.ProfileCatalog, caseID str
 		if parsed.CaseID != caseID {
 			continue
 		}
-		if fallback == nil {
-			fallback = &next
+		if defaultValue == nil {
+			defaultValue = &next
 		}
 	}
-	return fallback
+	return defaultValue
 }
 
 func testKitCaseIDs(value any) []string {

@@ -6,7 +6,7 @@ type Change struct {
 	SQL     string
 }
 
-const CurrentVersion = 14
+const CurrentVersion = 15
 
 func All() []Change {
 	return []Change{
@@ -481,6 +481,37 @@ alter table evidence_records add column step_id text not null default '';
 
 create index if not exists idx_evidence_records_step
   on evidence_records(run_id, step_id, case_run_id, created_at, id);`,
+		},
+		{
+			Version: 15,
+			Name:    "add environment catalog",
+			SQL: `
+create table if not exists environments (
+  id text primary key,
+  display_name text not null default '',
+  description text not null default '',
+  status text not null default 'draft',
+  verified integer not null default 0,
+  services_json text not null default '[]',
+  repos_json text not null default '{}',
+  compose_json text not null default '{}',
+  health_checks_json text not null default '[]',
+  verification_workflow_id text not null default '',
+  last_verification_run_id text not null default '',
+  last_verification_status text not null default '',
+  evidence_complete integer not null default 0,
+  topology_complete integer not null default 0,
+  last_verified_at text,
+  summary_json text not null default '{}',
+  created_at text not null,
+  updated_at text not null
+);
+
+create index if not exists idx_environments_verified_status
+  on environments(verified, status, updated_at, id);
+
+create index if not exists idx_environments_verification
+  on environments(verification_workflow_id, last_verification_status, updated_at, id);`,
 		},
 	}
 }

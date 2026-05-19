@@ -8,8 +8,8 @@ function unique(values) {
   return [...new Set((values || []).filter(Boolean))];
 }
 
-function stepCopy(step, key, fallback) {
-  return step?.presentation?.copy?.[key] || fallback;
+function stepCopy(step, key, defaultValue) {
+  return step?.presentation?.copy?.[key] || defaultValue;
 }
 
 function runtimeText(runtime) {

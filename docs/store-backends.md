@@ -2,11 +2,12 @@
 
 Open Test Sandbox treats the Store as a pluggable database backend. Users pick
 one backend for a workspace or team, and daily CLI/API/UI commands operate
-against the selected Store without changing command shape. The Store holds
-environment catalogs, service and interface registrations, workflows, maintained
-API cases, run records, Evidence indexes, trace topology indexes, baseline
-gates, timing data, and post-process task state. Evidence files and local logs
-may still live on disk, but their indexes belong in the selected Store.
+against the selected Store without changing command shape. The active product
+path is PostgreSQL. The Store holds environment catalogs, service and interface
+registrations, workflows, maintained API cases, run records, Evidence indexes,
+trace topology indexes, baseline gates, timing data, and post-process task
+state. Evidence files and local logs may still live on disk, but their indexes
+belong in the selected Store.
 
 ## Backend Selection
 
@@ -55,8 +56,14 @@ otsandbox store use local-personal
 otsandbox store current
 ```
 
-Commands may also use `--store NAME_OR_DSN` for a one-off override. Legacy
-`--store-url` remains accepted during migration.
+Display commands, including JSON output, mask passwords in PostgreSQL DSNs.
+The on-disk Store config keeps the real DSN so CLI commands can still open the
+selected database.
+
+Commands may also use `--store NAME_OR_DSN` for a one-off override. Daily
+CLI/API commands read and write the active Store unless that explicit override
+is present. Legacy `--store-url` remains accepted during migration and import
+tests.
 
 The command shape is location-agnostic. A local PostgreSQL database and a
 remote team PostgreSQL database use the same daily commands; only the selected
@@ -73,6 +80,28 @@ otsandbox case discover --store team-verified --filter refund
 otsandbox workflow discover --store postgres://user:pass@host:5432/team_verified --filter checkout
 ```
 
+## Environment Catalog
+
+Environment Catalog entries are active Store records, not daily-maintained file
+packages. The supported lifecycle is:
+
+- `register`: record the minimal runtime facts needed to reach a service,
+  workflow target, or observability endpoint.
+- `discover`: list environments from the active Store or `--store NAME_OR_DSN`.
+- `inspect`: show connection facts, workflow coverage, Evidence health, and
+  verification status for one environment.
+- `bootstrap`: prepare local runtime facts and Store rows needed before the
+  first run.
+- `verify`: run the configured acceptance workflow and persist the result,
+  Evidence indexes, and real SkyWalking topology.
+- `publish-verified`: promote only environments whose verification workflow
+  passed and whose Evidence plus SkyWalking topology are complete.
+
+The verified discovery list must not include environments that only have a
+successful registration. Verification requires a passed workflow run, indexed
+Evidence, and stored real SkyWalking topology with provider, trace id, status,
+nodes, and edges.
+
 ## SQLite Compatibility
 
 SQLite is no longer the product target for new daily workflows. It remains a
@@ -80,6 +109,10 @@ compatibility path for old local runs, legacy Evidence import, and tests that
 exercise historical behavior while the PostgreSQL Store is being rolled in.
 
 Do not add new daily testing behavior that only works with SQLite.
+Daily execution/report commands must not create a hidden SQLite runtime when
+the selected Store is PostgreSQL. The inverse also holds for compatibility
+runs: a command uses the selected Store engine end to end, and missing Store
+configuration fails with guidance instead of switching to another engine.
 
 ## PostgreSQL-only Validation
 
@@ -93,5 +126,7 @@ npm run smoke:frontend
 
 When this flag is set, any accidental SQLite Store open fails immediately.
 This is the repeatable equivalent of taking the local SQLite path offline before
-running the core workflow. The smoke must still complete through the configured
-PostgreSQL Store.
+running the core workflow. When `OTSANDBOX_SMOKE_STORE_DSN` is present, the smoke
+harness configures a temporary named Store, selects it as active, upgrades the
+schema, and serves the workbench through `--store smoke-postgres`. The smoke
+must still complete through that PostgreSQL Store.

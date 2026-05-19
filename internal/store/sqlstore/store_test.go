@@ -48,7 +48,7 @@ func TestStoreRecordsAndReadsRunsThroughDatabaseSQL(t *testing.T) {
 	state.queueRows(fakeRows{
 		columns: []string{"id", "profile_id", "workflow_id", "status", "evidence_root", "summary_json", "started_at", "finished_at", "created_at", "updated_at"},
 		values: [][]driver.Value{{
-			"run-001", "profile.alpha", "workflow.alpha", store.StatusPassed, ".runtime/evidence/run-001", `{"stepCount":1}`,
+			"run-001", "profile.alpha", "workflow.alpha", store.StatusPassed, ".runtime/evidence/run-001", `{"stepCount": 1}`,
 			started.Format(time.RFC3339Nano), "", created.CreatedAt.Format(time.RFC3339Nano), created.UpdatedAt.Format(time.RFC3339Nano),
 		}},
 	})
@@ -77,6 +77,34 @@ func TestStoreRecordsAndReadsRunsThroughDatabaseSQL(t *testing.T) {
 	}
 	if len(runs) != 1 || runs[0].ID != "run-001" {
 		t.Fatalf("runs = %#v", runs)
+	}
+}
+
+func TestPostgresStoreUsesNullForZeroTimestampArgs(t *testing.T) {
+	ctx := context.Background()
+	db, state := openFakeSQLDB(t)
+	defer db.Close()
+	s := sqlstore.New(db, sqlstore.PostgresDialect{})
+	started := time.Date(2026, 5, 19, 9, 30, 0, 0, time.UTC)
+
+	_, err := s.CreateRun(ctx, store.Run{
+		ID:           "run-001",
+		ProfileID:    "profile.alpha",
+		WorkflowID:   "workflow.alpha",
+		Status:       store.StatusRunning,
+		EvidenceRoot: ".runtime/evidence/run-001",
+		SummaryJSON:  `{"stepCount":1}`,
+		StartedAt:    started,
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	exec := state.lastExec(t)
+	if exec.args[6] != started {
+		t.Fatalf("started_at arg = %#v, want time.Time", exec.args[6])
+	}
+	if exec.args[7] != nil {
+		t.Fatalf("finished_at arg = %#v, want nil for zero time", exec.args[7])
 	}
 }
 
@@ -129,6 +157,34 @@ func TestStoreRecordsAndReadsAPICaseRunsThroughDatabaseSQL(t *testing.T) {
 	query := state.lastQuery(t)
 	if !strings.Contains(query.query, "from api_case_runs where run_id = ?") || query.args[0] != "run-001" {
 		t.Fatalf("case run list query = %#v", query)
+	}
+}
+
+func TestStoreListsLatestAPICaseRunsThroughDatabaseSQL(t *testing.T) {
+	ctx := context.Background()
+	db, state := openFakeSQLDB(t)
+	defer db.Close()
+	s := sqlstore.New(db, sqlstore.PostgresDialect{})
+	createdAt := time.Date(2026, 5, 19, 9, 30, 0, 0, time.UTC)
+
+	state.queueRows(fakeRows{
+		columns: []string{"id", "run_id", "case_id", "status", "request_summary_json", "assertion_summary_json", "started_at", "finished_at", "created_at"},
+		values: [][]driver.Value{{
+			"case-run-latest", "run-001", "case.alpha", store.StatusPassed, `{"method":"GET"}`, `{"passed":true}`,
+			createdAt.Add(-time.Second), createdAt, createdAt,
+		}},
+	})
+
+	caseRuns, err := s.ListLatestAPICaseRuns(ctx)
+	if err != nil {
+		t.Fatalf("list latest api case runs: %v", err)
+	}
+	if len(caseRuns) != 1 || caseRuns[0].ID != "case-run-latest" || caseRuns[0].CaseID != "case.alpha" {
+		t.Fatalf("latest case runs = %#v", caseRuns)
+	}
+	query := state.lastQuery(t)
+	if !strings.Contains(query.query, "row_number() over (partition by case_id order by created_at desc, id desc)") || !strings.Contains(query.query, "where row_number = 1") {
+		t.Fatalf("latest case run query = %s", query.query)
 	}
 }
 
@@ -204,6 +260,9 @@ func TestStoreRecordsRuntimeEvidenceTopologyAndPostProcessThroughDatabaseSQL(t *
 	if !strings.Contains(exec.query, "insert into trace_topologies") || !strings.Contains(exec.query, "values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)") {
 		t.Fatalf("topology query did not use postgres bind vars:\n%s", exec.query)
 	}
+	if !strings.Contains(exec.query, "on conflict(id) do update") || !strings.Contains(exec.query, "topology_json = excluded.topology_json") {
+		t.Fatalf("topology query did not use postgres upsert:\n%s", exec.query)
+	}
 	if topology.CreatedAt.IsZero() || exec.args[1] != "run-001" || exec.args[8] != `{"provider":"skywalking"}` {
 		t.Fatalf("topology record/args = %#v %#v", topology, exec.args)
 	}
@@ -239,15 +298,20 @@ func TestStoreRecordsRuntimeEvidenceTopologyAndPostProcessThroughDatabaseSQL(t *
 		Status:      store.StatusPassed,
 		StartedAt:   started,
 		FinishedAt:  finished,
-		DurationMs:  3000,
 		SummaryJSON: `{"collected":true}`,
 	})
 	if err != nil {
 		t.Fatalf("record post-process task: %v", err)
 	}
+	if task.DurationMs != 3000 {
+		t.Fatalf("post-process duration = %d, want 3000", task.DurationMs)
+	}
 	exec = state.lastExec(t)
 	if !strings.Contains(exec.query, "insert into post_process_tasks") || !strings.Contains(exec.query, "values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)") {
 		t.Fatalf("post-process query did not use postgres bind vars:\n%s", exec.query)
+	}
+	if !strings.Contains(exec.query, "on conflict(id) do update") || !strings.Contains(exec.query, "summary_json = excluded.summary_json") {
+		t.Fatalf("post-process query did not use postgres upsert:\n%s", exec.query)
 	}
 	if task.CreatedAt.IsZero() || exec.args[5] != "skywalking-topology" || exec.args[11] != `{"collected":true}` {
 		t.Fatalf("post-process task/args = %#v %#v", task, exec.args)

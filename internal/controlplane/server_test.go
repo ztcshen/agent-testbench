@@ -86,6 +86,71 @@ func TestServerExposesExecutorPlanAPI(t *testing.T) {
 	}
 }
 
+func TestServerExecutorPlanPrefersStoreCatalog(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "executor.sqlite")})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "current",
+		APICases: []store.CatalogAPICase{
+			{ID: "case.catalog", DisplayName: "Catalog Case", SourceKind: "karate", SourcePath: "tests/catalog.feature", ExecutorID: "executor.catalog", Status: "active", TimeoutSeconds: 9},
+		},
+	}); err != nil {
+		t.Fatalf("seed catalog: %v", err)
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{
+		ID: "bundle-only",
+		Executors: []profile.ExecutorDescriptor{
+			{ID: "executor.bundle", Kind: "custom-command", Command: "true", Status: "active"},
+		},
+	}, s))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/executor/plan", http.StatusOK)
+	if payload["ok"] != true || payload["profileId"] != "current" {
+		t.Fatalf("store executor plan payload = %#v", payload)
+	}
+	items := payload["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("store executor plan items = %#v", items)
+	}
+	item := items[0].(map[string]any)
+	if item["id"] != "executor.catalog" || item["kind"] != "karate" || item["sourcePath"] != "tests/catalog.feature" || item["ready"] != true || item["timeoutSeconds"] != float64(9) {
+		t.Fatalf("store executor plan item = %#v", item)
+	}
+}
+
+func TestServerExposesCurrentStoreAPIWithMaskedURL(t *testing.T) {
+	server := httptest.NewServer(controlplane.NewWithOptions(profile.Bundle{ID: "sample"}, controlplane.Options{
+		StoreInfo: controlplane.StoreInfo{
+			Configured: true,
+			Name:       "team-verified",
+			Backend:    "postgres",
+			URL:        "postgres://tester:xxxxx@example.com:5432/team_verified?sslmode=require",
+			Source:     "active-config",
+		},
+	}))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/store/current", http.StatusOK)
+	if payload["ok"] != true || payload["configured"] != true {
+		t.Fatalf("store current flags = %#v", payload)
+	}
+	if payload["name"] != "team-verified" || payload["backend"] != "postgres" || payload["source"] != "active-config" {
+		t.Fatalf("store current metadata = %#v", payload)
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if strings.Contains(string(raw), "secret") || payload["url"] != "postgres://tester:xxxxx@example.com:5432/team_verified?sslmode=require" {
+		t.Fatalf("store current url was not masked: %s", raw)
+	}
+}
+
 func TestServerExposesOpenAPIImportPlanAPI(t *testing.T) {
 	specPath := filepath.Join(t.TempDir(), "catalog-openapi.json")
 	if err := os.WriteFile(specPath, []byte(`{
@@ -941,6 +1006,74 @@ func TestServerRegistersInterfaceIntoSandboxStoreWithoutProfileImport(t *testing
 	detail := decodeJSONResponse(t, server.URL+"/api/interface-node?id=interface.create", http.StatusOK)
 	if detail["ok"] != true || detail["requested"] != "interface.create" {
 		t.Fatalf("interface detail payload = %#v", detail)
+	}
+}
+
+func TestServerManagesVerifiedEnvironmentCatalogFromStore(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "sandbox.sqlite")
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: dbPath})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	server := httptest.NewServer(controlplane.NewWithStore(loadEmptyProfile(t), s))
+	defer server.Close()
+
+	registered := postJSONResponse(t, server.URL+"/api/environments", `{
+  "id": "env.team.api",
+  "displayName": "Team API Environment",
+  "description": "Accepted local Docker environment",
+  "services": [{"id":"entry-gateway","repo":"../entry-gateway"}],
+  "repos": {"entry-gateway":{"url":"../entry-gateway","branch":"main","checkout":"/tmp/entry-gateway"}},
+  "compose": {"composeFile":"docker-compose.yml","startCommand":"docker compose up -d"},
+  "healthChecks": [{"id":"retail-health","url":"http://127.0.0.1:18080/health"}],
+  "verificationWorkflowId": "workflow.core-10"
+}`, http.StatusOK)
+	env := registered["environment"].(map[string]any)
+	if env["id"] != "env.team.api" || env["status"] != "draft" || env["verified"] != false || env["verificationWorkflowId"] != "workflow.core-10" {
+		t.Fatalf("registered environment = %#v", env)
+	}
+
+	discover := decodeJSONResponse(t, server.URL+"/api/environments", http.StatusOK)
+	if discover["count"] != float64(0) {
+		t.Fatalf("unverified environment should stay out of default API discovery: %#v", discover)
+	}
+	discoverAll := decodeJSONResponse(t, server.URL+"/api/environments?all=true", http.StatusOK)
+	if discoverAll["count"] != float64(1) {
+		t.Fatalf("all API discovery = %#v", discoverAll)
+	}
+
+	denied := postJSONResponse(t, server.URL+"/api/environments/env.team.api/publish-verified", `{}`, http.StatusConflict)
+	if !strings.Contains(fmt.Sprint(denied["error"]), "not publishable") {
+		t.Fatalf("publish denied payload = %#v", denied)
+	}
+
+	verified := postJSONResponse(t, server.URL+"/api/environments/env.team.api/verify", `{
+  "runId": "run.core-10",
+  "status": "passed",
+  "evidenceComplete": true,
+  "topologyComplete": true
+}`, http.StatusOK)
+	verifiedEnv := verified["environment"].(map[string]any)
+	if verifiedEnv["status"] != "verified-ready" || verifiedEnv["lastVerificationRunId"] != "run.core-10" || verifiedEnv["evidenceComplete"] != true || verifiedEnv["topologyComplete"] != true {
+		t.Fatalf("verified environment = %#v", verifiedEnv)
+	}
+
+	published := postJSONResponse(t, server.URL+"/api/environments/env.team.api/publish-verified", `{}`, http.StatusOK)
+	publishedEnv := published["environment"].(map[string]any)
+	if publishedEnv["status"] != "verified" || publishedEnv["verified"] != true {
+		t.Fatalf("published environment = %#v", publishedEnv)
+	}
+	discoverVerified := decodeJSONResponse(t, server.URL+"/api/environments", http.StatusOK)
+	if discoverVerified["count"] != float64(1) {
+		t.Fatalf("verified API discovery = %#v", discoverVerified)
+	}
+
+	bootstrap := decodeJSONResponse(t, server.URL+"/api/environments/env.team.api/bootstrap", http.StatusOK)
+	plan := bootstrap["plan"].(map[string]any)
+	if plan["verificationWorkflow"] != "workflow.core-10" || len(plan["healthChecks"].([]any)) != 1 {
+		t.Fatalf("bootstrap plan = %#v", plan)
 	}
 }
 
@@ -4313,7 +4446,7 @@ func TestServerExecutesTestKitRunFromRuntimeConfig(t *testing.T) {
 						"nodeId":"service.alpha",
 						"path":"/callback",
 						"query":{"mode":"{{override:mode|default}}"},
-						"headers":{"X-Case":"{{override:header|fallback}}"},
+						"headers":{"X-Case":"{{override:header|defaultValue}}"},
 						"body":{"id":"{{override:id|default-id}}","serial":"{{serial:TST}}"},
 						"expectedHttpCodes":[200],
 						"requireRequestId":true,
@@ -4379,6 +4512,20 @@ func TestServerExecutesTestKitRunFromRuntimeConfig(t *testing.T) {
 	}
 	if requestSummary["method"] != http.MethodPost || requestSummary["fullUrl"] == "" || requestSummary["stepId"] != "step.alpha" {
 		t.Fatalf("request summary = %#v", requestSummary)
+	}
+	records, err := s.ListEvidence(ctx, runs[0].ID)
+	if err != nil {
+		t.Fatalf("list test-kit evidence: %v", err)
+	}
+	if len(records) < 3 {
+		t.Fatalf("test-kit run should persist request/response/assertion Evidence records, got %#v", records)
+	}
+	evidence := decodeJSONResponse(t, server.URL+"/api/case/evidence?runId="+runs[0].ID+"&caseId=case.alpha&stepId=step.alpha", http.StatusOK)
+	body := evidence["evidence"].(map[string]any)
+	requestEvidence := body["request"].(map[string]any)
+	responseEvidence := body["response"].(map[string]any)
+	if requestEvidence["evidence_uri"] == "" || responseEvidence["evidence_uri"] == "" || responseEvidence["http_code"] != float64(200) {
+		t.Fatalf("test-kit Evidence payload = %#v", evidence)
 	}
 }
 
@@ -7138,8 +7285,37 @@ func TestServerStartsAsyncAPICaseBatchRunForNodes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	if len(runs) != 2 {
+	if len(runs) != 3 {
 		t.Fatalf("stored runs = %#v", runs)
+	}
+	batchRun, err := s.GetRun(ctx, created.BatchRunID)
+	if err != nil {
+		t.Fatalf("get stored batch run: %v", err)
+	}
+	if batchRun.Status != store.StatusPassed || batchRun.ProfileID != "sample" || batchRun.EvidenceRoot != filepath.Dir(report.HTMLReportPath) {
+		t.Fatalf("stored batch run = %#v", batchRun)
+	}
+	batchEvidence, err := s.ListEvidence(ctx, created.BatchRunID)
+	if err != nil {
+		t.Fatalf("list batch evidence: %v", err)
+	}
+	evidenceByKind := map[string]store.EvidenceRecord{}
+	for _, row := range batchEvidence {
+		evidenceByKind[row.Kind] = row
+	}
+	for kind, want := range map[string]string{
+		"html":              report.HTMLReportPath,
+		"junit":             report.JUnitReportPath,
+		"artifact-manifest": report.ArtifactManifestPath,
+		"failure-summary":   filepath.Join(filepath.Dir(report.HTMLReportPath), "failures.json"),
+	} {
+		row, ok := evidenceByKind[kind]
+		if !ok {
+			t.Fatalf("batch evidence missing %s: %#v", kind, batchEvidence)
+		}
+		if row.URI != want || row.RunID != created.BatchRunID || row.Category != "report" || row.Visibility != "public" {
+			t.Fatalf("batch evidence %s = %#v", kind, row)
+		}
 	}
 }
 
@@ -7650,13 +7826,21 @@ func TestServerStartsAsyncAPICaseBatchRunForWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	if len(runs) != 10 {
+	if len(runs) != 11 {
 		t.Fatalf("stored runs = %#v", runs)
+	}
+	batchRun, err := s.GetRun(ctx, report.BatchRunID)
+	if err != nil {
+		t.Fatalf("get stored workflow batch run: %v", err)
+	}
+	if batchRun.Status != store.StatusPassed || batchRun.WorkflowID != "workflow.ten" {
+		t.Fatalf("stored workflow batch run = %#v", batchRun)
 	}
 }
 
 type apiCaseBatchReportForTest struct {
 	OK         bool   `json:"ok"`
+	BatchRunID string `json:"batchRunId"`
 	Status     string `json:"status"`
 	WorkflowID string `json:"workflowId"`
 	Completed  int    `json:"completed"`

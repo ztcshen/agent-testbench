@@ -44,6 +44,10 @@ type Store interface {
 	ReplaceProfileCatalog(context.Context, ProfileCatalog) error
 	GetProfileCatalog(context.Context) (ProfileCatalog, error)
 	GetProfileCatalogIndex(context.Context) (ProfileCatalogIndex, error)
+
+	UpsertEnvironment(context.Context, Environment) (Environment, error)
+	GetEnvironment(context.Context, string) (Environment, error)
+	ListEnvironments(context.Context) ([]Environment, error)
 }
 
 type Run struct {
@@ -160,6 +164,27 @@ type ReadModel struct {
 	PayloadJSON     string
 	GeneratedAt     time.Time
 	UpdatedAt       time.Time
+}
+
+type Environment struct {
+	ID                     string
+	DisplayName            string
+	Description            string
+	Status                 string
+	Verified               bool
+	ServicesJSON           string
+	ReposJSON              string
+	ComposeJSON            string
+	HealthChecksJSON       string
+	VerificationWorkflowID string
+	LastVerificationRunID  string
+	LastVerificationStatus string
+	EvidenceComplete       bool
+	TopologyComplete       bool
+	LastVerifiedAt         time.Time
+	SummaryJSON            string
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
 }
 
 type ProfileCatalog struct {

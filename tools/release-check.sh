@@ -38,6 +38,9 @@ fi
 step "checking source-domain guardrail"
 tools/guardrails/check_no_source_domain_core.sh
 
+step "checking Store-first contract guardrail"
+tools/guardrails/check_store_first_contracts.sh
+
 step "running Go tests"
 go test ./... -count=1
 
@@ -49,6 +52,9 @@ npm run build:frontend
 
 step "running frontend model tests"
 npm run test:frontend
+
+step "running smoke harness tests"
+node --test tools/smoke/*.test.mjs
 
 step "running browser smoke tests"
 npm run smoke:frontend

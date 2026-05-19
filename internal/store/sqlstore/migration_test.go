@@ -92,9 +92,31 @@ func TestCoreSchemaSQLKeepsSharedIndexesStable(t *testing.T) {
 		"create index if not exists idx_trace_topologies_workflow_run_id_created_at",
 		"create index if not exists idx_post_process_tasks_run_id_created_at",
 		"create index if not exists idx_config_versions_active_published",
+		"create index if not exists idx_environments_verified_status",
+		"create index if not exists idx_environments_verification",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("core schema missing index %q:\n%s", want, joined)
+		}
+	}
+}
+
+func TestCoreSchemaSQLIncludesEnvironmentCatalog(t *testing.T) {
+	statements := sqlstore.CoreSchemaSQL(sqlstore.PostgresDialect{})
+	joined := strings.Join(statements, "\n")
+	for _, want := range []string{
+		"create table if not exists environments",
+		"id text primary key",
+		"verified boolean not null",
+		"services_json jsonb not null",
+		"repos_json jsonb not null",
+		"compose_json jsonb not null",
+		"health_checks_json jsonb not null",
+		"last_verified_at timestamptz",
+		"summary_json jsonb not null",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("core schema missing environment catalog DDL %q:\n%s", want, joined)
 		}
 	}
 }
@@ -176,5 +198,45 @@ func TestSchemaStatusAndUpgradeSchemaUseSharedDatabaseSQLMigrations(t *testing.T
 	}
 	if execs := state.execsSnapshot(); len(execs) != 0 {
 		t.Fatalf("latest schema should not execute DDL: %#v", execs)
+	}
+}
+
+func TestUpgradeSchemaAppliesEnvironmentCatalogToVersionOneDatabase(t *testing.T) {
+	ctx := context.Background()
+	db, state := openFakeSQLDB(t)
+	defer db.Close()
+	dialect := sqlstore.PostgresDialect{}
+
+	state.queueRows(fakeRows{
+		columns: []string{"exists"},
+		values:  [][]driver.Value{{int64(1)}},
+	})
+	state.queueRows(fakeRows{
+		columns: []string{"version"},
+		values:  [][]driver.Value{{int64(1)}},
+	})
+	state.queueRows(fakeRows{
+		columns: []string{"exists"},
+		values:  [][]driver.Value{{int64(1)}},
+	})
+	state.queueRows(fakeRows{
+		columns: []string{"version"},
+		values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
+	})
+
+	status, err := sqlstore.UpgradeSchema(ctx, db, dialect)
+	if err != nil {
+		t.Fatalf("upgrade v1 schema: %v", err)
+	}
+	if status.CurrentVersion != sqlstore.CurrentSchemaVersion || status.AppliedCount != 1 || status.HasPending() {
+		t.Fatalf("upgraded v1 schema status = %#v", status)
+	}
+	joinedExecs := strings.Builder{}
+	for _, exec := range state.execsSnapshot() {
+		joinedExecs.WriteString(exec.query)
+		joinedExecs.WriteByte('\n')
+	}
+	if !strings.Contains(joinedExecs.String(), "create table if not exists environments") {
+		t.Fatalf("v1 upgrade did not apply environment catalog DDL:\n%s", joinedExecs.String())
 	}
 }

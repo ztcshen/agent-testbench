@@ -34,11 +34,59 @@ func handleTraceTopologyCollect(w http.ResponseWriter, r *http.Request, runtime 
 }
 
 func CollectTraceTopologyPayload(ctx context.Context, runtime store.Store, collector TraceCollector, payload map[string]any) (map[string]any, error) {
+	task := traceTopologyCollectTaskSeed(ctx, runtime, payload)
+	started := time.Now().UTC()
+	status := store.StatusPassed
+	errText := ""
+	summary := map[string]any{}
+	defer func() {
+		if task.RunID == "" {
+			return
+		}
+		finished := time.Now().UTC()
+		task.Kind = postProcessKindTraceTopology
+		task.Status = status
+		task.StartedAt = started
+		task.FinishedAt = finished
+		task.DurationMs = finished.Sub(started).Milliseconds()
+		task.Error = errText
+		task.SummaryJSON = compactJSON(summary)
+		task.CreatedAt = finished
+		recordPostProcessTask(ctx, runtime, task)
+	}()
 	row, topology, err := collectTraceTopology(ctx, runtime, collector, payload)
 	if err != nil {
+		status = store.StatusFailed
+		errText = err.Error()
+		summary["error"] = err.Error()
 		return nil, err
 	}
+	task.WorkflowID = row.WorkflowID
+	task.StepID = row.StepID
+	task.CaseID = row.CaseID
+	summary["traceId"] = row.TraceID
+	summary["requestId"] = row.RequestID
+	summary["topologyStatus"] = topology.Status
+	summary["spanCount"] = topology.SpanCount
 	return map[string]any{"ok": true, "traceTopology": traceTopologyPayload(row), "topology": topology}, nil
+}
+
+func traceTopologyCollectTaskSeed(ctx context.Context, runtime store.Store, payload map[string]any) store.PostProcessTask {
+	runID := strings.TrimSpace(valueString(payload["runId"]))
+	if runtime == nil || runID == "" {
+		return store.PostProcessTask{}
+	}
+	stepID := strings.TrimSpace(valueString(payload["stepId"]))
+	task := store.PostProcessTask{
+		ID:     runID + "." + safeRuntimeLogPathSegment(stepID) + "." + postProcessKindTraceTopology,
+		RunID:  runID,
+		StepID: stepID,
+		CaseID: strings.TrimSpace(valueString(payload["caseId"])),
+	}
+	if run, err := runtime.GetRun(ctx, runID); err == nil {
+		task.WorkflowID = run.WorkflowID
+	}
+	return task
 }
 
 func collectTraceTopology(ctx context.Context, runtime store.Store, collector traceCollector, payload map[string]any) (store.TraceTopology, traceTopology, error) {
@@ -182,15 +230,15 @@ func parseTraceCandidateStart(value string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-func timeFromPayload(value any, fallbacks ...time.Time) time.Time {
+func timeFromPayload(value any, defaultTimes ...time.Time) time.Time {
 	if raw := strings.TrimSpace(valueString(value)); raw != "" {
 		if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
 			return parsed
 		}
 	}
-	for _, fallback := range fallbacks {
-		if !fallback.IsZero() {
-			return fallback
+	for _, defaultValue := range defaultTimes {
+		if !defaultValue.IsZero() {
+			return defaultValue
 		}
 	}
 	return time.Now().UTC()
