@@ -287,3 +287,51 @@ Risk:
   release hardening. Remaining work is mostly breadth, parity, and proof:
   finishing daily command gating, validating the core 10-step workflow end to
   end, and proving real Evidence plus SkyWalking topology behavior.
+
+## 2026-05-19 Broad Daily Resolver Gate
+
+Estimated PostgreSQL mainline progress: 90%.
+
+Completed evidence:
+
+- `case discover`, `interface-node discover`, and `workflow discover` now share
+  the daily Store resolver, so active or named SQLite Store configs are rejected
+  before daily discovery reads.
+- The same daily resolver is now applied to the remaining clearly daily or
+  near-daily command families: sandbox interface registration, sandbox start,
+  executor plan, trace topology collection, profile catalog/verify/config
+  publish, interface-node case/report loading, workflow report, non-offline
+  workflow audit, baseline get/set, template render, case suite report, case
+  incomplete batch inspection, and `serve`.
+- Remaining generic Store resolution in `cmd/otsandbox` is intentionally scoped
+  to Store management commands, offline template package audit helpers, and
+  `evidence import` as a legacy runtime migration path.
+- Explicit `--store sqlite://...` compatibility coverage remains green for
+  discovery reads, and offline template package review remains available only
+  through `--offline-template-package`.
+- TDD evidence captured the behavior gap first:
+  `go test ./cmd/otsandbox -run TestDiscoverCommandsRejectActiveSQLiteStore -count=1`
+  failed because all three discovery commands succeeded against active SQLite.
+- Targeted discovery tests passed after the resolver change:
+  `go test ./cmd/otsandbox -run 'Test(DiscoverCommandsRejectActiveSQLiteStore|DiscoverCommandsAcceptStoreFlagAsLocationAgnosticStoreSelector|CaseDiscoverRequiresStoreUnlessOfflineTemplatePackage|InterfaceNodeDiscoverRequiresStoreUnlessOfflineTemplatePackage|WorkflowDiscoverRequiresStoreUnlessOfflineTemplatePackage|CaseDiscoverFiltersByMaintenanceMetadata)' -count=1`.
+- A release-check attempt exposed a control-plane async batch test timing issue:
+  one test used a local 2 second poll while neighboring batch tests used the
+  shared 10 second wait helper. That test now uses the shared helper, and its
+  targeted control-plane test passed.
+- Following the user's direction to avoid blocking on heavy testing, this slice
+  used static/light verification only after the broad resolver sweep:
+  `git diff --check` passed and the exact-word guardrail scan had no matches.
+
+Incomplete work:
+
+- `--store-url` still exists on compatibility surfaces and needs tighter
+  product wording or command-level scoping so bare paths cannot look like the
+  recommended daily path.
+- Daily-path test data still needs migration from explicit SQLite stores to
+  named PostgreSQL Stores.
+- The core 10-step smoke, per-interface Evidence completeness, and real
+  SkyWalking topology proof still need final human-machine validation.
+- Latest HEAD is not release-ready. The latest full release-check attempt
+  reached the `cmd/otsandbox` package but hit Go's default 10 minute package
+  timeout while the suite was still progressing; full validation is deferred by
+  user direction.

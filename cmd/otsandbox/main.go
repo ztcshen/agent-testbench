@@ -1013,7 +1013,7 @@ func runSandboxInterfaceRegister(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -1067,7 +1067,7 @@ func runSandboxStart(ctx context.Context, args []string) error {
 	if *timeoutSeconds <= 0 {
 		return errors.New("--timeout-seconds must be greater than 0")
 	}
-	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -1288,7 +1288,7 @@ func runExecutorPlan(ctx context.Context, args []string) error {
 }
 
 func executorPlanReport(ctx context.Context, profileRef string, profileHomeRef string, storeRef string, legacyStoreURL string) (executor.PlanReport, error) {
-	resolvedStoreURL, err := resolveRequiredStoreReference(storeRef, legacyStoreURL)
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(storeRef, legacyStoreURL)
 	if err != nil {
 		return executor.PlanReport{}, err
 	}
@@ -1386,7 +1386,7 @@ func runTraceTopologyCollect(ctx context.Context, args []string) error {
 	if strings.TrimSpace(*runID) == "" {
 		return errors.New("--run is required")
 	}
-	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -2140,7 +2140,7 @@ func runProfileCatalogIndex(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -2170,7 +2170,7 @@ func runProfileVerify(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -2233,7 +2233,7 @@ func runConfigPublishWithFlags(ctx context.Context, flags *flag.FlagSet, args []
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -3774,7 +3774,7 @@ func runInterfaceNodeCaseReport(ctx context.Context, args []string) error {
 		return errors.New("--timeout-seconds must be greater than zero")
 	}
 
-	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -3859,7 +3859,7 @@ func loadInterfaceNodeReportBundleFromStoreFlags(ctx context.Context, profileRef
 }
 
 func loadRequiredInterfaceNodeReportBundleFromStoreFlags(ctx context.Context, profileRef string, profileHomeRef string, storeRef string, legacyStoreURL string) (profile.Bundle, store.Store, string, func(), error) {
-	resolvedStoreURL, err := resolveRequiredStoreReference(storeRef, legacyStoreURL)
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(storeRef, legacyStoreURL)
 	if err != nil {
 		return profile.Bundle{}, nil, "", func() {}, err
 	}
@@ -3886,7 +3886,7 @@ func resolveDiscoveryInputs(profileRef string, storeRef string, legacyStoreURL s
 	if profileRef != "" {
 		return "", "", errors.New("--profile is for offline template package review; add --offline-template-package or use --store NAME_OR_DSN")
 	}
-	resolvedStoreURL, err := resolveRequiredStoreReference(storeRef, legacyStoreURL)
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(storeRef, legacyStoreURL)
 	if err != nil {
 		return "", "", err
 	}
@@ -4723,7 +4723,7 @@ func runWorkflowReport(ctx context.Context, args []string) error {
 	if strings.TrimSpace(*workflowID) == "" {
 		return errors.New("--workflow is required")
 	}
-	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -5149,7 +5149,7 @@ func runWorkflowAudit(ctx context.Context, args []string) error {
 		if strings.TrimSpace(*profilePath) != "" {
 			return errors.New("--profile is for offline template package review; add --offline-template-package or use --store NAME_OR_DSN")
 		}
-		resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+		resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
 		if err != nil {
 			return err
 		}
@@ -5304,7 +5304,7 @@ func runBaselineGet(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -5338,7 +5338,7 @@ func runBaselineSet(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -5417,7 +5417,7 @@ func runTemplateRender(args []string) error {
 }
 
 func loadTemplateRenderBundle(ctx context.Context, profileRef string, profileHomeRef string, storeRef string, legacyStoreURL string, templateID string) (profile.Bundle, func(), error) {
-	resolvedStoreURL, err := resolveRequiredStoreReference(storeRef, legacyStoreURL)
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(storeRef, legacyStoreURL)
 	if err != nil {
 		return profile.Bundle{}, func() {}, err
 	}
@@ -7172,7 +7172,7 @@ func runCaseSuiteReport(ctx context.Context, args []string) error {
 	if *timeoutSeconds <= 0 {
 		return errors.New("--timeout-seconds must be greater than zero")
 	}
-	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -7591,7 +7591,7 @@ func runCaseIncompleteBatches(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
@@ -8164,7 +8164,7 @@ func serveConfigFromArgs(args []string) (serveConfig, error) {
 }
 
 func serveHandler(cfg serveConfig) (http.Handler, func() error, error) {
-	resolvedStoreURL, err := resolveRequiredStoreReference(cfg.storeRef, cfg.storeURL)
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(cfg.storeRef, cfg.storeURL)
 	if err != nil {
 		return nil, nil, err
 	}

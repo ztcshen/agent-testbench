@@ -4181,6 +4181,39 @@ func TestDiscoverCommandsAcceptStoreFlagAsLocationAgnosticStoreSelector(t *testi
 	}
 }
 
+func TestDiscoverCommandsRejectActiveSQLiteStore(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "case discover", args: []string{"case", "discover", "--json"}},
+		{name: "interface-node discover", args: []string{"interface-node", "discover", "--json"}},
+		{name: "workflow discover", args: []string{"workflow", "discover", "--json"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(dir, "config"))
+			if err := saveStoreConfig(storeConfigFile{
+				Active: "legacy-local",
+				Stores: map[string]storeConfigEntry{
+					"legacy-local": {Name: "legacy-local", URL: "sqlite://" + filepath.Join(dir, "store.sqlite"), Backend: "sqlite"},
+				},
+			}); err != nil {
+				t.Fatalf("save store config: %v", err)
+			}
+
+			out := runCLIFails(t, tt.args...)
+			for _, want := range []string{"daily commands require PostgreSQL Store", "SQLite", "postgres://"} {
+				if !strings.Contains(out, want) {
+					t.Fatalf("%s output missing %q: %q", tt.name, want, out)
+				}
+			}
+		})
+	}
+}
+
 func TestInterfaceNodeDiscoverRequiresStoreUnlessOfflineTemplatePackage(t *testing.T) {
 	profileDir := writeInterfaceNodeBatchReportProfile(t)
 	env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}

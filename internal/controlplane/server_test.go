@@ -7189,73 +7189,7 @@ func TestServerStartsAsyncAPICaseBatchRunForNodes(t *testing.T) {
 		t.Fatalf("api case batch run response = %#v", created)
 	}
 
-	var report struct {
-		OK                   bool   `json:"ok"`
-		Status               string `json:"status"`
-		HTMLReportPath       string `json:"htmlReportPath"`
-		HTMLReportURL        string `json:"htmlReportUrl"`
-		JUnitReportPath      string `json:"junitReportPath"`
-		JUnitReportURL       string `json:"junitReportUrl"`
-		ArtifactManifestPath string `json:"artifactManifestPath"`
-		ArtifactManifestURL  string `json:"artifactManifestUrl"`
-		Completed            int    `json:"completed"`
-		Passed               int    `json:"passed"`
-		Failed               int    `json:"failed"`
-		Cases                []struct {
-			CaseID    string `json:"caseId"`
-			CaseRunID string `json:"caseRunId"`
-			NodeID    string `json:"nodeId"`
-			RunID     string `json:"runId"`
-			Status    string `json:"status"`
-			ViewerURL string `json:"viewerUrl"`
-			DetailURL string `json:"detailUrl"`
-			ElapsedMs int64  `json:"elapsedMs"`
-		} `json:"cases"`
-	}
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		statusResp, err := http.Get(server.URL + created.ReportURL)
-		if err != nil {
-			t.Fatalf("get api case batch run report: %v", err)
-		}
-		if statusResp.StatusCode != http.StatusOK {
-			raw, _ := io.ReadAll(statusResp.Body)
-			statusResp.Body.Close()
-			t.Fatalf("api case batch report status = %d body=%s", statusResp.StatusCode, raw)
-		}
-		report = struct {
-			OK                   bool   `json:"ok"`
-			Status               string `json:"status"`
-			HTMLReportPath       string `json:"htmlReportPath"`
-			HTMLReportURL        string `json:"htmlReportUrl"`
-			JUnitReportPath      string `json:"junitReportPath"`
-			JUnitReportURL       string `json:"junitReportUrl"`
-			ArtifactManifestPath string `json:"artifactManifestPath"`
-			ArtifactManifestURL  string `json:"artifactManifestUrl"`
-			Completed            int    `json:"completed"`
-			Passed               int    `json:"passed"`
-			Failed               int    `json:"failed"`
-			Cases                []struct {
-				CaseID    string `json:"caseId"`
-				CaseRunID string `json:"caseRunId"`
-				NodeID    string `json:"nodeId"`
-				RunID     string `json:"runId"`
-				Status    string `json:"status"`
-				ViewerURL string `json:"viewerUrl"`
-				DetailURL string `json:"detailUrl"`
-				ElapsedMs int64  `json:"elapsedMs"`
-			} `json:"cases"`
-		}{}
-		if err := json.NewDecoder(statusResp.Body).Decode(&report); err != nil {
-			statusResp.Body.Close()
-			t.Fatalf("decode api case batch report: %v", err)
-		}
-		statusResp.Body.Close()
-		if report.Status == store.StatusPassed || time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	report := waitAPICaseBatchReport(t, server.URL+created.ReportURL)
 	if !report.OK || report.Status != store.StatusPassed || report.Completed != 2 || report.Passed != 2 || report.Failed != 0 || len(report.Cases) != 2 {
 		t.Fatalf("api case batch report = %#v", report)
 	}
@@ -7906,14 +7840,20 @@ func TestServerStartsAsyncAPICaseBatchRunForWorkflow(t *testing.T) {
 }
 
 type apiCaseBatchReportForTest struct {
-	OK         bool   `json:"ok"`
-	BatchRunID string `json:"batchRunId"`
-	Status     string `json:"status"`
-	WorkflowID string `json:"workflowId"`
-	Completed  int    `json:"completed"`
-	Passed     int    `json:"passed"`
-	Failed     int    `json:"failed"`
-	Nodes      []struct {
+	OK                   bool   `json:"ok"`
+	BatchRunID           string `json:"batchRunId"`
+	Status               string `json:"status"`
+	WorkflowID           string `json:"workflowId"`
+	HTMLReportPath       string `json:"htmlReportPath"`
+	HTMLReportURL        string `json:"htmlReportUrl"`
+	JUnitReportPath      string `json:"junitReportPath"`
+	JUnitReportURL       string `json:"junitReportUrl"`
+	ArtifactManifestPath string `json:"artifactManifestPath"`
+	ArtifactManifestURL  string `json:"artifactManifestUrl"`
+	Completed            int    `json:"completed"`
+	Passed               int    `json:"passed"`
+	Failed               int    `json:"failed"`
+	Nodes                []struct {
 		ID          string `json:"id"`
 		DisplayName string `json:"displayName"`
 		Operation   string `json:"operation"`
@@ -7930,8 +7870,12 @@ type apiCaseBatchReportForTest struct {
 		Method          string `json:"method"`
 		Path            string `json:"path"`
 		StepID          string `json:"stepId"`
+		CaseRunID       string `json:"caseRunId"`
 		Status          string `json:"status"`
 		RunID           string `json:"runId"`
+		ViewerURL       string `json:"viewerUrl"`
+		DetailURL       string `json:"detailUrl"`
+		ElapsedMs       int64  `json:"elapsedMs"`
 	} `json:"cases"`
 }
 
