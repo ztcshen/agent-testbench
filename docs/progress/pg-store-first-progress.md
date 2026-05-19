@@ -176,3 +176,23 @@ Incomplete work:
   families still need the same Store resolver audit.
 - `--store-url PATH` is still accepted by compatibility paths and needs command
   family scoping before it can no longer look like a daily workflow.
+
+## 2026-05-19 Workflow Run Read Daily Gate
+
+Estimated PostgreSQL mainline progress: 83%.
+
+Completed evidence:
+
+- `workflow runs`, `workflow run`, `workflow step`, and
+  `workflow latest-step` now use the daily Store resolver, so active or named
+  SQLite Store configs are rejected before workflow execution results are read.
+- Explicit `--store sqlite://...` compatibility coverage remains green for
+  stored workflow run reads.
+- Targeted workflow, environment, and sandbox CLI tests passed after the
+  resolver change.
+
+Incomplete work:
+
+- Workflow discover/plan/audit/report, case suite/read commands, baseline,
+  template, executor, trace topology collection, and interface-node query
+  families still need Store resolver audits.

@@ -2721,6 +2721,52 @@ func TestWorkflowRunCommandsReadStoredRuns(t *testing.T) {
 	}
 }
 
+func TestWorkflowRunReadCommandsRejectActiveSQLiteStore(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "runs",
+			args: []string{"workflow", "runs", "--json"},
+		},
+		{
+			name: "run",
+			args: []string{"workflow", "run", "--run", "run.legacy", "--json"},
+		},
+		{
+			name: "step",
+			args: []string{"workflow", "step", "--run", "run.legacy", "--step", "step.legacy", "--json"},
+		},
+		{
+			name: "latest step",
+			args: []string{"workflow", "latest-step", "--workflow", "workflow.legacy", "--step", "step.legacy", "--json"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(dir, "config"))
+			if err := saveStoreConfig(storeConfigFile{
+				Active: "legacy-local",
+				Stores: map[string]storeConfigEntry{
+					"legacy-local": {Name: "legacy-local", URL: "sqlite://" + filepath.Join(dir, "store.sqlite"), Backend: "sqlite"},
+				},
+			}); err != nil {
+				t.Fatalf("save store config: %v", err)
+			}
+
+			out := runCLIFails(t, tt.args...)
+			for _, want := range []string{"daily commands require PostgreSQL Store", "SQLite", "postgres://"} {
+				if !strings.Contains(out, want) {
+					t.Fatalf("%s output missing %q: %q", tt.name, want, out)
+				}
+			}
+		})
+	}
+}
+
 func TestTraceTopologyCollectCommandPersistsTopology(t *testing.T) {
 	ctx := context.Background()
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")

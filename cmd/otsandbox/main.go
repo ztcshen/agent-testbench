@@ -4441,15 +4441,11 @@ func runWorkflowStep(ctx context.Context, args []string) error {
 	if strings.TrimSpace(*runID) == "" || strings.TrimSpace(*stepID) == "" {
 		return errors.New("--run and --step are required")
 	}
-	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
-	runtime, err := openStore(ctx, resolvedStoreURL)
-	if err != nil {
-		return err
-	}
-	defer runtime.Close()
+	defer cleanup()
 	payload, ok, err := controlplane.WorkflowStepRunPayload(ctx, runtime, *runID, *stepID)
 	if err != nil {
 		return err
@@ -4478,15 +4474,11 @@ func runWorkflowLatestStep(ctx context.Context, args []string) error {
 	if strings.TrimSpace(*workflowID) == "" || strings.TrimSpace(*stepID) == "" {
 		return errors.New("--workflow and --step are required")
 	}
-	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
-	runtime, err := openStore(ctx, resolvedStoreURL)
-	if err != nil {
-		return err
-	}
-	defer runtime.Close()
+	defer cleanup()
 	payload, ok, err := controlplane.LatestWorkflowStepRunPayload(ctx, runtime, *workflowID, *stepID)
 	if err != nil {
 		return err
@@ -4525,15 +4517,11 @@ func runWorkflowRuns(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
-	runtime, err := openStore(ctx, resolvedStoreURL)
-	if err != nil {
-		return err
-	}
-	defer runtime.Close()
+	defer cleanup()
 	payload, err := controlplane.WorkflowRunsPayload(ctx, runtime)
 	if err != nil {
 		return err
@@ -4558,15 +4546,11 @@ func runWorkflowRun(ctx context.Context, args []string) error {
 	if strings.TrimSpace(*runID) == "" {
 		return errors.New("--run is required")
 	}
-	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
-	runtime, err := openStore(ctx, resolvedStoreURL)
-	if err != nil {
-		return err
-	}
-	defer runtime.Close()
+	defer cleanup()
 	payload, ok, err := controlplane.WorkflowRunPayload(ctx, runtime, *runID)
 	if err != nil {
 		return err
