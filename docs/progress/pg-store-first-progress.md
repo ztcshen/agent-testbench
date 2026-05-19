@@ -1272,3 +1272,22 @@ Incomplete work:
   to named PostgreSQL Store coverage or explicit compatibility scopes. Final
   completion still requires the external PostgreSQL release-check and live
   SkyWalking 10-step proof run.
+
+## 2026-05-20 Release Check Runs PG-Gated Go Coverage
+
+Estimated PostgreSQL mainline progress: 99.994%.
+
+Completed evidence:
+
+- `tools/release-check.sh` now exports `OTSANDBOX_TEST_PG_DSN` from the required
+  PostgreSQL smoke Store DSN when the caller has not provided a more specific
+  test DSN.
+- The release gate's `go test ./... -count=1` therefore exercises named
+  PostgreSQL daily-path tests instead of silently skipping them while the smoke
+  Store DSN is already available.
+
+Incomplete work:
+
+- This wires the release gate for PG-gated unit coverage, but final completion
+  still needs the full external release-check and live SkyWalking 10-step proof
+  run against a real endpoint.
