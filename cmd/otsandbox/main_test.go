@@ -3515,12 +3515,12 @@ func TestWorkflowAuditAllowsExplicitOfflineTemplatePackage(t *testing.T) {
 }
 
 func TestTemplateRenderCommandPrintsRequestPreview(t *testing.T) {
+	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-template-render-pg")
 	dir := t.TempDir()
 	writeTemplateProfile(t, dir)
-	storePath := filepath.Join(t.TempDir(), "template-store.sqlite")
-	runCLI(t, "config", "publish", "--from", dir, "--store", "sqlite://"+storePath)
+	runCLI(t, "config", "publish", "--from", dir)
 
-	out := runCLI(t, "template", "render", "--store", "sqlite://"+storePath, "--template", "template.create", "--fixture", "fixture.item")
+	out := runCLI(t, "template", "render", "--template", "template.create", "--fixture", "fixture.item")
 
 	var rendered struct {
 		Method string         `json:"method"`
@@ -3538,8 +3538,7 @@ func TestTemplateRenderCommandPrintsRequestPreview(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	storePath = filepath.Join(t.TempDir(), "template-store-seeded.sqlite")
-	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	s, err := openStore(ctx, storeRef)
 	if err != nil {
 		t.Fatalf("open template store: %v", err)
 	}
@@ -3571,7 +3570,7 @@ func TestTemplateRenderCommandPrintsRequestPreview(t *testing.T) {
 		t.Fatalf("close template store: %v", err)
 	}
 
-	storeOut := runCLI(t, "template", "render", "--store", "sqlite://"+storePath, "--template", "template.store", "--fixture", "fixture.store")
+	storeOut := runCLI(t, "template", "render", "--template", "template.store", "--fixture", "fixture.store")
 	var storeRendered struct {
 		Method string         `json:"method"`
 		Path   string         `json:"path"`

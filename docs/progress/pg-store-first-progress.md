@@ -873,6 +873,32 @@ Incomplete work:
 - Final release readiness remains blocked on the later real PostgreSQL plus
   real SkyWalking human-machine validation pass.
 
+## 2026-05-20 Named PostgreSQL Template Render Coverage
+
+Estimated PostgreSQL mainline progress: 99.2%.
+
+Completed evidence:
+
+- Migrated `template render` request-preview coverage from explicit SQLite
+  Stores to active named PostgreSQL Store coverage behind
+  `OTSANDBOX_TEST_PG_DSN`.
+- The test now publishes template profile data through the active named Store,
+  renders without per-command `--store`, then seeds a Store-only template
+  catalog into the same PostgreSQL Store and renders that path without
+  per-command `--store`.
+- Light validation passed:
+  `go test ./cmd/otsandbox -run 'TestTemplateRenderCommandPrintsRequestPreview$' -count=1`,
+  `tools/guardrails/check_store_first_contracts.sh`, `git diff --check`, and
+  `rg -n -i 'fall''back' . --glob '!node_modules/**'`.
+
+Incomplete work:
+
+- Remaining product-like SQLite pockets are now mostly sandbox start/register,
+  workflow audit, trace topology collect, and selected direct case-run/report
+  compatibility tests.
+- Final release readiness still requires the later real PostgreSQL plus real
+  SkyWalking validation pass.
+
 ## 2026-05-20 Named PostgreSQL Serve Evidence Import API Coverage
 
 Estimated PostgreSQL mainline progress: 98.8%.
