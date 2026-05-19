@@ -134,7 +134,7 @@ Go 测试、demo、React build、active PostgreSQL CLI smoke 和 PostgreSQL-only
 - 执行能力：单 API 用例、已维护用例集合、接口节点报告、工作流报告；
 - Evidence：请求、响应、断言、摘要、日志、拓扑、耗时；
 - 工作台：基于 Control plane API 的本地 React 页面；
-- 发布门禁：`npm run release-check`。
+- 发布门禁：`OTSANDBOX_SMOKE_STORE_DSN=postgres://... npm run release-check`。
 
 后续重点是 Store-first 注册 API、更清晰的当前状态工作台、更强的后处理调度、
 已验收环境一键拉起，以及更丰富的公开示例。

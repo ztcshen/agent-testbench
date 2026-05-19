@@ -154,7 +154,7 @@ Current working areas:
   workflow reports;
 - Evidence: request, response, assertions, summaries, logs, topology, timing;
 - workbench: local React pages backed by Control plane APIs;
-- release gate: `npm run release-check`.
+- release gate: `OTSANDBOX_SMOKE_STORE_DSN=postgres://... npm run release-check`.
 
 Next areas are Store-first registration APIs, a cleaner current-state workbench,
 stronger post-process scheduling, verified environment bootstrap, and richer

@@ -42,6 +42,9 @@ check_pattern 'store-url[[:space:]][^`"$]*\.runtime/store\.sqlite|--store-url[[:
 check_pattern '^[[:space:]]*npm run release-check[[:space:]]*$' \
   "Release-check examples must show OTSANDBOX_SMOKE_STORE_DSN so the PostgreSQL gate runs."
 
+check_pattern 'release gate:[[:space:]]*`npm run release-check`|发布门禁：`npm run release-check`' \
+  "Release gate shorthand must mention OTSANDBOX_SMOKE_STORE_DSN."
+
 check_pattern '^[[:space:]]*npm run demo:api-case[[:space:]]*$' \
   "API case demo examples must show OTSANDBOX_DEMO_STORE or active Store setup."
 

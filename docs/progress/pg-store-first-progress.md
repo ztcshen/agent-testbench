@@ -998,3 +998,22 @@ Incomplete work:
 - Remaining proof is still the external live validation run with PostgreSQL DSN,
   `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, a real SkyWalking GraphQL endpoint,
   and real 10-step trace ids.
+
+## 2026-05-20 README Release Gate Shorthand
+
+Estimated PostgreSQL mainline progress: 99.8%.
+
+Completed evidence:
+
+- README and README.zh-CN now describe the release gate shorthand as
+  `OTSANDBOX_SMOKE_STORE_DSN=postgres://... npm run release-check`, not a bare
+  `npm run release-check`.
+- Store-first guardrails now reject the old English and Chinese shorthand so
+  user-facing docs cannot imply the release gate runs without a PostgreSQL
+  smoke Store DSN.
+
+Incomplete work:
+
+- The final proof remains the external live validation run with PostgreSQL DSN,
+  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, a real SkyWalking GraphQL endpoint,
+  and real 10-step trace ids.
