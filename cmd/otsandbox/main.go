@@ -5506,15 +5506,11 @@ func runEvidenceList(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	s, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
-	s, err := openStore(ctx, resolvedStoreURL)
-	if err != nil {
-		return err
-	}
-	defer s.Close()
+	defer cleanup()
 
 	report, err := controlplane.EvidenceList(ctx, s, *runID)
 	if err != nil {
@@ -5612,15 +5608,11 @@ func runEvidenceTasks(ctx context.Context, args []string) error {
 	if strings.TrimSpace(*runID) == "" {
 		return errors.New("--run is required")
 	}
-	resolvedStoreURL, err := resolveRequiredStoreReference(*storeRef, *storeURL)
+	s, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
-	s, err := openStore(ctx, resolvedStoreURL)
-	if err != nil {
-		return err
-	}
-	defer s.Close()
+	defer cleanup()
 	report, err := evidenceTasks(ctx, s, evidenceTaskFilter{
 		RunID:  *runID,
 		StepID: *stepID,

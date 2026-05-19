@@ -155,3 +155,24 @@ Incomplete work:
   Store resolution and need the same active/named SQLite rejection.
 - Daily-path tests still need broader migration from explicit SQLite stores to
   named PostgreSQL stores.
+
+## 2026-05-19 Evidence Read Daily Gate
+
+Estimated PostgreSQL mainline progress: 82%.
+
+Completed evidence:
+
+- `evidence list` and `evidence tasks` now use the daily Store resolver, so
+  active or named SQLite Store configs are rejected before daily Evidence
+  reads.
+- `evidence import` remains on the compatibility resolver because it is a
+  legacy runtime import path.
+- Targeted CLI tests passed for Evidence read rejection, Evidence list/tasks
+  compatibility reads, and adjacent profile/config publish commands.
+
+Incomplete work:
+
+- Case, workflow, baseline, template, executor, and interface-node daily query
+  families still need the same Store resolver audit.
+- `--store-url PATH` is still accepted by compatibility paths and needs command
+  family scoping before it can no longer look like a daily workflow.

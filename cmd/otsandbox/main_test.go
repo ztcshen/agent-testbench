@@ -3165,6 +3165,44 @@ func TestEvidenceListCommandRejectsMissingRun(t *testing.T) {
 	}
 }
 
+func TestEvidenceReadCommandsRejectActiveSQLiteStore(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "list",
+			args: []string{"evidence", "list", "--json"},
+		},
+		{
+			name: "tasks",
+			args: []string{"evidence", "tasks", "--run", "run.legacy", "--json"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(dir, "config"))
+			if err := saveStoreConfig(storeConfigFile{
+				Active: "legacy-local",
+				Stores: map[string]storeConfigEntry{
+					"legacy-local": {Name: "legacy-local", URL: "sqlite://" + filepath.Join(dir, "store.sqlite"), Backend: "sqlite"},
+				},
+			}); err != nil {
+				t.Fatalf("save store config: %v", err)
+			}
+
+			out := runCLIFails(t, tt.args...)
+			for _, want := range []string{"daily commands require PostgreSQL Store", "SQLite", "postgres://"} {
+				if !strings.Contains(out, want) {
+					t.Fatalf("%s output missing %q: %q", tt.name, want, out)
+				}
+			}
+		})
+	}
+}
+
 func TestEvidenceTasksCommandListsPostProcessTasks(t *testing.T) {
 	storePath := createPostProcessTaskStore(t)
 
