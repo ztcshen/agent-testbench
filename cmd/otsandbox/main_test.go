@@ -2345,53 +2345,6 @@ func TestProfileGenerationPlanOpenAPICommand(t *testing.T) {
 }
 
 func TestExecutorPlanCommandReportsProfileDescriptors(t *testing.T) {
-	profileDir := filepath.Join(t.TempDir(), "profile")
-	writeFile(t, filepath.Join(profileDir, "profile.json"), `{
-  "id": "sample",
-  "displayName": "Sample Profile",
-  "executors": [
-    {"id":"executor.command","displayName":"No-op command","kind":"custom-command","command":"true","status":"active"},
-    {"id":"executor.pytest","displayName":"Pytest suite","kind":"pytest","status":"active"}
-  ]
-}`)
-
-	out := runCLI(t, "executor", "plan", "--profile", profileDir, "--json")
-	var report struct {
-		OK        bool   `json:"ok"`
-		ProfileID string `json:"profileId"`
-		Counts    struct {
-			Total   int `json:"total"`
-			Ready   int `json:"ready"`
-			Blocked int `json:"blocked"`
-		} `json:"counts"`
-		Items []struct {
-			ID      string   `json:"id"`
-			Kind    string   `json:"kind"`
-			Ready   bool     `json:"ready"`
-			RunMode string   `json:"runMode"`
-			Issues  []string `json:"issues"`
-		} `json:"items"`
-	}
-	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode executor plan json: %v\n%s", err, out)
-	}
-	if report.OK || report.ProfileID != "sample" || report.Counts.Total != 2 || report.Counts.Ready != 1 || report.Counts.Blocked != 1 {
-		t.Fatalf("executor plan summary = %#v", report)
-	}
-	if report.Items[0].ID != "executor.command" || !report.Items[0].Ready || report.Items[0].RunMode != "dry-run" {
-		t.Fatalf("ready executor item = %#v", report.Items[0])
-	}
-	if report.Items[1].ID != "executor.pytest" || report.Items[1].Ready || !containsString(report.Items[1].Issues, "missing-source-path") {
-		t.Fatalf("blocked executor item = %#v", report.Items[1])
-	}
-
-	textOut := runCLI(t, "executor", "plan", "--profile", profileDir)
-	for _, want := range []string{"Executor Plan", "Profile: sample", "Ready: 1", "Blocked: 1", "missing-source-path"} {
-		if !strings.Contains(textOut, want) {
-			t.Fatalf("executor plan text missing %q:\n%s", want, textOut)
-		}
-	}
-
 	storePath := filepath.Join(t.TempDir(), "executor-store.sqlite")
 	s, err := sqlite.Open(context.Background(), sqlite.Config{Path: storePath})
 	if err != nil {
@@ -2401,6 +2354,7 @@ func TestExecutorPlanCommandReportsProfileDescriptors(t *testing.T) {
 		ProfileID: "current",
 		APICases: []store.CatalogAPICase{
 			{ID: "case.catalog", DisplayName: "Catalog Case", SourceKind: "pytest", SourcePath: "tests/catalog_test.py", ExecutorID: "executor.catalog", Status: "active", TimeoutSeconds: 11},
+			{ID: "case.blocked", DisplayName: "Blocked Case", SourceKind: "pytest", ExecutorID: "executor.blocked", Status: "active"},
 		},
 	}); err != nil {
 		t.Fatalf("seed executor store: %v", err)
@@ -2409,26 +2363,57 @@ func TestExecutorPlanCommandReportsProfileDescriptors(t *testing.T) {
 		t.Fatalf("close executor store: %v", err)
 	}
 
-	storeOut := runCLI(t, "executor", "plan", "--store", "sqlite://"+storePath, "--json")
-	var storeReport struct {
+	out := runCLI(t, "executor", "plan", "--store", "sqlite://"+storePath, "--json")
+	var report struct {
 		OK        bool   `json:"ok"`
 		ProfileID string `json:"profileId"`
-		Items     []struct {
-			ID             string `json:"id"`
-			Kind           string `json:"kind"`
-			SourcePath     string `json:"sourcePath"`
-			Ready          bool   `json:"ready"`
-			TimeoutSeconds int    `json:"timeoutSeconds"`
+		Counts    struct {
+			Total   int `json:"total"`
+			Ready   int `json:"ready"`
+			Blocked int `json:"blocked"`
+		} `json:"counts"`
+		Items []struct {
+			ID             string   `json:"id"`
+			Kind           string   `json:"kind"`
+			SourcePath     string   `json:"sourcePath"`
+			Ready          bool     `json:"ready"`
+			RunMode        string   `json:"runMode"`
+			TimeoutSeconds int      `json:"timeoutSeconds"`
+			Issues         []string `json:"issues"`
 		} `json:"items"`
 	}
-	if err := json.Unmarshal([]byte(storeOut), &storeReport); err != nil {
-		t.Fatalf("decode store executor plan json: %v\n%s", err, storeOut)
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode executor plan json: %v\n%s", err, out)
 	}
-	if !storeReport.OK || storeReport.ProfileID != "current" || len(storeReport.Items) != 1 {
-		t.Fatalf("store executor plan summary = %#v", storeReport)
+	if report.OK || report.ProfileID != "current" || report.Counts.Total != 2 || report.Counts.Ready != 1 || report.Counts.Blocked != 1 {
+		t.Fatalf("executor plan summary = %#v", report)
 	}
-	if storeReport.Items[0].ID != "executor.catalog" || storeReport.Items[0].Kind != "pytest" || storeReport.Items[0].SourcePath != "tests/catalog_test.py" || !storeReport.Items[0].Ready || storeReport.Items[0].TimeoutSeconds != 11 {
-		t.Fatalf("store executor plan item = %#v", storeReport.Items[0])
+	itemsByID := map[string]struct {
+		ID             string   `json:"id"`
+		Kind           string   `json:"kind"`
+		SourcePath     string   `json:"sourcePath"`
+		Ready          bool     `json:"ready"`
+		RunMode        string   `json:"runMode"`
+		TimeoutSeconds int      `json:"timeoutSeconds"`
+		Issues         []string `json:"issues"`
+	}{}
+	for _, item := range report.Items {
+		itemsByID[item.ID] = item
+	}
+	blocked := itemsByID["executor.blocked"]
+	if blocked.ID == "" || blocked.Ready || !containsString(blocked.Issues, "missing-source-path") {
+		t.Fatalf("blocked executor item = %#v", blocked)
+	}
+	ready := itemsByID["executor.catalog"]
+	if ready.ID == "" || ready.Kind != "pytest" || ready.SourcePath != "tests/catalog_test.py" || !ready.Ready || ready.RunMode != "dry-run" || ready.TimeoutSeconds != 11 {
+		t.Fatalf("ready executor item = %#v", ready)
+	}
+
+	textOut := runCLI(t, "executor", "plan", "--store", "sqlite://"+storePath)
+	for _, want := range []string{"Executor Plan", "Profile: current", "Ready: 1", "Blocked: 1", "missing-source-path"} {
+		if !strings.Contains(textOut, want) {
+			t.Fatalf("executor plan text missing %q:\n%s", want, textOut)
+		}
 	}
 }
 
@@ -2900,8 +2885,10 @@ func TestWorkflowAuditCommandPrintsTextSummary(t *testing.T) {
 func TestTemplateRenderCommandPrintsRequestPreview(t *testing.T) {
 	dir := t.TempDir()
 	writeTemplateProfile(t, dir)
+	storePath := filepath.Join(t.TempDir(), "template-store.sqlite")
+	runCLI(t, "config", "publish", "--from", dir, "--store-url", storePath)
 
-	out := runCLI(t, "template", "render", "--profile", dir, "--template", "template.create", "--fixture", "fixture.item")
+	out := runCLI(t, "template", "render", "--store", "sqlite://"+storePath, "--template", "template.create", "--fixture", "fixture.item")
 
 	var rendered struct {
 		Method string         `json:"method"`
@@ -2919,7 +2906,7 @@ func TestTemplateRenderCommandPrintsRequestPreview(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	storePath := filepath.Join(t.TempDir(), "template-store.sqlite")
+	storePath = filepath.Join(t.TempDir(), "template-store-seeded.sqlite")
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
 	if err != nil {
 		t.Fatalf("open template store: %v", err)
@@ -3690,6 +3677,36 @@ func TestDailyPlanningCommandsRequireStoreBeforeProfileLoad(t *testing.T) {
 		{
 			name: "case suite impact-report",
 			args: []string{"case", "suite", "impact-report", "--profile", missingProfile, "--json"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}
+			out := runCLIFailsWithEnv(t, env, tt.args...)
+			if !strings.Contains(out, errNoActiveStoreConfigured.Error()) {
+				t.Fatalf("%s output = %q", tt.name, out)
+			}
+			if strings.Contains(out, "missing-profile") {
+				t.Fatalf("%s loaded profile before Store binding: %q", tt.name, out)
+			}
+		})
+	}
+}
+
+func TestExecutorAndTemplateCommandsRequireStoreBeforeProfileLoad(t *testing.T) {
+	missingProfile := filepath.Join(t.TempDir(), "missing-profile")
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "executor plan",
+			args: []string{"executor", "plan", "--profile", missingProfile, "--json"},
+		},
+		{
+			name: "template render",
+			args: []string{"template", "render", "--profile", missingProfile, "--template", "template.create"},
 		},
 	}
 

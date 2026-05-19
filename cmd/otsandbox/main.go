@@ -1284,6 +1284,10 @@ func runExecutorPlan(ctx context.Context, args []string) error {
 }
 
 func executorPlanReport(ctx context.Context, profileRef string, profileHomeRef string, storeRef string, legacyStoreURL string) (executor.PlanReport, error) {
+	resolvedStoreURL, err := resolveRequiredStoreReference(storeRef, legacyStoreURL)
+	if err != nil {
+		return executor.PlanReport{}, err
+	}
 	if strings.TrimSpace(profileRef) != "" {
 		resolvedProfilePath, err := materializeProfileReference(profileRef, profileHomeRef, false)
 		if err != nil {
@@ -1294,10 +1298,6 @@ func executorPlanReport(ctx context.Context, profileRef string, profileHomeRef s
 			return executor.PlanReport{}, err
 		}
 		return executor.Plan(ctx, bundle), nil
-	}
-	resolvedStoreURL, err := resolveRequiredStoreReference(storeRef, legacyStoreURL)
-	if err != nil {
-		return executor.PlanReport{}, err
 	}
 	runtime, err := openStore(ctx, resolvedStoreURL)
 	if err != nil {
@@ -5384,6 +5384,10 @@ func runTemplateRender(args []string) error {
 }
 
 func loadTemplateRenderBundle(ctx context.Context, profileRef string, profileHomeRef string, storeRef string, legacyStoreURL string) (profile.Bundle, func(), error) {
+	resolvedStoreURL, err := resolveRequiredStoreReference(storeRef, legacyStoreURL)
+	if err != nil {
+		return profile.Bundle{}, func() {}, err
+	}
 	if strings.TrimSpace(profileRef) != "" {
 		resolvedProfile, err := resolveProfileReference(profileRef, profileHomeRef)
 		if err != nil {
@@ -5391,10 +5395,6 @@ func loadTemplateRenderBundle(ctx context.Context, profileRef string, profileHom
 		}
 		bundle, err := profile.Load(resolvedProfile)
 		return bundle, func() {}, err
-	}
-	resolvedStoreURL, err := resolveRequiredStoreReference(storeRef, legacyStoreURL)
-	if err != nil {
-		return profile.Bundle{}, func() {}, err
 	}
 	runtime, err := openStore(ctx, resolvedStoreURL)
 	if err != nil {
