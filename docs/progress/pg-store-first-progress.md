@@ -909,3 +909,27 @@ Incomplete work:
 - This adds drift protection for daily Store resolution. The final unresolved
   proof remains a live PostgreSQL release gate plus real SkyWalking 10-step
   validation with real trace ids.
+
+## 2026-05-20 Real SkyWalking Release-Check Mode
+
+Estimated PostgreSQL mainline progress: 99.4%.
+
+Completed evidence:
+
+- `tools/release-check.sh` now supports
+  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`.
+- In that mode, release-check fails early unless both `OTS_TRACE_GRAPHQL_URL`
+  and `OTS_SMOKE_TRACE_IDS` are set, so the final 10-step smoke cannot silently
+  run against the deterministic synthetic provider.
+- The release checklist documents the required env trio for live topology
+  sign-off.
+- This is consistent with Apache SkyWalking Query Protocol: topology is queried
+  through GraphQL from observed SkyWalking data, so release proof must provide
+  a real GraphQL endpoint and concrete trace ids.
+
+Incomplete work:
+
+- The live endpoint itself is still not available in this local run, so the
+  remaining proof is executing release-check with a PostgreSQL DSN,
+  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and real
+  `OTS_SMOKE_TRACE_IDS`.

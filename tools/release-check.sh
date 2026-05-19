@@ -19,7 +19,17 @@ if [[ -z "${OTSANDBOX_SMOKE_STORE_DSN:-${OTSANDBOX_SMOKE_STORE:-}}" ]]; then
 fi
 
 step "checking SkyWalking smoke provider mode"
-if [[ -z "${OTS_TRACE_GRAPHQL_URL:-}" ]]; then
+if [[ "${OTSANDBOX_REQUIRE_REAL_SKYWALKING:-}" == "1" ]]; then
+  if [[ -z "${OTS_TRACE_GRAPHQL_URL:-}" ]]; then
+    echo "OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 requires OTS_TRACE_GRAPHQL_URL." >&2
+    exit 1
+  fi
+  if [[ -z "${OTS_SMOKE_TRACE_IDS:-}" ]]; then
+    echo "OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 requires OTS_SMOKE_TRACE_IDS for the 10-step workflow." >&2
+    exit 1
+  fi
+  echo "Real SkyWalking validation required; using configured GraphQL endpoint and smoke trace ids." >&2
+elif [[ -z "${OTS_TRACE_GRAPHQL_URL:-}" ]]; then
   echo "OTS_TRACE_GRAPHQL_URL is not set; smoke will use the deterministic synthetic SkyWalking GraphQL provider." >&2
   echo "Set OTS_TRACE_GRAPHQL_URL and optional OTS_SMOKE_TRACE_IDS for real SkyWalking validation; synthetic smoke is not live topology proof." >&2
 fi

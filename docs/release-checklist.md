@@ -20,6 +20,11 @@ and edges. If the endpoint is absent or a trace cannot be queried, the expected
 result is unavailable, failed, or skipped topology collection, not a generated
 topology.
 
+To make release-check fail unless it is using live topology evidence, set
+`OTSANDBOX_REQUIRE_REAL_SKYWALKING=1` together with `OTS_TRACE_GRAPHQL_URL` and
+`OTS_SMOKE_TRACE_IDS`. This mode rejects synthetic smoke before the expensive
+gate starts.
+
 The gate verifies:
 
 - no root `import bundles/` directory exists;
