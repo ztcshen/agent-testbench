@@ -5791,14 +5791,13 @@ func TestCaseSuiteBriefSummarizesMaintainedSuiteForAgents(t *testing.T) {
 }
 
 func TestCaseSuiteQualityAuditsMaintainedCaseMetadata(t *testing.T) {
+	configureNamedPostgreSQLActiveStore(t, "daily-case-suite-quality-pg")
 	profileDir := writeCaseSuiteQualityProfile(t)
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
+	runCLI(t, "config", "publish", "--from", profileDir)
 
 	out := runCLI(t,
 		"case", "suite", "quality",
 		"--profile", profileDir,
-		"--store", "sqlite://"+storePath,
 		"--status", "active",
 		"--json",
 	)
@@ -5836,7 +5835,7 @@ func TestCaseSuiteQualityAuditsMaintainedCaseMetadata(t *testing.T) {
 	if len(report.Nodes) != 1 || report.Nodes[0].NodeID != "node.empty" {
 		t.Fatalf("suite quality nodes = %#v", report.Nodes)
 	}
-	textOut := runCLI(t, "case", "suite", "quality", "--profile", profileDir, "--store", "sqlite://"+storePath, "--status", "active")
+	textOut := runCLI(t, "case", "suite", "quality", "--profile", profileDir, "--status", "active")
 	for _, want := range []string{"Case Suite Quality", "Incomplete: 1", "node.empty", "case.gaps"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("quality text missing %q:\n%s", want, textOut)
@@ -5845,14 +5844,13 @@ func TestCaseSuiteQualityAuditsMaintainedCaseMetadata(t *testing.T) {
 }
 
 func TestCaseSuiteQualityPlanSuggestsAuthoringActions(t *testing.T) {
+	configureNamedPostgreSQLActiveStore(t, "daily-case-suite-quality-plan-pg")
 	profileDir := writeCaseSuiteQualityProfile(t)
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
+	runCLI(t, "config", "publish", "--from", profileDir)
 
 	out := runCLI(t,
 		"case", "suite", "quality-plan",
 		"--profile", profileDir,
-		"--store", "sqlite://"+storePath,
 		"--status", "active",
 		"--json",
 	)
@@ -5883,7 +5881,7 @@ func TestCaseSuiteQualityPlanSuggestsAuthoringActions(t *testing.T) {
 	if len(report.Actions) != 4 || report.Actions[0].Type != "draft-case" || report.Actions[0].NodeID != "node.empty" || report.Actions[0].SuggestedCaseID != "case.node-empty.default" {
 		t.Fatalf("suite quality plan actions = %#v", report.Actions)
 	}
-	textOut := runCLI(t, "case", "suite", "quality-plan", "--profile", profileDir, "--store", "sqlite://"+storePath, "--status", "active")
+	textOut := runCLI(t, "case", "suite", "quality-plan", "--profile", profileDir, "--status", "active")
 	for _, want := range []string{"Case Suite Quality Plan", "Draft Case: 1", "case.node-empty.default", "case.gaps"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("quality plan text missing %q:\n%s", want, textOut)
@@ -5892,15 +5890,14 @@ func TestCaseSuiteQualityPlanSuggestsAuthoringActions(t *testing.T) {
 }
 
 func TestCaseSuiteQualityReportWritesJSONAndHTML(t *testing.T) {
+	configureNamedPostgreSQLActiveStore(t, "daily-case-suite-quality-report-pg")
 	profileDir := writeCaseSuiteQualityProfile(t)
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	outputDir := filepath.Join(t.TempDir(), "quality-report")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
+	runCLI(t, "config", "publish", "--from", profileDir)
 
 	out := runCLI(t,
 		"case", "suite", "quality-report",
 		"--profile", profileDir,
-		"--store", "sqlite://"+storePath,
 		"--status", "active",
 		"--output-dir", outputDir,
 		"--json",
@@ -5953,7 +5950,7 @@ func TestCaseSuiteQualityReportWritesJSONAndHTML(t *testing.T) {
 		t.Fatalf("quality json report missing expected content:\n%s", jsonReport)
 	}
 
-	textOut := runCLI(t, "case", "suite", "quality-report", "--profile", profileDir, "--store", "sqlite://"+storePath, "--status", "active", "--output-dir", filepath.Join(t.TempDir(), "text-quality-report"))
+	textOut := runCLI(t, "case", "suite", "quality-report", "--profile", profileDir, "--status", "active", "--output-dir", filepath.Join(t.TempDir(), "text-quality-report"))
 	for _, want := range []string{"Case Suite Quality Report", "Total Actions: 4", "Report:"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("quality report text missing %q:\n%s", want, textOut)

@@ -759,6 +759,40 @@ Incomplete work:
 - Remaining PG-line gaps are now mostly CLI/API parity polish, release
   preparation, and live SkyWalking endpoint validation with real trace ids.
 
+## 2026-05-20 Named PostgreSQL Case Suite Daily Test Migration
+
+Estimated PostgreSQL mainline progress: 98.8%.
+
+Completed evidence:
+
+- Migrated the remaining high-priority product-like case-suite daily tests from
+  explicit SQLite Stores to active named PostgreSQL Store coverage behind
+  `OTSANDBOX_TEST_PG_DSN`.
+- The migrated no-flag daily commands now include `case suite coverage`,
+  `case suite inspect`, `case suite plan`, `case suite stability`,
+  `case suite priority`, `case suite brief`, `case suite impact`, and
+  `case suite impact-report`.
+- The tests configure an active named PostgreSQL Store, publish profiles through
+  the active Store, seed run facts into the same PostgreSQL Store when needed,
+  and then run CLI commands without per-command `--store`.
+- Shared PostgreSQL test databases are protected from run id collisions by
+  unique test ids in the migrated history-dependent tests.
+- Light validation passed for each migrated test with targeted `go test`
+  selectors, plus `tools/guardrails/check_store_first_contracts.sh`,
+  `git diff --check`, and
+  `rg -n -i 'fall''back' . --glob '!node_modules/**'`.
+
+Incomplete work:
+
+- These tests remain env-gated and skip without `OTSANDBOX_TEST_PG_DSN`; they
+  are PostgreSQL daily-path proof when the DSN is supplied, not a replacement
+  for the later human-machine PostgreSQL validation pass.
+- Some lower-priority case-suite quality/report tests still use explicit
+  SQLite compatibility Stores and should either migrate to named PostgreSQL or
+  be relabeled as compatibility coverage.
+- Final confidence still depends on CLI/API parity polish, release preparation,
+  and live SkyWalking endpoint validation with real trace ids.
+
 ## 2026-05-20 Named PostgreSQL Serve Evidence Import API Coverage
 
 Estimated PostgreSQL mainline progress: 98.8%.
