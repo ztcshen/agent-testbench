@@ -20,11 +20,13 @@ npm ci
 ```sh
 ./bin/otsandbox.sh version
 npm run demo:api-case
-npm run release-check
+OTSANDBOX_SMOKE_STORE_DSN="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run release-check
 ```
 
-The release check runs Go tests, the source-domain guardrail, the React build,
-and a headless browser smoke test against a generated generic import bundle.
+The release check requires a PostgreSQL smoke Store DSN. It runs Go tests, the
+source-domain guardrail, the React build, active PostgreSQL CLI smoke, and a
+PostgreSQL-only headless browser smoke test against a generated generic import
+bundle.
 The demo command starts a temporary local HTTP endpoint, runs the generic
 `examples/api-cases/create-item.json` case, and prints the Evidence bundle path.
 Demo output is kept under the system temp directory so you can inspect it after

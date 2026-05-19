@@ -6,8 +6,15 @@ cd "$ROOT_DIR"
 
 paths=(
   AGENTS.md
+  README.md
+  README.zh-CN.md
   cmd/otsandbox/main.go
+  control-plane/frontend/src
   docs
+  package.json
+  tools/examples
+  tools/release-check.sh
+  tools/smoke
 )
 
 violations=0
@@ -29,6 +36,9 @@ check_pattern 'default sqlite|sqlite by default|默认 SQLite|SQLite is the defa
 
 check_pattern 'store-url[[:space:]][^`"$]*\.runtime/store\.sqlite|--store-url[[:space:]]+\.runtime/store\.sqlite' \
   "Daily workflow examples must use --store NAME_OR_DSN instead of --store-url .runtime/store.sqlite."
+
+check_pattern '^[[:space:]]*npm run release-check[[:space:]]*$' \
+  "Release-check examples must show OTSANDBOX_SMOKE_STORE_DSN so the PostgreSQL gate runs."
 
 blocked_a="fall"
 blocked_b="back"

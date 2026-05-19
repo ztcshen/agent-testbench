@@ -11,6 +11,13 @@ step() {
 step "checking whitespace"
 git diff --check
 
+step "checking PostgreSQL smoke Store"
+if [[ -z "${OTSANDBOX_SMOKE_STORE_DSN:-${OTSANDBOX_SMOKE_STORE:-}}" ]]; then
+  echo "OTSANDBOX_SMOKE_STORE_DSN is required for release-check." >&2
+  echo "Example: OTSANDBOX_SMOKE_STORE_DSN='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run release-check" >&2
+  exit 1
+fi
+
 step "checking generated state is not tracked"
 if [[ -d team-configs ]]; then
   echo "root team-configs directory is not allowed in the core repository" >&2
@@ -56,15 +63,10 @@ npm run test:frontend
 step "running smoke harness tests"
 node --test tools/smoke/*.test.mjs
 
-if [[ -n "${OTSANDBOX_SMOKE_STORE_DSN:-${OTSANDBOX_SMOKE_STORE:-}}" ]]; then
-  step "running PostgreSQL active Store CLI smoke tests"
-  npm run smoke:cli:pg-active
+step "running PostgreSQL active Store CLI smoke tests"
+npm run smoke:cli:pg-active
 
-  step "running PostgreSQL-only browser smoke tests"
-  npm run smoke:frontend:pg-only
-else
-  step "running browser smoke tests"
-  npm run smoke:frontend
-fi
+step "running PostgreSQL-only browser smoke tests"
+npm run smoke:frontend:pg-only
 
 step "release check passed"

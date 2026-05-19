@@ -16,8 +16,12 @@ The current product direction is Store-first:
 
 - Test engineers use the sandbox through APIs and UI. They do not maintain a
   separate sandbox project or repeatedly edit external configuration.
-- SQLite is the default active Store for current sandbox state, runtime facts,
-  workflow catalog, execution state, Evidence indexes, and verification results.
+- PostgreSQL is the default active Store for current sandbox state, runtime
+  facts, workflow catalog, execution state, Evidence indexes, and verification
+  results. Local and remote PostgreSQL databases use the same daily commands;
+  users switch the active database through named Store config.
+- SQLite is retained for old local data import, compatibility checks, and tests.
+  It is not the product path for new daily workflows.
 - Optional template packages may exist only for import, export, sharing, review,
   or migration. They are not the daily testing surface.
 - New functionality should expose Store-first APIs and UI flows before adding
@@ -40,7 +44,7 @@ and validation tools all read the same facts.
 
 | Capability | What it means |
 | --- | --- |
-| Local-first Store | SQLite by default, with schema upgrades, run indexes, case run records, Evidence indexes, timing, logs, topology, and post-process task records. |
+| PostgreSQL Store-first | Named PostgreSQL Stores with schema upgrades, run indexes, case run records, Evidence indexes, timing, logs, topology, and post-process task records. |
 | API-operated catalog | Services, workflows, interface nodes, cases, request templates, fixtures, dependencies, and bindings are exposed through sandbox APIs and UI discovery. |
 | Agent-friendly discovery | Agents call discovery APIs first, then run reports with exact returned ids instead of hidden prompt knowledge. |
 | API case execution | Run one HTTP case, a maintained case suite, or only the failed/not-run part of a suite; render requests, assert responses, write Evidence, and index results into Store. |
@@ -67,20 +71,21 @@ Install dependencies and verify the checkout:
 npm ci
 ./bin/otsandbox.sh version
 npm run demo:api-case
-npm run release-check
+OTSANDBOX_SMOKE_STORE_DSN='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run release-check
 ```
 
 The demo command starts a temporary local HTTP endpoint, runs the generic
 `examples/api-cases/create-item.json` case, and prints the Evidence bundle path.
-The release gate runs whitespace checks, generated-state checks, source-domain
-guardrails, Go tests, the demo, the React build, and headless browser smoke
-tests.
+The release gate requires a PostgreSQL smoke Store DSN. It runs whitespace
+checks, generated-state checks, source-domain guardrails, Go tests, the demo,
+the React build, active PostgreSQL CLI smoke tests, and PostgreSQL-only
+headless browser smoke tests.
 
 ## Architecture
 
 ```text
 Sandbox APIs and UI
-  -> SQLite Store as active state
+  -> active PostgreSQL Store
   -> catalog read-models
   -> CLI discovery, Control plane APIs, React workbench
   -> case and workflow execution
@@ -93,7 +98,8 @@ Core packages stay generic:
 
 - `cmd/otsandbox/`: CLI entrypoint and command orchestration.
 - `internal/store/`: Store contract and runtime records.
-- `internal/store/sqlite/`: default local Store backend.
+- `internal/store/postgres/`: default product Store backend.
+- `internal/store/sqlite/`: legacy compatibility and migration backend.
 - `internal/controlplane/`: HTTP APIs, workbench data, reports, and Evidence views.
 - `internal/apicase/`: HTTP case runner and Evidence writer.
 - `control-plane/frontend/`: React workbench source.
@@ -114,8 +120,10 @@ Core packages stay generic:
 
 ## Project Principles
 
-- Keep the default developer experience local and lightweight.
-- Use SQLite as the default active Store.
+- Keep the default developer experience local and lightweight while using a
+  named PostgreSQL Store for daily product flows.
+- Keep local and remote PostgreSQL usage command-compatible: switch the active
+  Store instead of changing daily commands.
 - Test engineers should call sandbox APIs or use the UI, not maintain separate
   configuration projects.
 - Treat Evidence, reports, logs, and local databases as generated runtime state.
@@ -139,15 +147,15 @@ Current working areas:
 - release gate: `npm run release-check`.
 
 Next areas are Store-first registration APIs, a cleaner current-state workbench,
-stronger post-process scheduling, optional team Store backends, and richer public
-examples.
+stronger post-process scheduling, verified environment bootstrap, and richer
+public examples.
 
 ## Contributing
 
 Run the full local gate before publishing a change:
 
 ```sh
-npm run release-check
+OTSANDBOX_SMOKE_STORE_DSN='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run release-check
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and

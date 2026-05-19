@@ -483,7 +483,7 @@ function MissingNode({ payload, requested }) {
   const available = payload.available || [];
   return (
     <section className="interface-node-layout" aria-label="接口节点测试用例">
-      <Panel title={copyText(payload, "missingOptionsTitle", "可选接口节点")} subtitle={copyText(payload, "missingOptionsSubtitle", "当前 template-config SQLite 中已登记的接口节点")} className="interface-node-missing-panel">
+      <Panel title={copyText(payload, "missingOptionsTitle", "可选接口节点")} subtitle={copyText(payload, "missingOptionsSubtitle", "当前 active Store 中已登记的接口节点")} className="interface-node-missing-panel">
         <div className="environment-node-peer-list">
           {available.length ? available.map((item) => (
             <a className="environment-node-peer" href={item.href} key={item.id}>

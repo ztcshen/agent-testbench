@@ -6,7 +6,7 @@ outside a trusted team.
 ## Required Gate
 
 ```sh
-npm run release-check
+OTSANDBOX_SMOKE_STORE_DSN="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run release-check
 ```
 
 The gate verifies:
@@ -17,7 +17,8 @@ The gate verifies:
 - `git diff --check` passes;
 - Go tests pass;
 - the React workbench builds;
-- browser smoke tests pass in a headless context;
+- active PostgreSQL CLI smoke passes without per-command Store flags;
+- PostgreSQL-only browser smoke tests pass in a headless context;
 - the headless smoke can enter the core workflow from the workbench, click the
   workflow run button, persist the workflow run, open step Evidence, and verify
   stored SkyWalking topology with provider, trace id, status, nodes, and edges.
