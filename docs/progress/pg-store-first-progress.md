@@ -869,3 +869,22 @@ Incomplete work:
 - Remaining gap is no longer product contract shape; it is final execution
   evidence: run the PG release gate and 10-step smoke against a real SkyWalking
   endpoint with real trace ids in the human-machine validation pass.
+
+## 2026-05-20 Topology Contract Guardrail
+
+Estimated PostgreSQL mainline progress: 99.2%.
+
+Completed evidence:
+
+- Store-first guardrails now require docs to state that deterministic synthetic
+  SkyWalking smoke is not live release proof.
+- Store-first guardrails now require docs to state that missing SkyWalking
+  topology is reported as unavailable, failed, or skipped rather than generated.
+- `tools/release-check.sh` is now guarded to keep its synthetic provider message
+  distinct from live SkyWalking topology proof.
+
+Incomplete work:
+
+- The remaining gap is still execution evidence against a live SkyWalking
+  GraphQL endpoint with real trace ids; this guardrail only prevents contract
+  drift while the PG path is being finalized.

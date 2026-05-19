@@ -49,6 +49,21 @@ check_pattern 'OTSANDBOX_CLEAN_DEMO_OUTPUT=1 npm run demo:api-case' \
 check_pattern "topology:[[:space:]]*\\{[[:space:]]*status:[[:space:]]*['\"](partial|complete|unavailable)|\"topology\":[[:space:]]*\\{[[:space:]]*\"status\"[[:space:]]*:[[:space:]]*\"(partial|complete|unavailable)" \
   "SkyWalking topology fixtures must set provider/source before status."
 
+if ! rg -q -i 'not release evidence|not proof of a live SkyWalking deployment' README.md docs/store-backends.md docs/release-checklist.md; then
+  echo "Docs must state that synthetic SkyWalking smoke is not live release proof." >&2
+  violations=1
+fi
+
+if ! rg -q -i 'unavailable, failed, or skipped' README.md README.zh-CN.md docs/cli-api-contracts.md docs/roadmap.md; then
+  echo "Docs must state that missing SkyWalking topology reports unavailable, failed, or skipped status." >&2
+  violations=1
+fi
+
+if ! rg -q -i 'synthetic smoke is not live topology proof' tools/release-check.sh; then
+  echo "release-check must distinguish synthetic smoke from live SkyWalking proof." >&2
+  violations=1
+fi
+
 blocked_a="fall"
 blocked_b="back"
 blocked_word="${blocked_a}${blocked_b}"
