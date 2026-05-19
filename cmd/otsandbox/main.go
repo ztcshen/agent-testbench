@@ -41,6 +41,9 @@ import (
 
 const version = "0.1.0"
 
+var postgresSchemaStatus = postgres.SchemaStatus
+var postgresUpgradeSchema = postgres.UpgradeSchema
+
 type profileImportReport struct {
 	ProfileID     string               `json:"profileId"`
 	BundlePath    string               `json:"bundlePath"`
@@ -337,13 +340,13 @@ func runStore(ctx context.Context, args []string) error {
 		}
 		switch args[0] {
 		case "status":
-			status, err := postgres.SchemaStatus(ctx, cfg)
+			status, err := postgresSchemaStatus(ctx, cfg)
 			if err != nil {
 				return err
 			}
 			printPostgresStoreStatus(status)
 		case "upgrade":
-			status, err := postgres.UpgradeSchema(ctx, cfg)
+			status, err := postgresUpgradeSchema(ctx, cfg)
 			if err != nil {
 				return err
 			}

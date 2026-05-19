@@ -15,6 +15,7 @@ type Dialect interface {
 	BoolType() string
 	QuoteIdent(name string) string
 	UpsertClause(conflictColumn string, updateColumns []string) string
+	TableExistsSQL(tableName string) string
 }
 
 type Config struct {
@@ -82,6 +83,12 @@ func (PostgresDialect) QuoteIdent(name string) string {
 func (PostgresDialect) UpsertClause(conflictColumn string, updateColumns []string) string {
 	return standardUpsert(conflictColumn, updateColumns)
 }
+func (PostgresDialect) TableExistsSQL(tableName string) string {
+	return fmt.Sprintf(`select case when exists (
+  select 1 from information_schema.tables
+  where table_schema = current_schema() and table_name = %s
+) then 1 else 0 end as exists`, sqlLiteral(tableName))
+}
 
 func (MySQLDialect) Name() string       { return "mysql" }
 func (MySQLDialect) DriverName() string { return "mysql" }
@@ -103,6 +110,12 @@ func (MySQLDialect) UpsertClause(_ string, updateColumns []string) string {
 	}
 	return "on duplicate key update " + strings.Join(assignments, ", ")
 }
+func (MySQLDialect) TableExistsSQL(tableName string) string {
+	return fmt.Sprintf(`select case when exists (
+  select 1 from information_schema.tables
+  where table_schema = database() and table_name = %s
+) then 1 else 0 end as exists`, sqlLiteral(tableName))
+}
 
 func (SQLiteDialect) Name() string       { return "sqlite" }
 func (SQLiteDialect) DriverName() string { return "sqlite" }
@@ -115,6 +128,12 @@ func (SQLiteDialect) QuoteIdent(name string) string {
 }
 func (SQLiteDialect) UpsertClause(conflictColumn string, updateColumns []string) string {
 	return standardUpsert(conflictColumn, updateColumns)
+}
+func (SQLiteDialect) TableExistsSQL(tableName string) string {
+	return fmt.Sprintf(`select case when exists (
+  select 1 from sqlite_master
+  where type = 'table' and name = %s
+) then 1 else 0 end as exists`, sqlLiteral(tableName))
 }
 
 func standardUpsert(conflictColumn string, updateColumns []string) string {
@@ -131,4 +150,8 @@ func standardUpsert(conflictColumn string, updateColumns []string) string {
 
 func quoteDouble(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
+func sqlLiteral(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 }

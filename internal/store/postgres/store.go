@@ -3,16 +3,12 @@ package postgres
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
-	"os/exec"
 	"strings"
-	"time"
 
 	"open-test-sandbox/internal/store"
-	"open-test-sandbox/internal/store/schema"
 	"open-test-sandbox/internal/store/sqlstore"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -45,6 +41,14 @@ func ParseConfigFromURL(storeURL string) (Config, error) {
 }
 
 func Open(ctx context.Context, cfg Config) (*Store, error) {
+	db, err := openDB(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &Store{core: sqlstore.New(db, sqlstore.PostgresDialect{})}, nil
+}
+
+func openDB(ctx context.Context, cfg Config) (*sql.DB, error) {
 	driverName := strings.TrimSpace(cfg.DriverName)
 	if driverName == "" {
 		driverName = sqlstore.PostgresDialect{}.DriverName()
@@ -57,7 +61,7 @@ func Open(ctx context.Context, cfg Config) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("ping postgres store: %w", err)
 	}
-	return &Store{core: sqlstore.New(db, sqlstore.PostgresDialect{})}, nil
+	return db, nil
 }
 
 func (s *Store) Close() error {
@@ -167,106 +171,27 @@ func (r SchemaStatusResult) HasPending() bool {
 }
 
 func SchemaStatus(ctx context.Context, cfg Config) (SchemaStatusResult, error) {
-	current, err := currentSchemaVersion(ctx, cfg.URL)
+	db, err := openDB(ctx, cfg)
 	if err != nil {
 		return SchemaStatusResult{}, err
 	}
-	return SchemaStatusResult{URL: cfg.URL, CurrentVersion: current, TargetVersion: schema.CurrentVersion}, nil
+	defer db.Close()
+	status, err := sqlstore.SchemaStatus(ctx, db, sqlstore.PostgresDialect{})
+	if err != nil {
+		return SchemaStatusResult{}, err
+	}
+	return SchemaStatusResult{URL: cfg.URL, CurrentVersion: status.CurrentVersion, TargetVersion: status.TargetVersion, AppliedCount: status.AppliedCount}, nil
 }
 
 func UpgradeSchema(ctx context.Context, cfg Config) (SchemaStatusResult, error) {
-	if err := ensureSchemaVersionTable(ctx, cfg.URL); err != nil {
-		return SchemaStatusResult{}, err
-	}
-	current, err := currentSchemaVersion(ctx, cfg.URL)
+	db, err := openDB(ctx, cfg)
 	if err != nil {
 		return SchemaStatusResult{}, err
 	}
-	applied := 0
-	for _, change := range schema.All() {
-		if change.Version <= current {
-			continue
-		}
-		statement := fmt.Sprintf(`
-begin;
-%s
-insert into schema_versions (version, name, applied_at)
-values (%d, %s, %s);
-commit;`, change.SQL, change.Version, pgString(change.Name), pgString(time.Now().UTC().Format(time.RFC3339Nano)))
-		if err := psqlExec(ctx, cfg.URL, statement); err != nil {
-			return SchemaStatusResult{}, fmt.Errorf("apply schema change %d %q: %w", change.Version, change.Name, err)
-		}
-		applied++
-	}
-	status, err := SchemaStatus(ctx, cfg)
+	defer db.Close()
+	status, err := sqlstore.UpgradeSchema(ctx, db, sqlstore.PostgresDialect{})
 	if err != nil {
 		return SchemaStatusResult{}, err
 	}
-	status.AppliedCount = applied
-	return status, nil
-}
-
-func ensureSchemaVersionTable(ctx context.Context, dsn string) error {
-	return psqlExec(ctx, dsn, `
-create table if not exists schema_versions (
-  version integer primary key,
-  name text not null,
-  applied_at timestamptz not null
-);`)
-}
-
-func currentSchemaVersion(ctx context.Context, dsn string) (int, error) {
-	var tableRows []struct {
-		Count int `json:"count"`
-	}
-	if err := psqlQuery(ctx, dsn, `
-select case when exists (
-  select 1 from information_schema.tables
-  where table_schema = current_schema() and table_name = 'schema_versions'
-) then 1 else 0 end as count`, &tableRows); err != nil {
-		return 0, err
-	}
-	if len(tableRows) == 0 || tableRows[0].Count == 0 {
-		return 0, nil
-	}
-	var versionRows []struct {
-		Version int `json:"version"`
-	}
-	if err := psqlQuery(ctx, dsn, `select coalesce(max(version), 0) as version from schema_versions`, &versionRows); err != nil {
-		return 0, err
-	}
-	if len(versionRows) == 0 {
-		return 0, nil
-	}
-	return versionRows[0].Version, nil
-}
-
-func psqlExec(ctx context.Context, dsn string, statement string) error {
-	cmd := exec.CommandContext(ctx, "psql", dsn, "-X", "-q", "-v", "ON_ERROR_STOP=1", "-c", statement)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("run psql statement: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
-}
-
-func psqlQuery(ctx context.Context, dsn string, statement string, target any) error {
-	wrapped := fmt.Sprintf(`copy (select coalesce(json_agg(row_to_json(q)), '[]'::json) from (%s) q) to stdout;`, strings.TrimSuffix(strings.TrimSpace(statement), ";"))
-	cmd := exec.CommandContext(ctx, "psql", dsn, "-X", "-q", "-t", "-A", "-v", "ON_ERROR_STOP=1", "-c", wrapped)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("run psql query: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	raw := strings.TrimSpace(string(out))
-	if raw == "" {
-		raw = "[]"
-	}
-	if err := json.Unmarshal([]byte(raw), target); err != nil {
-		return fmt.Errorf("decode psql query result: %w", err)
-	}
-	return nil
-}
-
-func pgString(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+	return SchemaStatusResult{URL: cfg.URL, CurrentVersion: status.CurrentVersion, TargetVersion: status.TargetVersion, AppliedCount: status.AppliedCount}, nil
 }

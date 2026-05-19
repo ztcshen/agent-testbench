@@ -1,6 +1,80 @@
 package sqlstore
 
-import "fmt"
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"strings"
+	"time"
+)
+
+const (
+	CurrentSchemaVersion = 1
+	CoreSchemaName       = "create shared sql store schema"
+)
+
+type SchemaStatusResult struct {
+	CurrentVersion int
+	TargetVersion  int
+	AppliedCount   int
+}
+
+func (r SchemaStatusResult) HasPending() bool {
+	return r.CurrentVersion < r.TargetVersion
+}
+
+func SchemaStatus(ctx context.Context, db *sql.DB, d Dialect) (SchemaStatusResult, error) {
+	current, err := currentSchemaVersion(ctx, db, d)
+	if err != nil {
+		return SchemaStatusResult{}, err
+	}
+	return SchemaStatusResult{CurrentVersion: current, TargetVersion: CurrentSchemaVersion}, nil
+}
+
+func UpgradeSchema(ctx context.Context, db *sql.DB, d Dialect) (SchemaStatusResult, error) {
+	current, err := currentSchemaVersion(ctx, db, d)
+	if err != nil {
+		return SchemaStatusResult{}, err
+	}
+	applied := 0
+	if current >= CurrentSchemaVersion {
+		return SchemaStatusResult{CurrentVersion: current, TargetVersion: CurrentSchemaVersion}, nil
+	}
+	for _, statement := range CoreSchemaSQL(d) {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return SchemaStatusResult{}, fmt.Errorf("apply shared sql store schema: %w", err)
+		}
+	}
+	query := fmt.Sprintf(`
+insert into schema_versions (version, name, applied_at)
+values (%s)
+%s;`, bindVars(d, 3), d.UpsertClause("version", []string{"name", "applied_at"}))
+	if _, err := db.ExecContext(ctx, query, CurrentSchemaVersion, CoreSchemaName, time.Now().UTC()); err != nil {
+		return SchemaStatusResult{}, fmt.Errorf("record shared sql store schema version: %w", err)
+	}
+	applied = 1
+	status, err := SchemaStatus(ctx, db, d)
+	if err != nil {
+		return SchemaStatusResult{}, err
+	}
+	status.AppliedCount = applied
+	return status, nil
+}
+
+func currentSchemaVersion(ctx context.Context, db *sql.DB, d Dialect) (int, error) {
+	var exists int
+	if err := db.QueryRowContext(ctx, d.TableExistsSQL("schema_versions")).Scan(&exists); err != nil {
+		return 0, fmt.Errorf("check schema_versions table: %w", err)
+	}
+	if exists == 0 {
+		return 0, nil
+	}
+	var version int
+	if err := db.QueryRowContext(ctx, `select coalesce(max(version), 0) as version from schema_versions;`).Scan(&version); err != nil {
+		return 0, fmt.Errorf("read shared sql store schema version: %w", err)
+	}
+	return version, nil
+}
 
 func CoreSchemaSQL(d Dialect) []string {
 	text := "text"
@@ -160,4 +234,12 @@ create table if not exists profile_catalogs (
   template_configs %s not null
 );`, text, timeType, jsonType, intType, intType, intType, intType, intType, intType, intType, intType, intType, intType),
 	}
+}
+
+func bindVars(d Dialect, count int) string {
+	var out []string
+	for i := 1; i <= count; i++ {
+		out = append(out, d.BindVar(i))
+	}
+	return strings.Join(out, ", ")
 }

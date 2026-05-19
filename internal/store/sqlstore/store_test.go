@@ -609,6 +609,18 @@ func (s *fakeSQLState) lastExecs(t *testing.T, count int) []fakeSQLCall {
 	return append([]fakeSQLCall(nil), s.execs[len(s.execs)-count:]...)
 }
 
+func (s *fakeSQLState) execsSnapshot() []fakeSQLCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]fakeSQLCall(nil), s.execs...)
+}
+
+func (s *fakeSQLState) clearExecs() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.execs = nil
+}
+
 func (s *fakeSQLState) lastQuery(t *testing.T) fakeSQLCall {
 	t.Helper()
 	s.mu.Lock()

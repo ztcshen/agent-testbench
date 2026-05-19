@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -90,6 +91,48 @@ func TestOpenUsesConfiguredSQLDriverAndDelegatesRuntimeStoreMethods(t *testing.T
 	}
 }
 
+func TestSchemaStatusAndUpgradeUseConfiguredSQLDriver(t *testing.T) {
+	ctx := context.Background()
+	state := openFakePostgresDriver(t)
+	cfg := postgres.Config{URL: state.name, DriverName: fakePostgresDriverName}
+
+	state.queueRows(fakePostgresRows{
+		columns: []string{"exists"},
+		values:  [][]driver.Value{{int64(0)}},
+	})
+	status, err := postgres.SchemaStatus(ctx, cfg)
+	if err != nil {
+		t.Fatalf("schema status: %v", err)
+	}
+	if status.CurrentVersion != 0 || status.TargetVersion == 0 || !status.HasPending() {
+		t.Fatalf("postgres schema status = %#v", status)
+	}
+
+	state.queueRows(fakePostgresRows{
+		columns: []string{"exists"},
+		values:  [][]driver.Value{{int64(0)}},
+	})
+	state.queueRows(fakePostgresRows{
+		columns: []string{"exists"},
+		values:  [][]driver.Value{{int64(1)}},
+	})
+	state.queueRows(fakePostgresRows{
+		columns: []string{"version"},
+		values:  [][]driver.Value{{int64(1)}},
+	})
+	upgraded, err := postgres.UpgradeSchema(ctx, cfg)
+	if err != nil {
+		t.Fatalf("upgrade schema: %v", err)
+	}
+	if upgraded.CurrentVersion != upgraded.TargetVersion || upgraded.AppliedCount != 1 || upgraded.HasPending() {
+		t.Fatalf("postgres upgraded schema = %#v", upgraded)
+	}
+	execs := state.execsSnapshot()
+	if len(execs) == 0 || !strings.Contains(execs[0].query, "create table if not exists schema_versions") {
+		t.Fatalf("postgres upgrade execs = %#v", execs)
+	}
+}
+
 const fakePostgresDriverName = "otsandbox_postgres_open_fake"
 
 var registerFakePostgresDriverOnce sync.Once
@@ -117,6 +160,7 @@ type fakePostgresState struct {
 	mu    sync.Mutex
 	pings int
 	execs []fakePostgresCall
+	rows  []fakePostgresRows
 }
 
 func (s *fakePostgresState) lastExec(t *testing.T) fakePostgresCall {
@@ -127,6 +171,18 @@ func (s *fakePostgresState) lastExec(t *testing.T) fakePostgresCall {
 		t.Fatal("no exec calls recorded")
 	}
 	return s.execs[len(s.execs)-1]
+}
+
+func (s *fakePostgresState) queueRows(rows fakePostgresRows) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rows = append(s.rows, rows)
+}
+
+func (s *fakePostgresState) execsSnapshot() []fakePostgresCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]fakePostgresCall(nil), s.execs...)
 }
 
 var fakePostgresRegistry = &fakePostgresStateRegistry{states: map[string]*fakePostgresState{}}
@@ -184,4 +240,38 @@ func (c fakePostgresConn) ExecContext(_ context.Context, query string, args []dr
 	}
 	c.state.execs = append(c.state.execs, fakePostgresCall{query: query, args: out})
 	return driver.RowsAffected(1), nil
+}
+
+func (c fakePostgresConn) QueryContext(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	c.state.mu.Lock()
+	defer c.state.mu.Unlock()
+	if len(c.state.rows) == 0 {
+		return &fakePostgresSQLRows{}, nil
+	}
+	rows := c.state.rows[0]
+	c.state.rows = c.state.rows[1:]
+	return &fakePostgresSQLRows{columns: rows.columns, values: rows.values}, nil
+}
+
+type fakePostgresRows struct {
+	columns []string
+	values  [][]driver.Value
+}
+
+type fakePostgresSQLRows struct {
+	columns []string
+	values  [][]driver.Value
+	index   int
+}
+
+func (r fakePostgresSQLRows) Columns() []string { return r.columns }
+func (r fakePostgresSQLRows) Close() error      { return nil }
+
+func (r *fakePostgresSQLRows) Next(dest []driver.Value) error {
+	if r.index >= len(r.values) {
+		return io.EOF
+	}
+	copy(dest, r.values[r.index])
+	r.index++
+	return nil
 }

@@ -20,8 +20,10 @@ import (
 	"open-test-sandbox/internal/apicase"
 	"open-test-sandbox/internal/profile"
 	"open-test-sandbox/internal/store"
+	"open-test-sandbox/internal/store/postgres"
 	"open-test-sandbox/internal/store/schema"
 	"open-test-sandbox/internal/store/sqlite"
+	"open-test-sandbox/internal/store/sqlstore"
 )
 
 func TestStoreUpgradeAndStatusCommands(t *testing.T) {
@@ -79,37 +81,25 @@ func TestStoreConfigCommandsManageActivePostgresStore(t *testing.T) {
 }
 
 func TestStoreStatusSupportsPostgresURLs(t *testing.T) {
-	fakeBin := t.TempDir()
-	psql := filepath.Join(fakeBin, "psql")
-	if err := os.WriteFile(psql, []byte(`#!/bin/sh
-printf '[{"count":0}]'
-`), 0o755); err != nil {
-		t.Fatalf("write fake psql: %v", err)
-	}
-	env := []string{"PATH=" + fakeBin + string(os.PathListSeparator) + os.Getenv("PATH")}
+	withPostgresSchemaStatus(t, func(_ context.Context, cfg postgres.Config) (postgres.SchemaStatusResult, error) {
+		return postgres.SchemaStatusResult{URL: cfg.URL, CurrentVersion: 0, TargetVersion: sqlstore.CurrentSchemaVersion}, nil
+	})
 
-	out := runCLIWithEnv(t, env, "store", "status", "--store-url", "postgres://localhost/open_test_sandbox")
-	if !strings.Contains(out, "Store: postgres") || !strings.Contains(out, "Version: 0") || !strings.Contains(out, fmt.Sprintf("Pending: %d", schema.CurrentVersion)) {
+	out := runStoreCommand(t, "status", "--store-url", "postgres://localhost/open_test_sandbox")
+	if !strings.Contains(out, "Store: postgres") || !strings.Contains(out, "Version: 0") || !strings.Contains(out, fmt.Sprintf("Pending: %d", sqlstore.CurrentSchemaVersion)) {
 		t.Fatalf("postgres status output = %q", out)
 	}
 }
 
 func TestStoreStatusCanUseNamedPostgresStore(t *testing.T) {
 	configHome := t.TempDir()
-	fakeBin := t.TempDir()
-	psql := filepath.Join(fakeBin, "psql")
-	if err := os.WriteFile(psql, []byte(`#!/bin/sh
-printf '[{"count":0}]'
-`), 0o755); err != nil {
-		t.Fatalf("write fake psql: %v", err)
-	}
-	env := []string{
-		"OTSANDBOX_CONFIG_HOME=" + configHome,
-		"PATH=" + fakeBin + string(os.PathListSeparator) + os.Getenv("PATH"),
-	}
-	runCLIWithEnv(t, env, "store", "config", "set", "team-verified", "--url", "postgres://user:secret@example.com:5432/team_verified?sslmode=disable")
+	t.Setenv("OTSANDBOX_CONFIG_HOME", configHome)
+	withPostgresSchemaStatus(t, func(_ context.Context, cfg postgres.Config) (postgres.SchemaStatusResult, error) {
+		return postgres.SchemaStatusResult{URL: cfg.URL, CurrentVersion: 0, TargetVersion: sqlstore.CurrentSchemaVersion}, nil
+	})
+	runStoreCommand(t, "config", "set", "team-verified", "--url", "postgres://user:secret@example.com:5432/team_verified?sslmode=disable")
 
-	out := runCLIWithEnv(t, env, "store", "status", "--store", "team-verified")
+	out := runStoreCommand(t, "status", "--store", "team-verified")
 	if !strings.Contains(out, "Store: postgres") || !strings.Contains(out, "team_verified") || strings.Contains(out, "secret") {
 		t.Fatalf("named postgres status output = %q", out)
 	}
@@ -4464,6 +4454,38 @@ func runCLIWithEnv(t *testing.T, env []string, args ...string) string {
 		t.Fatalf("go run . %s failed: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	return string(out)
+}
+
+func runStoreCommand(t *testing.T, args ...string) string {
+	t.Helper()
+	readPipe, writePipe, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdout pipe: %v", err)
+	}
+	originalStdout := os.Stdout
+	os.Stdout = writePipe
+	runErr := runStore(context.Background(), args)
+	if closeErr := writePipe.Close(); closeErr != nil {
+		t.Fatalf("close stdout pipe: %v", closeErr)
+	}
+	os.Stdout = originalStdout
+	out, readErr := io.ReadAll(readPipe)
+	if readErr != nil {
+		t.Fatalf("read stdout pipe: %v", readErr)
+	}
+	if runErr != nil {
+		t.Fatalf("store %s failed: %v\n%s", strings.Join(args, " "), runErr, out)
+	}
+	return string(out)
+}
+
+func withPostgresSchemaStatus(t *testing.T, fn func(context.Context, postgres.Config) (postgres.SchemaStatusResult, error)) {
+	t.Helper()
+	original := postgresSchemaStatus
+	postgresSchemaStatus = fn
+	t.Cleanup(func() {
+		postgresSchemaStatus = original
+	})
 }
 
 func sqliteScalar(t *testing.T, dbPath string, statement string) string {
