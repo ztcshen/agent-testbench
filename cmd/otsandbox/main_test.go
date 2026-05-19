@@ -2898,8 +2898,8 @@ func TestProfileGenerationPlanOpenAPICommand(t *testing.T) {
 }
 
 func TestExecutorPlanCommandReportsProfileDescriptors(t *testing.T) {
-	storePath := filepath.Join(t.TempDir(), "executor-store.sqlite")
-	s, err := sqlite.Open(context.Background(), sqlite.Config{Path: storePath})
+	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-executor-plan-pg")
+	s, err := openStore(context.Background(), storeRef)
 	if err != nil {
 		t.Fatalf("open executor store: %v", err)
 	}
@@ -2916,7 +2916,7 @@ func TestExecutorPlanCommandReportsProfileDescriptors(t *testing.T) {
 		t.Fatalf("close executor store: %v", err)
 	}
 
-	out := runCLI(t, "executor", "plan", "--store", "sqlite://"+storePath, "--json")
+	out := runCLI(t, "executor", "plan", "--json")
 	var report struct {
 		OK        bool   `json:"ok"`
 		ProfileID string `json:"profileId"`
@@ -2962,7 +2962,7 @@ func TestExecutorPlanCommandReportsProfileDescriptors(t *testing.T) {
 		t.Fatalf("ready executor item = %#v", ready)
 	}
 
-	textOut := runCLI(t, "executor", "plan", "--store", "sqlite://"+storePath)
+	textOut := runCLI(t, "executor", "plan")
 	for _, want := range []string{"Executor Plan", "Profile: current", "Ready: 1", "Blocked: 1", "missing-source-path"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("executor plan text missing %q:\n%s", want, textOut)

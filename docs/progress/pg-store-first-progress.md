@@ -823,6 +823,32 @@ Incomplete work:
   deferred by user direction; they are still required before claiming final
   release readiness.
 
+## 2026-05-20 Named PostgreSQL Executor Plan Coverage
+
+Estimated PostgreSQL mainline progress: 99%.
+
+Completed evidence:
+
+- Migrated `executor plan` descriptor coverage from an explicit SQLite Store to
+  active named PostgreSQL Store coverage behind `OTSANDBOX_TEST_PG_DSN`.
+- The test now seeds executor descriptors directly into the named PostgreSQL
+  Store, then runs `executor plan --json` and text output without per-command
+  `--store`.
+- Light validation passed:
+  `go test ./cmd/otsandbox -run 'TestExecutorPlanCommandReportsProfileDescriptors$' -count=1`,
+  `tools/guardrails/check_store_first_contracts.sh`, `git diff --check`, and
+  `rg -n -i 'fall''back' . --glob '!node_modules/**'`.
+
+Incomplete work:
+
+- Remaining product-like SQLite tests are now concentrated in sandbox
+  start/register, case timing, workflow audit, template render, trace topology
+  collect, and selected direct case-run/report compatibility coverage.
+- The practical PG line is about 99% by test-surface migration, but final
+  release readiness still requires the later human-machine pass with a real
+  PostgreSQL DSN, real SkyWalking endpoint, real trace ids, and the 10-step UI
+  smoke proof.
+
 ## 2026-05-20 Named PostgreSQL Serve Evidence Import API Coverage
 
 Estimated PostgreSQL mainline progress: 98.8%.
