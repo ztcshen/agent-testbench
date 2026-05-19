@@ -695,3 +695,35 @@ Incomplete work:
   migration path, serve API profile import/verify through the running handler,
   CLI/API parity polish, release preparation, and live SkyWalking endpoint
   validation with real trace ids.
+
+## 2026-05-20 Named PostgreSQL Serve Profile API Coverage
+
+Estimated PostgreSQL mainline progress: 98.6%.
+
+Completed evidence:
+
+- Extended the env-gated named PostgreSQL serve coverage to include POST
+  `/api/profile/import` and POST `/api/profile/verify` through the actual
+  `serve` handler created from the active named Store.
+- The profile import API now has daily-path proof that the running control
+  plane writes profile index and read models into the active named PostgreSQL
+  Store, not a local SQLite runtime.
+- The profile verify API now has daily-path proof that the running control
+  plane verifies, publishes, activates, and persists the verified profile
+  catalog into the active named PostgreSQL Store.
+- The test reopens the PostgreSQL Store after the handler API calls and checks
+  the persisted profile index and catalog, so the API proof is Store-backed and
+  not only response-shape based.
+- Light validation passed:
+  `go test ./cmd/otsandbox -run 'Test(ServeAndEvidenceTasksUseNamedPostgreSQLActiveStore|ProfileImportAndVerifyUseNamedPostgreSQLActiveStore)$' -count=1`,
+  `tools/guardrails/check_store_first_contracts.sh`, `git diff --check`, and
+  `rg -n -i 'fall''back' . --glob '!node_modules/**'`.
+
+Incomplete work:
+
+- The serve profile API coverage is env-gated and skipped without
+  `OTSANDBOX_TEST_PG_DSN`; it does not replace the later human-machine
+  PostgreSQL validation pass.
+- Remaining PG-line gaps are now mostly `evidence import` as an explicit
+  migration path, CLI/API parity polish, release preparation, and live
+  SkyWalking endpoint validation with real trace ids.

@@ -6453,6 +6453,69 @@ func TestServeAndEvidenceTasksUseNamedPostgreSQLActiveStore(t *testing.T) {
 	if nodesPayload.Source.ID != "sample" || nodesPayload.Source.Kind != "store" || len(nodesPayload.Items) != 1 || nodesPayload.Items[0].ID != "node.alpha" {
 		t.Fatalf("PostgreSQL serve catalog payload = %#v", nodesPayload)
 	}
+
+	apiImportDir := writeEmptyProfileBundle(t)
+	importRec := httptest.NewRecorder()
+	handler.ServeHTTP(importRec, httptest.NewRequest(http.MethodPost, "/api/profile/import", strings.NewReader(`{"path":`+mustJSON(t, apiImportDir)+`}`)))
+	if importRec.Code != http.StatusOK {
+		t.Fatalf("profile import status = %d body=%s", importRec.Code, importRec.Body.String())
+	}
+	var importPayload struct {
+		ProfileID  string   `json:"profileId"`
+		BundlePath string   `json:"bundlePath"`
+		ReadModels []string `json:"readModels"`
+	}
+	if err := json.Unmarshal(importRec.Body.Bytes(), &importPayload); err != nil {
+		t.Fatalf("decode PostgreSQL serve profile import payload: %v\n%s", err, importRec.Body.String())
+	}
+	if importPayload.ProfileID != "empty" || importPayload.BundlePath != apiImportDir || strings.Join(importPayload.ReadModels, ",") != "interface-nodes,catalog,dashboard" {
+		t.Fatalf("PostgreSQL serve profile import payload = %#v", importPayload)
+	}
+
+	apiVerifyDir := writeInterfaceNodeCaseProfile(t)
+	verifyRec := httptest.NewRecorder()
+	handler.ServeHTTP(verifyRec, httptest.NewRequest(http.MethodPost, "/api/profile/verify", strings.NewReader(`{"path":`+mustJSON(t, apiVerifyDir)+`}`)))
+	if verifyRec.Code != http.StatusOK {
+		t.Fatalf("profile verify status = %d body=%s", verifyRec.Code, verifyRec.Body.String())
+	}
+	var verifyPayload struct {
+		OK        bool   `json:"ok"`
+		ProfileID string `json:"profileId"`
+		Publish   struct {
+			ProfileID  string   `json:"profileId"`
+			BundlePath string   `json:"bundlePath"`
+			ReadModels []string `json:"readModels"`
+		} `json:"publish"`
+		Summary struct {
+			FailedChecks int `json:"failedChecks"`
+		} `json:"summary"`
+	}
+	if err := json.Unmarshal(verifyRec.Body.Bytes(), &verifyPayload); err != nil {
+		t.Fatalf("decode PostgreSQL serve profile verify payload: %v\n%s", err, verifyRec.Body.String())
+	}
+	if !verifyPayload.OK || verifyPayload.ProfileID != "sample" || verifyPayload.Publish.ProfileID != "sample" || verifyPayload.Publish.BundlePath != apiVerifyDir || strings.Join(verifyPayload.Publish.ReadModels, ",") != "interface-nodes,catalog,dashboard" || verifyPayload.Summary.FailedChecks != 0 {
+		t.Fatalf("PostgreSQL serve profile verify payload = %#v", verifyPayload)
+	}
+
+	runtime, err = openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("reopen PostgreSQL serve profile Store: %v", err)
+	}
+	defer runtime.Close()
+	verifiedIndex, err := runtime.GetProfileIndex(ctx, "sample")
+	if err != nil {
+		t.Fatalf("get PostgreSQL serve profile index: %v", err)
+	}
+	if verifiedIndex.BundlePath != apiVerifyDir || !strings.HasPrefix(verifiedIndex.BundleDigest, "sha256:") {
+		t.Fatalf("PostgreSQL serve profile index = %#v", verifiedIndex)
+	}
+	verifiedCatalog, err := runtime.GetProfileCatalog(ctx)
+	if err != nil {
+		t.Fatalf("get PostgreSQL serve profile catalog: %v", err)
+	}
+	if verifiedCatalog.ProfileID != "sample" || len(verifiedCatalog.APICases) != 2 {
+		t.Fatalf("PostgreSQL serve profile catalog = %#v", verifiedCatalog)
+	}
 }
 
 func runCLI(t *testing.T, args ...string) string {
@@ -6463,6 +6526,15 @@ func runCLI(t *testing.T, args ...string) string {
 		t.Fatalf("go run . %s failed: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	return string(out)
+}
+
+func mustJSON(t *testing.T, value any) string {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal json: %v", err)
+	}
+	return string(raw)
 }
 
 func configureNamedPostgreSQLActiveStore(t *testing.T, name string) string {
