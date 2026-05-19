@@ -849,6 +849,30 @@ Incomplete work:
   PostgreSQL DSN, real SkyWalking endpoint, real trace ids, and the 10-step UI
   smoke proof.
 
+## 2026-05-20 Named PostgreSQL Case Timing Coverage
+
+Estimated PostgreSQL mainline progress: 99.1%.
+
+Completed evidence:
+
+- Migrated `case timing` summary coverage from an explicit SQLite Store to
+  active named PostgreSQL Store coverage behind `OTSANDBOX_TEST_PG_DSN`.
+- The test seeds uniquely named case run timing records into the named
+  PostgreSQL Store, then runs `case timing --kind case --json` without
+  per-command `--store`.
+- Light validation passed:
+  `go test ./cmd/otsandbox -run 'TestCaseTimingCommandSummarizesStoredCaseRuns$' -count=1`,
+  `tools/guardrails/check_store_first_contracts.sh`, `git diff --check`, and
+  `rg -n -i 'fall''back' . --glob '!node_modules/**'`.
+
+Incomplete work:
+
+- Remaining non-compatibility-looking SQLite daily-path candidates are smaller
+  pockets: sandbox start/register, workflow audit, template render, trace
+  topology collect, and selected direct case-run/report tests.
+- Final release readiness remains blocked on the later real PostgreSQL plus
+  real SkyWalking human-machine validation pass.
+
 ## 2026-05-20 Named PostgreSQL Serve Evidence Import API Coverage
 
 Estimated PostgreSQL mainline progress: 98.8%.

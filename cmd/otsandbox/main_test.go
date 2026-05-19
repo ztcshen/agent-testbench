@@ -1080,18 +1080,22 @@ func TestCaseEvidenceCommandReadsCaseRunEvidence(t *testing.T) {
 
 func TestCaseTimingCommandSummarizesStoredCaseRuns(t *testing.T) {
 	ctx := context.Background()
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-case-timing-pg")
+	s, err := openStore(ctx, storeRef)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
+	fastRunID := uniqueTestID(t, "run.fast")
+	slowRunID := uniqueTestID(t, "run.slow")
+	fastCaseID := uniqueTestID(t, "case.fast")
+	slowCaseID := uniqueTestID(t, "case.slow")
 	for _, item := range []struct {
 		runID    string
 		caseID   string
 		duration time.Duration
 	}{
-		{runID: "run.fast", caseID: "case.fast", duration: 200 * time.Millisecond},
-		{runID: "run.slow", caseID: "case.slow", duration: 1250 * time.Millisecond},
+		{runID: fastRunID, caseID: fastCaseID, duration: 200 * time.Millisecond},
+		{runID: slowRunID, caseID: slowCaseID, duration: 1250 * time.Millisecond},
 	} {
 		started := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
 		if _, err := s.CreateRun(ctx, store.Run{
@@ -1121,7 +1125,7 @@ func TestCaseTimingCommandSummarizesStoredCaseRuns(t *testing.T) {
 		t.Fatalf("close store: %v", err)
 	}
 
-	out := runCLI(t, "case", "timing", "--store", "sqlite://"+storePath, "--kind", "case", "--json")
+	out := runCLI(t, "case", "timing", "--kind", "case", "--json")
 
 	var payload struct {
 		OK      bool `json:"ok"`
@@ -1139,7 +1143,7 @@ func TestCaseTimingCommandSummarizesStoredCaseRuns(t *testing.T) {
 		t.Fatalf("case timing summary = %#v", payload.Summary)
 	}
 	slowest := payload.Summary.SlowestRows["caseRun"].(map[string]any)
-	if slowest["id"] != "run.slow.case" || slowest["caseId"] != "case.slow" || slowest["durationMs"] != float64(1250) {
+	if slowest["id"] != slowRunID+".case" || slowest["caseId"] != slowCaseID || slowest["durationMs"] != float64(1250) {
 		t.Fatalf("case timing slowest = %#v", slowest)
 	}
 }
