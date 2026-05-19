@@ -553,3 +553,37 @@ Incomplete work:
 - Remaining PG-line gaps are now concentrated around live SkyWalking endpoint
   validation, case execution and interface-node report coverage, Evidence
   import/list/tasks, profile import/verify, and serve/UI handler coverage.
+
+## 2026-05-19 Named PostgreSQL Case Execution Coverage
+
+Estimated PostgreSQL mainline progress: 98%.
+
+Completed evidence:
+
+- Added env-gated named PostgreSQL coverage for direct case execution and
+  interface-node case reporting behind `OTSANDBOX_TEST_PG_DSN`.
+- The new test configures an active named PostgreSQL Store and then runs daily
+  commands without per-command `--store` flags.
+- Covered commands now include file-based `case run`, `case runs`,
+  `case evidence`, `evidence list`, catalog-backed `case run --case-id`,
+  `interface-node discover`, and `interface-node case report`.
+- The coverage checks both file and Store-catalog case execution paths write
+  PostgreSQL-backed run and Evidence records, and that interface-node reporting
+  uses the active Store without creating `runtime.sqlite`.
+- The interface-node report path also keeps the existing report hygiene checks:
+  derived cases run, all cases pass, detail handles are present, and sensitive
+  response fields are redacted in previews.
+- Light validation passed:
+  `go test ./cmd/otsandbox -run 'Test(CaseExecutionAndInterfaceReportUseNamedPostgreSQLActiveStore|CaseSuiteCommandsUseNamedPostgreSQLActiveStore|EnvironmentCommandsUseNamedPostgreSQLActiveStore)$' -count=1`,
+  `tools/guardrails/check_store_first_contracts.sh`, `git diff --check`, and
+  `rg -n -i 'fall''back' . --glob '!node_modules/**'`.
+
+Incomplete work:
+
+- The new case execution coverage is env-gated and skipped without
+  `OTSANDBOX_TEST_PG_DSN`; it does not replace full release-check or the later
+  human-machine database validation pass.
+- Live SkyWalking endpoint validation with real trace ids remains open.
+- Remaining 98% to final-release gaps are now mostly Evidence import/tasks,
+  profile import/verify, serve/UI handler coverage, CLI/API parity, and release
+  preparation rather than core daily PG command shape.

@@ -3911,6 +3911,150 @@ func TestInterfaceNodeCaseReportRunsAllCasesByTargetName(t *testing.T) {
 	}
 }
 
+func TestCaseExecutionAndInterfaceReportUseNamedPostgreSQLActiveStore(t *testing.T) {
+	configureNamedPostgreSQLActiveStore(t, "daily-case-exec-pg")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/items":
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, `{"status":"created"}`)
+		case "/lookup":
+			switch r.URL.Query().Get("mode") {
+			case "bad":
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = fmt.Fprint(w, `{"status":"rejected","password":"variant-secret"}`)
+			default:
+				w.WriteHeader(http.StatusOK)
+				_, _ = fmt.Fprint(w, `{"status":"accepted","token":"report-secret"}`)
+			}
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	suffix := time.Now().UTC().Format("20060102150405.000000000")
+	dir := t.TempDir()
+	casePath := filepath.Join(dir, "case.json")
+	writeAPICaseFile(t, casePath)
+	fileRunID := "pg-file-case-run-" + suffix
+	fileEvidenceDir := filepath.Join(dir, "file-evidence")
+	fileOut := runCLI(t,
+		"case", "run",
+		"--case", casePath,
+		"--base-url", server.URL,
+		"--run-id", fileRunID,
+		"--evidence-dir", fileEvidenceDir,
+		"--profile", "sample",
+	)
+	if !strings.Contains(fileOut, "Case Run: "+fileRunID) || !strings.Contains(fileOut, "Status: passed") {
+		t.Fatalf("file case run via active PostgreSQL Store = %q", fileOut)
+	}
+	caseRunsOut := runCLI(t, "case", "runs", "--run", fileRunID, "--json")
+	if !strings.Contains(caseRunsOut, fileRunID) || !strings.Contains(caseRunsOut, "case.alpha") {
+		t.Fatalf("case runs via active PostgreSQL Store = %s", caseRunsOut)
+	}
+	fileEvidenceOut := runCLI(t, "case", "evidence", "--run", fileRunID, "--case-id", "case.alpha", "--json")
+	for _, want := range []string{fileRunID, "case.alpha", "request", "response"} {
+		if !strings.Contains(fileEvidenceOut, want) {
+			t.Fatalf("file case evidence via active PostgreSQL Store missing %q:\n%s", want, fileEvidenceOut)
+		}
+	}
+	evidenceListOut := runCLI(t, "evidence", "list", "--run", fileRunID, "--json")
+	if !strings.Contains(evidenceListOut, fileRunID) || !strings.Contains(evidenceListOut, "response") {
+		t.Fatalf("evidence list via active PostgreSQL Store = %s", evidenceListOut)
+	}
+
+	profileDir := writeInterfaceNodeBatchReportProfile(t)
+	runCLI(t, "config", "publish", "--from", profileDir)
+	catalogRunID := "pg-catalog-case-run-" + suffix
+	catalogOut := runCLI(t,
+		"case", "run",
+		"--case-id", "case.alpha.default",
+		"--base-url", server.URL,
+		"--run-id", catalogRunID,
+		"--evidence-dir", filepath.Join(dir, "catalog-evidence"),
+		"--profile", "sample",
+		"--json",
+	)
+	var catalogRun struct {
+		RunID  string `json:"runId"`
+		CaseID string `json:"caseId"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(catalogOut), &catalogRun); err != nil {
+		t.Fatalf("decode PostgreSQL catalog case run json: %v\n%s", err, catalogOut)
+	}
+	if catalogRun.RunID != catalogRunID || catalogRun.CaseID != "case.alpha.default" || catalogRun.Status != "passed" {
+		t.Fatalf("PostgreSQL catalog case run = %#v", catalogRun)
+	}
+	catalogEvidenceOut := runCLI(t, "case", "evidence", "--run", catalogRunID, "--case-id", "case.alpha.default", "--json")
+	for _, want := range []string{catalogRunID, "case.alpha.default", "request", "response"} {
+		if !strings.Contains(catalogEvidenceOut, want) {
+			t.Fatalf("catalog case evidence via active PostgreSQL Store missing %q:\n%s", want, catalogEvidenceOut)
+		}
+	}
+
+	listOut := runCLI(t, "interface-node", "discover", "--filter", "Result Lookup", "--json")
+	var listReport struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(listOut), &listReport); err != nil {
+		t.Fatalf("decode PostgreSQL interface-node discover json: %v\n%s", err, listOut)
+	}
+	if len(listReport.Items) != 1 || listReport.Items[0].ID != "node.alpha" {
+		t.Fatalf("PostgreSQL interface-node discover = %#v", listReport.Items)
+	}
+
+	outputDir := filepath.Join(t.TempDir(), "pg-interface-report")
+	reportOut := runCLI(t,
+		"interface-node", "case", "report",
+		"--node", listReport.Items[0].ID,
+		"--base-url", server.URL,
+		"--output-dir", outputDir,
+		"--timeout-seconds", "1",
+		"--json",
+	)
+	var report struct {
+		OK     bool   `json:"ok"`
+		NodeID string `json:"nodeId"`
+		Counts struct {
+			Total          int `json:"total"`
+			Passed         int `json:"passed"`
+			Failed         int `json:"failed"`
+			DerivedConfigs int `json:"derivedConfigs"`
+		} `json:"counts"`
+		Results []struct {
+			RunID       string `json:"runId"`
+			CaseRunID   string `json:"caseRunId"`
+			DetailURL   string `json:"detailUrl"`
+			BodyPreview string `json:"bodyPreview"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal([]byte(reportOut), &report); err != nil {
+		t.Fatalf("decode PostgreSQL interface-node report json: %v\n%s", err, reportOut)
+	}
+	if !report.OK || report.NodeID != "node.alpha" || report.Counts.Total != 2 || report.Counts.Passed != 2 || report.Counts.Failed != 0 || report.Counts.DerivedConfigs != 1 {
+		t.Fatalf("PostgreSQL interface-node report = %#v", report)
+	}
+	if len(report.Results) != 2 || report.Results[0].RunID == "" || report.Results[0].CaseRunID != report.Results[0].RunID+".case" || report.Results[0].DetailURL == "" {
+		t.Fatalf("PostgreSQL interface-node report handles = %#v", report.Results)
+	}
+	for _, item := range report.Results {
+		if strings.Contains(item.BodyPreview, "report-secret") || strings.Contains(item.BodyPreview, "variant-secret") {
+			t.Fatalf("PostgreSQL interface-node report body preview leaked sensitive value: %#v", item)
+		}
+		if !strings.Contains(item.BodyPreview, "[REDACTED]") {
+			t.Fatalf("PostgreSQL interface-node report body preview was not redacted: %#v", item)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(outputDir, "runtime.sqlite")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("PostgreSQL interface-node report should use active Store without creating runtime.sqlite, stat err=%v", err)
+	}
+}
+
 func TestDailyReportExecutionsUseSelectedStoreWithoutSQLiteDefault(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
