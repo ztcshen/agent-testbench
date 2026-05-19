@@ -68,6 +68,42 @@ func TestTopologyEvidenceViewForCaseIgnoresRowsWithoutSkyWalkingProvider(t *test
 	}
 }
 
+func TestTopologyEvidenceViewForCaseIgnoresSavedSummaryWithoutSkyWalkingProvider(t *testing.T) {
+	view := topologyEvidenceViewForCase(topologyEvidenceViewInput{
+		RunID:  "run.alpha",
+		CaseID: "case.alpha",
+		SavedSummary: map[string]any{
+			"topology": map[string]any{
+				"status":         "complete",
+				"confirmedEdges": []any{map[string]any{"source": "service.entry", "target": "service.worker"}},
+			},
+		},
+	})
+
+	if view["status"] != "unavailable" {
+		t.Fatalf("saved summary without SkyWalking provider should not be trusted: %#v", view)
+	}
+}
+
+func TestTopologyEvidenceViewForCaseAcceptsSavedSkyWalkingSummary(t *testing.T) {
+	view := topologyEvidenceViewForCase(topologyEvidenceViewInput{
+		RunID:  "run.alpha",
+		CaseID: "case.alpha",
+		SavedSummary: map[string]any{
+			"traceTopology": map[string]any{
+				"provider":       "skywalking",
+				"status":         "complete",
+				"traceId":        "trace.alpha",
+				"confirmedEdges": []any{map[string]any{"source": "service.entry", "target": "service.worker"}},
+			},
+		},
+	})
+
+	if view["status"] != "complete" || view["traceId"] != "trace.alpha" {
+		t.Fatalf("saved SkyWalking summary should be trusted: %#v", view)
+	}
+}
+
 func TestWorkflowRunTraceTopologiesExposeOnlySkyWalkingRows(t *testing.T) {
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: t.TempDir() + "/sandbox.sqlite"})

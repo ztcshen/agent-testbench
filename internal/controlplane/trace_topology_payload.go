@@ -38,13 +38,28 @@ func topologyEvidenceViewForCase(input topologyEvidenceViewInput) map[string]any
 	if topology := storedTraceTopologyEvidence(input.CaseID, input.Rows); len(topology) > 0 {
 		return topology
 	}
-	if topology := mapFromAny(input.SavedSummary["traceTopology"]); len(topology) > 0 {
+	if topology := skyWalkingTopologyEvidenceMap(input.SavedSummary["traceTopology"]); len(topology) > 0 {
 		return topology
 	}
-	if topology := mapFromAny(input.SavedSummary["topology"]); len(topology) > 0 {
+	if topology := skyWalkingTopologyEvidenceMap(input.SavedSummary["topology"]); len(topology) > 0 {
 		return topology
 	}
 	return unavailableTraceTopologyEvidence(input.RunID, input.CaseID)
+}
+
+func skyWalkingTopologyEvidenceMap(value any) map[string]any {
+	topology := mapFromAny(value)
+	if len(topology) == 0 {
+		return map[string]any{}
+	}
+	provider := strings.ToLower(strings.TrimSpace(valueString(topology["provider"])))
+	if provider == "" {
+		provider = strings.ToLower(strings.TrimSpace(valueString(topology["source"])))
+	}
+	if provider != "skywalking" {
+		return map[string]any{}
+	}
+	return topology
 }
 
 func storedTraceTopologyEvidence(caseID string, rows []store.TraceTopology) map[string]any {

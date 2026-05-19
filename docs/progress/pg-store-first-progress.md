@@ -310,6 +310,10 @@ Completed evidence:
   including bare local paths. PostgreSQL DSNs can still be resolved, while
   SQLite target Stores remain available only through compatibility/migration
   paths such as `evidence import`.
+- Evidence topology views now trust saved topology summaries only when they
+  explicitly identify SkyWalking as provider/source; otherwise they return the
+  unavailable SkyWalking view instead of exposing workflow order or legacy
+  summaries as real topology.
 - Explicit `--store sqlite://...` compatibility coverage remains green for
   discovery reads, and offline template package review remains available only
   through `--offline-template-package`.
@@ -334,7 +338,8 @@ Incomplete work:
 - Daily-path test data still needs migration from explicit SQLite stores to
   named PostgreSQL Stores.
 - The core 10-step smoke, per-interface Evidence completeness, and real
-  SkyWalking topology proof still need final human-machine validation.
+  SkyWalking topology proof still need final human-machine validation against a
+  real SkyWalking endpoint.
 - Latest HEAD is not release-ready. The latest full release-check attempt
   reached the `cmd/otsandbox` package but hit Go's default 10 minute package
   timeout while the suite was still progressing; full validation is deferred by
