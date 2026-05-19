@@ -385,11 +385,14 @@ async function checkWorkflowDetailRunButton(browser, baseURL) {
     if (passedSteps !== coreSmokeSteps.length) {
       throw new Error(`/workflow-detail.html expected ${coreSmokeSteps.length} passed workflow steps, got ${passedSteps}`);
     }
-    const runLink = await page.locator('a[href^="/workflow-run.html?id="]').count();
-    if (runLink === 0) {
-      throw new Error("/workflow-detail.html did not expose the persisted workflow run link");
+    const persistedRunLink = page.locator('a[href^="/workflow-run.html?id="]').first();
+    try {
+      await persistedRunLink.waitFor({ timeout: 10000 });
+    } catch (error) {
+      const text = await page.locator(".workflow-run-template").innerText().catch(() => "");
+      throw new Error(`/workflow-detail.html did not expose the persisted workflow run link:\n${text}\n${error.message}`);
     }
-    const href = await page.locator('a[href^="/workflow-run.html?id="]').first().getAttribute("href");
+    const href = await persistedRunLink.getAttribute("href");
     if (errors.length > 0) {
       throw new Error(`/workflow-detail.html run button browser errors:\n${errors.join("\n")}`);
     }

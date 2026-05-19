@@ -57,6 +57,9 @@ step "running smoke harness tests"
 node --test tools/smoke/*.test.mjs
 
 if [[ -n "${OTSANDBOX_SMOKE_STORE_DSN:-${OTSANDBOX_SMOKE_STORE:-}}" ]]; then
+  step "running PostgreSQL active Store CLI smoke tests"
+  npm run smoke:cli:pg-active
+
   step "running PostgreSQL-only browser smoke tests"
   npm run smoke:frontend:pg-only
 else
