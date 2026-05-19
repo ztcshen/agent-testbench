@@ -1332,3 +1332,23 @@ Incomplete work:
   moving to named PostgreSQL coverage or explicit compatibility labeling. Final
   completion still requires the external PostgreSQL release gate plus live
   SkyWalking 10-step proof run.
+
+## 2026-05-20 Named PostgreSQL Case Discovery Test Migration
+
+Estimated PostgreSQL mainline progress: 99.997%.
+
+Completed evidence:
+
+- Migrated the `case discover` maintenance metadata filter test from explicit
+  SQLite Store flags to active named PostgreSQL Store coverage.
+- The test now publishes catalog data into the active named PostgreSQL Store and
+  invokes the daily discovery command without per-command Store flags for both
+  metadata and text filter assertions.
+- Explicit `--store sqlite://...` discovery coverage remains in the dedicated
+  compatibility-selector test rather than being counted as daily path proof.
+
+Incomplete work:
+
+- Remaining completion evidence is the full external PostgreSQL release gate
+  and live SkyWalking 10-step proof run. Some legacy SQLite compatibility tests
+  remain by design.

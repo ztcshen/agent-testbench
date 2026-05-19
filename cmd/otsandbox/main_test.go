@@ -4703,12 +4703,11 @@ func TestAuditCommandsRequireExplicitStoreOrOfflineReviewBeforeProfileLoad(t *te
 
 func TestCaseDiscoverFiltersByMaintenanceMetadata(t *testing.T) {
 	profileDir := writeInterfaceNodeBatchReportProfile(t)
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
+	configureNamedPostgreSQLActiveStore(t, "daily-case-discover-pg")
+	runCLI(t, "config", "publish", "--from", profileDir)
 
 	out := runCLI(t,
 		"case", "discover",
-		"--store", "sqlite://"+storePath,
 		"--tag", "smoke",
 		"--status", "active",
 		"--owner", "team-a",
@@ -4742,7 +4741,7 @@ func TestCaseDiscoverFiltersByMaintenanceMetadata(t *testing.T) {
 		t.Fatalf("case discover metadata = %#v", item)
 	}
 
-	filtered := runCLI(t, "case", "discover", "--store", "sqlite://"+storePath, "--filter", "variant", "--json")
+	filtered := runCLI(t, "case", "discover", "--filter", "variant", "--json")
 	var filteredReport struct {
 		Items []struct {
 			ID    string   `json:"id"`
