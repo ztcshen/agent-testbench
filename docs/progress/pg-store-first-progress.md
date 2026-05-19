@@ -957,3 +957,25 @@ Incomplete work:
 - The remaining proof is still external execution: run release-check with a
   PostgreSQL DSN plus `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`,
   `OTS_TRACE_GRAPHQL_URL`, and real `OTS_SMOKE_TRACE_IDS`.
+
+## 2026-05-20 Live SkyWalking Release-Check Test Coverage
+
+Estimated PostgreSQL mainline progress: 99.6%.
+
+Completed evidence:
+
+- Added `tools/smoke/release-check.test.mjs`, which is included by the existing
+  release-check smoke harness test glob.
+- The new lightweight tests verify that
+  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1` fails before expensive gates when
+  `OTS_TRACE_GRAPHQL_URL` is missing.
+- The tests also verify that the same mode fails before expensive gates when
+  `OTS_SMOKE_TRACE_IDS` is missing, even if a SkyWalking GraphQL URL is set.
+- This makes the live SkyWalking release sign-off contract executable instead
+  of only documented and guardrailed.
+
+Incomplete work:
+
+- The final external proof remains a real run with PostgreSQL DSN,
+  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, a real `OTS_TRACE_GRAPHQL_URL`, and
+  real 10-step `OTS_SMOKE_TRACE_IDS`.
