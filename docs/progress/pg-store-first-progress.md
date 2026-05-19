@@ -793,6 +793,36 @@ Incomplete work:
 - Final confidence still depends on CLI/API parity polish, release preparation,
   and live SkyWalking endpoint validation with real trace ids.
 
+## 2026-05-20 Named PostgreSQL Case Suite Quality Coverage
+
+Estimated PostgreSQL mainline progress: 98.9%.
+
+Completed evidence:
+
+- Migrated the remaining case-suite quality planning tests from explicit
+  SQLite Stores to active named PostgreSQL Store coverage behind
+  `OTSANDBOX_TEST_PG_DSN`.
+- The migrated no-flag daily commands now include `case suite quality`,
+  `case suite quality-plan`, and `case suite quality-report`.
+- Also migrated the older detailed `case suite report` filter/report test to
+  active named PostgreSQL Store usage, so the detailed HTML/JUnit report
+  assertions no longer depend on a SQLite daily path.
+- Light validation passed:
+  `go test ./cmd/otsandbox -run 'TestCaseSuiteQuality(AuditsMaintainedCaseMetadata|PlanSuggestsAuthoringActions|ReportWritesJSONAndHTML)$' -count=1`,
+  `go test ./cmd/otsandbox -run 'TestCaseSuiteReportRunsCasesByMaintenanceFilters$' -count=1`,
+  `tools/guardrails/check_store_first_contracts.sh`, `git diff --check`, and
+  `rg -n -i 'fall''back' . --glob '!node_modules/**'`.
+
+Incomplete work:
+
+- Remaining explicit SQLite tests are now more heavily concentrated in Store
+  management, template/package/profile compatibility, Evidence import/runtime
+  migration, serve handler compatibility, and selected direct case execution
+  compatibility paths.
+- Full release-check and real SkyWalking validation remain intentionally
+  deferred by user direction; they are still required before claiming final
+  release readiness.
+
 ## 2026-05-20 Named PostgreSQL Serve Evidence Import API Coverage
 
 Estimated PostgreSQL mainline progress: 98.8%.

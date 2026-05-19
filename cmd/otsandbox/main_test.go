@@ -5051,6 +5051,7 @@ func TestWorkflowDiscoverRequiresStoreUnlessOfflineTemplatePackage(t *testing.T)
 }
 
 func TestCaseSuiteReportRunsCasesByMaintenanceFilters(t *testing.T) {
+	configureNamedPostgreSQLActiveStore(t, "daily-case-suite-report-pg")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Query().Get("mode") {
 		case "bad":
@@ -5063,13 +5064,11 @@ func TestCaseSuiteReportRunsCasesByMaintenanceFilters(t *testing.T) {
 	}))
 	defer server.Close()
 	profileDir := writeInterfaceNodeBatchReportProfile(t)
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
+	runCLI(t, "config", "publish", "--from", profileDir)
 
 	outputDir := filepath.Join(t.TempDir(), "suite-report")
 	out := runCLI(t,
 		"case", "suite", "report",
-		"--store", "sqlite://"+storePath,
 		"--tag", "smoke",
 		"--owner", "team-a",
 		"--base-url", server.URL,
@@ -5148,7 +5147,6 @@ func TestCaseSuiteReportRunsCasesByMaintenanceFilters(t *testing.T) {
 
 	variantOut := runCLI(t,
 		"case", "suite", "report",
-		"--store", "sqlite://"+storePath,
 		"--tag", "negative",
 		"--base-url", server.URL,
 		"--output-dir", filepath.Join(t.TempDir(), "variant-suite-report"),
