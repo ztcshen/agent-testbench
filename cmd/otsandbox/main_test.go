@@ -40,17 +40,17 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 func TestStoreUpgradeAndStatusCommands(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
 
-	initial := runCLI(t, "store", "status", "--store-url", dbPath)
+	initial := runCLI(t, "store", "status", "--store", "sqlite://"+dbPath)
 	if !strings.Contains(initial, "Version: 0") || !strings.Contains(initial, fmt.Sprintf("Pending: %d", schema.CurrentVersion)) {
 		t.Fatalf("initial status output = %q", initial)
 	}
 
-	upgraded := runCLI(t, "store", "upgrade", "--store-url", dbPath)
+	upgraded := runCLI(t, "store", "upgrade", "--store", "sqlite://"+dbPath)
 	if !strings.Contains(upgraded, fmt.Sprintf("Upgraded store schema to version %d", schema.CurrentVersion)) {
 		t.Fatalf("upgrade output = %q", upgraded)
 	}
 
-	current := runCLI(t, "store", "status", "--store-url", dbPath)
+	current := runCLI(t, "store", "status", "--store", "sqlite://"+dbPath)
 	if !strings.Contains(current, fmt.Sprintf("Version: %d", schema.CurrentVersion)) || !strings.Contains(current, "Pending: 0") {
 		t.Fatalf("current status output = %q", current)
 	}
@@ -697,7 +697,7 @@ func TestCaseRunsCommandListsStoredCaseRuns(t *testing.T) {
 		t.Fatalf("close store: %v", err)
 	}
 
-	out := runCLI(t, "case", "runs", "--store-url", storePath, "--json")
+	out := runCLI(t, "case", "runs", "--store", "sqlite://"+storePath, "--json")
 
 	var report struct {
 		OK       bool `json:"ok"`
@@ -765,7 +765,7 @@ func TestCaseEvidenceCommandReadsCaseRunEvidence(t *testing.T) {
 		t.Fatalf("close store: %v", err)
 	}
 
-	out := runCLI(t, "case", "evidence", "--store-url", storePath, "--case-run", "case-run-001", "--json")
+	out := runCLI(t, "case", "evidence", "--store", "sqlite://"+storePath, "--case-run", "case-run-001", "--json")
 
 	var payload struct {
 		OK       bool `json:"ok"`
@@ -829,7 +829,7 @@ func TestCaseTimingCommandSummarizesStoredCaseRuns(t *testing.T) {
 		t.Fatalf("close store: %v", err)
 	}
 
-	out := runCLI(t, "case", "timing", "--store-url", storePath, "--kind", "case", "--json")
+	out := runCLI(t, "case", "timing", "--store", "sqlite://"+storePath, "--kind", "case", "--json")
 
 	var payload struct {
 		OK      bool `json:"ok"`
@@ -1011,7 +1011,7 @@ func TestProfileInstallCommandCopiesBundleIntoProfileHome(t *testing.T) {
 	}
 
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
-	verify := runCLI(t, "profile", "verify", "--profile", "sample", "--profile-home", profileHome, "--store-url", dbPath)
+	verify := runCLI(t, "profile", "verify", "--profile", "sample", "--profile-home", profileHome, "--store", "sqlite://"+dbPath)
 	if !strings.Contains(verify, "Profile Verification: sample") || !strings.Contains(verify, "OK: true") {
 		t.Fatalf("verify installed profile = %q", verify)
 	}
@@ -1105,7 +1105,7 @@ func TestProfileInstallCommandAcceptsPackedArchive(t *testing.T) {
 		t.Fatalf("installed archive manifest missing: %v", err)
 	}
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
-	verify := runCLI(t, "profile", "verify", "--profile", "sample", "--profile-home", profileHome, "--store-url", dbPath)
+	verify := runCLI(t, "profile", "verify", "--profile", "sample", "--profile-home", profileHome, "--store", "sqlite://"+dbPath)
 	if !strings.Contains(verify, "Profile Verification: sample") || !strings.Contains(verify, "OK: true") {
 		t.Fatalf("verify installed archive profile = %q", verify)
 	}
@@ -1595,7 +1595,7 @@ func TestConfigPublishCommandMaterializesInterfaceNodeDetailReadModels(t *testin
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
 	profileDir := writeInterfaceNodeCaseProfile(t)
 
-	out := runCLI(t, "config", "publish", "--from", profileDir, "--store-url", dbPath, "--json")
+	out := runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+dbPath, "--json")
 
 	var report struct {
 		ConfigVersion struct {
@@ -1617,7 +1617,7 @@ func TestConfigPublishCommandMaterializesInterfaceNodeCoverageReadModels(t *test
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
 	profileDir := writeInterfaceNodeCoverageProfile(t)
 
-	out := runCLI(t, "config", "publish", "--from", profileDir, "--store-url", dbPath, "--json")
+	out := runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+dbPath, "--json")
 
 	var report struct {
 		ConfigVersion struct {
@@ -1638,7 +1638,7 @@ func TestConfigPublishCommandMaterializesInterfaceNodeCoverageReadModels(t *test
 func TestInterfaceNodeCoverageCommandCanEmitJSON(t *testing.T) {
 	profileDir := writeInterfaceNodeCoverageProfile(t)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
 
 	out := runCLI(t, "interface-node", "coverage", "--store", "sqlite://"+storePath, "--workflow", "workflow.alpha", "--json")
 
@@ -1681,7 +1681,7 @@ func TestInterfaceNodeCoverageGapsCommandCanEmitJSON(t *testing.T) {
   "fixtures": []
 }`)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", dir, "--store-url", storePath)
+	runCLI(t, "config", "publish", "--from", dir, "--store", "sqlite://"+storePath)
 
 	out := runCLI(t, "interface-node", "coverage-gaps", "--store", "sqlite://"+storePath, "--workflow", "workflow.alpha", "--json")
 
@@ -2096,10 +2096,10 @@ func TestProfileAuditCommandEmitsJSONWithStoreState(t *testing.T) {
 }`, alphaPath, betaPath))
 
 	storePath := filepath.Join(dir, "store.sqlite")
-	runCLI(t, "profile", "import", "--from", profileDir, "--store-url", storePath)
-	runCLI(t, "case", "run", "--case", alphaPath, "--base-url", server.URL, "--run-id", "run-alpha", "--store-url", storePath, "--profile", "sample")
+	runCLI(t, "profile", "import", "--from", profileDir, "--store", "sqlite://"+storePath)
+	runCLI(t, "case", "run", "--case", alphaPath, "--base-url", server.URL, "--run-id", "run-alpha", "--store", "sqlite://"+storePath, "--profile", "sample")
 
-	out := runCLI(t, "profile", "audit", "--profile", profileDir, "--offline-template-package", "--store-url", storePath, "--json")
+	out := runCLI(t, "profile", "audit", "--profile", profileDir, "--offline-template-package", "--store", "sqlite://"+storePath, "--json")
 
 	var report struct {
 		OK         bool `json:"ok"`
@@ -2611,7 +2611,7 @@ func TestWorkflowPlanCommandPrintsBoundSteps(t *testing.T) {
 	dir := t.TempDir()
 	writeWorkflowProfile(t, dir)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", dir, "--store-url", storePath)
+	runCLI(t, "config", "publish", "--from", dir, "--store", "sqlite://"+storePath)
 
 	out := runCLI(t, "workflow", "plan", "--store", "sqlite://"+storePath, "--workflow", "workflow.alpha")
 
@@ -2632,7 +2632,7 @@ func TestWorkflowPlanCommandCanEmitJSONFromStore(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
 	profileDir := t.TempDir()
 	writeWorkflowProfile(t, profileDir)
-	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", dbPath)
+	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+dbPath)
 
 	out := runCLI(t, "workflow", "plan", "--store", "sqlite://"+dbPath, "--workflow", "workflow.alpha", "--json")
 
@@ -2665,7 +2665,7 @@ func TestWorkflowPlanCommandRejectsMissingWorkflow(t *testing.T) {
 	dir := t.TempDir()
 	writeWorkflowProfile(t, dir)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", dir, "--store-url", storePath)
+	runCLI(t, "config", "publish", "--from", dir, "--store", "sqlite://"+storePath)
 
 	out := runCLIFails(t, "workflow", "plan", "--store", "sqlite://"+storePath, "--workflow", "workflow.missing")
 	if !strings.Contains(out, "workflow not found") || !strings.Contains(out, "workflow.missing") {
@@ -2701,7 +2701,7 @@ func TestWorkflowRunCommandsReadStoredRuns(t *testing.T) {
 		t.Fatalf("close store: %v", err)
 	}
 
-	listOut := runCLI(t, "workflow", "runs", "--store-url", storePath, "--json")
+	listOut := runCLI(t, "workflow", "runs", "--store", "sqlite://"+storePath, "--json")
 	var list struct {
 		OK           bool `json:"ok"`
 		WorkflowRuns []struct {
@@ -2718,7 +2718,7 @@ func TestWorkflowRunCommandsReadStoredRuns(t *testing.T) {
 		t.Fatalf("workflow runs = %#v", list)
 	}
 
-	detailOut := runCLI(t, "workflow", "run", "--store-url", storePath, "--run", "run.workflow.001", "--json")
+	detailOut := runCLI(t, "workflow", "run", "--store", "sqlite://"+storePath, "--run", "run.workflow.001", "--json")
 	var detail struct {
 		OK      bool           `json:"ok"`
 		Run     map[string]any `json:"run"`
@@ -2733,7 +2733,7 @@ func TestWorkflowRunCommandsReadStoredRuns(t *testing.T) {
 		t.Fatalf("workflow run detail = %#v", detail)
 	}
 
-	stepOut := runCLI(t, "workflow", "step", "--store-url", storePath, "--run", "run.workflow.001", "--step", "step.one", "--json")
+	stepOut := runCLI(t, "workflow", "step", "--store", "sqlite://"+storePath, "--run", "run.workflow.001", "--step", "step.one", "--json")
 	var stepDetail struct {
 		OK      bool           `json:"ok"`
 		Run     map[string]any `json:"run"`
@@ -2748,7 +2748,7 @@ func TestWorkflowRunCommandsReadStoredRuns(t *testing.T) {
 		t.Fatalf("workflow step detail = %#v", stepDetail)
 	}
 
-	latestOut := runCLI(t, "workflow", "latest-step", "--store-url", storePath, "--workflow", "workflow.alpha", "--step", "step.one", "--json")
+	latestOut := runCLI(t, "workflow", "latest-step", "--store", "sqlite://"+storePath, "--workflow", "workflow.alpha", "--step", "step.one", "--json")
 	var latestDetail struct {
 		OK      bool           `json:"ok"`
 		Run     map[string]any `json:"run"`
@@ -2960,7 +2960,7 @@ func TestWorkflowAuditCommandEmitsJSONWithScopedStoreState(t *testing.T) {
   "fixtures": []
 }`)
 	storePath := filepath.Join(dir, "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -3079,7 +3079,7 @@ func TestWorkflowAuditCommandPrintsTextSummary(t *testing.T) {
 	dir := t.TempDir()
 	writeWorkflowProfile(t, dir)
 	storePath := filepath.Join(t.TempDir(), "workflow-audit.sqlite")
-	runCLI(t, "config", "publish", "--from", dir, "--store-url", storePath)
+	runCLI(t, "config", "publish", "--from", dir, "--store", "sqlite://"+storePath)
 
 	out := runCLI(t, "workflow", "audit", "--store", "sqlite://"+storePath, "--workflow", "workflow.alpha")
 
@@ -3118,7 +3118,7 @@ func TestTemplateRenderCommandPrintsRequestPreview(t *testing.T) {
 	dir := t.TempDir()
 	writeTemplateProfile(t, dir)
 	storePath := filepath.Join(t.TempDir(), "template-store.sqlite")
-	runCLI(t, "config", "publish", "--from", dir, "--store-url", storePath)
+	runCLI(t, "config", "publish", "--from", dir, "--store", "sqlite://"+storePath)
 
 	out := runCLI(t, "template", "render", "--store", "sqlite://"+storePath, "--template", "template.create", "--fixture", "fixture.item")
 
@@ -3191,7 +3191,7 @@ func TestEvidenceImportCommandIndexesLegacyRuntime(t *testing.T) {
 	createLegacyRuntimeDB(t, sourcePath)
 	storePath := filepath.Join(dir, "store.sqlite")
 
-	out := runCLI(t, "evidence", "import", "--from", sourcePath, "--profile", "sample", "--store-url", storePath)
+	out := runCLI(t, "evidence", "import", "--from", sourcePath, "--profile", "sample", "--store", "sqlite://"+storePath)
 	if !strings.Contains(out, "Imported evidence index") || !strings.Contains(out, "Runs: 2") || !strings.Contains(out, "API Case Runs: 1") {
 		t.Fatalf("evidence import output = %q", out)
 	}
@@ -3227,7 +3227,7 @@ func TestEvidenceImportCommandCanEmitJSONReport(t *testing.T) {
 func TestEvidenceListCommandPrintsStoreRecords(t *testing.T) {
 	storePath := createStoredCaseRun(t, "case-run-004")
 
-	out := runCLI(t, "evidence", "list", "--store-url", storePath)
+	out := runCLI(t, "evidence", "list", "--store", "sqlite://"+storePath)
 
 	for _, want := range []string{"Run: case-run-004", "Case Run: case-run-004.case", "Case: case.alpha", "Evidence: response"} {
 		if !strings.Contains(out, want) {
@@ -3239,7 +3239,7 @@ func TestEvidenceListCommandPrintsStoreRecords(t *testing.T) {
 func TestEvidenceListCommandCanEmitJSON(t *testing.T) {
 	storePath := createStoredCaseRun(t, "case-run-005")
 
-	out := runCLI(t, "evidence", "list", "--store-url", storePath, "--json")
+	out := runCLI(t, "evidence", "list", "--store", "sqlite://"+storePath, "--json")
 
 	var report struct {
 		Runs []struct {
@@ -3262,7 +3262,7 @@ func TestEvidenceListCommandCanEmitJSON(t *testing.T) {
 func TestEvidenceListCommandRejectsMissingRun(t *testing.T) {
 	storePath := createStoredCaseRun(t, "case-run-006")
 
-	out := runCLIFails(t, "evidence", "list", "--store-url", storePath, "--run", "case-run-missing")
+	out := runCLIFails(t, "evidence", "list", "--store", "sqlite://"+storePath, "--run", "case-run-missing")
 	if !strings.Contains(out, "run not found") || !strings.Contains(out, "case-run-missing") {
 		t.Fatalf("missing run output = %q", out)
 	}
@@ -3351,13 +3351,13 @@ func TestEvidenceTasksCommandListsPostProcessTasks(t *testing.T) {
 		t.Fatalf("evidence task readable status = %#v", report.Tasks[0])
 	}
 
-	textOut := runCLI(t, "evidence", "tasks", "--store-url", storePath, "--run", "run.tasks", "--status", "failed")
+	textOut := runCLI(t, "evidence", "tasks", "--store", "sqlite://"+storePath, "--run", "run.tasks", "--status", "failed")
 	for _, want := range []string{"Post Process Tasks: run.tasks", "task.logs", "runtime_log_collect", "300 ms", "log source missing"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("evidence tasks text missing %q:\n%s", want, textOut)
 		}
 	}
-	skippedOut := runCLI(t, "evidence", "tasks", "--store-url", storePath, "--run", "run.tasks", "--status", "skipped")
+	skippedOut := runCLI(t, "evidence", "tasks", "--store", "sqlite://"+storePath, "--run", "run.tasks", "--status", "skipped")
 	for _, want := range []string{"task.trace.skip", "skipped: SkyWalking provider unavailable"} {
 		if !strings.Contains(skippedOut, want) {
 			t.Fatalf("evidence skipped task text missing %q:\n%s", want, skippedOut)
@@ -3493,7 +3493,7 @@ func TestCaseRunCommandIndexesStoreRecords(t *testing.T) {
 	storePath := filepath.Join(dir, "store.sqlite")
 	evidenceDir := filepath.Join(dir, "evidence")
 
-	runCLI(t, "case", "run", "--case", casePath, "--base-url", server.URL, "--run-id", "case-run-003", "--evidence-dir", evidenceDir, "--store-url", storePath, "--profile", "sample")
+	runCLI(t, "case", "run", "--case", casePath, "--base-url", server.URL, "--run-id", "case-run-003", "--evidence-dir", evidenceDir, "--store", "sqlite://"+storePath, "--profile", "sample")
 
 	s, err := sqlite.Open(context.Background(), sqlite.Config{Path: storePath})
 	if err != nil {
@@ -3703,8 +3703,8 @@ func TestInterfaceNodeCaseReportRunsAllCasesByTargetName(t *testing.T) {
 	defer server.Close()
 	profileDir := writeInterfaceNodeBatchReportProfile(t)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
-	listOut := runCLI(t, "interface-node", "discover", "--store-url", storePath, "--filter", "Result Lookup", "--json")
+	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
+	listOut := runCLI(t, "interface-node", "discover", "--store", "sqlite://"+storePath, "--filter", "Result Lookup", "--json")
 	var listReport struct {
 		Items []struct {
 			ID          string `json:"id"`
@@ -3722,7 +3722,7 @@ func TestInterfaceNodeCaseReportRunsAllCasesByTargetName(t *testing.T) {
 	out := runCLI(t,
 		"interface-node", "case", "report",
 		"--node", listReport.Items[0].ID,
-		"--store-url", storePath,
+		"--store", "sqlite://"+storePath,
 		"--base-url", server.URL,
 		"--output-dir", outputDir,
 		"--timeout-seconds", "1",
@@ -4070,11 +4070,11 @@ func TestAuditCommandsRequireExplicitStoreOrOfflineReviewBeforeProfileLoad(t *te
 func TestCaseDiscoverFiltersByMaintenanceMetadata(t *testing.T) {
 	profileDir := writeInterfaceNodeBatchReportProfile(t)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
 
 	out := runCLI(t,
 		"case", "discover",
-		"--store-url", storePath,
+		"--store", "sqlite://"+storePath,
 		"--tag", "smoke",
 		"--status", "active",
 		"--owner", "team-a",
@@ -4108,7 +4108,7 @@ func TestCaseDiscoverFiltersByMaintenanceMetadata(t *testing.T) {
 		t.Fatalf("case discover metadata = %#v", item)
 	}
 
-	filtered := runCLI(t, "case", "discover", "--store-url", storePath, "--filter", "variant", "--json")
+	filtered := runCLI(t, "case", "discover", "--store", "sqlite://"+storePath, "--filter", "variant", "--json")
 	var filteredReport struct {
 		Items []struct {
 			ID    string   `json:"id"`
@@ -4150,7 +4150,7 @@ func TestCaseDiscoverRequiresStoreUnlessOfflineTemplatePackage(t *testing.T) {
 func TestDiscoverCommandsAcceptStoreFlagAsLocationAgnosticStoreSelector(t *testing.T) {
 	profileDir := writeInterfaceNodeBatchReportProfile(t)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
 	storeRef := "sqlite://" + storePath
 
 	caseOut := runCLI(t, "case", "discover", "--store", storeRef, "--filter", "variant", "--json")
@@ -4181,7 +4181,7 @@ func TestDiscoverCommandsAcceptStoreFlagAsLocationAgnosticStoreSelector(t *testi
 
 	workflowProfileDir := writeWorkflowBatchReportProfile(t)
 	workflowStorePath := filepath.Join(t.TempDir(), "workflow-store.sqlite")
-	runCLI(t, "config", "publish", "--from", workflowProfileDir, "--store-url", workflowStorePath)
+	runCLI(t, "config", "publish", "--from", workflowProfileDir, "--store", "sqlite://"+workflowStorePath)
 	workflowOut := runCLI(t, "workflow", "discover", "--store", "sqlite://"+workflowStorePath, "--filter", "Workflow Alpha", "--json")
 	var workflowReport struct {
 		Items []struct {
@@ -4289,7 +4289,7 @@ func TestCaseSuiteReportRunsCasesByMaintenanceFilters(t *testing.T) {
 	defer server.Close()
 	profileDir := writeInterfaceNodeBatchReportProfile(t)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
 
 	outputDir := filepath.Join(t.TempDir(), "suite-report")
 	out := runCLI(t,
@@ -4373,7 +4373,7 @@ func TestCaseSuiteReportRunsCasesByMaintenanceFilters(t *testing.T) {
 
 	variantOut := runCLI(t,
 		"case", "suite", "report",
-		"--store-url", storePath,
+		"--store", "sqlite://"+storePath,
 		"--tag", "negative",
 		"--base-url", server.URL,
 		"--output-dir", filepath.Join(t.TempDir(), "variant-suite-report"),
@@ -4408,7 +4408,7 @@ func TestCaseSuiteCoverageReportsLatestRunStatusByMaintenanceFilters(t *testing.
 	ctx := context.Background()
 	profileDir := writeCaseSuiteCoverageProfile(t)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
 
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
 	if err != nil {
@@ -4425,7 +4425,7 @@ func TestCaseSuiteCoverageReportsLatestRunStatusByMaintenanceFilters(t *testing.
 	out := runCLI(t,
 		"case", "suite", "coverage",
 		"--profile", profileDir,
-		"--store-url", storePath,
+		"--store", "sqlite://"+storePath,
 		"--tag", "regression",
 		"--status", "active",
 		"--json",
@@ -4485,7 +4485,7 @@ func TestCaseSuiteCoverageReportsLatestRunStatusByMaintenanceFilters(t *testing.
 		t.Fatalf("unrun coverage = %#v", byCase["case.unrun"])
 	}
 
-	textOut := runCLI(t, "case", "suite", "coverage", "--profile", profileDir, "--store-url", storePath, "--tag", "regression")
+	textOut := runCLI(t, "case", "suite", "coverage", "--profile", profileDir, "--store", "sqlite://"+storePath, "--tag", "regression")
 	for _, want := range []string{"Case Suite Coverage", "Total: 3 Passed: 1 Failed: 1 Not Run: 1", "case.variant", "run.variant.latest.case"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("coverage text missing %q:\n%s", want, textOut)
@@ -4497,7 +4497,7 @@ func TestCaseSuiteInspectReportsReadinessByMaintenanceFilters(t *testing.T) {
 	ctx := context.Background()
 	profileDir := writeCaseSuiteCoverageProfile(t)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
 
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
 	if err != nil {
@@ -4513,7 +4513,7 @@ func TestCaseSuiteInspectReportsReadinessByMaintenanceFilters(t *testing.T) {
 	out := runCLI(t,
 		"case", "suite", "inspect",
 		"--profile", profileDir,
-		"--store-url", storePath,
+		"--store", "sqlite://"+storePath,
 		"--tag", "regression",
 		"--status", "active",
 		"--json",
@@ -4572,7 +4572,7 @@ func TestCaseSuiteInspectReportsReadinessByMaintenanceFilters(t *testing.T) {
 		t.Fatalf("unrun inspection = %#v", byCase["case.unrun"])
 	}
 
-	textOut := runCLI(t, "case", "suite", "inspect", "--profile", profileDir, "--store-url", storePath, "--tag", "regression")
+	textOut := runCLI(t, "case", "suite", "inspect", "--profile", profileDir, "--store", "sqlite://"+storePath, "--tag", "regression")
 	for _, want := range []string{"Case Suite Inspection", "Total: 3 Ready: 2 Blocked: 1", "case.unrun", "add-runnable-source"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("inspection text missing %q:\n%s", want, textOut)
@@ -4584,7 +4584,7 @@ func TestCaseSuitePlanBuildsExecutableBatchRequest(t *testing.T) {
 	ctx := context.Background()
 	profileDir := writeCaseSuiteCoverageProfile(t)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
 
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
 	if err != nil {
@@ -4600,7 +4600,7 @@ func TestCaseSuitePlanBuildsExecutableBatchRequest(t *testing.T) {
 	out := runCLI(t,
 		"case", "suite", "plan",
 		"--profile", profileDir,
-		"--store-url", storePath,
+		"--store", "sqlite://"+storePath,
 		"--tag", "regression",
 		"--status", "active",
 		"--action", "run",
@@ -4640,7 +4640,7 @@ func TestCaseSuitePlanBuildsExecutableBatchRequest(t *testing.T) {
 		t.Fatalf("batch request = %#v", report.BatchRequest)
 	}
 
-	textOut := runCLI(t, "case", "suite", "plan", "--profile", profileDir, "--store-url", storePath, "--tag", "regression", "--action", "rerun")
+	textOut := runCLI(t, "case", "suite", "plan", "--profile", profileDir, "--store", "sqlite://"+storePath, "--tag", "regression", "--action", "rerun")
 	for _, want := range []string{"Case Suite Plan", "Selected: 1", "case.variant"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("plan text missing %q:\n%s", want, textOut)
@@ -4652,7 +4652,7 @@ func TestCaseSuiteStabilityReportsTransitions(t *testing.T) {
 	ctx := context.Background()
 	profileDir := writeCaseSuiteCoverageProfile(t)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
 
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
 	if err != nil {
@@ -4670,7 +4670,7 @@ func TestCaseSuiteStabilityReportsTransitions(t *testing.T) {
 	out := runCLI(t,
 		"case", "suite", "stability",
 		"--profile", profileDir,
-		"--store-url", storePath,
+		"--store", "sqlite://"+storePath,
 		"--tag", "regression",
 		"--status", "active",
 		"--limit", "3",
@@ -4722,7 +4722,7 @@ func TestCaseSuiteStabilityReportsTransitions(t *testing.T) {
 		t.Fatalf("variant stability = %#v", byCase["case.variant"])
 	}
 
-	textOut := runCLI(t, "case", "suite", "stability", "--profile", profileDir, "--store-url", storePath, "--tag", "regression", "--limit", "3")
+	textOut := runCLI(t, "case", "suite", "stability", "--profile", profileDir, "--store", "sqlite://"+storePath, "--tag", "regression", "--limit", "3")
 	for _, want := range []string{"Case Suite Stability", "Unstable: 1", "case.variant"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("stability text missing %q:\n%s", want, textOut)
@@ -4734,7 +4734,7 @@ func TestCaseSuitePriorityBuildsRankedBatchRequest(t *testing.T) {
 	ctx := context.Background()
 	profileDir := writeCaseSuiteCoverageProfile(t)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
 
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
 	if err != nil {
@@ -4751,7 +4751,7 @@ func TestCaseSuitePriorityBuildsRankedBatchRequest(t *testing.T) {
 	out := runCLI(t,
 		"case", "suite", "priority",
 		"--profile", profileDir,
-		"--store-url", storePath,
+		"--store", "sqlite://"+storePath,
 		"--tag", "regression",
 		"--status", "active",
 		"--signal", "Variant",
@@ -4793,7 +4793,7 @@ func TestCaseSuitePriorityBuildsRankedBatchRequest(t *testing.T) {
 		t.Fatalf("suite priority batch = %#v", report.BatchRequest)
 	}
 
-	textOut := runCLI(t, "case", "suite", "priority", "--profile", profileDir, "--store-url", storePath, "--tag", "regression", "--signal", "Variant", "--limit", "1")
+	textOut := runCLI(t, "case", "suite", "priority", "--profile", profileDir, "--store", "sqlite://"+storePath, "--tag", "regression", "--signal", "Variant", "--limit", "1")
 	for _, want := range []string{"Case Suite Priority", "Selected: 1", "case.variant"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("priority text missing %q:\n%s", want, textOut)
@@ -4805,7 +4805,7 @@ func TestCaseSuiteBriefSummarizesMaintainedSuiteForAgents(t *testing.T) {
 	ctx := context.Background()
 	profileDir := writeCaseSuiteCoverageProfile(t)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
 
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
 	if err != nil {
@@ -4822,7 +4822,7 @@ func TestCaseSuiteBriefSummarizesMaintainedSuiteForAgents(t *testing.T) {
 	out := runCLI(t,
 		"case", "suite", "brief",
 		"--profile", profileDir,
-		"--store-url", storePath,
+		"--store", "sqlite://"+storePath,
 		"--tag", "regression",
 		"--status", "active",
 		"--signal", "Variant",
@@ -4863,7 +4863,7 @@ func TestCaseSuiteBriefSummarizesMaintainedSuiteForAgents(t *testing.T) {
 		t.Fatalf("suite brief batch = %#v", report.BatchRequest)
 	}
 
-	textOut := runCLI(t, "case", "suite", "brief", "--profile", profileDir, "--store-url", storePath, "--tag", "regression", "--signal", "Variant")
+	textOut := runCLI(t, "case", "suite", "brief", "--profile", profileDir, "--store", "sqlite://"+storePath, "--tag", "regression", "--signal", "Variant")
 	for _, want := range []string{"Case Suite Brief", "Ready: 2", "Recommended: 2", "case.variant"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("brief text missing %q:\n%s", want, textOut)
@@ -4874,12 +4874,12 @@ func TestCaseSuiteBriefSummarizesMaintainedSuiteForAgents(t *testing.T) {
 func TestCaseSuiteQualityAuditsMaintainedCaseMetadata(t *testing.T) {
 	profileDir := writeCaseSuiteQualityProfile(t)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
 
 	out := runCLI(t,
 		"case", "suite", "quality",
 		"--profile", profileDir,
-		"--store-url", storePath,
+		"--store", "sqlite://"+storePath,
 		"--status", "active",
 		"--json",
 	)
@@ -4917,7 +4917,7 @@ func TestCaseSuiteQualityAuditsMaintainedCaseMetadata(t *testing.T) {
 	if len(report.Nodes) != 1 || report.Nodes[0].NodeID != "node.empty" {
 		t.Fatalf("suite quality nodes = %#v", report.Nodes)
 	}
-	textOut := runCLI(t, "case", "suite", "quality", "--profile", profileDir, "--store-url", storePath, "--status", "active")
+	textOut := runCLI(t, "case", "suite", "quality", "--profile", profileDir, "--store", "sqlite://"+storePath, "--status", "active")
 	for _, want := range []string{"Case Suite Quality", "Incomplete: 1", "node.empty", "case.gaps"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("quality text missing %q:\n%s", want, textOut)
@@ -4928,12 +4928,12 @@ func TestCaseSuiteQualityAuditsMaintainedCaseMetadata(t *testing.T) {
 func TestCaseSuiteQualityPlanSuggestsAuthoringActions(t *testing.T) {
 	profileDir := writeCaseSuiteQualityProfile(t)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
 
 	out := runCLI(t,
 		"case", "suite", "quality-plan",
 		"--profile", profileDir,
-		"--store-url", storePath,
+		"--store", "sqlite://"+storePath,
 		"--status", "active",
 		"--json",
 	)
@@ -4964,7 +4964,7 @@ func TestCaseSuiteQualityPlanSuggestsAuthoringActions(t *testing.T) {
 	if len(report.Actions) != 4 || report.Actions[0].Type != "draft-case" || report.Actions[0].NodeID != "node.empty" || report.Actions[0].SuggestedCaseID != "case.node-empty.default" {
 		t.Fatalf("suite quality plan actions = %#v", report.Actions)
 	}
-	textOut := runCLI(t, "case", "suite", "quality-plan", "--profile", profileDir, "--store-url", storePath, "--status", "active")
+	textOut := runCLI(t, "case", "suite", "quality-plan", "--profile", profileDir, "--store", "sqlite://"+storePath, "--status", "active")
 	for _, want := range []string{"Case Suite Quality Plan", "Draft Case: 1", "case.node-empty.default", "case.gaps"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("quality plan text missing %q:\n%s", want, textOut)
@@ -4976,12 +4976,12 @@ func TestCaseSuiteQualityReportWritesJSONAndHTML(t *testing.T) {
 	profileDir := writeCaseSuiteQualityProfile(t)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	outputDir := filepath.Join(t.TempDir(), "quality-report")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
 
 	out := runCLI(t,
 		"case", "suite", "quality-report",
 		"--profile", profileDir,
-		"--store-url", storePath,
+		"--store", "sqlite://"+storePath,
 		"--status", "active",
 		"--output-dir", outputDir,
 		"--json",
@@ -5034,7 +5034,7 @@ func TestCaseSuiteQualityReportWritesJSONAndHTML(t *testing.T) {
 		t.Fatalf("quality json report missing expected content:\n%s", jsonReport)
 	}
 
-	textOut := runCLI(t, "case", "suite", "quality-report", "--profile", profileDir, "--store-url", storePath, "--status", "active", "--output-dir", filepath.Join(t.TempDir(), "text-quality-report"))
+	textOut := runCLI(t, "case", "suite", "quality-report", "--profile", profileDir, "--store", "sqlite://"+storePath, "--status", "active", "--output-dir", filepath.Join(t.TempDir(), "text-quality-report"))
 	for _, want := range []string{"Case Suite Quality Report", "Total Actions: 4", "Report:"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("quality report text missing %q:\n%s", want, textOut)
@@ -5046,7 +5046,7 @@ func TestCaseSuiteImpactBuildsExecutableBatchRequest(t *testing.T) {
 	ctx := context.Background()
 	profileDir := writeCaseSuiteCoverageProfile(t)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
 
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
 	if err != nil {
@@ -5062,7 +5062,7 @@ func TestCaseSuiteImpactBuildsExecutableBatchRequest(t *testing.T) {
 	out := runCLI(t,
 		"case", "suite", "impact",
 		"--profile", profileDir,
-		"--store-url", storePath,
+		"--store", "sqlite://"+storePath,
 		"--signal", "/alpha",
 		"--status", "active",
 		"--action", "run",
@@ -5104,7 +5104,7 @@ func TestCaseSuiteImpactBuildsExecutableBatchRequest(t *testing.T) {
 		t.Fatalf("impact cases = %#v", report.Cases)
 	}
 
-	textOut := runCLI(t, "case", "suite", "impact", "--profile", profileDir, "--store-url", storePath, "--signal", "/alpha", "--action", "rerun")
+	textOut := runCLI(t, "case", "suite", "impact", "--profile", profileDir, "--store", "sqlite://"+storePath, "--signal", "/alpha", "--action", "rerun")
 	for _, want := range []string{"Case Suite Impact", "Selected: 1", "case.variant"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("impact text missing %q:\n%s", want, textOut)
@@ -5124,13 +5124,13 @@ func TestCaseSuiteImpactReportRunsImpactedCases(t *testing.T) {
 	defer server.Close()
 	profileDir := writeInterfaceNodeBatchReportProfile(t)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
+	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
 
 	outputDir := filepath.Join(t.TempDir(), "impact-report")
 	out := runCLI(t,
 		"case", "suite", "impact-report",
 		"--profile", profileDir,
-		"--store-url", storePath,
+		"--store", "sqlite://"+storePath,
 		"--signal", "/lookup",
 		"--tag", "smoke",
 		"--status", "active",
@@ -5197,8 +5197,8 @@ func TestWorkflowReportWritesReportWhenStepFails(t *testing.T) {
 	defer server.Close()
 	profileDir := writeWorkflowBatchReportProfile(t)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store-url", storePath)
-	listOut := runCLI(t, "workflow", "discover", "--store-url", storePath, "--filter", "Workflow Alpha", "--json")
+	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
+	listOut := runCLI(t, "workflow", "discover", "--store", "sqlite://"+storePath, "--filter", "Workflow Alpha", "--json")
 	var listReport struct {
 		Items []struct {
 			ID          string `json:"id"`
@@ -5216,7 +5216,7 @@ func TestWorkflowReportWritesReportWhenStepFails(t *testing.T) {
 	out := runCLI(t,
 		"workflow", "report",
 		"--workflow", listReport.Items[0].ID,
-		"--store-url", storePath,
+		"--store", "sqlite://"+storePath,
 		"--base-url", server.URL,
 		"--output-dir", outputDir,
 		"--json",
@@ -5295,7 +5295,7 @@ func TestCaseIncompleteBatchesCommandReportsNotRunCases(t *testing.T) {
 }`, alphaPath, betaPath))
 
 	storePath := filepath.Join(dir, "store.sqlite")
-	runCLI(t, "case", "run", "--case", alphaPath, "--base-url", server.URL, "--run-id", "run-alpha", "--store-url", storePath, "--profile", "sample")
+	runCLI(t, "case", "run", "--case", alphaPath, "--base-url", server.URL, "--run-id", "run-alpha", "--store", "sqlite://"+storePath, "--profile", "sample")
 
 	out := runCLI(t, "case", "incomplete-batches", "--profile", profileDir, "--store", "sqlite://"+storePath)
 	for _, want := range []string{"Incomplete API Cases: 1", "case.beta", "not-run", betaPath} {
@@ -5400,7 +5400,7 @@ func TestServeHandlerUsesConfiguredStore(t *testing.T) {
 	}
 
 	handler, cleanup, err := serveHandlerFromArgs([]string{
-		"--store-url", storePath,
+		"--store", "sqlite://" + storePath,
 	})
 	if err != nil {
 		t.Fatalf("build serve handler: %v", err)
@@ -5531,7 +5531,7 @@ func TestServeHandlerCanBootFromPublishedStoreCatalogWithoutProfilePath(t *testi
 		t.Fatalf("close store: %v", err)
 	}
 
-	handler, cleanup, err := serveHandlerFromArgs([]string{"--store-url", storePath})
+	handler, cleanup, err := serveHandlerFromArgs([]string{"--store", "sqlite://" + storePath})
 	if err != nil {
 		t.Fatalf("build serve handler from store catalog: %v", err)
 	}
@@ -5621,7 +5621,7 @@ func TestServeHandlerPublishesProfilePathIntoStoreBeforeServing(t *testing.T) {
 
 	handler, cleanup, err := serveHandlerFromArgs([]string{
 		"--profile", profileDir,
-		"--store-url", storePath,
+		"--store", "sqlite://" + storePath,
 	})
 	if err != nil {
 		t.Fatalf("build serve handler with profile path: %v", err)
@@ -5665,7 +5665,7 @@ func TestServeHandlerPublishesInstalledProfileIDBeforeServing(t *testing.T) {
 	handler, cleanup, err := serveHandlerFromArgs([]string{
 		"--profile", "sample",
 		"--profile-home", profileHome,
-		"--store-url", storePath,
+		"--store", "sqlite://" + storePath,
 	})
 	if err != nil {
 		t.Fatalf("build serve handler with installed profile id: %v", err)
@@ -5853,7 +5853,7 @@ func createStoredCaseRun(t *testing.T, runID string) string {
 	storePath := filepath.Join(dir, "store.sqlite")
 	evidenceDir := filepath.Join(dir, "evidence")
 
-	runCLI(t, "case", "run", "--case", casePath, "--base-url", server.URL, "--run-id", runID, "--evidence-dir", evidenceDir, "--store-url", storePath, "--profile", "sample")
+	runCLI(t, "case", "run", "--case", casePath, "--base-url", server.URL, "--run-id", runID, "--evidence-dir", evidenceDir, "--store", "sqlite://"+storePath, "--profile", "sample")
 	return storePath
 }
 
