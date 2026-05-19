@@ -6115,9 +6115,9 @@ func TestWorkflowReportWritesReportWhenStepFails(t *testing.T) {
 	}))
 	defer server.Close()
 	profileDir := writeWorkflowBatchReportProfile(t)
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
-	listOut := runCLI(t, "workflow", "discover", "--store", "sqlite://"+storePath, "--filter", "Workflow Alpha", "--json")
+	configureNamedPostgreSQLActiveStore(t, "daily-workflow-report-fail-pg")
+	runCLI(t, "config", "publish", "--from", profileDir)
+	listOut := runCLI(t, "workflow", "discover", "--filter", "Workflow Alpha", "--json")
 	var listReport struct {
 		Items []struct {
 			ID          string `json:"id"`
@@ -6135,7 +6135,6 @@ func TestWorkflowReportWritesReportWhenStepFails(t *testing.T) {
 	out := runCLI(t,
 		"workflow", "report",
 		"--workflow", listReport.Items[0].ID,
-		"--store", "sqlite://"+storePath,
 		"--base-url", server.URL,
 		"--output-dir", outputDir,
 		"--json",

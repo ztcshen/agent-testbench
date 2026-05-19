@@ -1352,3 +1352,21 @@ Incomplete work:
 - Remaining completion evidence is the full external PostgreSQL release gate
   and live SkyWalking 10-step proof run. Some legacy SQLite compatibility tests
   remain by design.
+
+## 2026-05-20 Named PostgreSQL Workflow Report Failure Test Migration
+
+Estimated PostgreSQL mainline progress: 99.998%.
+
+Completed evidence:
+
+- Migrated the workflow report failure-path test from explicit SQLite Store
+  flags to active named PostgreSQL Store coverage.
+- The test now publishes workflow catalog data into the active named
+  PostgreSQL Store, discovers the workflow through the daily Store path, runs
+  `workflow report` without a per-command Store flag, and still verifies the
+  failed-step counts, Evidence handles, and generated HTML report.
+
+Incomplete work:
+
+- The final remaining proof is still the external PostgreSQL release gate plus
+  live SkyWalking 10-step validation against a real endpoint.
