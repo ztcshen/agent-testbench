@@ -64,6 +64,21 @@ if ! rg -q -i 'synthetic smoke is not live topology proof' tools/release-check.s
   violations=1
 fi
 
+if ! rg -q 'OTSANDBOX_REQUIRE_REAL_SKYWALKING' tools/release-check.sh docs/release-checklist.md; then
+  echo "release-check must keep the explicit real SkyWalking enforcement mode documented and implemented." >&2
+  violations=1
+fi
+
+if ! rg -q 'OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 requires OTS_TRACE_GRAPHQL_URL' tools/release-check.sh; then
+  echo "release-check real SkyWalking mode must require OTS_TRACE_GRAPHQL_URL before expensive gates run." >&2
+  violations=1
+fi
+
+if ! rg -q 'OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 requires OTS_SMOKE_TRACE_IDS' tools/release-check.sh; then
+  echo "release-check real SkyWalking mode must require OTS_SMOKE_TRACE_IDS for the 10-step workflow." >&2
+  violations=1
+fi
+
 generic_resolver_count=$(rg -n 'resolveStoreReference\(' cmd/otsandbox/main.go | wc -l | tr -d ' ')
 if [[ "$generic_resolver_count" != "4" ]]; then
   echo "Daily command code must not add generic Store resolver calls; use resolveRequiredDailyStoreReference unless the path is Store maintenance, offline review, or migration." >&2

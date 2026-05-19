@@ -933,3 +933,27 @@ Incomplete work:
   remaining proof is executing release-check with a PostgreSQL DSN,
   `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and real
   `OTS_SMOKE_TRACE_IDS`.
+
+## 2026-05-20 Live SkyWalking Release Mode Guardrail
+
+Estimated PostgreSQL mainline progress: 99.5%.
+
+Completed evidence:
+
+- Store-first guardrails now require the explicit
+  `OTSANDBOX_REQUIRE_REAL_SKYWALKING` release-check mode to stay present in
+  both implementation and release documentation.
+- Store-first guardrails now require the live SkyWalking mode to fail before
+  expensive gates unless `OTS_TRACE_GRAPHQL_URL` is configured.
+- Store-first guardrails now require the same mode to fail before expensive
+  gates unless `OTS_SMOKE_TRACE_IDS` is configured for the core 10-step
+  workflow.
+- This preserves the final validation contract: live topology sign-off must use
+  a real SkyWalking GraphQL endpoint and concrete trace ids, not the synthetic
+  local provider.
+
+Incomplete work:
+
+- The remaining proof is still external execution: run release-check with a
+  PostgreSQL DSN plus `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`,
+  `OTS_TRACE_GRAPHQL_URL`, and real `OTS_SMOKE_TRACE_IDS`.
