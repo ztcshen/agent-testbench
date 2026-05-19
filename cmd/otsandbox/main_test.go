@@ -5963,17 +5963,17 @@ func TestCaseSuiteQualityReportWritesJSONAndHTML(t *testing.T) {
 
 func TestCaseSuiteImpactBuildsExecutableBatchRequest(t *testing.T) {
 	ctx := context.Background()
+	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-case-suite-impact-pg")
 	profileDir := writeCaseSuiteCoverageProfile(t)
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
+	runCLI(t, "config", "publish", "--from", profileDir)
 
-	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	s, err := openStore(ctx, storeRef)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	base := mustParseTime(t, "2026-05-16T01:00:00Z")
-	recordCaseRunForCoverage(t, ctx, s, "run.default.latest", "case.default", store.StatusPassed, base)
-	recordCaseRunForCoverage(t, ctx, s, "run.variant.latest", "case.variant", store.StatusFailed, base.Add(time.Minute))
+	base := time.Now().UTC()
+	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.default.latest"), "case.default", store.StatusPassed, base.Add(-time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.variant.latest"), "case.variant", store.StatusFailed, base)
 	if err := s.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
 	}
@@ -5981,7 +5981,6 @@ func TestCaseSuiteImpactBuildsExecutableBatchRequest(t *testing.T) {
 	out := runCLI(t,
 		"case", "suite", "impact",
 		"--profile", profileDir,
-		"--store", "sqlite://"+storePath,
 		"--signal", "/alpha",
 		"--status", "active",
 		"--action", "run",
@@ -6023,7 +6022,7 @@ func TestCaseSuiteImpactBuildsExecutableBatchRequest(t *testing.T) {
 		t.Fatalf("impact cases = %#v", report.Cases)
 	}
 
-	textOut := runCLI(t, "case", "suite", "impact", "--profile", profileDir, "--store", "sqlite://"+storePath, "--signal", "/alpha", "--action", "rerun")
+	textOut := runCLI(t, "case", "suite", "impact", "--profile", profileDir, "--signal", "/alpha", "--action", "rerun")
 	for _, want := range []string{"Case Suite Impact", "Selected: 1", "case.variant"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("impact text missing %q:\n%s", want, textOut)
