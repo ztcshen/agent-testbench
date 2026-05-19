@@ -1185,6 +1185,14 @@ Incomplete work:
   SQLite. Final external sign-off remains the real PostgreSQL plus live
   SkyWalking 10-step run.
 
+Update:
+
+- This was narrowed after representative CLI tests showed that rejecting every
+  direct `--store sqlite://...` also removed explicit compatibility coverage.
+  The current contract rejects implicit active/named SQLite Stores and legacy
+  `--store-url` SQLite paths for daily commands, while direct
+  `--store sqlite://...` remains an explicit compatibility selector.
+
 ## 2026-05-20 Smoke Harness Live Mode Enforcement
 
 Estimated PostgreSQL mainline progress: 99.99%.
@@ -1241,3 +1249,26 @@ Incomplete work:
 
 - Final completion still depends on the external PostgreSQL release-check and
   live SkyWalking 10-step proof run.
+
+## 2026-05-20 Named PostgreSQL Read Path Test Migration
+
+Estimated PostgreSQL mainline progress: 99.993%.
+
+Completed evidence:
+
+- Migrated representative daily read-path tests for `case runs`,
+  `case evidence`, workflow run detail commands, and `evidence list` away from
+  explicit SQLite Store flags.
+- The migrated tests now configure an active named PostgreSQL Store through
+  `OTSANDBOX_TEST_PG_DSN`, seed Store records directly or through CLI execution,
+  and invoke the daily commands without per-command Store flags for the primary
+  assertions.
+- The tests use unique run/workflow ids and `--run` filters where needed so a
+  shared PostgreSQL test DSN does not make assertions depend on old rows.
+
+Incomplete work:
+
+- More older SQLite-backed product-like tests remain and should continue moving
+  to named PostgreSQL Store coverage or explicit compatibility scopes. Final
+  completion still requires the external PostgreSQL release-check and live
+  SkyWalking 10-step proof run.

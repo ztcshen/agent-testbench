@@ -217,17 +217,21 @@ func TestDailyStoreReferenceRejectsNamedSQLiteConfig(t *testing.T) {
 	}
 }
 
-func TestDailyStoreReferenceRejectsDirectSQLiteStoreFlag(t *testing.T) {
+func TestDailyStoreReferenceKeepsDirectSQLiteStoreFlagAsExplicitCompatibility(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	for _, storeRef := range []string{"sqlite://" + storePath, "file://" + storePath} {
-		_, err := resolveRequiredDailyStoreReference(storeRef, "")
-		if err == nil {
-			t.Fatalf("daily Store reference should reject direct SQLite store flag %q", storeRef)
+	for _, tc := range []struct {
+		storeRef string
+		want     string
+	}{
+		{storeRef: "sqlite://" + storePath, want: "sqlite://" + storePath},
+		{storeRef: "file://" + storePath, want: "file://" + storePath},
+	} {
+		resolved, err := resolveRequiredDailyStoreReference(tc.storeRef, "")
+		if err != nil {
+			t.Fatalf("daily Store reference should keep explicit SQLite compatibility store flag %q: %v", tc.storeRef, err)
 		}
-		for _, want := range []string{"--store", "daily commands require PostgreSQL Store", "SQLite", "postgres://"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Fatalf("daily SQLite store flag error missing %q: %v", want, err)
-			}
+		if resolved != tc.want {
+			t.Fatalf("direct SQLite compatibility store flag = %q want %q", resolved, tc.want)
 		}
 	}
 }
@@ -943,26 +947,29 @@ func TestTemplatePackageCatalogIndexCommandReadsStoreCatalog(t *testing.T) {
 
 func TestCaseRunsCommandListsStoredCaseRuns(t *testing.T) {
 	ctx := context.Background()
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-case-runs-pg")
+	s, err := openStore(ctx, storeRef)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
+	defer s.Close()
+	runID := uniqueTestID(t, "run.case-runs")
+	caseRunID := runID + ".case"
 	started := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
 	if _, err := s.CreateRun(ctx, store.Run{
-		ID:           "run-001",
+		ID:           runID,
 		ProfileID:    "sample",
 		WorkflowID:   "workflow.alpha",
 		Status:       store.StatusPassed,
-		EvidenceRoot: "/tmp/evidence/run-001",
+		EvidenceRoot: "/tmp/evidence/" + runID,
 		StartedAt:    started,
 		FinishedAt:   started.Add(time.Second),
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 	if _, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
-		ID:                   "case-run-001",
-		RunID:                "run-001",
+		ID:                   caseRunID,
+		RunID:                runID,
 		CaseID:               "case.alpha",
 		Status:               store.StatusPassed,
 		RequestSummaryJSON:   `{"method":"POST","path":"/alpha"}`,
@@ -973,19 +980,16 @@ func TestCaseRunsCommandListsStoredCaseRuns(t *testing.T) {
 		t.Fatalf("record case run: %v", err)
 	}
 	if _, err := s.RecordEvidence(ctx, store.EvidenceRecord{
-		ID:        "evidence-001",
-		RunID:     "run-001",
-		CaseRunID: "case-run-001",
+		ID:        runID + ".evidence",
+		RunID:     runID,
+		CaseRunID: caseRunID,
 		Kind:      "http-response",
-		URI:       "/tmp/evidence/run-001/response.json",
+		URI:       "/tmp/evidence/" + runID + "/response.json",
 	}); err != nil {
 		t.Fatalf("record evidence: %v", err)
 	}
-	if err := s.Close(); err != nil {
-		t.Fatalf("close store: %v", err)
-	}
 
-	out := runCLI(t, "case", "runs", "--store", "sqlite://"+storePath, "--json")
+	out := runCLI(t, "case", "runs", "--run", runID, "--json")
 
 	var report struct {
 		OK       bool `json:"ok"`
@@ -1006,31 +1010,34 @@ func TestCaseRunsCommandListsStoredCaseRuns(t *testing.T) {
 		t.Fatalf("case runs report = %#v", report)
 	}
 	item := report.CaseRuns[0]
-	if item.ID != "case-run-001" || item.RunID != "run-001" || item.CaseID != "case.alpha" || item.Status != store.StatusPassed || item.Operation != "POST /alpha" || item.EvidenceCount != 1 || item.EvidencePath != "/tmp/evidence/run-001" {
+	if item.ID != caseRunID || item.RunID != runID || item.CaseID != "case.alpha" || item.Status != store.StatusPassed || item.Operation != "POST /alpha" || item.EvidenceCount != 1 || item.EvidencePath != "/tmp/evidence/"+runID {
 		t.Fatalf("case run item = %#v", item)
 	}
 }
 
 func TestCaseEvidenceCommandReadsCaseRunEvidence(t *testing.T) {
 	ctx := context.Background()
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-case-evidence-pg")
+	s, err := openStore(ctx, storeRef)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
+	defer s.Close()
+	runID := uniqueTestID(t, "run.case-evidence")
+	caseRunID := runID + ".case"
 	if _, err := s.CreateRun(ctx, store.Run{
-		ID:           "run-001",
+		ID:           runID,
 		ProfileID:    "sample",
 		WorkflowID:   "workflow.alpha",
 		Status:       store.StatusPassed,
-		EvidenceRoot: "/tmp/evidence/run-001",
+		EvidenceRoot: "/tmp/evidence/" + runID,
 		SummaryJSON:  "{}",
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 	if _, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
-		ID:                   "case-run-001",
-		RunID:                "run-001",
+		ID:                   caseRunID,
+		RunID:                runID,
 		CaseID:               "case.alpha",
 		Status:               store.StatusPassed,
 		RequestSummaryJSON:   `{"method":"GET","path":"/alpha"}`,
@@ -1039,21 +1046,18 @@ func TestCaseEvidenceCommandReadsCaseRunEvidence(t *testing.T) {
 		t.Fatalf("record case run: %v", err)
 	}
 	if _, err := s.RecordEvidence(ctx, store.EvidenceRecord{
-		ID:        "response-001",
-		RunID:     "run-001",
-		CaseRunID: "case-run-001",
+		ID:        runID + ".response",
+		RunID:     runID,
+		CaseRunID: caseRunID,
 		Kind:      "response",
-		URI:       "/tmp/evidence/run-001/response.json",
+		URI:       "/tmp/evidence/" + runID + "/response.json",
 		MediaType: "application/json",
 		Summary:   `{"statusCode":200}`,
 	}); err != nil {
 		t.Fatalf("record evidence: %v", err)
 	}
-	if err := s.Close(); err != nil {
-		t.Fatalf("close store: %v", err)
-	}
 
-	out := runCLI(t, "case", "evidence", "--store", "sqlite://"+storePath, "--case-run", "case-run-001", "--json")
+	out := runCLI(t, "case", "evidence", "--case-run", caseRunID, "--json")
 
 	var payload struct {
 		OK       bool `json:"ok"`
@@ -1066,10 +1070,10 @@ func TestCaseEvidenceCommandReadsCaseRunEvidence(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &payload); err != nil {
 		t.Fatalf("decode case evidence json: %v\n%s", err, out)
 	}
-	if !payload.OK || payload.Evidence.Summary["case_run_id"] != "case-run-001" || payload.Evidence.Summary["operation"] != "GET /alpha" {
+	if !payload.OK || payload.Evidence.Summary["case_run_id"] != caseRunID || payload.Evidence.Summary["operation"] != "GET /alpha" {
 		t.Fatalf("case evidence summary = %#v", payload.Evidence.Summary)
 	}
-	if payload.Evidence.Response["http_code"] != float64(200) || payload.Evidence.Response["evidence_uri"] != "/tmp/evidence/run-001/response.json" {
+	if payload.Evidence.Response["http_code"] != float64(200) || payload.Evidence.Response["evidence_uri"] != "/tmp/evidence/"+runID+"/response.json" {
 		t.Fatalf("case evidence response = %#v", payload.Evidence.Response)
 	}
 }
@@ -3059,16 +3063,19 @@ func TestWorkflowPlanCommandRejectsMissingWorkflow(t *testing.T) {
 
 func TestWorkflowRunCommandsReadStoredRuns(t *testing.T) {
 	ctx := context.Background()
-	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-workflow-runs-pg")
+	s, err := openStore(ctx, storeRef)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
+	defer s.Close()
+	runID := uniqueTestID(t, "run.workflow")
+	workflowID := uniqueTestID(t, "workflow.alpha")
 	started := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
 	if _, err := s.CreateRun(ctx, store.Run{
-		ID:         "run.workflow.001",
+		ID:         runID,
 		ProfileID:  "sample",
-		WorkflowID: "workflow.alpha",
+		WorkflowID: workflowID,
 		Status:     store.StatusPassed,
 		SummaryJSON: `{
 			"summary":{"stepCount":1,"passed":1},
@@ -3081,11 +3088,8 @@ func TestWorkflowRunCommandsReadStoredRuns(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	if err := s.Close(); err != nil {
-		t.Fatalf("close store: %v", err)
-	}
 
-	listOut := runCLI(t, "workflow", "runs", "--store", "sqlite://"+storePath, "--json")
+	listOut := runCLI(t, "workflow", "runs", "--json")
 	var list struct {
 		OK           bool `json:"ok"`
 		WorkflowRuns []struct {
@@ -3098,11 +3102,18 @@ func TestWorkflowRunCommandsReadStoredRuns(t *testing.T) {
 	if err := json.Unmarshal([]byte(listOut), &list); err != nil {
 		t.Fatalf("decode workflow runs json: %v\n%s", err, listOut)
 	}
-	if !list.OK || len(list.WorkflowRuns) != 1 || list.WorkflowRuns[0].ID != "run.workflow.001" || list.WorkflowRuns[0].StepCount != 1 {
+	foundRun := false
+	for _, item := range list.WorkflowRuns {
+		if item.ID == runID && item.StepCount == 1 {
+			foundRun = true
+			break
+		}
+	}
+	if !list.OK || !foundRun {
 		t.Fatalf("workflow runs = %#v", list)
 	}
 
-	detailOut := runCLI(t, "workflow", "run", "--store", "sqlite://"+storePath, "--run", "run.workflow.001", "--json")
+	detailOut := runCLI(t, "workflow", "run", "--run", runID, "--json")
 	var detail struct {
 		OK      bool           `json:"ok"`
 		Run     map[string]any `json:"run"`
@@ -3113,11 +3124,11 @@ func TestWorkflowRunCommandsReadStoredRuns(t *testing.T) {
 	if err := json.Unmarshal([]byte(detailOut), &detail); err != nil {
 		t.Fatalf("decode workflow run json: %v\n%s", err, detailOut)
 	}
-	if !detail.OK || detail.Run["id"] != "run.workflow.001" || len(detail.Summary.Steps) != 1 || detail.Summary.Steps[0]["stepId"] != "step.one" {
+	if !detail.OK || detail.Run["id"] != runID || len(detail.Summary.Steps) != 1 || detail.Summary.Steps[0]["stepId"] != "step.one" {
 		t.Fatalf("workflow run detail = %#v", detail)
 	}
 
-	stepOut := runCLI(t, "workflow", "step", "--store", "sqlite://"+storePath, "--run", "run.workflow.001", "--step", "step.one", "--json")
+	stepOut := runCLI(t, "workflow", "step", "--run", runID, "--step", "step.one", "--json")
 	var stepDetail struct {
 		OK      bool           `json:"ok"`
 		Run     map[string]any `json:"run"`
@@ -3128,11 +3139,11 @@ func TestWorkflowRunCommandsReadStoredRuns(t *testing.T) {
 	if err := json.Unmarshal([]byte(stepOut), &stepDetail); err != nil {
 		t.Fatalf("decode workflow step json: %v\n%s", err, stepOut)
 	}
-	if !stepDetail.OK || stepDetail.Run["id"] != "run.workflow.001" || len(stepDetail.Summary.Steps) != 1 || stepDetail.Summary.Steps[0]["stepId"] != "step.one" {
+	if !stepDetail.OK || stepDetail.Run["id"] != runID || len(stepDetail.Summary.Steps) != 1 || stepDetail.Summary.Steps[0]["stepId"] != "step.one" {
 		t.Fatalf("workflow step detail = %#v", stepDetail)
 	}
 
-	latestOut := runCLI(t, "workflow", "latest-step", "--store", "sqlite://"+storePath, "--workflow", "workflow.alpha", "--step", "step.one", "--json")
+	latestOut := runCLI(t, "workflow", "latest-step", "--workflow", workflowID, "--step", "step.one", "--json")
 	var latestDetail struct {
 		OK      bool           `json:"ok"`
 		Run     map[string]any `json:"run"`
@@ -3143,21 +3154,20 @@ func TestWorkflowRunCommandsReadStoredRuns(t *testing.T) {
 	if err := json.Unmarshal([]byte(latestOut), &latestDetail); err != nil {
 		t.Fatalf("decode latest workflow step json: %v\n%s", err, latestOut)
 	}
-	if !latestDetail.OK || latestDetail.Run["id"] != "run.workflow.001" || len(latestDetail.Summary.Steps) != 1 || latestDetail.Summary.Steps[0]["caseId"] != "case.alpha" {
+	if !latestDetail.OK || latestDetail.Run["id"] != runID || len(latestDetail.Summary.Steps) != 1 || latestDetail.Summary.Steps[0]["caseId"] != "case.alpha" {
 		t.Fatalf("latest workflow step detail = %#v", latestDetail)
 	}
 
-	storeRef := "sqlite://" + storePath
-	if out := runCLI(t, "workflow", "runs", "--store", storeRef, "--json"); !strings.Contains(out, "run.workflow.001") {
+	if out := runCLI(t, "workflow", "runs", "--store", storeRef, "--json"); !strings.Contains(out, runID) {
 		t.Fatalf("workflow runs --store output = %q", out)
 	}
-	if out := runCLI(t, "workflow", "run", "--store", storeRef, "--run", "run.workflow.001", "--json"); !strings.Contains(out, "step.one") {
+	if out := runCLI(t, "workflow", "run", "--store", storeRef, "--run", runID, "--json"); !strings.Contains(out, "step.one") {
 		t.Fatalf("workflow run --store output = %q", out)
 	}
-	if out := runCLI(t, "workflow", "step", "--store", storeRef, "--run", "run.workflow.001", "--step", "step.one", "--json"); !strings.Contains(out, "case.alpha") {
+	if out := runCLI(t, "workflow", "step", "--store", storeRef, "--run", runID, "--step", "step.one", "--json"); !strings.Contains(out, "case.alpha") {
 		t.Fatalf("workflow step --store output = %q", out)
 	}
-	if out := runCLI(t, "workflow", "latest-step", "--store", storeRef, "--workflow", "workflow.alpha", "--step", "step.one", "--json"); !strings.Contains(out, "run.workflow.001") {
+	if out := runCLI(t, "workflow", "latest-step", "--store", storeRef, "--workflow", workflowID, "--step", "step.one", "--json"); !strings.Contains(out, runID) {
 		t.Fatalf("workflow latest-step --store output = %q", out)
 	}
 }
@@ -3700,11 +3710,12 @@ func TestEvidenceImportUsesNamedPostgreSQLActiveStore(t *testing.T) {
 }
 
 func TestEvidenceListCommandPrintsStoreRecords(t *testing.T) {
-	storePath := createStoredCaseRun(t, "case-run-004")
+	runID := uniqueTestID(t, "case-run-004")
+	createStoredCaseRun(t, runID)
 
-	out := runCLI(t, "evidence", "list", "--store", "sqlite://"+storePath)
+	out := runCLI(t, "evidence", "list", "--run", runID)
 
-	for _, want := range []string{"Run: case-run-004", "Case Run: case-run-004.case", "Case: case.alpha", "Evidence: response"} {
+	for _, want := range []string{"Run: " + runID, "Case Run: " + runID + ".case", "Case: case.alpha", "Evidence: response"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("evidence list output missing %q: %q", want, out)
 		}
@@ -3712,9 +3723,10 @@ func TestEvidenceListCommandPrintsStoreRecords(t *testing.T) {
 }
 
 func TestEvidenceListCommandCanEmitJSON(t *testing.T) {
-	storePath := createStoredCaseRun(t, "case-run-005")
+	runID := uniqueTestID(t, "case-run-005")
+	createStoredCaseRun(t, runID)
 
-	out := runCLI(t, "evidence", "list", "--store", "sqlite://"+storePath, "--json")
+	out := runCLI(t, "evidence", "list", "--run", runID, "--json")
 
 	var report struct {
 		Runs []struct {
@@ -3726,7 +3738,7 @@ func TestEvidenceListCommandCanEmitJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode evidence list json: %v\n%s", err, out)
 	}
-	if len(report.Runs) != 1 || report.Runs[0].ID != "case-run-005" {
+	if len(report.Runs) != 1 || report.Runs[0].ID != runID {
 		t.Fatalf("json runs = %#v", report.Runs)
 	}
 	if report.Runs[0].APICaseRunCount != 1 || report.Runs[0].EvidenceCount != 5 {
@@ -3735,9 +3747,10 @@ func TestEvidenceListCommandCanEmitJSON(t *testing.T) {
 }
 
 func TestEvidenceListCommandRejectsMissingRun(t *testing.T) {
-	storePath := createStoredCaseRun(t, "case-run-006")
+	runID := uniqueTestID(t, "case-run-006")
+	createStoredCaseRun(t, runID)
 
-	out := runCLIFails(t, "evidence", "list", "--store", "sqlite://"+storePath, "--run", "case-run-missing")
+	out := runCLIFails(t, "evidence", "list", "--run", "case-run-missing")
 	if !strings.Contains(out, "run not found") || !strings.Contains(out, "case-run-missing") {
 		t.Fatalf("missing run output = %q", out)
 	}
@@ -6848,6 +6861,13 @@ func configureNamedPostgreSQLActiveStore(t *testing.T, name string) string {
 	return dsn
 }
 
+func uniqueTestID(t *testing.T, prefix string) string {
+	t.Helper()
+	slug := strings.ToLower(t.Name())
+	slug = strings.NewReplacer("/", "-", "_", "-", " ", "-").Replace(slug)
+	return fmt.Sprintf("%s.%s.%d", prefix, slug, time.Now().UTC().UnixNano())
+}
+
 func seedEnvironmentVerificationArtifacts(t *testing.T, storeRef string, runID string) {
 	t.Helper()
 	ctx := context.Background()
@@ -7048,8 +7068,9 @@ func containsString(items []string, want string) bool {
 	return false
 }
 
-func createStoredCaseRun(t *testing.T, runID string) string {
+func createStoredCaseRun(t *testing.T, runID string) {
 	t.Helper()
+	configureNamedPostgreSQLActiveStore(t, "daily-evidence-list-pg")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprint(w, `{"status":"created"}`)
@@ -7059,11 +7080,9 @@ func createStoredCaseRun(t *testing.T, runID string) string {
 	dir := t.TempDir()
 	casePath := filepath.Join(dir, "case.json")
 	writeAPICaseFile(t, casePath)
-	storePath := filepath.Join(dir, "store.sqlite")
 	evidenceDir := filepath.Join(dir, "evidence")
 
-	runCLI(t, "case", "run", "--case", casePath, "--base-url", server.URL, "--run-id", runID, "--evidence-dir", evidenceDir, "--store", "sqlite://"+storePath, "--profile", "sample")
-	return storePath
+	runCLI(t, "case", "run", "--case", casePath, "--base-url", server.URL, "--run-id", runID, "--evidence-dir", evidenceDir, "--profile", "sample")
 }
 
 func createPostProcessTaskStore(t *testing.T) string {
