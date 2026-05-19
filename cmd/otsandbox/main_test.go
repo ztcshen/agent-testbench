@@ -4229,6 +4229,46 @@ func TestDiscoverCommandsRejectActiveSQLiteStore(t *testing.T) {
 	}
 }
 
+func TestDiscoverCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("OTSANDBOX_TEST_PG_DSN"))
+	if dsn == "" {
+		t.Skip("set OTSANDBOX_TEST_PG_DSN to run named PostgreSQL daily path coverage")
+	}
+	t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	profileDir := writeInterfaceNodeBatchReportProfile(t)
+	runCLI(t, "store", "config", "set", "daily-pg", "--url", dsn)
+	runCLI(t, "store", "use", "daily-pg")
+	runCLI(t, "store", "upgrade")
+	runCLI(t, "config", "publish", "--from", profileDir)
+
+	caseOut := runCLI(t, "case", "discover", "--filter", "variant", "--json")
+	var caseReport struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(caseOut), &caseReport); err != nil {
+		t.Fatalf("decode case discover json: %v\n%s", err, caseOut)
+	}
+	if len(caseReport.Items) != 1 || caseReport.Items[0].ID != "case.alpha.variant" {
+		t.Fatalf("case discover via active PostgreSQL Store = %#v", caseReport.Items)
+	}
+
+	nodeOut := runCLI(t, "interface-node", "discover", "--filter", "Result Lookup", "--json")
+	var nodeReport struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(nodeOut), &nodeReport); err != nil {
+		t.Fatalf("decode interface-node discover json: %v\n%s", err, nodeOut)
+	}
+	if len(nodeReport.Items) != 1 || nodeReport.Items[0].ID != "node.alpha" {
+		t.Fatalf("interface-node discover via active PostgreSQL Store = %#v", nodeReport.Items)
+	}
+}
+
 func TestInterfaceNodeDiscoverRequiresStoreUnlessOfflineTemplatePackage(t *testing.T) {
 	profileDir := writeInterfaceNodeBatchReportProfile(t)
 	env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}

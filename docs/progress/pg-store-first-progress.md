@@ -316,6 +316,10 @@ Completed evidence:
 - CLI tests no longer exercise SQLite bare paths through `--store-url` for
   daily command setup or reads. Remaining `--store-url` test references are
   negative assertions or explicit PostgreSQL/legacy compatibility checks.
+- An environment-gated named PostgreSQL daily-path test is now available for
+  human-machine validation with `OTSANDBOX_TEST_PG_DSN`; it configures an active
+  named PostgreSQL Store, publishes config, and runs daily discovery without
+  per-command Store flags.
 - Evidence topology views now trust saved topology summaries only when they
   explicitly identify SkyWalking as provider/source; otherwise they return the
   unavailable SkyWalking view instead of exposing workflow order or legacy
@@ -346,9 +350,10 @@ Incomplete work:
   surfaces for migration and explicit compatibility; daily product examples
   should continue steering users to `--store NAME_OR_DSN`.
 - Daily-path test data still needs migration from explicit SQLite stores to
-  named PostgreSQL Stores. The current test cleanup first moves old
-  `--store-url PATH` calls to explicit `--store sqlite://...` compatibility
-  form so the daily path no longer normalizes SQLite bare paths.
+  named PostgreSQL Stores beyond the new env-gated discovery coverage. The
+  current test cleanup first moves old `--store-url PATH` calls to explicit
+  `--store sqlite://...` compatibility form so the daily path no longer
+  normalizes SQLite bare paths.
 - The core 10-step smoke, per-interface Evidence completeness, and real
   SkyWalking topology proof still need final human-machine validation against a
   real SkyWalking endpoint.
