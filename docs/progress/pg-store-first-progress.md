@@ -493,3 +493,33 @@ Incomplete work:
 - Many product-like CLI tests still use explicit `--store sqlite://...` as
   compatibility coverage. More daily-path suites should move to named
   PostgreSQL Store coverage over time.
+
+## 2026-05-19 Named PostgreSQL Environment Gate Coverage
+
+Estimated PostgreSQL mainline progress: 97%.
+
+Completed evidence:
+
+- Added env-gated named PostgreSQL coverage for the Environment Catalog
+  verified discovery lifecycle behind `OTSANDBOX_TEST_PG_DSN`.
+- The new test configures an active named PostgreSQL Store and runs the daily
+  Environment Catalog chain without per-command `--store`: register, default
+  discover exclusion for unverified environments, publish denial before complete
+  verification, verify with complete Evidence and topology flags,
+  publish-verified, verified discovery, and bootstrap plan retrieval.
+- This directly covers the product rule that verified discovery requires a
+  passed acceptance workflow plus complete Evidence and SkyWalking topology,
+  while using the same local/remote PostgreSQL command shape.
+- Light validation passed:
+  `go test ./cmd/otsandbox -run 'Test(EnvironmentCommandsUseNamedPostgreSQLActiveStore|DailyWorkflowCommandsUseNamedPostgreSQLActiveStore|DiscoverCommandsUseNamedPostgreSQLActiveStore)$' -count=1`,
+  `tools/guardrails/check_store_first_contracts.sh`, `git diff --check`, and
+  `rg -n -i 'fall''back' . --glob '!node_modules/**'`.
+
+Incomplete work:
+
+- The environment PG coverage is env-gated and skipped without
+  `OTSANDBOX_TEST_PG_DSN`; it does not replace full release-check or real
+  SkyWalking endpoint validation.
+- Remaining product-like SQLite tests are now mostly broader case-suite,
+  case-execution/interface-node report, Evidence import/list/tasks, profile
+  import/verify, and serve/UI handler coverage.

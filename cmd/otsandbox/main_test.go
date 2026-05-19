@@ -411,6 +411,128 @@ func TestEnvironmentCommandsGateVerifiedDiscovery(t *testing.T) {
 	}
 }
 
+func TestEnvironmentCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
+	configureNamedPostgreSQLActiveStore(t, "daily-environment-pg")
+
+	registerOut := runCLI(t, "environment", "register",
+		"--id", "env.team.pg",
+		"--display-name", "Team PostgreSQL Environment",
+		"--description", "Accepted local Docker environment",
+		"--service", "entry-gateway",
+		"--repo", "entry-gateway=../entry-gateway",
+		"--branch", "entry-gateway=main",
+		"--checkout", "entry-gateway=/tmp/entry-gateway",
+		"--compose-file", "docker-compose.yml",
+		"--start-command", "docker compose up -d",
+		"--health-url", "http://127.0.0.1:18080/health",
+		"--verification-workflow", "workflow.core-10",
+		"--json",
+	)
+	var registered struct {
+		OK          bool `json:"ok"`
+		Environment struct {
+			ID                     string         `json:"id"`
+			Status                 string         `json:"status"`
+			Verified               bool           `json:"verified"`
+			VerificationWorkflowID string         `json:"verificationWorkflowId"`
+			Repos                  map[string]any `json:"repos"`
+		} `json:"environment"`
+	}
+	if err := json.Unmarshal([]byte(registerOut), &registered); err != nil {
+		t.Fatalf("decode environment register json: %v\n%s", err, registerOut)
+	}
+	if !registered.OK || registered.Environment.ID != "env.team.pg" || registered.Environment.Status != "draft" || registered.Environment.Verified {
+		t.Fatalf("registered PostgreSQL environment = %#v", registered.Environment)
+	}
+	if registered.Environment.VerificationWorkflowID != "workflow.core-10" || registered.Environment.Repos["entry-gateway"] == nil {
+		t.Fatalf("registered PostgreSQL environment catalog fields = %#v", registered.Environment)
+	}
+
+	discoverOut := runCLI(t, "environment", "discover", "--json")
+	var discovered struct {
+		Count int `json:"count"`
+	}
+	if err := json.Unmarshal([]byte(discoverOut), &discovered); err != nil {
+		t.Fatalf("decode discover json: %v\n%s", err, discoverOut)
+	}
+	if discovered.Count != 0 {
+		t.Fatalf("unverified PostgreSQL environment should stay out of default discovery: %#v", discovered)
+	}
+
+	publishDenied := runCLIFails(t, "environment", "publish-verified", "env.team.pg")
+	if !strings.Contains(publishDenied, "not publishable") {
+		t.Fatalf("publish should require complete verification evidence: %q", publishDenied)
+	}
+
+	verifyOut := runCLI(t, "environment", "verify",
+		"--run", "run.core-10",
+		"--status", "passed",
+		"--evidence-complete",
+		"--topology-complete",
+		"--json",
+		"env.team.pg",
+	)
+	var verified struct {
+		Environment struct {
+			Status                 string `json:"status"`
+			LastVerificationRunID  string `json:"lastVerificationRunId"`
+			LastVerificationStatus string `json:"lastVerificationStatus"`
+			EvidenceComplete       bool   `json:"evidenceComplete"`
+			TopologyComplete       bool   `json:"topologyComplete"`
+		} `json:"environment"`
+	}
+	if err := json.Unmarshal([]byte(verifyOut), &verified); err != nil {
+		t.Fatalf("decode verify json: %v\n%s", err, verifyOut)
+	}
+	if verified.Environment.Status != "verified-ready" || verified.Environment.LastVerificationRunID != "run.core-10" || verified.Environment.LastVerificationStatus != "passed" || !verified.Environment.EvidenceComplete || !verified.Environment.TopologyComplete {
+		t.Fatalf("verified PostgreSQL environment = %#v", verified.Environment)
+	}
+
+	publishOut := runCLI(t, "environment", "publish-verified", "--json", "env.team.pg")
+	var published struct {
+		Environment struct {
+			Status   string `json:"status"`
+			Verified bool   `json:"verified"`
+		} `json:"environment"`
+	}
+	if err := json.Unmarshal([]byte(publishOut), &published); err != nil {
+		t.Fatalf("decode publish json: %v\n%s", err, publishOut)
+	}
+	if published.Environment.Status != "verified" || !published.Environment.Verified {
+		t.Fatalf("published PostgreSQL environment = %#v", published.Environment)
+	}
+
+	discoverVerifiedOut := runCLI(t, "environment", "discover", "--json")
+	var discoveredVerified struct {
+		Count int `json:"count"`
+		Items []struct {
+			ID       string `json:"id"`
+			Verified bool   `json:"verified"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(discoverVerifiedOut), &discoveredVerified); err != nil {
+		t.Fatalf("decode verified discover json: %v\n%s", err, discoverVerifiedOut)
+	}
+	if discoveredVerified.Count != 1 || discoveredVerified.Items[0].ID != "env.team.pg" || !discoveredVerified.Items[0].Verified {
+		t.Fatalf("verified PostgreSQL discovery = %#v", discoveredVerified)
+	}
+
+	bootstrapOut := runCLI(t, "environment", "bootstrap", "--json", "env.team.pg")
+	var bootstrap struct {
+		Plan struct {
+			VerificationWorkflow string         `json:"verificationWorkflow"`
+			Repos                map[string]any `json:"repos"`
+			HealthChecks         []any          `json:"healthChecks"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal([]byte(bootstrapOut), &bootstrap); err != nil {
+		t.Fatalf("decode bootstrap json: %v\n%s", err, bootstrapOut)
+	}
+	if bootstrap.Plan.VerificationWorkflow != "workflow.core-10" || bootstrap.Plan.Repos["entry-gateway"] == nil || len(bootstrap.Plan.HealthChecks) != 1 {
+		t.Fatalf("PostgreSQL bootstrap plan = %#v", bootstrap.Plan)
+	}
+}
+
 func TestSandboxStartCommandRunsStartupCommandsFromStore(t *testing.T) {
 	dir := t.TempDir()
 	storePath := filepath.Join(dir, "store.sqlite")
