@@ -979,3 +979,22 @@ Incomplete work:
 - The final external proof remains a real run with PostgreSQL DSN,
   `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, a real `OTS_TRACE_GRAPHQL_URL`, and
   real 10-step `OTS_SMOKE_TRACE_IDS`.
+
+## 2026-05-20 Release-Check Doc Guardrail Scope
+
+Estimated PostgreSQL mainline progress: 99.7%.
+
+Completed evidence:
+
+- `SECURITY.md` and `CONTRIBUTING.md` now show release-check with
+  `OTSANDBOX_SMOKE_STORE_DSN=postgres://...` instead of a bare
+  `npm run release-check`.
+- Store-first guardrails now scan `SECURITY.md` and `CONTRIBUTING.md`, so those
+  entrypoint docs cannot drift back to a release-check example without a
+  PostgreSQL smoke Store DSN.
+
+Incomplete work:
+
+- Remaining proof is still the external live validation run with PostgreSQL DSN,
+  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, a real SkyWalking GraphQL endpoint,
+  and real 10-step trace ids.

@@ -6,8 +6,10 @@ cd "$ROOT_DIR"
 
 paths=(
   AGENTS.md
+  CONTRIBUTING.md
   README.md
   README.zh-CN.md
+  SECURITY.md
   cmd/otsandbox/main.go
   control-plane/frontend/src
   docs
