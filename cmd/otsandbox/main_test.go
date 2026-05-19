@@ -900,6 +900,48 @@ func TestCaseQueryCommandsAcceptStoreFlag(t *testing.T) {
 	}
 }
 
+func TestCaseReadCommandsRejectActiveSQLiteStore(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "runs",
+			args: []string{"case", "runs", "--json"},
+		},
+		{
+			name: "evidence",
+			args: []string{"case", "evidence", "--case-run", "case-run-legacy", "--json"},
+		},
+		{
+			name: "timing",
+			args: []string{"case", "timing", "--kind", "case", "--json"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(dir, "config"))
+			if err := saveStoreConfig(storeConfigFile{
+				Active: "legacy-local",
+				Stores: map[string]storeConfigEntry{
+					"legacy-local": {Name: "legacy-local", URL: "sqlite://" + filepath.Join(dir, "store.sqlite"), Backend: "sqlite"},
+				},
+			}); err != nil {
+				t.Fatalf("save store config: %v", err)
+			}
+
+			out := runCLIFails(t, tt.args...)
+			for _, want := range []string{"daily commands require PostgreSQL Store", "SQLite", "postgres://"} {
+				if !strings.Contains(out, want) {
+					t.Fatalf("%s output missing %q: %q", tt.name, want, out)
+				}
+			}
+		})
+	}
+}
+
 func TestProfileInitCommandRejectsCoreProfilesPath(t *testing.T) {
 	out := runCLIFails(t, "profile", "init", "--output", "profiles/sample")
 	if !strings.Contains(out, "outside this core repository") {

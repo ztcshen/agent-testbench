@@ -196,3 +196,23 @@ Incomplete work:
 - Workflow discover/plan/audit/report, case suite/read commands, baseline,
   template, executor, trace topology collection, and interface-node query
   families still need Store resolver audits.
+
+## 2026-05-19 Case Read Daily Gate
+
+Estimated PostgreSQL mainline progress: 84%.
+
+Completed evidence:
+
+- `case runs`, `case evidence`, and `case timing` now use the daily Store
+  resolver, so active or named SQLite Store configs are rejected before case
+  execution results, Evidence, or timing summaries are read.
+- Explicit `--store sqlite://...` compatibility coverage remains green for
+  case run, case Evidence, and case timing reads.
+- Targeted case read CLI tests passed after the resolver change.
+- The exact-word guardrail scan and `git diff --check` passed.
+
+Incomplete work:
+
+- Case discover and case suite commands still need Store resolver audits.
+- Workflow discover/plan/audit/report, baseline, template, executor, trace
+  topology collection, and interface-node query families remain to be checked.

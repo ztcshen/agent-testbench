@@ -5873,18 +5873,11 @@ func runCaseTiming(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	resolvedStoreURL, err := resolveStoreReference(*storeRef, *storeURL)
+	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
-	if resolvedStoreURL == "" {
-		return errNoActiveStoreConfigured
-	}
-	runtime, err := openStore(ctx, resolvedStoreURL)
-	if err != nil {
-		return err
-	}
-	defer runtime.Close()
+	defer cleanup()
 	payload, err := controlplane.CaseTimingPayload(ctx, runtime, *kind, *maxAgeMinutes)
 	if err != nil {
 		return err
@@ -5922,14 +5915,12 @@ func runCaseEvidence(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	resolvedStoreURL, err := resolveStoreReference(*storeRef, *storeURL)
+	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
-	if resolvedStoreURL == "" {
-		return errNoActiveStoreConfigured
-	}
-	payload, err := readCaseEvidence(ctx, resolvedStoreURL, *caseRunID, *runID, *caseID, *stepID)
+	defer cleanup()
+	payload, err := readCaseEvidence(ctx, runtime, *caseRunID, *runID, *caseID, *stepID)
 	if err != nil {
 		return err
 	}
@@ -5940,14 +5931,10 @@ func runCaseEvidence(ctx context.Context, args []string) error {
 	return nil
 }
 
-func readCaseEvidence(ctx context.Context, storeURL string, caseRunID string, runID string, caseID string, stepID string) (map[string]any, error) {
-	runtime, err := openStore(ctx, storeURL)
-	if err != nil {
-		return nil, err
-	}
-	defer runtime.Close()
+func readCaseEvidence(ctx context.Context, runtime store.Store, caseRunID string, runID string, caseID string, stepID string) (map[string]any, error) {
 	var payload map[string]any
 	var ok bool
+	var err error
 	if strings.TrimSpace(caseRunID) != "" {
 		payload, ok, err = controlplane.CaseEvidencePayloadForCaseRunID(ctx, runtime, caseRunID)
 	} else if strings.TrimSpace(runID) != "" {
@@ -6005,14 +5992,12 @@ func runCaseRuns(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	resolvedStoreURL, err := resolveStoreReference(*storeRef, *storeURL)
+	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
-	if resolvedStoreURL == "" {
-		return errNoActiveStoreConfigured
-	}
-	report, err := listCaseRunsFromStore(ctx, resolvedStoreURL, *runFilter)
+	defer cleanup()
+	report, err := listCaseRunsFromStore(ctx, runtime, *runFilter)
 	if err != nil {
 		return err
 	}
@@ -6023,12 +6008,7 @@ func runCaseRuns(ctx context.Context, args []string) error {
 	return nil
 }
 
-func listCaseRunsFromStore(ctx context.Context, storeURL string, runFilter string) (caseRunsCLIReport, error) {
-	runtime, err := openStore(ctx, storeURL)
-	if err != nil {
-		return caseRunsCLIReport{}, err
-	}
-	defer runtime.Close()
+func listCaseRunsFromStore(ctx context.Context, runtime store.Store, runFilter string) (caseRunsCLIReport, error) {
 	runs, err := runtime.ListRuns(ctx)
 	if err != nil {
 		return caseRunsCLIReport{}, err
