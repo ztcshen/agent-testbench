@@ -276,7 +276,7 @@ func catalogWorkflowsFromStore(catalog store.ProfileCatalog, byWorkflow map[stri
 			},
 			Presentation: catalogWorkflowPresentationForStore(firstNonEmpty(workflowConfig.Title, workflow.DisplayName, workflowID), steps, stringMapFromAny(workflowConfigJSON["copy"])),
 			RunCount:     state.Count,
-			LatestRun:    state.Latest,
+			LatestRun:    catalogWorkflowLatestRun(state, len(steps)),
 		})
 	}
 	return workflows
@@ -530,6 +530,7 @@ func catalogTopologyFromWorkflows(serviceIDs []string, workflows []catalogWorkfl
 type catalogWorkflowRunState struct {
 	Count  int
 	Latest map[string]any
+	Runs   []store.Run
 }
 
 func catalogWorkflowRuns(runs []store.Run) map[string]catalogWorkflowRunState {
@@ -544,9 +545,34 @@ func catalogWorkflowRuns(runs []store.Run) map[string]catalogWorkflowRunState {
 		if state.Latest == nil {
 			state.Latest = workflowRunCatalogItem(run)
 		}
+		state.Runs = append(state.Runs, run)
 		byWorkflow[run.WorkflowID] = state
 	}
 	return byWorkflow
+}
+
+func catalogWorkflowLatestRun(state catalogWorkflowRunState, expectedStepCount int) map[string]any {
+	if expectedStepCount <= 0 {
+		return state.Latest
+	}
+	for _, run := range state.Runs {
+		if workflowRunHeaderStepCount(run) >= expectedStepCount {
+			return workflowRunCatalogItem(run)
+		}
+	}
+	return state.Latest
+}
+
+func workflowRunHeaderStepCount(run store.Run) int {
+	summary, err := workflowRunSummary(run.SummaryJSON)
+	if err != nil {
+		return 0
+	}
+	if steps := mapListFromAny(summary["steps"]); len(steps) > 0 {
+		return len(steps)
+	}
+	nested := mapFromAny(summary["summary"])
+	return intFromAny(nested["stepCount"])
 }
 
 func isAPICaseRunHeader(run store.Run) bool {

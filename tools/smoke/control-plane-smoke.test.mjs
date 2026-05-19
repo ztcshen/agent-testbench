@@ -1,8 +1,12 @@
 import { spawnSync } from "node:child_process";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { writeSmokeProfile } from "./control-plane-smoke.mjs";
 
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
@@ -61,5 +65,36 @@ describe("control-plane smoke Evidence assertions", () => {
       encoding: "utf8",
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
+  });
+});
+
+describe("control-plane smoke workflow shape", () => {
+  it("models the core button workflow as ten Store-backed steps", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "ots-smoke-profile-"));
+    try {
+      const profileDir = await writeSmokeProfile(tempDir, 18080);
+      const raw = await readFile(path.join(profileDir, "profile.json"), "utf8");
+      const profile = JSON.parse(raw);
+      assert.equal(profile.workflows.length, 1);
+      assert.equal(profile.services.length, 10);
+      assert.equal(new Set(profile.services.map((item) => item.id)).size, 10);
+      assert.equal(profile.workflowBindings.length, 10);
+      assert.equal(profile.apiCases.length, 10);
+      assert.equal(profile.templateConfigs.filter((item) => item.templateId === "case-execution").length, 10);
+      assert.deepEqual(profile.workflowBindings.map((item) => item.stepId), [
+        "step-01",
+        "step-02",
+        "step-03",
+        "step-04",
+        "step-05",
+        "step-06",
+        "step-07",
+        "step-08",
+        "step-09",
+        "step-10",
+      ]);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 });

@@ -392,6 +392,23 @@ func copyWorkflowStepTraceTopologiesFromSources(ctx context.Context, runtime sto
 	}
 	stepID := strings.TrimSpace(valueString(step["stepId"]))
 	caseID := strings.TrimSpace(valueString(step["caseId"]))
+	if row, ok := workflowStepEmbeddedTraceTopology(step); ok && isSkyWalkingTraceTopology(row) {
+		copied := row
+		copied.ID = copiedWorkflowTraceTopologyID(runID, stepID, row)
+		copied.WorkflowRunID = runID
+		copied.WorkflowID = firstNonEmpty(workflowID, row.WorkflowID)
+		copied.StepID = firstNonEmpty(stepID, row.StepID)
+		copied.CaseID = firstNonEmpty(caseID, row.CaseID)
+		copied.CreatedAt = defaultValue
+		if copied.CreatedAt.IsZero() {
+			copied.CreatedAt = time.Now().UTC()
+		}
+		saved, err := runtime.SaveTraceTopology(ctx, copied)
+		if err != nil {
+			return nil, err
+		}
+		copiedRows = append(copiedRows, traceTopologyPayload(saved))
+	}
 	for _, sourceRunID := range workflowStepSourceRunIDs(step) {
 		if sourceRunID == "" || sourceRunID == runID {
 			continue
@@ -428,6 +445,35 @@ func copyWorkflowStepTraceTopologiesFromSources(ctx context.Context, runtime sto
 		}
 	}
 	return copiedRows, nil
+}
+
+func workflowStepEmbeddedTraceTopology(step map[string]any) (store.TraceTopology, bool) {
+	row := mapFromAny(step["traceTopologyRow"])
+	topology := mapFromAny(step["traceTopology"])
+	if len(row) == 0 && len(topology) == 0 {
+		return store.TraceTopology{}, false
+	}
+	topologyJSON := valueString(row["topologyJson"])
+	if topologyJSON == "" && len(topology) > 0 {
+		topologyJSON = compactJSON(topology)
+	}
+	if topologyJSON == "" {
+		topologyJSON = "{}"
+	}
+	out := store.TraceTopology{
+		ID:            valueString(row["id"]),
+		WorkflowRunID: valueString(row["workflowRunId"]),
+		WorkflowID:    valueString(row["workflowId"]),
+		StepID:        firstNonEmpty(valueString(row["stepId"]), valueString(topology["stepId"])),
+		CaseID:        firstNonEmpty(valueString(row["caseId"]), valueString(topology["caseId"])),
+		RequestID:     firstNonEmpty(valueString(row["requestId"]), valueString(topology["requestId"])),
+		TraceID:       firstNonEmpty(valueString(row["traceId"]), valueString(topology["traceId"])),
+		Status:        firstNonEmpty(valueString(row["status"]), valueString(topology["status"])),
+		TopologyJSON:  topologyJSON,
+		TextTopology:  firstNonEmpty(valueString(row["textTopology"]), valueString(topology["textTopology"])),
+		CreatedAt:     timeFromPayload(row["createdAt"]),
+	}
+	return out, true
 }
 
 func copyWorkflowStepPostProcessTasksFromSources(ctx context.Context, runtime store.Store, runID string, workflowID string, step map[string]any, defaultValue time.Time) ([]map[string]any, error) {

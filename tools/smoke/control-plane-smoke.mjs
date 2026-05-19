@@ -8,6 +8,18 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
+const coreSmokeSteps = Array.from({ length: 10 }, (_, index) => {
+  const number = String(index + 1).padStart(2, "0");
+  return {
+    id: `step-${number}`,
+    caseID: `case.step-${number}`,
+    nodeID: `node.step-${number}`,
+    serviceID: `service.step-${number}`,
+    templateID: `template.step-${number}`,
+    path: `/v1/items/step-${number}`,
+    traceID: `trace.smoke.${number}`,
+  };
+});
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { cwd: rootDir, encoding: "utf8", stdio: "pipe", ...options });
@@ -59,11 +71,13 @@ async function postJSON(url, body) {
 async function startSmokeTargetServer(port) {
   const server = createServer((request, response) => {
     if (request.url?.startsWith("/v1/items")) {
+      const pathname = new URL(request.url, `http://127.0.0.1:${port}`).pathname;
+      const step = coreSmokeSteps.find((item) => item.path === pathname);
       response.writeHead(200, {
         "content-type": "application/json",
-        "request-id": "smoke-request-1",
+        "request-id": step ? `smoke-request-${step.id}` : "smoke-request-1",
       });
-      response.end(JSON.stringify({ ok: true, id: "item-smoke-1" }));
+      response.end(JSON.stringify({ ok: true, id: step?.id || "item-smoke-1" }));
       return;
     }
     response.writeHead(404, { "content-type": "application/json" });
@@ -95,42 +109,44 @@ async function startSmokeTraceProvider(port) {
       response.end(JSON.stringify({
         data: {
           queryBasicTraces: {
-            traces: [{
-              endpointNames: ["GET:/v1/items", "/v1/items"],
+            traces: coreSmokeSteps.map((step) => ({
+              endpointNames: [`GET:${step.path}`, step.path],
               duration: 42,
               start: "2026-05-18 1200",
               isError: false,
-              traceIds: ["trace.smoke.1"],
-            }],
+              traceIds: [step.traceID],
+            })),
           },
         },
       }));
       return;
     }
     if (payload.query?.includes("queryTrace")) {
+      const traceID = payload.variables?.traceId || "trace.smoke.01";
+      const step = coreSmokeSteps.find((item) => item.traceID === traceID) || coreSmokeSteps[0];
       response.end(JSON.stringify({
         data: {
           queryTrace: {
             spans: [
               {
-                traceId: "trace.smoke.1",
+                traceId: step.traceID,
                 segmentId: "segment.entry",
                 spanId: 0,
                 parentSpanId: -1,
                 refs: [],
                 serviceCode: "service.alpha",
-                endpointName: "/v1/items",
+                endpointName: step.path,
                 type: "Entry",
                 component: "Tomcat",
               },
               {
-                traceId: "trace.smoke.1",
+                traceId: step.traceID,
                 segmentId: "segment.worker",
                 spanId: 0,
                 parentSpanId: -1,
-                refs: [{ traceId: "trace.smoke.1", parentSegmentId: "segment.entry", parentSpanId: 0, type: "CrossProcess" }],
+                refs: [{ traceId: step.traceID, parentSegmentId: "segment.entry", parentSpanId: 0, type: "CrossProcess" }],
                 serviceCode: "service.worker",
-                endpointName: "GET:/v1/items",
+                endpointName: `GET:${step.path}`,
                 type: "Entry",
                 component: "Server",
               },
@@ -154,29 +170,55 @@ async function closeHTTPServer(server) {
   await new Promise((resolve) => server.close(resolve));
 }
 
-async function writeSmokeProfile(baseDir, targetPort) {
+export async function writeSmokeProfile(baseDir, targetPort) {
   const profileDir = path.join(baseDir, "profile");
   await mkdir(profileDir, { recursive: true });
   const profile = {
     id: "smoke",
     displayName: "Smoke Profile",
     description: "Generic profile for local browser smoke checks.",
-    services: [{ id: "service.alpha", displayName: "Service Alpha", kind: "http", servicePort: targetPort }],
+    services: coreSmokeSteps.map((step, index) => ({
+      id: step.serviceID,
+      displayName: `Service ${index + 1}`,
+      kind: "http",
+      servicePort: targetPort,
+      sortOrder: index + 1,
+    })),
     workflows: [{ id: "workflow.alpha", displayName: "Workflow Alpha", description: "Checks a generic item flow." }],
-    interfaceNodes: [{ id: "node.alpha", displayName: "Node Alpha", serviceId: "service.alpha" }],
-    apiCases: [{ id: "case.alpha", displayName: "Case Alpha", nodeId: "node.alpha" }],
-    requestTemplates: [
-      {
-        id: "template.alpha",
-        displayName: "Template Alpha",
-        nodeId: "node.alpha",
-        method: "GET",
-        path: "/v1/items",
-        templateJson: JSON.stringify({ method: "GET", path: "/v1/items" }),
-      },
-    ],
-    caseDependencies: [{ id: "dependency.alpha", caseId: "case.alpha", fixtureId: "fixture.alpha", mappingsJson: "[]" }],
-    workflowBindings: [{ workflowId: "workflow.alpha", stepId: "step.alpha", nodeId: "node.alpha", caseId: "case.alpha", required: true }],
+    interfaceNodes: coreSmokeSteps.map((step, index) => ({
+      id: step.nodeID,
+      displayName: `Node ${index + 1}`,
+      serviceId: step.serviceID,
+    })),
+    apiCases: coreSmokeSteps.map((step, index) => ({
+      id: step.caseID,
+      displayName: `Case ${index + 1}`,
+      nodeId: step.nodeID,
+      sortOrder: index + 1,
+      requiredForAdmission: true,
+    })),
+    requestTemplates: coreSmokeSteps.map((step, index) => ({
+      id: step.templateID,
+      displayName: `Template ${index + 1}`,
+      nodeId: step.nodeID,
+      method: "GET",
+      path: step.path,
+      templateJson: JSON.stringify({ method: "GET", path: step.path }),
+    })),
+    caseDependencies: coreSmokeSteps.map((step) => ({
+      id: `dependency.${step.id}`,
+      caseId: step.caseID,
+      fixtureId: "fixture.alpha",
+      mappingsJson: "[]",
+    })),
+    workflowBindings: coreSmokeSteps.map((step, index) => ({
+      workflowId: "workflow.alpha",
+      stepId: step.id,
+      nodeId: step.nodeID,
+      caseId: step.caseID,
+      required: true,
+      sortOrder: index + 1,
+    })),
     fixtures: [{ id: "fixture.alpha", displayName: "Fixture Alpha", kind: "json", dataJson: "{}" }],
     templateConfigs: [
       {
@@ -186,29 +228,30 @@ async function writeSmokeProfile(baseDir, targetPort) {
         scopeId: "_default",
         configJson: JSON.stringify({
           workflowFinder: {
-            targetStepCount: 1,
-            targetInterfaceCount: 1,
+            targetStepCount: 10,
+            targetInterfaceCount: 10,
             targetLabel: "Configured workflow target",
           },
         }),
         status: "active",
       },
-      {
-        id: "cfg.case.alpha.execution",
+      ...coreSmokeSteps.map((step, index) => ({
+        id: `cfg.${step.caseID}.execution`,
         templateId: "case-execution",
         scopeType: "case",
-        scopeId: "case.alpha",
+        scopeId: step.caseID,
         configJson: JSON.stringify({
-          caseId: "case.alpha",
+          caseId: step.caseID,
           caseExecution: {
             method: "GET",
-            nodeId: "service.alpha",
-            path: "/v1/items",
+            nodeId: step.serviceID,
+            path: step.path,
             expectedHttpCodes: [200],
           },
         }),
         status: "active",
-      },
+        sortOrder: index + 1,
+      })),
     ],
   };
   await writeFile(path.join(profileDir, "profile.json"), JSON.stringify(profile, null, 2));
@@ -239,7 +282,7 @@ function requireValue(value, message) {
   return value;
 }
 
-export function assertWorkflowCaseEvidence(payload, { runID, caseID, stepID }) {
+export function assertWorkflowCaseEvidence(payload, { runID, caseID, stepID, path = "/v1/items", traceID = "trace.smoke.1" }) {
   if (!payload?.ok || !payload.evidence) {
     throw new Error(`case evidence payload is not ok: ${JSON.stringify(payload)}`);
   }
@@ -249,7 +292,7 @@ export function assertWorkflowCaseEvidence(payload, { runID, caseID, stepID }) {
     throw new Error(`unexpected case evidence summary: ${JSON.stringify(summary)}`);
   }
   const request = evidence.request || {};
-  if (request.method !== "GET" || request.path !== "/v1/items") {
+  if (request.method !== "GET" || request.path !== path) {
     throw new Error(`unexpected case evidence request: ${JSON.stringify(request)}`);
   }
   requireValue(request.evidence_uri, `request evidence missing stored URI: ${JSON.stringify(request)}`);
@@ -263,7 +306,7 @@ export function assertWorkflowCaseEvidence(payload, { runID, caseID, stepID }) {
     throw new Error(`unexpected case evidence assertions: ${JSON.stringify(assertions)}`);
   }
   const topology = evidence.topology || {};
-  if (topology.provider !== "skywalking" || topology.status !== "complete" || topology.traceId !== "trace.smoke.1" || (topology.confirmedEdges || []).length < 1) {
+  if (topology.provider !== "skywalking" || topology.status !== "complete" || topology.traceId !== traceID || (topology.confirmedEdges || []).length < 1) {
     throw new Error(`case evidence missing real SkyWalking topology: ${JSON.stringify(topology)}`);
   }
 }
@@ -338,8 +381,8 @@ async function checkWorkflowDetailRunButton(browser, baseURL) {
       throw new Error(`/workflow-detail.html did not complete after clicking run button:\n${text}\n${error.message}`);
     }
     const passedSteps = await page.locator(".workflow-progress-step.passed").count();
-    if (passedSteps !== 1) {
-      throw new Error(`/workflow-detail.html expected 1 passed workflow step, got ${passedSteps}`);
+    if (passedSteps !== coreSmokeSteps.length) {
+      throw new Error(`/workflow-detail.html expected ${coreSmokeSteps.length} passed workflow steps, got ${passedSteps}`);
     }
     const runLink = await page.locator('a[href^="/workflow-run.html?id="]').count();
     if (runLink === 0) {
@@ -352,7 +395,9 @@ async function checkWorkflowDetailRunButton(browser, baseURL) {
     const runID = new URL(href, baseURL).searchParams.get("id");
     const detail = runID ? await waitForJSON(`${baseURL}/api/workflow-runs/${encodeURIComponent(runID)}`) : {};
     const topologies = detail.traceTopologies || [];
-    if (!topologies.some((item) => item.stepId === "step.alpha" && item.provider === "skywalking")) {
+    const topologySteps = new Set(topologies.filter((item) => item.provider === "skywalking").map((item) => item.stepId));
+    const missingTopologySteps = coreSmokeSteps.filter((step) => !topologySteps.has(step.id)).map((step) => step.id);
+    if (missingTopologySteps.length > 0) {
       throw new Error(`/workflow-detail.html run did not persist SkyWalking topology: ${JSON.stringify({ runID, topologies, summary: detail.summary })}`);
     }
     return runID;
@@ -373,7 +418,8 @@ async function checkWorkflowStepSkyWalkingTopology(browser, baseURL, runID) {
   page.on("pageerror", (error) => errors.push(error.message));
 
   try {
-    const stepURL = `${baseURL}/workflow-step.html?workflow=workflow.alpha&step=step.alpha&runId=${encodeURIComponent(runID)}`;
+    const step = coreSmokeSteps[0];
+    const stepURL = `${baseURL}/workflow-step.html?workflow=workflow.alpha&step=${step.id}&runId=${encodeURIComponent(runID)}`;
     const response = await page.goto(stepURL, { waitUntil: "networkidle" });
     if (!response?.ok()) {
       throw new Error(`/workflow-step.html returned ${response?.status()}`);
@@ -381,22 +427,22 @@ async function checkWorkflowStepSkyWalkingTopology(browser, baseURL, runID) {
     await page.waitForSelector("#react-workflow-step-root");
     await page.locator(".workflow-step-topology-head", { hasText: "complete" }).waitFor({ timeout: 30000 });
     const text = await page.locator(".workflow-step-topology-graph").innerText();
-    for (const expected of ["2 nodes", "1 edges", "complete", "trace.smoke.1", "service.alpha", "service.worker"]) {
+    for (const expected of ["2 nodes", "1 edges", "complete", step.traceID, "service.alpha", "service.worker"]) {
       if (!text.includes(expected)) {
         throw new Error(`/workflow-step.html SkyWalking topology missing ${expected}:\n${text}`);
       }
     }
     const detail = await waitForJSON(`${baseURL}/api/workflow-runs/${encodeURIComponent(runID)}`);
     const topologies = detail.traceTopologies || [];
-    const topology = topologies.find((item) => item.stepId === "step.alpha" && item.provider === "skywalking");
+    const topology = topologies.find((item) => item.stepId === step.id && item.provider === "skywalking");
     if (!topology) {
       throw new Error(`/api/workflow-runs/${runID} missing stored SkyWalking topology: ${JSON.stringify(topologies)}`);
     }
     const parsed = typeof topology.topologyJson === "string" ? JSON.parse(topology.topologyJson) : topology.topologyJson;
-    if (parsed.provider !== "skywalking" || parsed.status !== "complete" || parsed.traceId !== "trace.smoke.1" || (parsed.confirmedEdges || []).length !== 1) {
+    if (parsed.provider !== "skywalking" || parsed.status !== "complete" || parsed.traceId !== step.traceID || (parsed.confirmedEdges || []).length !== 1) {
       throw new Error(`unexpected SkyWalking topology payload: ${JSON.stringify(parsed)}`);
     }
-    const tasks = await waitForJSON(`${baseURL}/api/post-process-tasks?runId=${encodeURIComponent(runID)}&stepId=step.alpha&kind=trace_topology_collect`);
+    const tasks = await waitForJSON(`${baseURL}/api/post-process-tasks?runId=${encodeURIComponent(runID)}&stepId=${step.id}&kind=trace_topology_collect`);
     if (tasks.counts?.passed !== 1 || tasks.counts?.failed !== 0 || tasks.counts?.skipped !== 0 || tasks.tasks?.[0]?.status !== "passed") {
       throw new Error(`unexpected SkyWalking post-process task status: ${JSON.stringify(tasks)}`);
     }
@@ -412,8 +458,10 @@ async function checkWorkflowRunCaseEvidence(baseURL, runID) {
   if (!runID) {
     throw new Error("workflow run button did not return a run id for evidence verification");
   }
-  const payload = await waitForJSON(`${baseURL}/api/case/evidence?runId=${encodeURIComponent(runID)}&caseId=case.alpha&stepId=step.alpha`);
-  assertWorkflowCaseEvidence(payload, { runID, caseID: "case.alpha", stepID: "step.alpha" });
+  for (const step of coreSmokeSteps) {
+    const payload = await waitForJSON(`${baseURL}/api/case/evidence?runId=${encodeURIComponent(runID)}&caseId=${encodeURIComponent(step.caseID)}&stepId=${encodeURIComponent(step.id)}`);
+    assertWorkflowCaseEvidence(payload, { runID, caseID: step.caseID, stepID: step.id, path: step.path, traceID: step.traceID });
+  }
 }
 
 async function checkEvidenceViewerTimeline(browser, baseURL) {
@@ -512,9 +560,9 @@ async function checkWorkbenchVerify(browser, baseURL, profileDir) {
     await page.getByText("workflow runs optional").waitFor();
     await page.getByLabel("要求用例已通过").check();
     await page.getByRole("button", { name: "验收并发布" }).click();
-    await page.getByText("1 failed").waitFor();
+    await page.getByText("10 failed").waitFor();
     await page.getByText("case runs required").waitFor();
-    await page.getByText("api-case-run:case.alpha", { exact: true }).waitFor();
+    await page.getByText("api-case-run:case.step-01", { exact: true }).waitFor();
     const unexpectedErrors = errors.filter((item) => !item.includes("400 (Bad Request)"));
     if (unexpectedErrors.length > 0) {
       throw new Error(`/index.html verify action browser errors:\n${unexpectedErrors.join("\n")}`);
@@ -634,12 +682,12 @@ async function main() {
     if (imported.profileId !== "smoke") throw new Error(`unexpected import payload: ${JSON.stringify(imported)}`);
 
     const index = await waitForJSON(`${baseURL}/api/template-packages/catalog-index`);
-    if (index.profileId !== "smoke" || index.counts.workflows !== 1 || index.counts.templates !== 4 || index.counts.templateConfigs !== 4) {
+    if (index.profileId !== "smoke" || index.counts.workflows !== 1 || index.counts.templates !== 22 || index.counts.templateConfigs !== 22) {
       throw new Error(`unexpected catalog index: ${JSON.stringify(index)}`);
     }
     const catalog = await waitForJSON(`${baseURL}/api/catalog`);
     const finder = catalog.presentation?.workflowFinder;
-    if (finder?.targetStepCount !== 1 || finder?.targetInterfaceCount !== 1 || finder?.targetLabel !== "Configured workflow target") {
+    if (finder?.targetStepCount !== 10 || finder?.targetInterfaceCount !== 10 || finder?.targetLabel !== "Configured workflow target") {
       throw new Error(`unexpected workflow finder config: ${JSON.stringify(catalog.presentation)}`);
     }
 
@@ -648,17 +696,17 @@ async function main() {
       const pages = [
         { path: "/index.html", root: "#react-sandbox-workbench-root", presentText: ["Configured workflow target", "MATCHING WORKFLOW", "Workflow Alpha", "安装到本地", "要求用例已通过", "要求工作流已通过", "验收并发布"], absentText: ["Agent Test Kit"], absentHrefs: ["agent-test.html"] },
         { path: "/dashboard.html", root: "#react-dashboard-root" },
-        { path: "/workflows.html", root: "#react-workflows-root", presentText: ["Configured workflow target", "WORKFLOW MAP", "STEP", "INTERFACE", "CASE", "ACTIONS", "Runs", "ready"], presentHrefs: ["/api-cases.html?workflow=workflow.alpha&case=case.alpha"] },
+        { path: "/workflows.html", root: "#react-workflows-root", presentText: ["Configured workflow target", "WORKFLOW MAP", "STEP", "INTERFACE", "CASE", "ACTIONS", "Runs", "ready"], presentHrefs: ["/api-cases.html?workflow=workflow.alpha&case=case.step-01"] },
         { path: "/workflow-detail.html?id=workflow.alpha", root: "#react-workflow-detail-root" },
         { path: "/workflow-blueprint-demo.html?workflow=workflow.alpha", root: "#react-workflow-blueprint-demo-root" },
         { path: "/workflow-blueprint-new.html", root: "#react-workflow-blueprint-demo-root" },
         { path: "/api-cases.html", root: "#react-api-cases-root", presentText: ["API Case 工作台", "Coverage matrix", "Case Management Search", "Readiness groups"] },
-        { path: "/api-cases.html?workflow=workflow.alpha", root: "#react-api-cases-root", presentText: ["WORKFLOW CASE SET", "Workflow Alpha", "1 steps", "1 interfaces", "1 cases", "Workflow case sequence", "Case Alpha", "service.alpha", "needs-review · not-run", "Runs"], presentHrefs: ["/interface-nodes.html?serviceId=service.alpha&workflow=workflow.alpha&case=case.alpha", "/case-runs.html?case=case.alpha&workflow=workflow.alpha"] },
-        { path: "/interface-nodes.html?serviceId=service.alpha&workflow=workflow.alpha&case=case.alpha", root: "#react-interface-nodes-root", presentText: ["Workflow case set", "Node Alpha", "service.alpha"], presentHrefs: ["/interface-node.html?id=node.alpha&workflow=workflow.alpha&case=case.alpha", "/api-cases.html?workflow=workflow.alpha&case=case.alpha"] },
-        { path: "/interface-node.html?id=node.alpha&workflow=workflow.alpha&case=case.alpha", root: "#react-interface-node-root", presentText: ["Workflow case set"], presentHrefs: ["/api-cases.html?workflow=workflow.alpha&case=case.alpha"] },
+        { path: "/api-cases.html?workflow=workflow.alpha", root: "#react-api-cases-root", presentText: ["WORKFLOW CASE SET", "Workflow Alpha", "10 steps", "10 interfaces", "10 cases", "Workflow case sequence", "Case 1", "service.step-01", "needs-review · not-run", "Runs"], presentHrefs: ["/interface-nodes.html?serviceId=service.step-01&workflow=workflow.alpha&case=case.step-01", "/case-runs.html?case=case.step-01&workflow=workflow.alpha"] },
+        { path: "/interface-nodes.html?serviceId=service.step-01&workflow=workflow.alpha&case=case.step-01", root: "#react-interface-nodes-root", presentText: ["Workflow case set", "Node 1", "service.step-01"], presentHrefs: ["/interface-node.html?id=node.step-01&workflow=workflow.alpha&case=case.step-01", "/api-cases.html?workflow=workflow.alpha&case=case.step-01"] },
+        { path: "/interface-node.html?id=node.step-01&workflow=workflow.alpha&case=case.step-01", root: "#react-interface-node-root", presentText: ["Workflow case set"], presentHrefs: ["/api-cases.html?workflow=workflow.alpha&case=case.step-01"] },
         { path: "/case-runs.html", root: "#react-case-runs-root", presentText: ["Run Analysis Center", "Case run report workbench", "Failure triage", "Report Grid"] },
-        { path: "/case-runs.html?case=case.alpha", root: "#react-case-runs-root", presentText: ["Run Analysis Center", "case: case.alpha", "CASE EXECUTION SUMMARY", "0 runs", "Report Grid"] },
-        { path: "/case-runs.html?workflow=workflow.alpha&case=case.alpha", root: "#react-case-runs-root", presentText: ["Run Analysis Center", "WORKFLOW CONTEXT", "workflow.alpha", "Workflow case set", "case: case.alpha", "CASE EXECUTION SUMMARY"], presentHrefs: ["/api-cases.html?workflow=workflow.alpha&case=case.alpha"] },
+        { path: "/case-runs.html?case=case.step-01", root: "#react-case-runs-root", presentText: ["Run Analysis Center", "case: case.step-01", "CASE EXECUTION SUMMARY", "0 runs", "Report Grid"] },
+        { path: "/case-runs.html?workflow=workflow.alpha&case=case.step-01", root: "#react-case-runs-root", presentText: ["Run Analysis Center", "WORKFLOW CONTEXT", "workflow.alpha", "Workflow case set", "case: case.step-01", "CASE EXECUTION SUMMARY"], presentHrefs: ["/api-cases.html?workflow=workflow.alpha&case=case.step-01"] },
         { path: "/interface-nodes.html", root: "#react-interface-nodes-root" },
       ];
       for (const page of pages) {

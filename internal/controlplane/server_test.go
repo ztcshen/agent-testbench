@@ -2675,6 +2675,73 @@ func TestServerExposesCatalogWorkflowRunsFromStore(t *testing.T) {
 	}
 }
 
+func TestServerCatalogWorkflowLatestRunPrefersCompleteWorkflowRun(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	workflow := store.CatalogWorkflow{ID: "workflow.alpha", DisplayName: "Workflow Alpha"}
+	bindings := make([]store.CatalogWorkflowBinding, 0, 10)
+	for i := 1; i <= 10; i++ {
+		stepID := fmt.Sprintf("step.%02d", i)
+		bindings = append(bindings, store.CatalogWorkflowBinding{
+			WorkflowID: workflow.ID,
+			StepID:     stepID,
+			CaseID:     "case." + stepID,
+			NodeID:     "node." + stepID,
+			Required:   true,
+			SortOrder:  i,
+		})
+	}
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID:        "sample",
+		Workflows:        []store.CatalogWorkflow{workflow},
+		WorkflowBindings: bindings,
+	}); err != nil {
+		t.Fatalf("replace profile catalog: %v", err)
+	}
+	started := time.Date(2026, 5, 19, 9, 0, 0, 0, time.UTC)
+	for _, item := range []store.Run{
+		{
+			ID:          "run.complete",
+			ProfileID:   "sample",
+			WorkflowID:  workflow.ID,
+			Status:      store.StatusPassed,
+			SummaryJSON: `{"summary":{"expectedStepCount":10,"stepCount":10,"passed":10},"steps":[{},{},{},{},{},{},{},{},{},{}]}`,
+			CreatedAt:   started,
+			UpdatedAt:   started,
+		},
+		{
+			ID:          "run.partial",
+			ProfileID:   "sample",
+			WorkflowID:  workflow.ID,
+			Status:      store.StatusFailed,
+			SummaryJSON: `{"summary":{"expectedStepCount":10,"stepCount":7,"passed":6},"steps":[{},{},{},{},{},{},{}]}`,
+			CreatedAt:   started.Add(time.Minute),
+			UpdatedAt:   started.Add(time.Minute),
+		},
+	} {
+		if _, err := s.CreateRun(ctx, item); err != nil {
+			t.Fatalf("create run %s: %v", item.ID, err)
+		}
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample"}, s))
+	defer server.Close()
+
+	payload := decodeJSONResponse(t, server.URL+"/api/catalog", http.StatusOK)
+	workflows := payload["workflows"].([]any)
+	alpha := workflows[0].(map[string]any)
+	if alpha["runCount"] != float64(2) {
+		t.Fatalf("workflow run count = %#v", alpha)
+	}
+	latest := alpha["latestRun"].(map[string]any)
+	if latest["id"] != "run.complete" || latest["status"] != store.StatusPassed || latest["stepCount"] != float64(10) {
+		t.Fatalf("catalog should expose latest complete workflow run: %#v", latest)
+	}
+}
+
 func TestServerExposesDashboardSnapshotForReactShell(t *testing.T) {
 	bundle := profile.Bundle{
 		ID:          "sample",
