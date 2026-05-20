@@ -46,11 +46,17 @@ automatically.
 ./bin/otsandbox.sh store use local-personal
 ./bin/otsandbox.sh store status --store local-personal
 ./bin/otsandbox.sh store upgrade --store local-personal
+./bin/otsandbox.sh store ddl --backend postgres > otsandbox-schema.sql
 ```
 
 Use a private PostgreSQL database for unverified local work and a separate
 shared database for verified team environments. SQLite is kept only for legacy
 compatibility while PostgreSQL rollout continues.
+The Open Test Sandbox Store is the control-plane database and should already
+exist outside any Docker environment restored for a tested target. Do not point
+the Store DSN at a Docker database that `environment restore` is responsible
+for starting; business databases used by the tested services belong to the
+target environment, while the sandbox Store remains independent.
 
 Daily discovery commands do not change when you switch between a local
 PostgreSQL Store and a remote team PostgreSQL Store. Use `store use NAME` to
@@ -73,6 +79,7 @@ publishing it to the verified discovery list:
 ./bin/otsandbox.sh environment discover --store local-personal
 ./bin/otsandbox.sh environment inspect --store local-personal local-sample
 ./bin/otsandbox.sh environment bootstrap --store local-personal local-sample
+./bin/otsandbox.sh environment restore --store local-personal local-sample --workspace "$HOME/open-test-runtime" --json
 ./bin/otsandbox.sh environment verify --store local-personal local-sample --run RUN_ID --status passed --evidence-complete --topology-complete
 ./bin/otsandbox.sh environment publish-verified --store local-personal local-sample
 ```
@@ -85,6 +92,18 @@ the passed run, indexed Evidence, and complete SkyWalking topology before
 promotion. The `--topology-complete` flag is only a recorded completeness
 signal; collect real topology separately through a configured SkyWalking
 endpoint before publishing a verified environment.
+
+`environment restore` is anchored to the environment's verification workflow,
+for example the team core 10-step workflow. It prepares the local machine from
+the Store-backed environment facts instead of acting as a generic Docker
+launcher. By default it is a dry run: it resolves optional repository checkouts
+under `--workspace`, shows Git clone commands when repos are recorded, and
+prints the Docker Compose pull/build/up plan plus recorded health checks. Add
+`--execute` to clone missing remote repositories, run Docker Compose, and wait
+for recorded health checks. Add `--pull` with `--execute` to update existing
+checkouts using `git pull --ff-only`. The final workflow run remains anchored
+to the recorded verification workflow, so a restored environment is validated
+against the same workflow that qualified it.
 
 ## Create and Install a Import Bundle
 

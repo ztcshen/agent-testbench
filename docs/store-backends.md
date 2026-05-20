@@ -60,6 +60,12 @@ Display commands, including JSON output, mask passwords in PostgreSQL DSNs.
 The on-disk Store config keeps the real DSN so CLI commands can still open the
 selected database.
 
+Keep the sandbox control-plane Store outside restored Docker environments. The
+Store may describe and verify a target environment, but it must not be hosted
+by that same target environment; otherwise restore would depend on the database
+it is trying to discover. Target application databases used by tested services
+are separate Docker-managed runtime dependencies.
+
 Commands may also use `--store NAME_OR_DSN` for a one-off override. Daily
 CLI/API commands read and write the active Store unless that explicit override
 is present. Legacy `--store-url` remains accepted during migration and import

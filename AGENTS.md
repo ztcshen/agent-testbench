@@ -14,6 +14,11 @@ API-operated, Store-first, and local-first.
 - PostgreSQL Store is the active source of truth for current sandbox configuration,
   runtime facts, workflow catalog, execution state, Evidence indexes, and
   verification results.
+- The sandbox's own PostgreSQL Store/control-plane database must be provisioned
+  outside any Docker environment restored for a tested target, and must remain
+  separate from target application databases. Environment restore may start
+  tested services and their business databases, but it must not start or host
+  the sandbox Store itself.
 - Environment Catalog entries must be Store-first. Test engineers register,
   discover, inspect, bootstrap, verify, and publish verified environments through
   CLI/API/UI surfaces backed by the active Store or an explicit `--store

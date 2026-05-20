@@ -23,8 +23,12 @@ Verification baseline: this page was checked against `cmd/otsandbox/main.go`,
   Store named by `--store NAME_OR_DSN` for a single command. SQLite paths are
   limited to legacy, compatibility, and import-test work.
 - Environment Catalog operations are Store-first: register, discover, inspect,
-  bootstrap, verify, and publish-verified must share the selected Store contract
-  across CLI, API, and UI.
+  bootstrap, restore, verify, and publish-verified must share the selected
+  Store contract across CLI, API, and UI.
+- The sandbox control-plane Store is outside restored Docker target
+  environments. Restore may start tested services and their business databases,
+  but the PostgreSQL Store used to read the Environment Catalog must already be
+  reachable and must remain separate.
 - Verified environment discovery is gated by a passed verification workflow plus
   complete Evidence indexes and stored real SkyWalking topology.
 - Docker runtime management is local-only for now. The parity target is local
@@ -44,8 +48,8 @@ Verification baseline: this page was checked against `cmd/otsandbox/main.go`,
 | Area | CLI commands |
 | --- | --- |
 | General | `version`, `help` |
-| Store | `store config set/list/remove`, `store use`, `store current`, `store status`, `store upgrade` |
-| Environment catalog | `environment register`, `environment discover`, `environment inspect`, `environment bootstrap`, `environment verify`, `environment publish-verified` |
+| Store | `store config set/list/remove`, `store use`, `store current`, `store status`, `store upgrade`, `store ddl` |
+| Environment catalog | `environment register`, `environment discover`, `environment inspect`, `environment bootstrap`, `environment restore`, `environment verify`, `environment publish-verified` |
 | Sandbox runtime | `sandbox start`, `sandbox service register`, `sandbox interface register` |
 | Template package lifecycle | `template-package ...` / `template-packages ...` aliases for `profile init`, `profile install`, `profile pack`, `profile list`, `profile inspect`, `profile audit`, `profile audit-plan`, `profile verify`, `profile import` |
 | Template package generation/import planning | `template-package generation-plan openapi`, `template-package import-plan openapi`, `template-package import-plan http-capture` aliases for the legacy `profile ...` commands |
@@ -155,8 +159,8 @@ reference is needed for inspect, pack, audit, audit-plan, and verify. Legacy
 | Serve control plane | `serve` | Not applicable | CLI-only bootstrap. |
 | Version/help | `version`, `help` | None | CLI-only. |
 | Store selection visibility | `store current` | `/api/store/current` | Paired as read-only visibility. CLI reports the active named Store; API reports the Store selected when `serve` started. Neither surface exposes raw DSN passwords. |
-| Store status and schema upgrade | `store status`, `store upgrade` | None | CLI-only. |
-| Environment catalog lifecycle | `environment register`, `environment discover`, `environment inspect`, `environment bootstrap`, `environment verify`, `environment publish-verified` | `/api/environments`, `/api/environments/{environmentId}`, `GET /api/environments/{environmentId}/bootstrap`, `/api/environments/{environmentId}/verify`, `/api/environments/{environmentId}/publish-verified` | Paired. CLI and API use the active Store or `--store NAME_OR_DSN`; `verify` records run status and completeness flags, while `publish-verified` inspects the selected Store for a passed run, indexed Evidence, and complete SkyWalking topology before verified discovery. |
+| Store status, schema upgrade, and DDL | `store status`, `store upgrade`, `store ddl` | None | CLI-only. `store ddl --backend postgres` prints the PostgreSQL Store schema for externally provisioned control-plane databases. |
+| Environment catalog lifecycle | `environment register`, `environment discover`, `environment inspect`, `environment bootstrap`, `environment restore`, `environment verify`, `environment publish-verified` | `/api/environments`, `/api/environments/{environmentId}`, `GET /api/environments/{environmentId}/bootstrap`, `/api/environments/{environmentId}/verify`, `/api/environments/{environmentId}/publish-verified` | Mostly paired. CLI and API use the active Store or `--store NAME_OR_DSN`; `restore` is currently CLI-only local machine preparation anchored to the environment verification workflow. It dry-runs by default, can clone remote repos into a workspace with `--execute`, runs the recorded Docker Compose pull/build/up plan, and waits for recorded health checks. `verify` records run status and completeness flags, while `publish-verified` inspects the selected Store for a passed run, indexed Evidence, and complete SkyWalking topology before verified discovery. |
 | Start registered sandbox service | `sandbox start` | None | CLI-only local execution. CLI accepts active Store or `--store NAME_OR_DSN`; local and remote PostgreSQL Stores use the same command. |
 | Register sandbox service/interface in Store | `sandbox service register`, `sandbox interface register` | `/api/sandbox/services`, `/api/sandbox/interfaces` | Paired. CLI and API share the same Store catalog registration path; CLI accepts active Store or `--store NAME_OR_DSN`. |
 | Template package install/list | `template-package install`, `template-package list` (`profile ...` legacy alias) | `/api/template-packages/install`, `/api/template-packages/installed` | Mostly paired through Store-first aliases; legacy `/api/profile/*` routes remain. |

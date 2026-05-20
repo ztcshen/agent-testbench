@@ -36,6 +36,7 @@ import (
 	storeopen "open-test-sandbox/internal/store/open"
 	"open-test-sandbox/internal/store/postgres"
 	"open-test-sandbox/internal/store/sqlite"
+	"open-test-sandbox/internal/store/sqlstore"
 	"open-test-sandbox/internal/workflowaudit"
 )
 
@@ -243,10 +244,12 @@ Usage:
   otsandbox store current [--json]
   otsandbox store status [--store NAME_OR_DSN]
   otsandbox store upgrade [--store NAME_OR_DSN]
+  otsandbox store ddl [--backend postgres]
   otsandbox environment register --id ID [--store NAME_OR_DSN] [--display-name NAME] [--service ID] [--repo SERVICE=PATH] [--branch SERVICE=BRANCH] [--checkout SERVICE=PATH] [--compose-file PATH] [--start-command TEXT] [--health-url URL] [--verification-workflow ID] [--json]
   otsandbox environment discover [--store NAME_OR_DSN] [--all] [--json]
   otsandbox environment inspect ENV_ID [--store NAME_OR_DSN] [--json]
   otsandbox environment bootstrap ENV_ID [--store NAME_OR_DSN] [--json]
+  otsandbox environment restore ENV_ID --workspace PATH [--store NAME_OR_DSN] [--execute] [--pull] [--health-timeout-seconds N] [--json]
   otsandbox environment verify ENV_ID --run ID --status STATUS [--evidence-complete] [--topology-complete] [--store NAME_OR_DSN] [--json]
   otsandbox environment publish-verified ENV_ID [--store NAME_OR_DSN] [--json]
   otsandbox sandbox start [--store NAME_OR_DSN] [--service ID] [--kind KIND] [--timeout-seconds N] [--json]
@@ -335,6 +338,8 @@ func runStore(ctx context.Context, args []string) error {
 		return runStoreUse(args[1:])
 	case "current":
 		return runStoreCurrent(args[1:])
+	case "ddl":
+		return runStoreDDL(args[1:])
 	}
 
 	flags := flag.NewFlagSet("store "+args[0], flag.ContinueOnError)
@@ -402,6 +407,22 @@ func runStore(ctx context.Context, args []string) error {
 	return nil
 }
 
+func runStoreDDL(args []string) error {
+	flags := flag.NewFlagSet("store ddl", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	backend := flags.String("backend", "postgres", "Store backend")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	switch strings.ToLower(strings.TrimSpace(*backend)) {
+	case "postgres", "postgresql":
+		fmt.Println(strings.Join(sqlstore.CoreSchemaSQL(sqlstore.PostgresDialect{}), "\n\n"))
+		return nil
+	default:
+		return fmt.Errorf("unsupported DDL backend %q; supported backend: postgres", *backend)
+	}
+}
+
 func runEnvironment(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("missing environment command")
@@ -415,6 +436,8 @@ func runEnvironment(ctx context.Context, args []string) error {
 		return runEnvironmentInspect(ctx, args[1:])
 	case "bootstrap":
 		return runEnvironmentBootstrap(ctx, args[1:])
+	case "restore":
+		return runEnvironmentRestore(ctx, args[1:])
 	case "verify":
 		return runEnvironmentVerify(ctx, args[1:])
 	case "publish-verified":
@@ -564,6 +587,473 @@ func runEnvironmentBootstrap(ctx context.Context, args []string) error {
 	fmt.Printf("Repos: %s\n", env.ReposJSON)
 	fmt.Printf("Compose: %s\n", env.ComposeJSON)
 	return nil
+}
+
+type environmentRestoreReport struct {
+	OK                   bool                           `json:"ok"`
+	Executed             bool                           `json:"executed"`
+	EnvironmentID        string                         `json:"environmentId"`
+	VerificationWorkflow string                         `json:"verificationWorkflow"`
+	Workspace            string                         `json:"workspace"`
+	Repos                []environmentRestoreRepoReport `json:"repos"`
+	Compose              map[string]any                 `json:"compose"`
+	HealthChecks         []any                          `json:"healthChecks"`
+	Docker               environmentRestoreDockerReport `json:"docker"`
+	NextActions          []string                       `json:"nextActions"`
+}
+
+type environmentRestoreRepoReport struct {
+	ServiceID string   `json:"serviceId"`
+	URL       string   `json:"url,omitempty"`
+	Branch    string   `json:"branch,omitempty"`
+	Checkout  string   `json:"checkout"`
+	Exists    bool     `json:"exists"`
+	Action    string   `json:"action"`
+	Command   []string `json:"command,omitempty"`
+	OK        bool     `json:"ok"`
+	Output    string   `json:"output,omitempty"`
+	Error     string   `json:"error,omitempty"`
+}
+
+type environmentRestoreRepoSpec struct {
+	ServiceID string
+	URL       string
+	Branch    string
+	Checkout  string
+}
+
+type environmentRestoreDockerReport struct {
+	OK           bool                                  `json:"ok"`
+	Action       string                                `json:"action"`
+	ComposeFile  string                                `json:"composeFile,omitempty"`
+	Workdir      string                                `json:"workdir,omitempty"`
+	Commands     [][]string                            `json:"commands,omitempty"`
+	Output       []string                              `json:"output,omitempty"`
+	Error        string                                `json:"error,omitempty"`
+	HealthChecks []environmentRestoreHealthCheckReport `json:"healthChecks,omitempty"`
+}
+
+type environmentRestoreHealthCheckReport struct {
+	ID         string `json:"id,omitempty"`
+	URL        string `json:"url"`
+	OK         bool   `json:"ok"`
+	StatusCode int    `json:"statusCode,omitempty"`
+	Error      string `json:"error,omitempty"`
+}
+
+func runEnvironmentRestore(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("environment restore", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
+	workspace := flags.String("workspace", "", "Local workspace for cloned or existing service checkouts")
+	execute := flags.Bool("execute", false, "Clone or update service repositories, run Docker Compose, and wait for health checks")
+	pull := flags.Bool("pull", false, "Run git pull --ff-only for existing checkouts when --execute is set")
+	healthTimeoutSeconds := flags.Int("health-timeout-seconds", 60, "Seconds to wait for recorded Docker service health checks")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	id := strings.TrimSpace(flags.Arg(0))
+	if id == "" {
+		return errors.New("environment id is required")
+	}
+	if strings.TrimSpace(*workspace) == "" {
+		return errors.New("--workspace is required")
+	}
+	if *healthTimeoutSeconds <= 0 {
+		return errors.New("--health-timeout-seconds must be positive")
+	}
+	env, err := loadEnvironmentForCLI(ctx, *storeRef, *storeURL, id)
+	if err != nil {
+		return err
+	}
+	report, err := buildEnvironmentRestoreReport(ctx, env, *workspace, *execute, *pull, time.Duration(*healthTimeoutSeconds)*time.Second)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		if encodeErr := writeIndentedJSON(report); encodeErr != nil {
+			return encodeErr
+		}
+	} else {
+		printEnvironmentRestoreReport(report)
+	}
+	if !report.OK {
+		return errors.New("environment restore did not complete")
+	}
+	return nil
+}
+
+func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, workspace string, execute bool, pull bool, healthTimeout time.Duration) (environmentRestoreReport, error) {
+	workflowID := strings.TrimSpace(env.VerificationWorkflowID)
+	if workflowID == "" {
+		return environmentRestoreReport{}, fmt.Errorf("environment %s has no verification workflow; restore must be anchored to a verified workflow", env.ID)
+	}
+	workspace, err := filepath.Abs(strings.TrimSpace(workspace))
+	if err != nil {
+		return environmentRestoreReport{}, err
+	}
+	specs := environmentRestoreRepoSpecs(env, workspace)
+	compose := jsonObjectString(env.ComposeJSON)
+	healthChecks := jsonArrayString(env.HealthChecksJSON)
+	report := environmentRestoreReport{
+		OK:                   true,
+		Executed:             execute,
+		EnvironmentID:        env.ID,
+		VerificationWorkflow: workflowID,
+		Workspace:            workspace,
+		Compose:              compose,
+		HealthChecks:         healthChecks,
+		NextActions: []string{
+			"run verification workflow " + workflowID,
+		},
+	}
+	for _, spec := range specs {
+		item := environmentRestoreRepo(ctx, spec, execute, pull)
+		if !item.OK {
+			report.OK = false
+		}
+		report.Repos = append(report.Repos, item)
+	}
+	if report.OK {
+		report.Docker = environmentRestoreDocker(ctx, compose, healthChecks, workspace, execute, healthTimeout)
+		if !report.Docker.OK {
+			report.OK = false
+		}
+	} else {
+		report.Docker = environmentRestoreDockerReport{
+			OK:      false,
+			Action:  "skipped-due-to-repository-error",
+			Workdir: workspace,
+			Error:   "repository preparation did not complete",
+		}
+	}
+	if !execute {
+		report.NextActions = append([]string{"review the Docker Compose plan, then rerun with --execute"}, report.NextActions...)
+	}
+	return report, nil
+}
+
+func environmentRestoreRepoSpecs(env store.Environment, workspace string) []environmentRestoreRepoSpec {
+	repoMap := jsonObjectString(env.ReposJSON)
+	services := jsonArrayString(env.ServicesJSON)
+	specByID := map[string]environmentRestoreRepoSpec{}
+	for id, raw := range repoMap {
+		spec := environmentRestoreRepoSpec{ServiceID: strings.TrimSpace(id)}
+		if item, ok := raw.(map[string]any); ok {
+			spec.URL = strings.TrimSpace(valueString(item["url"]))
+			spec.Branch = strings.TrimSpace(valueString(item["branch"]))
+			spec.Checkout = strings.TrimSpace(valueString(item["checkout"]))
+		}
+		if spec.ServiceID != "" {
+			specByID[spec.ServiceID] = spec
+		}
+	}
+	for _, raw := range services {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		id := strings.TrimSpace(valueString(item["id"]))
+		if id == "" {
+			continue
+		}
+		spec := specByID[id]
+		spec.ServiceID = id
+		if value := strings.TrimSpace(valueString(item["repo"])); value != "" {
+			spec.URL = value
+		}
+		if value := strings.TrimSpace(valueString(item["branch"])); value != "" {
+			spec.Branch = value
+		}
+		if value := strings.TrimSpace(valueString(item["checkout"])); value != "" {
+			spec.Checkout = value
+		}
+		specByID[id] = spec
+	}
+	ids := make([]string, 0, len(specByID))
+	for id := range specByID {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	out := make([]environmentRestoreRepoSpec, 0, len(ids))
+	for _, id := range ids {
+		spec := specByID[id]
+		if spec.Checkout == "" {
+			spec.Checkout = filepath.Join(workspace, safeCheckoutDirName(id))
+		} else if !filepath.IsAbs(spec.Checkout) {
+			spec.Checkout = filepath.Join(workspace, spec.Checkout)
+		}
+		out = append(out, spec)
+	}
+	return out
+}
+
+func environmentRestoreRepo(ctx context.Context, spec environmentRestoreRepoSpec, execute bool, pull bool) environmentRestoreRepoReport {
+	report := environmentRestoreRepoReport{
+		ServiceID: spec.ServiceID,
+		URL:       spec.URL,
+		Branch:    spec.Branch,
+		Checkout:  spec.Checkout,
+		OK:        true,
+	}
+	if strings.TrimSpace(spec.URL) == "" {
+		report.OK = false
+		report.Action = "missing-repo-url"
+		report.Error = "repository url is required for restore"
+		return report
+	}
+	if stat, err := os.Stat(spec.Checkout); err == nil && stat.IsDir() {
+		report.Exists = true
+		if !execute || !pull {
+			report.Action = "use-existing-checkout"
+			return report
+		}
+		args := []string{"-C", spec.Checkout, "pull", "--ff-only"}
+		report.Action = "pull-existing-checkout"
+		report.Command = append([]string{"git"}, args...)
+		report.Output, report.Error = runRestoreGitCommand(ctx, args...)
+		report.OK = report.Error == ""
+		return report
+	}
+	if !execute {
+		report.Action = "clone"
+		args := restoreGitCloneArgs(spec)
+		report.Command = append([]string{"git"}, args...)
+		return report
+	}
+	if err := os.MkdirAll(filepath.Dir(spec.Checkout), 0o755); err != nil {
+		report.OK = false
+		report.Action = "prepare-checkout-parent"
+		report.Error = err.Error()
+		return report
+	}
+	args := restoreGitCloneArgs(spec)
+	report.Action = "clone"
+	report.Command = append([]string{"git"}, args...)
+	report.Output, report.Error = runRestoreGitCommand(ctx, args...)
+	report.OK = report.Error == ""
+	return report
+}
+
+func environmentRestoreDocker(ctx context.Context, compose map[string]any, healthChecks []any, workspace string, execute bool, healthTimeout time.Duration) environmentRestoreDockerReport {
+	report := environmentRestoreDockerReport{
+		OK:      true,
+		Workdir: workspace,
+	}
+	composeFile := strings.TrimSpace(valueString(compose["composeFile"]))
+	startCommand := strings.TrimSpace(valueString(compose["startCommand"]))
+	switch {
+	case composeFile != "":
+		report.Action = "plan-docker-compose"
+		report.ComposeFile = restoreWorkspacePath(workspace, composeFile)
+		report.Commands = [][]string{
+			{"docker", "compose", "-f", report.ComposeFile, "pull"},
+			{"docker", "compose", "-f", report.ComposeFile, "build"},
+			{"docker", "compose", "-f", report.ComposeFile, "up", "-d"},
+		}
+	case startCommand != "":
+		report.Action = "plan-start-command"
+		report.Commands = [][]string{{"/bin/sh", "-c", startCommand}}
+	default:
+		report.OK = false
+		report.Action = "missing-docker-plan"
+		report.Error = "composeFile or startCommand is required to restore Docker services"
+		return report
+	}
+	if !execute {
+		return report
+	}
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		report.OK = false
+		report.Action = "prepare-workspace"
+		report.Error = err.Error()
+		return report
+	}
+	if report.Action == "plan-docker-compose" {
+		report.Action = "run-docker-compose"
+	} else {
+		report.Action = "run-start-command"
+	}
+	for _, command := range report.Commands {
+		output, errText := runRestoreCommand(ctx, workspace, command)
+		if strings.TrimSpace(output) != "" {
+			report.Output = append(report.Output, output)
+		}
+		if errText != "" {
+			report.OK = false
+			report.Error = errText
+			return report
+		}
+	}
+	report.HealthChecks = waitEnvironmentRestoreHealthChecks(ctx, healthChecks, healthTimeout)
+	for _, check := range report.HealthChecks {
+		if !check.OK {
+			report.OK = false
+		}
+	}
+	return report
+}
+
+func restoreGitCloneArgs(spec environmentRestoreRepoSpec) []string {
+	args := []string{"clone"}
+	if strings.TrimSpace(spec.Branch) != "" {
+		args = append(args, "--branch", strings.TrimSpace(spec.Branch))
+	}
+	args = append(args, strings.TrimSpace(spec.URL), strings.TrimSpace(spec.Checkout))
+	return args
+}
+
+func restoreWorkspacePath(workspace string, value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || filepath.IsAbs(value) {
+		return value
+	}
+	return filepath.Join(workspace, value)
+}
+
+func runRestoreGitCommand(ctx context.Context, args ...string) (string, string) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	out, err := cmd.CombinedOutput()
+	output := strings.TrimSpace(string(out))
+	if err != nil {
+		return output, err.Error()
+	}
+	return output, ""
+}
+
+func runRestoreCommand(ctx context.Context, workdir string, command []string) (string, string) {
+	if len(command) == 0 {
+		return "", "empty restore command"
+	}
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
+	cmd.Dir = workdir
+	out, err := cmd.CombinedOutput()
+	output := strings.TrimSpace(string(out))
+	if err != nil {
+		if output != "" {
+			return output, err.Error() + ": " + output
+		}
+		return output, err.Error()
+	}
+	return output, ""
+}
+
+func waitEnvironmentRestoreHealthChecks(ctx context.Context, checks []any, timeout time.Duration) []environmentRestoreHealthCheckReport {
+	out := make([]environmentRestoreHealthCheckReport, 0, len(checks))
+	for _, raw := range checks {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		url := strings.TrimSpace(valueString(item["url"]))
+		if url == "" {
+			continue
+		}
+		out = append(out, waitEnvironmentRestoreHealthCheck(ctx, environmentRestoreHealthCheckReport{
+			ID:  strings.TrimSpace(valueString(item["id"])),
+			URL: url,
+		}, timeout))
+	}
+	return out
+}
+
+func waitEnvironmentRestoreHealthCheck(ctx context.Context, check environmentRestoreHealthCheckReport, timeout time.Duration) environmentRestoreHealthCheckReport {
+	client := &http.Client{Timeout: 2 * time.Second}
+	deadline := time.Now().Add(timeout)
+	var lastErr string
+	for {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, check.URL, nil)
+		if err != nil {
+			check.Error = err.Error()
+			return check
+		}
+		resp, err := client.Do(req)
+		if err == nil {
+			check.StatusCode = resp.StatusCode
+			_ = resp.Body.Close()
+			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+				check.OK = true
+				check.Error = ""
+				return check
+			}
+			lastErr = fmt.Sprintf("health check returned HTTP %d", resp.StatusCode)
+		} else {
+			lastErr = err.Error()
+		}
+		if time.Now().After(deadline) {
+			check.Error = lastErr
+			return check
+		}
+		select {
+		case <-ctx.Done():
+			check.Error = ctx.Err().Error()
+			return check
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+}
+
+func safeCheckoutDirName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "service"
+	}
+	replacer := strings.NewReplacer("/", "-", "\\", "-", ":", "-", " ", "-")
+	return replacer.Replace(value)
+}
+
+func printEnvironmentRestoreReport(report environmentRestoreReport) {
+	fmt.Printf("Environment Restore: %s\n", report.EnvironmentID)
+	fmt.Printf("OK: %t\n", report.OK)
+	fmt.Printf("Executed: %t\n", report.Executed)
+	fmt.Printf("Workspace: %s\n", report.Workspace)
+	fmt.Printf("Verification Workflow: %s\n", report.VerificationWorkflow)
+	for _, repo := range report.Repos {
+		state := repo.Action
+		if !repo.OK {
+			state = "failed"
+		}
+		fmt.Printf("- %s [%s]\n", repo.ServiceID, state)
+		fmt.Printf("  checkout: %s\n", repo.Checkout)
+		if repo.URL != "" {
+			fmt.Printf("  repo: %s\n", repo.URL)
+		}
+		if repo.Branch != "" {
+			fmt.Printf("  branch: %s\n", repo.Branch)
+		}
+		if repo.Error != "" {
+			fmt.Printf("  error: %s\n", repo.Error)
+		}
+	}
+	dockerState := report.Docker.Action
+	if !report.Docker.OK {
+		dockerState = "failed"
+	}
+	fmt.Printf("Docker: %s\n", dockerState)
+	if report.Docker.ComposeFile != "" {
+		fmt.Printf("  compose: %s\n", report.Docker.ComposeFile)
+	}
+	for _, command := range report.Docker.Commands {
+		fmt.Printf("  command: %s\n", strings.Join(command, " "))
+	}
+	for _, check := range report.Docker.HealthChecks {
+		state := "failed"
+		if check.OK {
+			state = "ok"
+		}
+		fmt.Printf("  health: %s [%s]\n", check.URL, state)
+		if check.Error != "" {
+			fmt.Printf("    error: %s\n", check.Error)
+		}
+	}
+	if report.Docker.Error != "" {
+		fmt.Printf("  error: %s\n", report.Docker.Error)
+	}
+	for _, action := range report.NextActions {
+		fmt.Printf("Next: %s\n", action)
+	}
 }
 
 func runEnvironmentVerify(ctx context.Context, args []string) error {
