@@ -638,6 +638,34 @@ Current blocker:
 - Daily CLI/API named active Store parity still has deeper DSN-gated coverage
   to add beyond Store guidance.
 
+## 2026-05-21 Control Plane Smoke Shared Store Env Guidance Slice
+
+Progress: `[###################-] 97%`
+
+Implemented:
+
+- Updated `tools/smoke/control-plane-smoke.mjs` Store-selection errors to list
+  both supported smoke Store env names: `OTSANDBOX_SMOKE_STORE_DSN` and
+  `OTSANDBOX_SMOKE_STORE`.
+- Added focused regression expectations so missing and non-SQL smoke Store
+  inputs both keep the shared Store env visible in browser/control-plane smoke
+  guidance.
+- Kept the actual smoke Store selection unchanged: PostgreSQL and MySQL DSNs can
+  still come from either env, and SQLite remains behind explicit compatibility
+  mode only.
+
+Validated:
+
+- `node --test tools/smoke/control-plane-smoke.test.mjs`
+- `node --check tools/smoke/control-plane-smoke.mjs`
+
+Current blocker:
+
+- Final completion still requires a real dedicated company MySQL Store DSN for
+  `npm run release-check:mysql-real`.
+- Daily CLI/API named active Store parity still has deeper DSN-gated coverage
+  to add beyond Store guidance.
+
 ## 2026-05-21 Release Gate Shared Store Env Guidance Slice
 
 Progress: `[###################-] 97%`

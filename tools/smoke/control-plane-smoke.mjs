@@ -324,11 +324,11 @@ export async function prepareSmokeStoreReference(tempDir, env = process.env, run
       }
       return { storeRef: `sqlite://${path.join(tempDir, "store.sqlite")}`, serverEnv: env };
     }
-    throw new Error("set OTSANDBOX_SMOKE_STORE_DSN to a PostgreSQL or MySQL Store DSN for smoke validation");
+    throw new Error("set OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE to a PostgreSQL or MySQL Store DSN for smoke validation");
   }
   const backend = /^postgres(?:ql)?:\/\//i.test(smokeStoreDSN) ? "postgres" : /^mysql:\/\//i.test(smokeStoreDSN) ? "mysql" : "";
   if (!backend) {
-    throw new Error("OTSANDBOX_SMOKE_STORE_DSN must be a PostgreSQL or MySQL Store DSN");
+    throw new Error("OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE must be a PostgreSQL or MySQL Store DSN");
   }
   const storeName = backend === "mysql" ? "smoke-mysql" : "smoke-postgres";
   const configHome = path.join(tempDir, "store-config");

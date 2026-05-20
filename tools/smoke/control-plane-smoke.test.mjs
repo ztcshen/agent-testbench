@@ -68,7 +68,7 @@ describe("control-plane smoke Store selection", () => {
       encoding: "utf8",
     });
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /OTSANDBOX_SMOKE_STORE_DSN/);
+    assert.match(result.stderr, /OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE/);
   });
 
   it("keeps SQLite smoke behind an explicit compatibility switch", () => {
@@ -100,6 +100,7 @@ describe("control-plane smoke Store selection", () => {
       encoding: "utf8",
     });
     assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE/);
     assert.match(result.stderr, /PostgreSQL or MySQL Store DSN/);
   });
 
