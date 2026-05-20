@@ -2422,3 +2422,14 @@ Remote source policy slice:
   anchored async workflow acceptance report. Until that destructive run is
   performed, the honest status is "ready to attempt real clean-machine
   restore", not "already proven after deleting Docker".
+- 2026-05-20T10:26Z destructive validation slice: the first real
+  clean-machine run found that LLT was configured correctly as a remote GitHub
+  checkout plus local Docker build, but restore treated every service as a
+  pullable remote image. `environment restore` now inspects Store-generated
+  Compose services and excludes services with `build:` from `docker compose
+  pull`; it runs `docker compose build` only for those build-backed services
+  and still includes all requested services in `docker compose up -d`.
+- Verification: focused restore coverage now proves an image service is pulled,
+  LLT-like build service is built, and both services are started. The active
+  `local-pg` clean-machine dry-run now generates `pull` without `llt`, then
+  `build llt`, then `up -d` with the full service allow-list.

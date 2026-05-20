@@ -3276,11 +3276,16 @@ func environmentRestoreDocker(ctx context.Context, compose map[string]any, healt
 		composeBaseArgs = baseArgs
 		services := stringSliceFromAny(compose["services"])
 		report.Cleanup = environmentRestoreDockerCleanupPlan(baseArgs, cleanupOptions)
+		imageServices, buildServices := environmentRestoreComposeCommandServices(compose, workspace, composeFiles, services)
 		if !boolFromReportAny(compose["skipPull"]) {
-			report.Commands = append(report.Commands, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"pull"}, services...)...))
+			if len(imageServices) > 0 {
+				report.Commands = append(report.Commands, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"pull"}, imageServices...)...))
+			}
 		}
 		if !boolFromReportAny(compose["skipBuild"]) {
-			report.Commands = append(report.Commands, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"build"}, services...)...))
+			if len(buildServices) > 0 {
+				report.Commands = append(report.Commands, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"build"}, buildServices...)...))
+			}
 		}
 		report.Commands = append(report.Commands, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"up", "-d"}, services...)...))
 	case startCommand != "":
@@ -3699,6 +3704,116 @@ func environmentRestoreComposeBaseArgs(compose map[string]any, workspace string,
 
 func environmentRestoreGeneratedEnvFilePath(workspace string) string {
 	return filepath.Join(workspace, ".otsandbox", "restore.env")
+}
+
+func environmentRestoreComposeCommandServices(compose map[string]any, workspace string, composeFiles []string, selected []string) ([]string, []string) {
+	knownServices, buildServices := environmentRestoreComposeBuildServiceSet(compose, workspace, composeFiles)
+	services := append([]string{}, selected...)
+	if len(services) == 0 && len(knownServices) > 0 {
+		services = make([]string, 0, len(knownServices))
+		for service := range knownServices {
+			services = append(services, service)
+		}
+		sort.Strings(services)
+	}
+	imageOut := []string{}
+	buildOut := []string{}
+	for _, service := range services {
+		service = strings.TrimSpace(service)
+		if service == "" {
+			continue
+		}
+		if buildServices[service] {
+			buildOut = append(buildOut, service)
+			continue
+		}
+		imageOut = append(imageOut, service)
+	}
+	return imageOut, buildOut
+}
+
+func environmentRestoreComposeBuildServiceSet(compose map[string]any, workspace string, composeFiles []string) (map[string]bool, map[string]bool) {
+	known := map[string]bool{}
+	builds := map[string]bool{}
+	generated := stringMapFromAny(compose["generatedFiles"])
+	for _, file := range composeFiles {
+		content := generated[filepath.Clean(file)]
+		if content == "" {
+			content = generated[file]
+		}
+		if content == "" {
+			if raw, err := os.ReadFile(restoreWorkspacePath(workspace, file)); err == nil {
+				content = string(raw)
+			}
+		}
+		if content == "" {
+			continue
+		}
+		fileKnown, fileBuilds := environmentRestoreComposeBuildServicesFromText(content)
+		for service := range fileKnown {
+			known[service] = true
+		}
+		for service := range fileBuilds {
+			known[service] = true
+			builds[service] = true
+		}
+	}
+	return known, builds
+}
+
+func environmentRestoreComposeBuildServicesFromText(content string) (map[string]bool, map[string]bool) {
+	known := map[string]bool{}
+	builds := map[string]bool{}
+	inServices := false
+	servicesIndent := -1
+	serviceIndent := -1
+	currentService := ""
+	for _, line := range strings.Split(content, "\n") {
+		if strings.TrimSpace(line) == "" || strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		indent := leadingSpaceCount(line)
+		trimmed := strings.TrimSpace(line)
+		if !inServices {
+			if trimmed == "services:" {
+				inServices = true
+				servicesIndent = indent
+			}
+			continue
+		}
+		if indent <= servicesIndent {
+			break
+		}
+		if strings.HasPrefix(trimmed, "-") {
+			continue
+		}
+		if strings.HasSuffix(trimmed, ":") {
+			key := strings.TrimSuffix(trimmed, ":")
+			if serviceIndent < 0 || indent == serviceIndent {
+				serviceIndent = indent
+				currentService = strings.TrimSpace(key)
+				if currentService != "" {
+					known[currentService] = true
+				}
+				continue
+			}
+		}
+		if currentService != "" && indent > serviceIndent && (trimmed == "build:" || strings.HasPrefix(trimmed, "build: ")) {
+			builds[currentService] = true
+		}
+	}
+	return known, builds
+}
+
+func leadingSpaceCount(value string) int {
+	count := 0
+	for _, r := range value {
+		if r != ' ' {
+			break
+		}
+		count++
+	}
+	return count
 }
 
 func writeEnvironmentRestoreGeneratedEnvFile(workspace string, compose map[string]any) (string, error) {

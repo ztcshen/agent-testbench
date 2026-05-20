@@ -2107,6 +2107,7 @@ func TestEnvironmentRestoreSupportsMultipleComposeFiles(t *testing.T) {
 		"--compose-env", "SANDBOX_ROOT=$OTS_WORKSPACE",
 		"--compose-skip-pull",
 		"--compose-skip-build",
+		"--health-compose-service", "web",
 		"--verification-workflow", "workflow.core-10",
 	)
 
@@ -2140,6 +2141,56 @@ func TestEnvironmentRestoreSupportsMultipleComposeFiles(t *testing.T) {
 	envFile, err := os.ReadFile(filepath.Join(workspace, ".otsandbox", "restore.env"))
 	if err != nil || !strings.Contains(string(envFile), "SANDBOX_ROOT="+workspace) {
 		t.Fatalf("generated compose env file = %q err=%v", envFile, err)
+	}
+}
+
+func TestEnvironmentRestoreDoesNotPullComposeBuildServices(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	composeSource := filepath.Join(t.TempDir(), "compose.yml")
+	fakeDockerEnv, dockerCallsPath := fakeDockerCommand(t)
+	writeFile(t, composeSource, `services:
+  web:
+    image: nginx:alpine
+  llt:
+    build:
+      context: ${DOCKER_LLT_SIMULATOR_REPO}
+    image: open-test-sandbox/llt-simulator:local
+`)
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.compose.build-filter",
+		"--compose-file", "compose/docker-compose.yml",
+		"--compose-generated-file", "compose/docker-compose.yml="+composeSource,
+		"--compose-env", "DOCKER_LLT_SIMULATOR_REPO=$OTS_WORKSPACE/open-test-sandbox-llt-simulator",
+		"--compose-service", "web",
+		"--compose-service", "llt",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--json", "env.compose.build-filter")
+	var report struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode build service restore json: %v\n%s", err, out)
+	}
+	if !report.OK {
+		t.Fatalf("build service restore report = %#v\n%s", report, out)
+	}
+	dockerCalls, err := os.ReadFile(dockerCallsPath)
+	if err != nil {
+		t.Fatalf("read fake docker calls: %v", err)
+	}
+	calls := string(dockerCalls)
+	if !strings.Contains(calls, " pull web\n") || strings.Contains(calls, " pull web llt") || strings.Contains(calls, " pull llt") {
+		t.Fatalf("pull should include image services only:\n%s", calls)
+	}
+	if !strings.Contains(calls, " build llt\n") || strings.Contains(calls, " build web") {
+		t.Fatalf("build should include build services only:\n%s", calls)
+	}
+	if !strings.Contains(calls, " up -d web llt") {
+		t.Fatalf("up should still include all requested services:\n%s", calls)
 	}
 }
 
