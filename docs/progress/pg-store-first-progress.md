@@ -2407,3 +2407,18 @@ Remote source policy slice:
   gates, seven service repositories, 15 startup assets, four remote component
   assets, 27,150 inline asset bytes, a 65,536 byte graph metadata limit, and
   no failed readiness items.
+- 2026-05-20T10:03Z status checkpoint: current evidence supports a
+  non-destructive clean-machine answer, not yet a proven destructive
+  end-to-end restore. The active `local-pg` dry-run for
+  `scf-chain-core10-local-docker` still returns `ok=true`,
+  `cleanMachine.ready=true`, 12 green prerequisites, a two-phase
+  `prepareCommand` / `executeCommand`, 24 components, two startup batches,
+  seven service repositories, 15 startup assets, and 26 Store-backed health
+  probes. The generated Docker plan would pull/build/up ZooKeeper, MySQL,
+  Redis, RabbitMQ, WireMock, LLT, Apollo, XXL-Job, SkyWalking OAP/UI, and the
+  recorded business services from PG-generated compose files. The remaining
+  proof gap is a real operator-approved clean Docker execution on a disposable
+  workspace/machine: run prepare, then execute, then health gates, then the
+  anchored async workflow acceptance report. Until that destructive run is
+  performed, the honest status is "ready to attempt real clean-machine
+  restore", not "already proven after deleting Docker".
