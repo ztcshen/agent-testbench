@@ -590,6 +590,7 @@ type environmentRestoreReport struct {
 	EnvironmentID        string                         `json:"environmentId"`
 	VerificationWorkflow string                         `json:"verificationWorkflow"`
 	Workspace            string                         `json:"workspace"`
+	Environment          map[string]any                 `json:"environment,omitempty"`
 	Repos                []environmentRestoreRepoReport `json:"repos"`
 	Compose              map[string]any                 `json:"compose"`
 	HealthChecks         []any                          `json:"healthChecks"`
@@ -772,11 +773,36 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 		if !report.Workflow.OK {
 			report.OK = false
 		}
+		if report.Workflow.RunID != "" {
+			env.LastVerificationRunID = report.Workflow.RunID
+			env.LastVerificationStatus = statusText(report.Workflow.OK)
+			env.EvidenceComplete = report.Workflow.OK
+			env.TopologyComplete = false
+			env.Verified = false
+			env.Status = "verification-recorded"
+			env.UpdatedAt = time.Now().UTC()
+			report.Environment = environmentPayload(env)
+			if err := environmentRestoreUpdateEnvironment(ctx, workflowOptions.StoreURL, env); err != nil {
+				report.OK = false
+				report.Workflow.OK = false
+				report.Workflow.Error = err.Error()
+			}
+		}
 	}
 	if !execute {
 		report.NextActions = append([]string{"review the Docker Compose plan, then rerun with --execute"}, report.NextActions...)
 	}
 	return report, nil
+}
+
+func environmentRestoreUpdateEnvironment(ctx context.Context, storeURL string, env store.Environment) error {
+	runtime, err := openStore(ctx, storeURL)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = runtime.Close() }()
+	_, err = runtime.UpsertEnvironment(ctx, env)
+	return err
 }
 
 func environmentRestoreRepoSpecs(env store.Environment, workspace string) []environmentRestoreRepoSpec {

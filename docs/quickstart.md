@@ -104,11 +104,15 @@ prints the Docker Compose pull/build/up plan plus recorded health checks. Add
 for recorded health checks. Add `--pull` with `--execute` to update existing
 checkouts using `git pull --ff-only`. Add `--run-workflow` with `--execute` to
 run the recorded verification workflow after Docker health checks pass; the run,
-case runs, and Evidence indexes are written to the selected Store. Use
-`--base-url` for the restored target endpoint and `--workflow-output-dir` when
-you want a fixed local report directory. When `composeFile` is recorded, the
-file must exist under `--workspace` after optional repository preparation;
-restore fails before invoking Docker if it is missing.
+case runs, Evidence indexes, and Environment Catalog verification run status are
+written to the selected Store. Restore records Evidence completeness from the
+workflow result but does not mark SkyWalking topology complete or publish the
+environment as verified; real topology collection and `publish-verified` remain
+separate gates. Use `--base-url` for the restored target endpoint and
+`--workflow-output-dir` when you want a fixed local report directory. When
+`composeFile` is recorded, the file must exist under `--workspace` after
+optional repository preparation; restore fails before invoking Docker if it is
+missing.
 
 The control-plane API exposes the same recovery shape through
 `GET /api/environments/{environmentId}/bootstrap`: repository steps, Docker

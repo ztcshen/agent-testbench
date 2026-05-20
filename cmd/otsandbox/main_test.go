@@ -825,6 +825,23 @@ func TestEnvironmentRestoreRunsVerificationWorkflowAfterDockerHealth(t *testing.
 	if !strings.Contains(caseRunsOut, "case.first") || !strings.Contains(caseRunsOut, "case.second") {
 		t.Fatalf("restore workflow did not persist case runs: %s", caseRunsOut)
 	}
+	inspectOut := runCLI(t, "environment", "inspect", "--store", "sqlite://"+storePath, "--json", "env.workflow.restore")
+	var inspected struct {
+		Environment struct {
+			Status                 string `json:"status"`
+			LastVerificationRunID  string `json:"lastVerificationRunId"`
+			LastVerificationStatus string `json:"lastVerificationStatus"`
+			EvidenceComplete       bool   `json:"evidenceComplete"`
+			TopologyComplete       bool   `json:"topologyComplete"`
+			Verified               bool   `json:"verified"`
+		} `json:"environment"`
+	}
+	if err := json.Unmarshal([]byte(inspectOut), &inspected); err != nil {
+		t.Fatalf("decode restored environment inspect json: %v\n%s", err, inspectOut)
+	}
+	if inspected.Environment.LastVerificationRunID != report.Workflow.RunID || inspected.Environment.LastVerificationStatus != store.StatusPassed || inspected.Environment.Status != "verification-recorded" || !inspected.Environment.EvidenceComplete || inspected.Environment.TopologyComplete || inspected.Environment.Verified {
+		t.Fatalf("restored environment status = %#v", inspected.Environment)
+	}
 }
 
 func TestEnvironmentRestoreUsesNamedPostgreSQLActiveStore(t *testing.T) {
