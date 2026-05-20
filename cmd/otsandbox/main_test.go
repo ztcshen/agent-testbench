@@ -5095,11 +5095,22 @@ func TestConfigPublishCommandMaterializesInterfaceNodeCoverageReadModels(t *test
 }
 
 func TestInterfaceNodeCoverageCommandCanEmitJSON(t *testing.T) {
-	profileDir := writeInterfaceNodeCoverageProfile(t)
+	fixture := writeUniqueInterfaceNodeCoverageProfile(t)
 	configureNamedPostgreSQLActiveStore(t, "daily-interface-coverage-pg")
-	runCLI(t, "config", "publish", "--from", profileDir)
+	runInterfaceNodeCoverageCommandCanEmitJSON(t, fixture, "PostgreSQL")
+}
 
-	out := runCLI(t, "interface-node", "coverage", "--workflow", "workflow.alpha", "--json")
+func TestInterfaceNodeCoverageCommandUsesNamedMySQLActiveStore(t *testing.T) {
+	fixture := writeUniqueInterfaceNodeCoverageProfile(t)
+	configureNamedMySQLActiveStore(t, "daily-interface-coverage-mysql")
+	runInterfaceNodeCoverageCommandCanEmitJSON(t, fixture, "MySQL")
+}
+
+func runInterfaceNodeCoverageCommandCanEmitJSON(t *testing.T, fixture interfaceNodeCoverageFixture, label string) {
+	t.Helper()
+	runCLI(t, "config", "publish", "--from", fixture.dir)
+
+	out := runCLI(t, "interface-node", "coverage", "--workflow", fixture.workflowID, "--json")
 
 	var report struct {
 		OK      bool `json:"ok"`
@@ -5115,34 +5126,33 @@ func TestInterfaceNodeCoverageCommandCanEmitJSON(t *testing.T) {
 		} `json:"rows"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode interface-node coverage json: %v\n%s", err, out)
+		t.Fatalf("decode %s interface-node coverage json: %v\n%s", label, err, out)
 	}
 	if !report.OK || report.Summary.TotalSteps != 1 || report.Summary.MappedSteps != 1 {
-		t.Fatalf("coverage summary = %#v", report.Summary)
+		t.Fatalf("%s coverage summary = %#v", label, report.Summary)
 	}
-	if len(report.Rows) != 1 || report.Rows[0].WorkflowID != "workflow.alpha" || report.Rows[0].StepID != "step.alpha" || report.Rows[0].NodeID != "node.alpha" || !report.Rows[0].Mapped {
-		t.Fatalf("coverage rows = %#v", report.Rows)
+	if len(report.Rows) != 1 || report.Rows[0].WorkflowID != fixture.workflowID || report.Rows[0].StepID != fixture.stepID || report.Rows[0].NodeID != fixture.nodeID || !report.Rows[0].Mapped {
+		t.Fatalf("%s coverage rows = %#v", label, report.Rows)
 	}
 }
 
 func TestInterfaceNodeCoverageGapsCommandCanEmitJSON(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "profile.json"), `{
-  "id": "sample",
-  "displayName": "Sample Profile",
-  "services": [],
-  "workflows": [{"id":"workflow.alpha","displayName":"Workflow Alpha"}],
-  "interfaceNodes": [],
-  "apiCases": [],
-  "requestTemplates": [],
-  "caseDependencies": [],
-  "workflowBindings": [{"workflowId":"workflow.alpha","stepId":"step.missing","nodeId":"node.missing","caseId":"case.missing","required":true}],
-  "fixtures": []
-}`)
+	fixture := writeUniqueInterfaceNodeCoverageGapsProfile(t)
 	configureNamedPostgreSQLActiveStore(t, "daily-interface-coverage-gaps-pg")
-	runCLI(t, "config", "publish", "--from", dir)
+	runInterfaceNodeCoverageGapsCommandCanEmitJSON(t, fixture, "PostgreSQL")
+}
 
-	out := runCLI(t, "interface-node", "coverage-gaps", "--workflow", "workflow.alpha", "--json")
+func TestInterfaceNodeCoverageGapsCommandUsesNamedMySQLActiveStore(t *testing.T) {
+	fixture := writeUniqueInterfaceNodeCoverageGapsProfile(t)
+	configureNamedMySQLActiveStore(t, "daily-interface-coverage-gaps-mysql")
+	runInterfaceNodeCoverageGapsCommandCanEmitJSON(t, fixture, "MySQL")
+}
+
+func runInterfaceNodeCoverageGapsCommandCanEmitJSON(t *testing.T, fixture interfaceNodeCoverageFixture, label string) {
+	t.Helper()
+	runCLI(t, "config", "publish", "--from", fixture.dir)
+
+	out := runCLI(t, "interface-node", "coverage-gaps", "--workflow", fixture.workflowID, "--json")
 
 	var report struct {
 		OK      bool `json:"ok"`
@@ -5157,13 +5167,72 @@ func TestInterfaceNodeCoverageGapsCommandCanEmitJSON(t *testing.T) {
 		} `json:"gaps"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode interface-node coverage gaps json: %v\n%s", err, out)
+		t.Fatalf("decode %s interface-node coverage gaps json: %v\n%s", label, err, out)
 	}
 	if !report.OK || report.Summary.TotalSteps != 1 || report.Summary.GapCount != 1 {
-		t.Fatalf("coverage gaps summary = %#v", report.Summary)
+		t.Fatalf("%s coverage gaps summary = %#v", label, report.Summary)
 	}
-	if len(report.Gaps) != 1 || report.Gaps[0].StepID != "step.missing" || report.Gaps[0].Mapped {
-		t.Fatalf("coverage gaps = %#v", report.Gaps)
+	if len(report.Gaps) != 1 || report.Gaps[0].StepID != fixture.stepID || report.Gaps[0].NodeID != fixture.nodeID || report.Gaps[0].Mapped {
+		t.Fatalf("%s coverage gaps = %#v", label, report.Gaps)
+	}
+}
+
+type interfaceNodeCoverageFixture struct {
+	dir        string
+	profileID  string
+	workflowID string
+	serviceID  string
+	nodeID     string
+	caseID     string
+	stepID     string
+}
+
+func writeUniqueInterfaceNodeCoverageProfile(t *testing.T) interfaceNodeCoverageFixture {
+	t.Helper()
+	fixture := newInterfaceNodeCoverageFixture(t)
+	writeFile(t, filepath.Join(fixture.dir, "profile.json"), fmt.Sprintf(`{
+  "id": %q,
+  "displayName": "Sample Profile",
+  "services": [{"id":%q,"displayName":"Service Alpha"}],
+  "workflows": [{"id":%q,"displayName":"Workflow Alpha"}],
+  "interfaceNodes": [{"id":%q,"displayName":"Node Alpha","serviceId":%q}],
+  "apiCases": [{"id":%q,"displayName":"Case Alpha","nodeId":%q}],
+  "requestTemplates": [],
+  "caseDependencies": [],
+  "workflowBindings": [{"workflowId":%q,"stepId":%q,"nodeId":%q,"caseId":%q,"required":true}],
+  "fixtures": []
+}`, fixture.profileID, fixture.serviceID, fixture.workflowID, fixture.nodeID, fixture.serviceID, fixture.caseID, fixture.nodeID, fixture.workflowID, fixture.stepID, fixture.nodeID, fixture.caseID))
+	return fixture
+}
+
+func writeUniqueInterfaceNodeCoverageGapsProfile(t *testing.T) interfaceNodeCoverageFixture {
+	t.Helper()
+	fixture := newInterfaceNodeCoverageFixture(t)
+	writeFile(t, filepath.Join(fixture.dir, "profile.json"), fmt.Sprintf(`{
+  "id": %q,
+  "displayName": "Sample Profile",
+  "services": [],
+  "workflows": [{"id":%q,"displayName":"Workflow Alpha"}],
+  "interfaceNodes": [],
+  "apiCases": [],
+  "requestTemplates": [],
+  "caseDependencies": [],
+  "workflowBindings": [{"workflowId":%q,"stepId":%q,"nodeId":%q,"caseId":%q,"required":true}],
+  "fixtures": []
+}`, fixture.profileID, fixture.workflowID, fixture.workflowID, fixture.stepID, fixture.nodeID, fixture.caseID))
+	return fixture
+}
+
+func newInterfaceNodeCoverageFixture(t *testing.T) interfaceNodeCoverageFixture {
+	t.Helper()
+	return interfaceNodeCoverageFixture{
+		dir:        t.TempDir(),
+		profileID:  uniqueTestID(t, "profile.interface-coverage"),
+		workflowID: uniqueTestID(t, "workflow.interface-coverage"),
+		serviceID:  uniqueTestID(t, "service.interface-coverage"),
+		nodeID:     uniqueTestID(t, "node.interface-coverage"),
+		caseID:     uniqueTestID(t, "case.interface-coverage"),
+		stepID:     uniqueTestID(t, "step.interface-coverage"),
 	}
 }
 
