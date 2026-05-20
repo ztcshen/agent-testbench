@@ -1261,11 +1261,22 @@ func TestServerEnvironmentAPIReportsComponentGraphReadiness(t *testing.T) {
 	plan := bootstrap["plan"].(map[string]any)
 	planGraph := plan["componentGraph"].(map[string]any)
 	restoreGraph := plan["restore"].(map[string]any)["componentGraph"].(map[string]any)
+	startupPlan := plan["componentStartupPlan"].(map[string]any)
+	restoreStartupPlan := plan["restore"].(map[string]any)["componentStartupPlan"].(map[string]any)
 	if planGraph["ok"] != true || strings.Join(jsonStringSlice(planGraph["blockingOrder"]), ",") != "db,app" {
 		t.Fatalf("bootstrap component graph readiness = %#v", planGraph)
 	}
 	if restoreGraph["ok"] != true || strings.Join(jsonStringSlice(restoreGraph["blockingOrder"]), ",") != "db,app" {
 		t.Fatalf("bootstrap restore component graph readiness = %#v", restoreGraph)
+	}
+	batches := startupPlan["batches"].([]any)
+	firstBatch := batches[0].(map[string]any)["components"].([]any)[0].(map[string]any)
+	secondBatch := batches[1].(map[string]any)["components"].([]any)[0].(map[string]any)
+	if startupPlan["ok"] != true || len(batches) != 2 || firstBatch["componentId"] != "db" || secondBatch["componentId"] != "app" || len(startupPlan["healthGates"].([]any)) != 2 {
+		t.Fatalf("bootstrap component startup plan = %#v", startupPlan)
+	}
+	if restoreStartupPlan["ok"] != true {
+		t.Fatalf("bootstrap restore component startup plan = %#v", restoreStartupPlan)
 	}
 }
 

@@ -2294,3 +2294,17 @@ Remote source policy slice:
   checks, and zero missing health checks or remote refs; the dry-run remains
   blocked by other pre-existing restore readiness items, not the component
   graph gate.
+- 2026-05-20T09:35Z implementation slice: componentized Docker startup is now
+  visible in Store-first plans. A shared control-plane
+  `EnvironmentComponentStartupPlanReport` turns the Store component graph into
+  provider-before-consumer startup batches plus static health gates derived from
+  component health checks. CLI `environment bootstrap`, API bootstrap, and CLI
+  `environment restore` now expose `componentStartupPlan`; restore readiness
+  also has a required `component-startup-plan` item when a component graph is
+  configured.
+- Verification stayed lightweight and Store-first. Focused Go tests passed for
+  CLI restore component readiness/startup planning, CLI bootstrap startup
+  planning, and API bootstrap startup planning. The active `local-pg`
+  environment `scf-chain-core10-local-docker` reports startup planning
+  `ok=true` with two startup batches and 24 health gates in both bootstrap and
+  restore dry-run JSON.

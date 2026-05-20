@@ -103,9 +103,12 @@ func handleEnvironmentItem(w http.ResponseWriter, r *http.Request, runtime store
 		}
 		plan := EnvironmentBootstrapPlan(env)
 		componentReadiness := EnvironmentComponentGraphReadinessReport(env.ID, componentGraph)
+		componentStartupPlan := EnvironmentComponentStartupPlanReport(env.ID, componentGraph)
 		plan["componentGraph"] = componentReadiness
+		plan["componentStartupPlan"] = componentStartupPlan
 		if restorePlan, ok := plan["restore"].(map[string]any); ok {
 			restorePlan["componentGraph"] = componentReadiness
+			restorePlan["componentStartupPlan"] = componentStartupPlan
 		}
 		writeJSON(w, map[string]any{"ok": true, "environment": environmentAPIPayload(env), "plan": plan})
 	case action == "verify" && r.Method == http.MethodPost:

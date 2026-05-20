@@ -37,6 +37,39 @@ type EnvironmentComponentGraphReadiness struct {
 	Error                   string     `json:"error,omitempty"`
 }
 
+type EnvironmentComponentStartupPlan struct {
+	Configured    bool                               `json:"configured"`
+	OK            bool                               `json:"ok"`
+	Batches       []EnvironmentComponentStartupBatch `json:"batches,omitempty"`
+	HealthGates   []EnvironmentComponentHealthGate   `json:"healthGates,omitempty"`
+	BlockingOrder []string                           `json:"blockingOrder,omitempty"`
+	Error         string                             `json:"error,omitempty"`
+}
+
+type EnvironmentComponentStartupBatch struct {
+	Index      int                               `json:"index"`
+	Components []EnvironmentComponentStartupUnit `json:"components"`
+	WaitFor    []string                          `json:"waitFor,omitempty"`
+}
+
+type EnvironmentComponentStartupUnit struct {
+	ComponentID    string `json:"componentId"`
+	DisplayName    string `json:"displayName,omitempty"`
+	Kind           string `json:"kind,omitempty"`
+	Role           string `json:"role,omitempty"`
+	ComposeService string `json:"composeService,omitempty"`
+	Image          string `json:"image,omitempty"`
+	Required       bool   `json:"required"`
+}
+
+type EnvironmentComponentHealthGate struct {
+	ComponentID string `json:"componentId"`
+	Kind        string `json:"kind"`
+	Target      string `json:"target,omitempty"`
+	Required    bool   `json:"required"`
+	Expect      string `json:"expect"`
+}
+
 func EnvironmentComponentGraphReadinessReport(envID string, graph store.EnvironmentComponentGraph) EnvironmentComponentGraphReadiness {
 	report := EnvironmentComponentGraphReadiness{
 		Configured:   len(graph.Components) > 0 || len(graph.Dependencies) > 0 || len(graph.Assets) > 0,
@@ -109,6 +142,96 @@ func EnvironmentComponentGraphReadinessReport(envID string, graph store.Environm
 	return report
 }
 
+func EnvironmentComponentStartupPlanReport(envID string, graph store.EnvironmentComponentGraph) EnvironmentComponentStartupPlan {
+	readiness := EnvironmentComponentGraphReadinessReport(envID, graph)
+	plan := EnvironmentComponentStartupPlan{
+		Configured:    readiness.Configured,
+		OK:            readiness.OK,
+		BlockingOrder: append([]string{}, readiness.BlockingOrder...),
+		Error:         readiness.Error,
+	}
+	if !plan.Configured || !plan.OK {
+		return plan
+	}
+	componentByID := map[string]store.EnvironmentComponent{}
+	for _, component := range graph.Components {
+		id := strings.TrimSpace(component.ComponentID)
+		if id != "" {
+			componentByID[id] = component
+		}
+	}
+	levelByID := map[string]int{}
+	waitForByID := map[string][]string{}
+	for _, id := range readiness.BlockingOrder {
+		level := 0
+		for _, dep := range graph.Dependencies {
+			if strings.EqualFold(strings.TrimSpace(dep.Phase), "runtime") {
+				continue
+			}
+			if strings.TrimSpace(dep.ConsumerComponentID) != id {
+				continue
+			}
+			provider := strings.TrimSpace(dep.ProviderComponentID)
+			if provider == "" {
+				continue
+			}
+			waitForByID[id] = append(waitForByID[id], provider)
+			if providerLevel := levelByID[provider] + 1; providerLevel > level {
+				level = providerLevel
+			}
+		}
+		sort.Strings(waitForByID[id])
+		levelByID[id] = level
+	}
+	batchByLevel := map[int][]EnvironmentComponentStartupUnit{}
+	for _, id := range readiness.BlockingOrder {
+		component := componentByID[id]
+		batchByLevel[levelByID[id]] = append(batchByLevel[levelByID[id]], EnvironmentComponentStartupUnit{
+			ComponentID:    id,
+			DisplayName:    strings.TrimSpace(component.DisplayName),
+			Kind:           strings.TrimSpace(component.Kind),
+			Role:           strings.TrimSpace(component.Role),
+			ComposeService: strings.TrimSpace(component.ComposeService),
+			Image:          strings.TrimSpace(component.Image),
+			Required:       component.Required,
+		})
+		if gate, ok := environmentComponentHealthGate(component); ok {
+			plan.HealthGates = append(plan.HealthGates, gate)
+		}
+	}
+	levels := make([]int, 0, len(batchByLevel))
+	for level := range batchByLevel {
+		levels = append(levels, level)
+	}
+	sort.Ints(levels)
+	for _, level := range levels {
+		components := batchByLevel[level]
+		sort.SliceStable(components, func(i, j int) bool {
+			return components[i].ComponentID < components[j].ComponentID
+		})
+		waitFor := []string{}
+		seen := map[string]bool{}
+		for _, component := range components {
+			for _, provider := range waitForByID[component.ComponentID] {
+				if !seen[provider] {
+					waitFor = append(waitFor, provider)
+					seen[provider] = true
+				}
+			}
+		}
+		sort.Strings(waitFor)
+		plan.Batches = append(plan.Batches, EnvironmentComponentStartupBatch{
+			Index:      len(plan.Batches) + 1,
+			Components: components,
+			WaitFor:    waitFor,
+		})
+	}
+	sort.SliceStable(plan.HealthGates, func(i, j int) bool {
+		return plan.HealthGates[i].ComponentID < plan.HealthGates[j].ComponentID
+	})
+	return plan
+}
+
 func normalizeEnvironmentComponentHealthCheck(component store.EnvironmentComponent) (map[string]any, string) {
 	raw := strings.TrimSpace(component.HealthCheckJSON)
 	if raw == "" || raw == "{}" {
@@ -164,6 +287,56 @@ func normalizeEnvironmentComponentHealthCheck(component store.EnvironmentCompone
 		return nil, "unsupported health check kind: " + kind
 	}
 	return normalized, ""
+}
+
+func environmentComponentHealthGate(component store.EnvironmentComponent) (EnvironmentComponentHealthGate, bool) {
+	check, errText := normalizeEnvironmentComponentHealthCheck(component)
+	if errText != "" {
+		return EnvironmentComponentHealthGate{}, false
+	}
+	kind := strings.TrimSpace(valueString(check["kind"]))
+	gate := EnvironmentComponentHealthGate{
+		ComponentID: strings.TrimSpace(component.ComponentID),
+		Kind:        kind,
+		Target:      environmentComponentHealthGateTarget(kind, check),
+		Required:    component.Required,
+		Expect:      environmentComponentHealthExpectation(kind),
+	}
+	return gate, gate.ComponentID != "" && gate.Kind != ""
+}
+
+func environmentComponentHealthGateTarget(kind string, check map[string]any) string {
+	switch kind {
+	case "url":
+		return strings.TrimSpace(valueString(check["url"]))
+	case "tcp":
+		return strings.TrimSpace(valueString(check["address"]))
+	case "command":
+		return strings.TrimSpace(valueString(check["command"]))
+	case "compose-service":
+		return strings.TrimSpace(valueString(check["service"]))
+	case "container":
+		return strings.TrimSpace(valueString(check["container"]))
+	default:
+		return ""
+	}
+}
+
+func environmentComponentHealthExpectation(kind string) string {
+	switch kind {
+	case "url":
+		return "2xx"
+	case "tcp":
+		return "connect"
+	case "command":
+		return "exit 0"
+	case "compose-service":
+		return "running and healthy if Docker reports health"
+	case "container":
+		return "running"
+	default:
+		return "supported health check"
+	}
 }
 
 func environmentComponentBlockingDependencyOrder(g store.EnvironmentComponentGraph) ([]string, [][]string, string) {

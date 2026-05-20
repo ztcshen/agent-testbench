@@ -609,9 +609,12 @@ func runEnvironmentBootstrap(ctx context.Context, args []string) error {
 	}
 	bootstrapPlan := controlplane.EnvironmentBootstrapPlan(env)
 	componentReadiness := environmentRestoreComponentGraphReport(env.ID, componentGraph)
+	componentStartupPlan := controlplane.EnvironmentComponentStartupPlanReport(env.ID, componentGraph)
 	bootstrapPlan["componentGraph"] = componentReadiness
+	bootstrapPlan["componentStartupPlan"] = componentStartupPlan
 	if restorePlan, ok := bootstrapPlan["restore"].(map[string]any); ok {
 		restorePlan["componentGraph"] = componentReadiness
+		restorePlan["componentStartupPlan"] = componentStartupPlan
 	}
 	payload := map[string]any{
 		"ok":          true,
@@ -860,26 +863,27 @@ func environmentStartupFileSummaryJSON(existing string, files map[string]string)
 }
 
 type environmentRestoreReport struct {
-	OK                   bool                               `json:"ok"`
-	RestoreID            string                             `json:"restoreId"`
-	Executed             bool                               `json:"executed"`
-	EnvironmentID        string                             `json:"environmentId"`
-	VerificationWorkflow string                             `json:"verificationWorkflow"`
-	Workspace            string                             `json:"workspace"`
-	Environment          map[string]any                     `json:"environment,omitempty"`
-	Error                string                             `json:"error,omitempty"`
-	Package              environmentRestorePackageReport    `json:"package,omitempty"`
-	Repos                []environmentRestoreRepoReport     `json:"repos"`
-	SourcePolicy         environmentRestoreSourcePolicy     `json:"sourcePolicy,omitempty"`
-	ComponentGraph       environmentRestoreComponentGraph   `json:"componentGraph,omitempty"`
-	ComponentAssets      []environmentRestoreComponentAsset `json:"componentAssets,omitempty"`
-	Compose              map[string]any                     `json:"compose"`
-	HealthChecks         []any                              `json:"healthChecks"`
-	Preflight            environmentRestorePreflight        `json:"preflight"`
-	Readiness            environmentRestoreReadiness        `json:"readiness"`
-	Docker               environmentRestoreDockerReport     `json:"docker"`
-	Workflow             environmentRestoreWorkflowRun      `json:"workflow"`
-	NextActions          []string                           `json:"nextActions"`
+	OK                   bool                                         `json:"ok"`
+	RestoreID            string                                       `json:"restoreId"`
+	Executed             bool                                         `json:"executed"`
+	EnvironmentID        string                                       `json:"environmentId"`
+	VerificationWorkflow string                                       `json:"verificationWorkflow"`
+	Workspace            string                                       `json:"workspace"`
+	Environment          map[string]any                               `json:"environment,omitempty"`
+	Error                string                                       `json:"error,omitempty"`
+	Package              environmentRestorePackageReport              `json:"package,omitempty"`
+	Repos                []environmentRestoreRepoReport               `json:"repos"`
+	SourcePolicy         environmentRestoreSourcePolicy               `json:"sourcePolicy,omitempty"`
+	ComponentGraph       environmentRestoreComponentGraph             `json:"componentGraph,omitempty"`
+	ComponentStartupPlan controlplane.EnvironmentComponentStartupPlan `json:"componentStartupPlan,omitempty"`
+	ComponentAssets      []environmentRestoreComponentAsset           `json:"componentAssets,omitempty"`
+	Compose              map[string]any                               `json:"compose"`
+	HealthChecks         []any                                        `json:"healthChecks"`
+	Preflight            environmentRestorePreflight                  `json:"preflight"`
+	Readiness            environmentRestoreReadiness                  `json:"readiness"`
+	Docker               environmentRestoreDockerReport               `json:"docker"`
+	Workflow             environmentRestoreWorkflowRun                `json:"workflow"`
+	NextActions          []string                                     `json:"nextActions"`
 }
 
 type environmentRestoreSourcePolicy struct {
@@ -1286,6 +1290,7 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 	packageSpec := environmentRestorePackageSpecFromCompose(compose, workspace)
 	healthChecks := environmentRestoreEffectiveHealthChecks(jsonArrayString(env.HealthChecksJSON), compose, componentGraph)
 	componentGraphReport := environmentRestoreComponentGraphReport(env.ID, componentGraph)
+	componentStartupPlan := controlplane.EnvironmentComponentStartupPlanReport(env.ID, componentGraph)
 	attemptedAt := time.Now().UTC()
 	remoteOnly := environmentRestoreRequiresRemoteSources(workflowOptions.StoreURL)
 	report := environmentRestoreReport{
@@ -1298,6 +1303,7 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 		Compose:              compose,
 		HealthChecks:         healthChecks,
 		ComponentGraph:       componentGraphReport,
+		ComponentStartupPlan: componentStartupPlan,
 		Preflight:            environmentRestorePreflightReport(packageSpec, specs, compose, workspace, cleanupOptions, prepareReposOnly),
 		SourcePolicy:         environmentRestoreSourcePolicyReport(packageSpec, specs, remoteOnly),
 		Workflow: environmentRestoreWorkflowRun{
@@ -2334,6 +2340,11 @@ func environmentRestoreReadinessReport(report environmentRestoreReport, packageS
 			detail = report.ComponentGraph.Error
 		}
 		addItem("component-graph", true, report.ComponentGraph.OK, detail)
+		startupDetail := fmt.Sprintf("%d startup batch(es), %d health gate(s)", len(report.ComponentStartupPlan.Batches), len(report.ComponentStartupPlan.HealthGates))
+		if strings.TrimSpace(report.ComponentStartupPlan.Error) != "" {
+			startupDetail = report.ComponentStartupPlan.Error
+		}
+		addItem("component-startup-plan", true, report.ComponentStartupPlan.OK, startupDetail)
 	} else if report.SourcePolicy.RemoteOnly {
 		addItem("component-graph", true, false, "PostgreSQL one-click Docker restore requires a Store component graph for services, middleware, mocks, observability, dependencies, assets, and health gates")
 	} else {

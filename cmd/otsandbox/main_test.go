@@ -1086,8 +1086,17 @@ func TestEnvironmentRestoreReportsComponentGraphReadiness(t *testing.T) {
 	if strings.Join(report.ComponentGraph.BlockingOrder, ",") != "mysql,service.alpha" {
 		t.Fatalf("blocking dependency order = %#v", report.ComponentGraph.BlockingOrder)
 	}
+	if !report.ComponentStartupPlan.OK || len(report.ComponentStartupPlan.Batches) != 2 || len(report.ComponentStartupPlan.HealthGates) != 2 {
+		t.Fatalf("component startup plan = %#v", report.ComponentStartupPlan)
+	}
+	if got := report.ComponentStartupPlan.Batches[0].Components[0].ComponentID + "," + report.ComponentStartupPlan.Batches[1].Components[0].ComponentID; got != "mysql,service.alpha" {
+		t.Fatalf("component startup batches = %s plan=%#v", got, report.ComponentStartupPlan)
+	}
 	if !restoreTypedReadinessHasItem(report.Readiness.Items, "component-graph", true, "2 component(s)") {
 		t.Fatalf("readiness should include component graph item: %#v", report.Readiness.Items)
+	}
+	if !restoreTypedReadinessHasItem(report.Readiness.Items, "component-startup-plan", true, "2 startup batch") {
+		t.Fatalf("readiness should include component startup plan item: %#v", report.Readiness.Items)
 	}
 }
 
@@ -1771,11 +1780,25 @@ func TestEnvironmentBootstrapReportsComponentGraphReadiness(t *testing.T) {
 				BlockingDependencies int      `json:"blockingDependencies"`
 				BlockingOrder        []string `json:"blockingOrder"`
 			} `json:"componentGraph"`
+			ComponentStartupPlan struct {
+				OK      bool `json:"ok"`
+				Batches []struct {
+					Components []struct {
+						ComponentID string `json:"componentId"`
+					} `json:"components"`
+				} `json:"batches"`
+				HealthGates []struct {
+					ComponentID string `json:"componentId"`
+				} `json:"healthGates"`
+			} `json:"componentStartupPlan"`
 			Restore struct {
 				ComponentGraph struct {
 					OK            bool     `json:"ok"`
 					BlockingOrder []string `json:"blockingOrder"`
 				} `json:"componentGraph"`
+				ComponentStartupPlan struct {
+					OK bool `json:"ok"`
+				} `json:"componentStartupPlan"`
 			} `json:"restore"`
 		} `json:"plan"`
 	}
@@ -1787,6 +1810,12 @@ func TestEnvironmentBootstrapReportsComponentGraphReadiness(t *testing.T) {
 	}
 	if !payload.Plan.Restore.ComponentGraph.OK || strings.Join(payload.Plan.Restore.ComponentGraph.BlockingOrder, ",") != "db,app" {
 		t.Fatalf("bootstrap restore component graph readiness = %#v", payload.Plan.Restore.ComponentGraph)
+	}
+	if !payload.Plan.ComponentStartupPlan.OK || len(payload.Plan.ComponentStartupPlan.Batches) != 2 || payload.Plan.ComponentStartupPlan.Batches[0].Components[0].ComponentID != "db" || payload.Plan.ComponentStartupPlan.Batches[1].Components[0].ComponentID != "app" || len(payload.Plan.ComponentStartupPlan.HealthGates) != 2 {
+		t.Fatalf("bootstrap component startup plan = %#v", payload.Plan.ComponentStartupPlan)
+	}
+	if !payload.Plan.Restore.ComponentStartupPlan.OK {
+		t.Fatalf("bootstrap restore component startup plan = %#v", payload.Plan.Restore.ComponentStartupPlan)
 	}
 }
 
