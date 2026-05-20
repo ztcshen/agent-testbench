@@ -20,10 +20,17 @@ describe("api-case demo Store selection", () => {
   });
 
   it("uses an explicit MySQL demo Store", () => {
-    const store = demoStore("/tmp/ots-demo", { OTSANDBOX_DEMO_STORE: "mysql://user:secret@example.com:3306/ots?tls=false" });
-    assert.equal(store.label, "mysql://user:secret@example.com:3306/ots?tls=false");
+    const store = demoStore("/tmp/ots-demo", { OTSANDBOX_DEMO_STORE: "mysql://user:secret@example.com:3306/otsandbox_demo?tls=false" });
+    assert.equal(store.label, "mysql://user:secret@example.com:3306/otsandbox_demo?tls=false");
     assert.deepEqual(store.storeArgs, ["--store", store.label]);
     assert.deepEqual(store.upgradeArgs, ["--store", store.label]);
+  });
+
+  it("refuses likely business MySQL demo databases", () => {
+    assert.throws(
+      () => demoStore("/tmp/ots-demo", { OTSANDBOX_DEMO_STORE: "mysql://user:secret@example.com:3306/business_prod?tls=false" }),
+      /refuses database 'business_prod'/,
+    );
   });
 
   it("uses a named Store and lets the CLI resolve it", () => {

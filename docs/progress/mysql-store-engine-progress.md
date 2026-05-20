@@ -927,6 +927,33 @@ Current blocker:
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
   `npm run release-check:mysql-real`.
 
+## 2026-05-21 MySQL API Demo DSN Guard Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Reused the shared MySQL smoke Store DSN guard in `npm run demo:api-case` so
+  direct demo runs with `OTSANDBOX_DEMO_STORE=mysql://...` refuse likely
+  business database names before Store upgrade or Evidence writes.
+- Updated the demo Store selection test to use a dedicated MySQL demo database
+  name and added regression coverage for unsafe MySQL demo database names.
+- Updated README, README.zh-CN, quickstart, and share-kit docs to state MySQL
+  demo Stores must use dedicated sandbox/smoke/test/CI-looking database names,
+  not business schemas.
+
+Validated:
+
+- `node --test tools/examples/api-case-demo.test.mjs`
+- `node --check tools/examples/api-case-demo.mjs`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
+  `npm run release-check:mysql-real`.
+
 ## 2026-05-21 MySQL CLI and Frontend Smoke DSN Guard Slice
 
 Progress: `[###################-] 98%`

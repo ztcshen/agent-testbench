@@ -38,6 +38,8 @@ The demo command starts a temporary local HTTP endpoint, runs the generic
 `examples/api-cases/create-item.json` case against the active SQL Store, or
 `OTSANDBOX_DEMO_STORE=postgres://...` / `OTSANDBOX_DEMO_STORE=mysql://...`, and
 prints the Evidence bundle path.
+MySQL demo Stores must use dedicated sandbox/smoke/test/CI-looking database
+names and must not point at business schemas.
 Demo output is kept under the system temp directory so you can inspect it after
 the command exits. Set `OTSANDBOX_CLEAN_DEMO_OUTPUT=1` to remove it
 automatically.

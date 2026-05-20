@@ -81,6 +81,8 @@ The demo command starts a temporary local HTTP endpoint, runs the generic
 `examples/api-cases/create-item.json` case against the active SQL Store or
 `OTSANDBOX_DEMO_STORE=postgres://...` /
 `OTSANDBOX_DEMO_STORE=mysql://...`, and prints the Evidence bundle path. The
+demo and release gate require dedicated MySQL Store database names that look
+like sandbox/smoke/test/CI targets; do not point them at a business schema. The
 release gate requires a PostgreSQL or MySQL smoke Store DSN.
 It runs whitespace checks, generated-state checks, source-domain guardrails, Go
 tests, the demo, the React build, active SQL Store CLI smoke tests, and

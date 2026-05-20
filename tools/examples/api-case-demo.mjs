@@ -5,6 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { requireSafeMySQLStoreDSN } from "../smoke/mysql-store-dsn-guard.mjs";
+
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
 function freeServer() {
@@ -94,6 +96,9 @@ export function demoStore(tempDir, env = process.env) {
     }
     if (explicitStore.includes("://") && !isProductSQLStore(explicitStore) && !sqliteCompat) {
       throw new Error("Demo Store must be OTSANDBOX_DEMO_STORE=postgres://... or OTSANDBOX_DEMO_STORE=mysql://... unless SQLite compatibility is explicit");
+    }
+    if (/^mysql:\/\//i.test(explicitStore)) {
+      requireSafeMySQLStoreDSN(explicitStore, { label: "The API case demo" });
     }
     return { label: explicitStore, storeArgs: ["--store", explicitStore], upgradeArgs: ["--store", explicitStore] };
   }

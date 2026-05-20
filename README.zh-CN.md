@@ -70,6 +70,8 @@ OTSANDBOX_SMOKE_STORE_DSN='mysql://user:pass@host:3306/otsandbox_smoke?tls=false
 `examples/api-cases/create-item.json`，写入 active SQL Store 或
 `OTSANDBOX_DEMO_STORE=postgres://...` /
 `OTSANDBOX_DEMO_STORE=mysql://...`，并打印 Evidence 目录。
+demo 和发布门禁都要求 MySQL Store 使用看起来属于 sandbox/smoke/test/CI 的专用
+库名，不要指向业务 schema。
 `release-check` 要求提供 PostgreSQL 或 MySQL smoke Store DSN，会运行空白检查、
 生成态检查、核心守卫、Go 测试、demo、React build、active SQL Store CLI smoke
 和无头浏览器冒烟。
