@@ -2433,3 +2433,50 @@ Remote source policy slice:
   LLT-like build service is built, and both services are started. The active
   `local-pg` clean-machine dry-run now generates `pull` without `llt`, then
   `build llt`, then `up -d` with the full service allow-list.
+- 2026-05-20T10:43Z destructive validation checkpoint:
+  evidence-only mode is active. The real restore has passed repository/asset
+  preparation, generated Store-backed Compose/startup files, built the LLT
+  GitHub service locally, and reached the business-service boot phase. Current
+  Docker evidence shows LLT, MySQL, Redis, RabbitMQ, ZooKeeper, Apollo,
+  XXL-Job, SkyWalking OAP/UI, `scf-loan`, and `sequence-service` are up.
+  `account-channel`, `retail-gateway`, `scf-gateway`, and `scf-member` are not
+  yet green, so the environment is not publishable and the bound workflow must
+  not be treated as accepted yet.
+- Current blockers: `account-channel` built successfully but fails at runtime
+  because `/sandbox/configs/account-channel-logback-spring.xml` is missing;
+  `retail-gateway` checked out the configured remote repository but the
+  checkout contains only `README.md`, so its recorded startup script points to
+  project paths that are absent; `scf-gateway` stops on a company Nexus
+  `502 Bad Gateway` while resolving
+  `com.baofoo.cgwfi:baofoo-cgwfi-all-ws:4.0.101-SNAPSHOT`; `scf-member` builds
+  successfully but its run phase exits after dependency metadata warnings and
+  an invalid transitive POM warning for `sequence-service-facade` missing
+  `javax.validation:validation-api` version metadata. Next progress slice stays
+  evidence-driven: fix only the proven Store/remote-source inputs, rerun the
+  same restore, and after it passes start again from a fresh workspace as the
+  final two-step proof (`prepareCommand`, then `executeCommand` with the bound
+  workflow).
+- 2026-05-20T10:58Z destructive validation checkpoint: added a Store-first CLI
+  patch command, `environment repo set`, so a verified environment can update a
+  single service repository URL/branch/ref/checkout without re-registering the
+  whole environment or touching the database directly. Used it to pin
+  `retail-gateway` to the verified remote ref `origin/test`; the isolated
+  prepare gate then checked out commit `b03c73f` and confirmed the expected
+  project paths and certificate file exist. Also updated the PG component graph
+  through `environment components replace`: added the small
+  `account-channel-logback-spring.xml` config asset and amended the
+  `scf-member` startup script with the required `zf.xxljob2.*` runtime
+  arguments. The graph now has 24 components, 47 dependencies, 29 assets, and
+  32,016 inline bytes, still well within the small-metadata Store constraint.
+- Verification: focused CLI tests for `environment repo set` and restore repo
+  handling pass; the exact-word guard still returns no matches. The next real
+  Docker run reached a stronger state than the previous attempt:
+  `account-channel` starts successfully with the PG-provided logback config,
+  `scf-member` reports HTTP 200 and `status=UP` on its actuator health endpoint,
+  `scf-loan`, `sequence-service`, LLT, SkyWalking, and middleware are running.
+  Remaining blockers are now narrower: `scf-gateway` exits while Maven resolves
+  `com.baofoo.cgwfi:baofoo-cgwfi-all-ws:4.0.101-SNAPSHOT` because the company
+  Nexus endpoint at `10.0.20.242` returns/times out with `502 Bad Gateway`;
+  `retail-gateway` still exits early during its startup script and needs the
+  next evidence pass after the gateway dependency is addressed. The final
+  two-step proof has not been run yet.

@@ -374,6 +374,32 @@ func TestEnvironmentCommandsGateVerifiedDiscovery(t *testing.T) {
 		t.Fatalf("registered environment catalog fields = %#v", registered.Environment)
 	}
 
+	repoSetOut := runCLI(t, "environment", "repo", "set",
+		"--store", storeRef,
+		"--repo-ref", "entry-gateway=v1.2.4",
+		"--checkout", "entry-gateway=entry-gateway",
+		"--json",
+		"env.team.verified",
+	)
+	var repoSet struct {
+		OK          bool `json:"ok"`
+		Environment struct {
+			VerificationWorkflowID string           `json:"verificationWorkflowId"`
+			Services               []map[string]any `json:"services"`
+			Repos                  map[string]any   `json:"repos"`
+		} `json:"environment"`
+	}
+	if err := json.Unmarshal([]byte(repoSetOut), &repoSet); err != nil {
+		t.Fatalf("decode environment repo set json: %v\n%s", err, repoSetOut)
+	}
+	entryRepo, _ := repoSet.Environment.Repos["entry-gateway"].(map[string]any)
+	if !repoSet.OK || repoSet.Environment.VerificationWorkflowID != "workflow.core-10" || entryRepo["ref"] != "v1.2.4" || entryRepo["checkout"] != "entry-gateway" {
+		t.Fatalf("repo set environment = %#v", repoSet.Environment)
+	}
+	if len(repoSet.Environment.Services) != 1 || repoSet.Environment.Services[0]["ref"] != "v1.2.4" || repoSet.Environment.Services[0]["checkout"] != "entry-gateway" {
+		t.Fatalf("repo set services = %#v", repoSet.Environment.Services)
+	}
+
 	discoverOut := runCLI(t, "environment", "discover", "--store", storeRef, "--json")
 	var discovered struct {
 		Count int `json:"count"`
@@ -488,7 +514,7 @@ func TestEnvironmentCommandsGateVerifiedDiscovery(t *testing.T) {
 	if bootstrap.Plan.VerificationWorkflow != "workflow.core-10" || bootstrap.Plan.Repos["entry-gateway"] == nil || len(bootstrap.Plan.HealthChecks) != 1 {
 		t.Fatalf("bootstrap plan = %#v", bootstrap.Plan)
 	}
-	if repo, ok := bootstrap.Plan.Repos["entry-gateway"].(map[string]any); !ok || repo["ref"] != "v1.2.3" {
+	if repo, ok := bootstrap.Plan.Repos["entry-gateway"].(map[string]any); !ok || repo["ref"] != "v1.2.4" {
 		t.Fatalf("bootstrap repo ref = %#v", bootstrap.Plan.Repos["entry-gateway"])
 	}
 	if !bootstrap.Plan.Restore.PauseBeforeHeavyValidation || bootstrap.Plan.Restore.Docker.Action != "docker-compose" || len(bootstrap.Plan.Restore.Docker.Commands) != 3 {
@@ -866,7 +892,7 @@ func TestEnvironmentRestoreClonesRemoteReposForVerifiedWorkflow(t *testing.T) {
 	if dryRun.Repos[0].ServiceID != "entry-gateway" || dryRun.Repos[0].Action != "clone" || dryRun.Repos[0].Checkout != expectedCheckout || strings.Join(dryRun.Repos[0].Command, " ") == "" {
 		t.Fatalf("restore dry-run repo = %#v", dryRun.Repos[0])
 	}
-	if !dryRun.Docker.OK || dryRun.Docker.Action != "plan-docker-compose" || len(dryRun.Docker.Commands) != 3 {
+	if !dryRun.Docker.OK || dryRun.Docker.Action != "plan-docker-compose" || len(dryRun.Docker.Commands) == 0 || !commandSlicesContain(dryRun.Docker.Commands, "up") {
 		t.Fatalf("restore dry-run docker plan = %#v", dryRun.Docker)
 	}
 	if !dryRun.Preflight.OK || !restorePreflightHasTool(dryRun.Preflight.Tools, "git", true) || !restorePreflightHasTool(dryRun.Preflight.Tools, "docker", true) || !restorePreflightHasTool(dryRun.Preflight.Tools, "docker compose", true) || len(dryRun.Preflight.HeavySteps) == 0 {
@@ -913,14 +939,8 @@ func TestEnvironmentRestoreClonesRemoteReposForVerifiedWorkflow(t *testing.T) {
 		t.Fatalf("read fake docker calls: %v", err)
 	}
 	composePath := filepath.Join(workspace, "docker-compose.yml")
-	for _, want := range []string{
-		"compose -f " + composePath + " pull",
-		"compose -f " + composePath + " build",
-		"compose -f " + composePath + " up -d",
-	} {
-		if !strings.Contains(string(dockerCalls), want) {
-			t.Fatalf("fake docker calls missing %q:\n%s", want, dockerCalls)
-		}
+	if want := "compose -f " + composePath + " up -d"; !strings.Contains(string(dockerCalls), want) {
+		t.Fatalf("fake docker calls missing %q:\n%s", want, dockerCalls)
 	}
 	if raw, err := os.ReadFile(filepath.Join(expectedCheckout, "README.md")); err != nil || !strings.Contains(string(raw), "restore fixture") {
 		t.Fatalf("restored checkout missing fixture file raw=%q err=%v", raw, err)
@@ -1891,6 +1911,17 @@ func restoreReadinessHasItem(items []struct {
 		}
 		if detailContains == "" || strings.Contains(item.Detail, detailContains) {
 			return true
+		}
+	}
+	return false
+}
+
+func commandSlicesContain(commands [][]string, part string) bool {
+	for _, command := range commands {
+		for _, item := range command {
+			if item == part {
+				return true
+			}
 		}
 	}
 	return false

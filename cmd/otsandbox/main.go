@@ -252,6 +252,7 @@ Usage:
   otsandbox environment discover [--store NAME_OR_DSN] [--all] [--json]
   otsandbox environment inspect ENV_ID [--store NAME_OR_DSN] [--json]
   otsandbox environment bootstrap ENV_ID [--store NAME_OR_DSN] [--json]
+  otsandbox environment repo set ENV_ID [--repo SERVICE=URL] [--branch SERVICE=BRANCH] [--repo-ref SERVICE=REF] [--checkout SERVICE=PATH] [--store NAME_OR_DSN] [--json]
   otsandbox environment startup-file put ENV_ID --file TARGET=SOURCE_FILE [--store NAME_OR_DSN] [--json]
   otsandbox environment components inspect ENV_ID [--store NAME_OR_DSN] [--json]
   otsandbox environment components replace ENV_ID --file COMPONENT_GRAPH_JSON [--store NAME_OR_DSN] [--json]
@@ -446,6 +447,8 @@ func runEnvironment(ctx context.Context, args []string) error {
 		return runEnvironmentInspect(ctx, args[1:])
 	case "bootstrap":
 		return runEnvironmentBootstrap(ctx, args[1:])
+	case "repo":
+		return runEnvironmentRepo(ctx, args[1:])
 	case "startup-file":
 		return runEnvironmentStartupFile(ctx, args[1:])
 	case "components":
@@ -632,6 +635,83 @@ func runEnvironmentBootstrap(ctx context.Context, args []string) error {
 	}
 	fmt.Printf("Repos: %s\n", env.ReposJSON)
 	fmt.Printf("Compose: %s\n", env.ComposeJSON)
+	return nil
+}
+
+func runEnvironmentRepo(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing environment repo command")
+	}
+	switch args[0] {
+	case "set":
+		return runEnvironmentRepoSet(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown environment repo command: %s", args[0])
+	}
+}
+
+func runEnvironmentRepoSet(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("environment repo set", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	var repos, branches, repoRefs, checkouts stringListFlag
+	flags.Var(&repos, "repo", "Service repo as SERVICE=PATH_OR_URL; repeat for multiple services")
+	flags.Var(&branches, "branch", "Service branch as SERVICE=BRANCH; repeat for multiple services")
+	flags.Var(&repoRefs, "repo-ref", "Service Git ref as SERVICE=REF; repeat for multiple services")
+	flags.Var(&checkouts, "checkout", "Service checkout path as SERVICE=PATH; repeat for multiple services")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	id := strings.TrimSpace(flags.Arg(0))
+	if id == "" {
+		return errors.New("environment id is required")
+	}
+	updates := environmentRepoUpdateMap(repos, branches, repoRefs, checkouts)
+	if len(updates) == 0 {
+		return errors.New("at least one --repo, --branch, --repo-ref, or --checkout update is required")
+	}
+	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	env, err := runtime.GetEnvironment(ctx, id)
+	if err != nil {
+		return err
+	}
+	repoMap := jsonObjectString(env.ReposJSON)
+	for serviceID, update := range updates {
+		current := jsonObjectFromAny(repoMap[serviceID])
+		for key, value := range update {
+			if strings.TrimSpace(value) == "" {
+				delete(current, key)
+				continue
+			}
+			current[key] = value
+		}
+		repoMap[serviceID] = current
+	}
+	env.ReposJSON = mustCompactJSON(repoMap)
+	env.ServicesJSON = mustCompactJSON(environmentServicesWithRepoUpdates(jsonArrayString(env.ServicesJSON), updates))
+	env.UpdatedAt = time.Now().UTC()
+	env, err = runtime.UpsertEnvironment(ctx, env)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":           true,
+		"environment":  environmentPayload(env),
+		"updatedRepos": updates,
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(payload)
+	}
+	fmt.Printf("Updated Environment Repositories: %s\n", env.ID)
+	for _, serviceID := range sortedMapKeys(updates) {
+		fmt.Printf("- %s\n", serviceID)
+	}
 	return nil
 }
 
@@ -4627,6 +4707,104 @@ func environmentHealthChecks(urls stringListFlag, tcpAddresses stringListFlag, c
 		index++
 	}
 	return out
+}
+
+func environmentRepoUpdateMap(repos stringListFlag, branches stringListFlag, repoRefs stringListFlag, checkouts stringListFlag) map[string]map[string]string {
+	repoByService := environmentKeyValueMap(repos)
+	branchByService := environmentKeyValueMap(branches)
+	refByService := environmentKeyValueMap(repoRefs)
+	checkoutByService := environmentKeyValueMap(checkouts)
+	updates := map[string]map[string]string{}
+	add := func(serviceID, key, value string) {
+		serviceID = strings.TrimSpace(serviceID)
+		if serviceID == "" {
+			return
+		}
+		if _, ok := updates[serviceID]; !ok {
+			updates[serviceID] = map[string]string{}
+		}
+		updates[serviceID][key] = value
+	}
+	for serviceID, value := range repoByService {
+		add(serviceID, "url", value)
+	}
+	for serviceID, value := range branchByService {
+		add(serviceID, "branch", value)
+	}
+	for serviceID, value := range refByService {
+		add(serviceID, "ref", value)
+	}
+	for serviceID, value := range checkoutByService {
+		add(serviceID, "checkout", value)
+	}
+	return updates
+}
+
+func environmentServicesWithRepoUpdates(existing []any, updates map[string]map[string]string) []any {
+	out := make([]any, 0, len(existing)+len(updates))
+	seen := map[string]bool{}
+	for _, raw := range existing {
+		item := jsonObjectFromAny(raw)
+		serviceID := strings.TrimSpace(valueString(item["id"]))
+		if serviceID == "" {
+			continue
+		}
+		if update, ok := updates[serviceID]; ok {
+			applyEnvironmentServiceRepoUpdate(item, update)
+		}
+		seen[serviceID] = true
+		out = append(out, item)
+	}
+	for _, serviceID := range sortedMapKeys(updates) {
+		if seen[serviceID] {
+			continue
+		}
+		item := map[string]any{"id": serviceID}
+		applyEnvironmentServiceRepoUpdate(item, updates[serviceID])
+		out = append(out, item)
+	}
+	return out
+}
+
+func applyEnvironmentServiceRepoUpdate(item map[string]any, update map[string]string) {
+	keyMap := map[string]string{
+		"url":      "repo",
+		"branch":   "branch",
+		"ref":      "ref",
+		"checkout": "checkout",
+	}
+	for repoKey, serviceKey := range keyMap {
+		value, ok := update[repoKey]
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(value) == "" {
+			delete(item, serviceKey)
+			continue
+		}
+		item[serviceKey] = value
+	}
+}
+
+func jsonObjectFromAny(value any) map[string]any {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return map[string]any{}
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil || out == nil {
+		return map[string]any{}
+	}
+	return out
+}
+
+func sortedMapKeys[V any](items map[string]V) []string {
+	keys := make([]string, 0, len(items))
+	for key := range items {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func environmentKeyValueMap(values stringListFlag) map[string]string {
