@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { assertCaseEvidencePayload, assertRegisteredInterfaceCatalog, assertWorkflowBatchReport, requiredMySQLDSN } from "./mysql-store-api-smoke.mjs";
+import { assertCaseEvidencePayload, assertEnvironmentCatalogPayload, assertRegisteredInterfaceCatalog, assertWorkflowBatchReport, requiredMySQLDSN } from "./mysql-store-api-smoke.mjs";
 
 test("MySQL API smoke accepts the shared SQL smoke Store env", () => {
   assert.equal(
@@ -98,5 +98,35 @@ test("MySQL API smoke validates registered interface catalog data", () => {
     templateConfigs: [
       { id: "cfg.case.mysql-api-smoke.default.execution", scopeType: "case", scopeId: "case.mysql-api-smoke.default" },
     ],
+  });
+});
+
+test("MySQL API smoke validates Environment Catalog registration payloads", () => {
+  assertEnvironmentCatalogPayload({
+    registered: {
+      ok: true,
+      environment: {
+        id: "env.mysql-api-smoke",
+        status: "draft",
+        verified: false,
+        verificationWorkflowId: "workflow.alpha",
+      },
+    },
+    discoverAll: {
+      ok: true,
+      count: 1,
+      items: [{ id: "env.mysql-api-smoke", verificationWorkflowId: "workflow.alpha" }],
+    },
+    inspect: {
+      ok: true,
+      environment: { id: "env.mysql-api-smoke", verificationWorkflowId: "workflow.alpha" },
+    },
+    bootstrap: {
+      ok: true,
+      plan: {
+        verificationWorkflow: "workflow.alpha",
+        restore: { docker: { action: "docker-compose" } },
+      },
+    },
   });
 });

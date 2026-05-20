@@ -190,6 +190,30 @@ export function assertRegisteredInterfaceCatalog(catalog, {
   }
 }
 
+export function assertEnvironmentCatalogPayload({ registered, discoverAll, inspect, bootstrap }, {
+  environmentID = "env.mysql-api-smoke",
+  workflowID = "workflow.alpha",
+} = {}) {
+  const registeredEnv = registered?.environment || {};
+  if (!registered?.ok || registeredEnv.id !== environmentID || registeredEnv.status !== "draft" || registeredEnv.verified !== false || registeredEnv.verificationWorkflowId !== workflowID) {
+    throw new Error(`unexpected MySQL Environment Catalog registration payload: ${JSON.stringify(registered)}`);
+  }
+  const discoverItems = Array.isArray(discoverAll?.items) ? discoverAll.items : [];
+  const discovered = discoverItems.find((item) => item.id === environmentID);
+  if (!discoverAll?.ok || !discovered || discovered.verificationWorkflowId !== workflowID) {
+    throw new Error(`MySQL Environment Catalog discovery did not include ${environmentID}: ${JSON.stringify(discoverAll)}`);
+  }
+  const inspectedEnv = inspect?.environment || {};
+  if (!inspect?.ok || inspectedEnv.id !== environmentID || inspectedEnv.verificationWorkflowId !== workflowID) {
+    throw new Error(`unexpected MySQL Environment Catalog inspect payload: ${JSON.stringify(inspect)}`);
+  }
+  const plan = bootstrap?.plan || {};
+  const docker = plan.restore?.docker || {};
+  if (!bootstrap?.ok || plan.verificationWorkflow !== workflowID || docker.action !== "docker-compose") {
+    throw new Error(`unexpected MySQL Environment Catalog bootstrap payload: ${JSON.stringify(bootstrap)}`);
+  }
+}
+
 async function waitForWorkflowBatchReport(baseURL, reportURL, timeoutMs = 30000) {
   if (!reportURL) {
     throw new Error("workflow batch start did not return reportUrl");
@@ -394,6 +418,35 @@ async function main() {
       throw new Error(`MySQL API write did not persist to Store-backed catalog: ${JSON.stringify(updatedCatalog.services)}`);
     }
     assertRegisteredInterfaceCatalog(updatedCatalog);
+
+    const environmentRegistration = await postJSON(`${baseURL}/api/environments`, {
+      id: "env.mysql-api-smoke",
+      displayName: "MySQL API Smoke Environment",
+      description: "MySQL Store API smoke Environment Catalog entry",
+      services: [{ id: "service.mysql-api-smoke", repo: "https://example.invalid/mysql-api-smoke.git" }],
+      repos: {
+        "service.mysql-api-smoke": {
+          url: "https://example.invalid/mysql-api-smoke.git",
+          branch: "main",
+          checkout: "/tmp/mysql-api-smoke",
+        },
+      },
+      compose: {
+        composeFile: "docker-compose.yml",
+        startCommand: "docker compose up -d",
+      },
+      healthChecks: [{ id: "mysql-api-smoke-health", url: "http://127.0.0.1:19090/health" }],
+      verificationWorkflowId: "workflow.alpha",
+    });
+    const environmentDiscoverAll = await waitForJSON(`${baseURL}/api/environments?all=true`);
+    const environmentInspect = await waitForJSON(`${baseURL}/api/environments/env.mysql-api-smoke`);
+    const environmentBootstrap = await waitForJSON(`${baseURL}/api/environments/env.mysql-api-smoke/bootstrap`);
+    assertEnvironmentCatalogPayload({
+      registered: environmentRegistration,
+      discoverAll: environmentDiscoverAll,
+      inspect: environmentInspect,
+      bootstrap: environmentBootstrap,
+    });
   } finally {
     await closeHTTPServer(targetServer);
     await stopServer(server);

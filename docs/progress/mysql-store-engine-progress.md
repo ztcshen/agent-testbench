@@ -802,3 +802,32 @@ Current blocker:
   for all 10 workflow steps.
 - MySQL daily parity still has deeper DSN-gated coverage to add for environment
   lifecycle APIs and final live release proof.
+
+## 2026-05-21 MySQL API Environment Catalog Smoke Slice
+
+Progress: `[###################-] 97%`
+
+Implemented:
+
+- Extended the MySQL Store API smoke to register an Environment Catalog entry
+  through `/api/environments`.
+- The smoke now verifies Store-backed environment discovery with `all=true`,
+  environment inspect payloads, and bootstrap planning for the configured
+  verification workflow.
+- Added focused helper coverage so MySQL smoke fails clearly if Environment
+  Catalog registration, discovery, inspect, or bootstrap payloads drift.
+
+Validated:
+
+- `node --test tools/smoke/mysql-store-api-smoke.test.mjs`
+- `node --check tools/smoke/mysql-store-api-smoke.mjs`
+
+Current blocker:
+
+- Final completion still requires a real dedicated company MySQL Store DSN for
+  `npm run release-check:mysql-real`.
+- Real SkyWalking release proof still requires
+  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and trace ids
+  for all 10 workflow steps.
+- Remaining MySQL daily parity work is now concentrated around final live
+  release proof and any deeper DSN-gated environment publish/acceptance checks.
