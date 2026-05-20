@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -315,6 +316,20 @@ func TestEnvironmentRegisterRequiresVerificationWorkflow(t *testing.T) {
 	)
 	if !strings.Contains(out, "--verification-workflow") {
 		t.Fatalf("register without verification workflow output = %q", out)
+	}
+}
+
+func TestEnvironmentRegisterRejectsOversizedDefinitionMetadata(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	large := strings.Repeat("x", store.EnvironmentDefinitionMaxBytes)
+	out := runCLIFails(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.too-large",
+		"--description", large,
+		"--verification-workflow", "workflow.core-10",
+	)
+	if !strings.Contains(out, "maximum is 65536 bytes") || !strings.Contains(out, "not code, images, logs, evidence payloads, or large files") {
+		t.Fatalf("oversized environment metadata output = %q", out)
 	}
 }
 
@@ -1212,7 +1227,13 @@ func TestEnvironmentRestoreHonorsComposeOptionsFromStore(t *testing.T) {
 			SkipBuild   bool     `json:"skipBuild"`
 		} `json:"compose"`
 		Docker struct {
-			Commands [][]string `json:"commands"`
+			Commands     [][]string `json:"commands"`
+			HealthChecks []struct {
+				Kind    string `json:"kind"`
+				Service string `json:"service"`
+				State   string `json:"state"`
+				OK      bool   `json:"ok"`
+			} `json:"healthChecks"`
 		} `json:"docker"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
@@ -1224,6 +1245,9 @@ func TestEnvironmentRestoreHonorsComposeOptionsFromStore(t *testing.T) {
 	if len(report.Docker.Commands) != 1 {
 		t.Fatalf("compose options should only run up command, got %#v", report.Docker.Commands)
 	}
+	if len(report.Docker.HealthChecks) != 1 || report.Docker.HealthChecks[0].Kind != "compose-service" || report.Docker.HealthChecks[0].Service != "web" || report.Docker.HealthChecks[0].State != "running" || !report.Docker.HealthChecks[0].OK {
+		t.Fatalf("compose service readiness should be generated for requested service: %#v", report.Docker.HealthChecks)
+	}
 	want := "compose -f " + filepath.Join(workspace, "compose.yml") + " -p demo --env-file " + filepath.Join(workspace, ".env.local") + " --profile api up -d web"
 	dockerCalls, err := os.ReadFile(dockerCallsPath)
 	if err != nil {
@@ -1231,6 +1255,9 @@ func TestEnvironmentRestoreHonorsComposeOptionsFromStore(t *testing.T) {
 	}
 	if strings.Contains(string(dockerCalls), " pull") || strings.Contains(string(dockerCalls), " build") || !strings.Contains(string(dockerCalls), want) {
 		t.Fatalf("compose option docker calls want %q:\n%s", want, dockerCalls)
+	}
+	if !strings.Contains(string(dockerCalls), "compose -f "+filepath.Join(workspace, "compose.yml")+" -p demo --env-file "+filepath.Join(workspace, ".env.local")+" --profile api ps --format json web") {
+		t.Fatalf("compose option docker calls should include service readiness check:\n%s", dockerCalls)
 	}
 }
 
@@ -1337,6 +1364,72 @@ func TestEnvironmentRestoreCanPrepareRepositoriesBeforeDocker(t *testing.T) {
 	}
 	if strings.Contains(string(dockerCalls), " compose ") {
 		t.Fatalf("prepare repos should not invoke Docker Compose:\n%s", dockerCalls)
+	}
+}
+
+func TestEnvironmentRestoreCanPreparePackageRepositoryBeforeDocker(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	packageRepo := createBareGitRepoWithFiles(t, "main", map[string]string{
+		"compose/docker-compose.yml": "services: {}\n",
+		"README.md":                  "# environment package\n",
+	})
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	fakeDockerEnv, dockerCallsPath := fakeDockerCommand(t)
+	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer healthServer.Close()
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.package.prepare",
+		"--package-repo", packageRepo,
+		"--package-branch", "main",
+		"--compose-file", "compose/docker-compose.yml",
+		"--health-url", healthServer.URL+"/ready",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--prepare-repos-only", "--json", "env.package.prepare")
+	var report struct {
+		OK      bool `json:"ok"`
+		Package struct {
+			Configured bool   `json:"configured"`
+			Action     string `json:"action"`
+			OK         bool   `json:"ok"`
+			Checkout   string `json:"checkout"`
+		} `json:"package"`
+		Repos  []any `json:"repos"`
+		Docker struct {
+			OK     bool   `json:"ok"`
+			Action string `json:"action"`
+		} `json:"docker"`
+		Readiness struct {
+			OK    bool `json:"ok"`
+			Items []struct {
+				Name   string `json:"name"`
+				OK     bool   `json:"ok"`
+				Detail string `json:"detail"`
+			} `json:"items"`
+		} `json:"readiness"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode package prepare restore json: %v\n%s", err, out)
+	}
+	if !report.OK || !report.Package.Configured || report.Package.Action != "clone" || !report.Package.OK || report.Package.Checkout != workspace || len(report.Repos) != 0 || !report.Docker.OK || report.Docker.Action != "skipped-after-repository-preparation" || !report.Readiness.OK {
+		t.Fatalf("package prepare report = %#v", report)
+	}
+	if !restoreReadinessHasItem(report.Readiness.Items, "environment-package", true, "environment package") {
+		t.Fatalf("readiness should include package gate: %#v", report.Readiness.Items)
+	}
+	if raw, err := os.ReadFile(filepath.Join(workspace, "compose", "docker-compose.yml")); err != nil || !strings.Contains(string(raw), "services") {
+		t.Fatalf("package compose file missing raw=%q err=%v", raw, err)
+	}
+	dockerCalls, err := os.ReadFile(dockerCallsPath)
+	if err != nil {
+		t.Fatalf("read fake docker calls: %v", err)
+	}
+	if strings.Contains(string(dockerCalls), " compose ") {
+		t.Fatalf("prepare package should not invoke Docker Compose:\n%s", dockerCalls)
 	}
 }
 
@@ -8422,14 +8515,27 @@ func seedEnvironmentVerificationArtifacts(t *testing.T, storeRef string, runID s
 }
 
 func createBareGitRepo(t *testing.T, branch string) string {
+	return createBareGitRepoWithFiles(t, branch, map[string]string{
+		"README.md": "# restore fixture\n",
+	})
+}
+
+func createBareGitRepoWithFiles(t *testing.T, branch string, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
 	remote := filepath.Join(dir, "remote.git")
 	work := filepath.Join(dir, "work")
 	runGit(t, "", "init", "--bare", remote)
 	runGit(t, "", "init", "-b", branch, work)
-	writeFile(t, filepath.Join(work, "README.md"), "# restore fixture\n")
-	runGit(t, work, "add", "README.md")
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		writeFile(t, filepath.Join(work, name), files[name])
+	}
+	runGit(t, work, "add", ".")
 	runGit(t, work, "-c", "user.name=Open Test", "-c", "user.email=open-test@example.com", "commit", "-m", "initial")
 	runGit(t, work, "remote", "add", "origin", remote)
 	runGit(t, work, "push", "origin", branch)

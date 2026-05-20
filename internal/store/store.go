@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -185,6 +186,23 @@ type Environment struct {
 	SummaryJSON            string
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
+}
+
+const (
+	EnvironmentDefinitionMaxBytes = 64 * 1024
+	EnvironmentSummaryMaxBytes    = 128 * 1024
+)
+
+func ValidateEnvironmentDefinitionSize(e Environment) error {
+	total := len(e.ID) + len(e.DisplayName) + len(e.Description) + len(e.Status) +
+		len(e.ServicesJSON) + len(e.ReposJSON) + len(e.ComposeJSON) + len(e.HealthChecksJSON) + len(e.VerificationWorkflowID)
+	if total > EnvironmentDefinitionMaxBytes {
+		return fmt.Errorf("environment definition metadata is %d bytes; maximum is %d bytes. Store only compact restore metadata in PostgreSQL, not code, images, logs, evidence payloads, or large files", total, EnvironmentDefinitionMaxBytes)
+	}
+	if len(e.SummaryJSON) > EnvironmentSummaryMaxBytes {
+		return fmt.Errorf("environment summary metadata is %d bytes; maximum is %d bytes. Store only compact acceptance summaries and indexes in PostgreSQL, not code, images, logs, evidence payloads, or large files", len(e.SummaryJSON), EnvironmentSummaryMaxBytes)
+	}
+	return nil
 }
 
 type ProfileCatalog struct {

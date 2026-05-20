@@ -1795,6 +1795,9 @@ Core 10-step workflow acceptance-green slice:
 
 Docker restore acceptance binding slice:
 
+- Current validation is intentionally three-layered: non-destructive dry-run,
+  isolated prepare-repos-only pre-Docker gate, then operator-approved real
+  Docker pull/build/up plus async acceptance run.
 - 2026-05-20T06:30Z: set the active goal to prove that an environment bound to
   a successful async acceptance workflow can be restored from Store metadata
   toward a colleague-machine Docker environment, without putting the sandbox
@@ -1830,3 +1833,57 @@ Docker restore acceptance binding slice:
   package in the isolated workspace and run Docker pull/build/up. Because the
   compose stack uses fixed container names and may download/build images, this
   requires operator approval before proceeding.
+
+Environment package and PG size-boundary slice:
+
+- 2026-05-20T06:55Z: added Store metadata for an environment package repository
+  through `environment register --package-repo [--package-branch]
+  [--package-ref]`. Restore now prepares that package before service
+  repositories, so a new workspace can obtain the validation compose package
+  from Git instead of relying on manual copy from this machine.
+- Added `package` details to restore reports and a readiness gate named
+  `environment-package`. `--prepare-repos-only` now covers both the environment
+  package repository and service repositories, while still stopping before
+  Docker.
+- Added a Store-layer environment definition metadata cap:
+  `store.EnvironmentDefinitionMaxBytes = 65536`; environment summary metadata
+  is separately capped at `store.EnvironmentSummaryMaxBytes = 131072`. The
+  definition cap covers compact fields such as id/display/description, services,
+  repo pointers, compose pointers/env entries, health checks, and workflow
+  binding. PostgreSQL must store only restore metadata and acceptance
+  summaries/indexes; code packages, Docker images, logs, Evidence payloads, and
+  other large files are rejected by this boundary and must live in Git, Docker
+  registry, object storage, or the workspace.
+- Expected size for the current 10-step Docker environment definition remains
+  in the tens-of-KB class at most; the current `scf-chain-core10-local-docker`
+  PG row is about 3211 bytes for definition metadata and about 13151 bytes for
+  restore summary metadata. The goal is compact metadata, not binary or artifact
+  storage in PG.
+- Light validation for this slice:
+  `go test ./cmd/otsandbox -run
+  'TestEnvironment(RegisterRejectsOversizedDefinitionMetadata|RestoreCanPreparePackageRepositoryBeforeDocker)'
+  -count=1`;
+  `go test ./internal/store/... -run 'Test.*Environment' -count=1`.
+
+Docker service startup gate slice:
+
+- 2026-05-20T07:10Z: shifted the restore gate priority ahead of workflow
+  execution: middleware and business containers must first be started and
+  reported as ready before the bound workflow acceptance is useful.
+- Restore now expands the recorded Compose service allow-list into generated
+  `compose-service` health checks. After Docker startup it runs
+  `docker compose ps --format json SERVICE` for each recorded service and
+  requires the container state to be `running` with no `unhealthy` status.
+- For `scf-chain-core10-local-docker`, the dry-run report now includes 19
+  readiness checks: 2 URL probes plus 17 generated Compose service checks
+  covering Zookeeper, MySQL, Redis, RabbitMQ, Apollo, XXL job, SkyWalking,
+  LLT, and the business services. This report was persisted back to the active
+  local PostgreSQL Store as restore progress metadata.
+- This does not replace real HTTP/API checks where they exist; it adds the
+  container startup proof that must pass before running the async workflow
+  acceptance report.
+- Light validation for this slice:
+  `go test ./cmd/otsandbox -run
+  'TestEnvironmentRestoreHonorsComposeOptionsFromStore|TestEnvironment(RegisterRejectsOversizedDefinitionMetadata|RestoreCanPreparePackageRepositoryBeforeDocker)'
+  -count=1`; dry-run against `local-pg` returned `ok=True`,
+  `healthChecks=19`, readiness `ready-for-operator-review`.

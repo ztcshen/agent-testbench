@@ -461,6 +461,9 @@ limit 1;`)
 }
 
 func (s *Store) UpsertEnvironment(ctx context.Context, e store.Environment) (store.Environment, error) {
+	if err := store.ValidateEnvironmentDefinitionSize(e); err != nil {
+		return store.Environment{}, err
+	}
 	now := utcNow()
 	if e.CreatedAt.IsZero() {
 		e.CreatedAt = now

@@ -248,7 +248,7 @@ Usage:
   otsandbox store status [--store NAME_OR_DSN]
   otsandbox store upgrade [--store NAME_OR_DSN]
   otsandbox store ddl [--backend postgres]
-  otsandbox environment register --id ID [--store NAME_OR_DSN] [--display-name NAME] [--service ID] [--repo SERVICE=PATH] [--branch SERVICE=BRANCH] [--checkout SERVICE=PATH] [--compose-file PATH]... [--compose-env KEY=VALUE]... [--start-command TEXT] [--health-url URL] [--health-tcp HOST:PORT] [--health-command CMD] [--health-compose-service SERVICE] [--verification-workflow ID] [--json]
+  otsandbox environment register --id ID [--store NAME_OR_DSN] [--display-name NAME] [--service ID] [--repo SERVICE=PATH] [--branch SERVICE=BRANCH] [--checkout SERVICE=PATH] [--package-repo URL] [--package-branch BRANCH] [--package-ref REF] [--compose-file PATH]... [--compose-env KEY=VALUE]... [--start-command TEXT] [--health-url URL] [--health-tcp HOST:PORT] [--health-command CMD] [--health-compose-service SERVICE] [--verification-workflow ID] [--json]
   otsandbox environment discover [--store NAME_OR_DSN] [--all] [--json]
   otsandbox environment inspect ENV_ID [--store NAME_OR_DSN] [--json]
   otsandbox environment bootstrap ENV_ID [--store NAME_OR_DSN] [--json]
@@ -469,6 +469,9 @@ func runEnvironmentRegister(ctx context.Context, args []string) error {
 	composeProjectName := flags.String("compose-project-name", "", "Docker Compose project name")
 	composeSkipPull := flags.Bool("compose-skip-pull", false, "Skip Docker Compose image pull during restore")
 	composeSkipBuild := flags.Bool("compose-skip-build", false, "Skip Docker Compose build during restore")
+	packageRepo := flags.String("package-repo", "", "Environment package Git URL containing compose files and local validation assets")
+	packageBranch := flags.String("package-branch", "", "Environment package Git branch")
+	packageRef := flags.String("package-ref", "", "Environment package Git ref to checkout detached")
 	startCommand := flags.String("start-command", "", "Local startup command")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	var services, repos, branches, repoRefs, checkouts, healthURLs, healthTCPs, healthCommands, healthComposeServices, composeFiles, composeEnvFiles, composeEnvs, composeProfiles, composeServices stringListFlag
@@ -507,7 +510,7 @@ func runEnvironmentRegister(ctx context.Context, args []string) error {
 		Status:                 stringDefault(strings.TrimSpace(*status), "draft"),
 		ServicesJSON:           mustCompactJSON(environmentServices(services, repos, branches, repoRefs, checkouts)),
 		ReposJSON:              mustCompactJSON(environmentRepoMap(repos, branches, repoRefs, checkouts)),
-		ComposeJSON:            mustCompactJSON(environmentComposeConfig(composeFiles, *startCommand, *composeProjectName, composeEnvFiles, composeEnvs, composeProfiles, composeServices, *composeSkipPull, *composeSkipBuild)),
+		ComposeJSON:            mustCompactJSON(environmentComposeConfig(composeFiles, *startCommand, *composeProjectName, composeEnvFiles, composeEnvs, composeProfiles, composeServices, *composeSkipPull, *composeSkipBuild, *packageRepo, *packageBranch, *packageRef)),
 		HealthChecksJSON:       mustCompactJSON(environmentHealthChecks(healthURLs, healthTCPs, healthCommands, healthComposeServices)),
 		VerificationWorkflowID: strings.TrimSpace(*verificationWorkflowID),
 		SummaryJSON:            mustCompactJSON(map[string]any{"source": "cli"}),
@@ -608,22 +611,44 @@ func runEnvironmentBootstrap(ctx context.Context, args []string) error {
 }
 
 type environmentRestoreReport struct {
-	OK                   bool                           `json:"ok"`
-	RestoreID            string                         `json:"restoreId"`
-	Executed             bool                           `json:"executed"`
-	EnvironmentID        string                         `json:"environmentId"`
-	VerificationWorkflow string                         `json:"verificationWorkflow"`
-	Workspace            string                         `json:"workspace"`
-	Environment          map[string]any                 `json:"environment,omitempty"`
-	Error                string                         `json:"error,omitempty"`
-	Repos                []environmentRestoreRepoReport `json:"repos"`
-	Compose              map[string]any                 `json:"compose"`
-	HealthChecks         []any                          `json:"healthChecks"`
-	Preflight            environmentRestorePreflight    `json:"preflight"`
-	Readiness            environmentRestoreReadiness    `json:"readiness"`
-	Docker               environmentRestoreDockerReport `json:"docker"`
-	Workflow             environmentRestoreWorkflowRun  `json:"workflow"`
-	NextActions          []string                       `json:"nextActions"`
+	OK                   bool                            `json:"ok"`
+	RestoreID            string                          `json:"restoreId"`
+	Executed             bool                            `json:"executed"`
+	EnvironmentID        string                          `json:"environmentId"`
+	VerificationWorkflow string                          `json:"verificationWorkflow"`
+	Workspace            string                          `json:"workspace"`
+	Environment          map[string]any                  `json:"environment,omitempty"`
+	Error                string                          `json:"error,omitempty"`
+	Package              environmentRestorePackageReport `json:"package,omitempty"`
+	Repos                []environmentRestoreRepoReport  `json:"repos"`
+	Compose              map[string]any                  `json:"compose"`
+	HealthChecks         []any                           `json:"healthChecks"`
+	Preflight            environmentRestorePreflight     `json:"preflight"`
+	Readiness            environmentRestoreReadiness     `json:"readiness"`
+	Docker               environmentRestoreDockerReport  `json:"docker"`
+	Workflow             environmentRestoreWorkflowRun   `json:"workflow"`
+	NextActions          []string                        `json:"nextActions"`
+}
+
+type environmentRestorePackageReport struct {
+	Configured bool     `json:"configured"`
+	URL        string   `json:"url,omitempty"`
+	Branch     string   `json:"branch,omitempty"`
+	Ref        string   `json:"ref,omitempty"`
+	Checkout   string   `json:"checkout,omitempty"`
+	Exists     bool     `json:"exists"`
+	Action     string   `json:"action"`
+	Command    []string `json:"command,omitempty"`
+	OK         bool     `json:"ok"`
+	Output     string   `json:"output,omitempty"`
+	Error      string   `json:"error,omitempty"`
+}
+
+type environmentRestorePackageSpec struct {
+	URL      string
+	Branch   string
+	Ref      string
+	Checkout string
 }
 
 type environmentRestoreRepoReport struct {
@@ -939,7 +964,8 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 	}
 	specs := environmentRestoreRepoSpecs(env, workspace)
 	compose := jsonObjectString(env.ComposeJSON)
-	healthChecks := jsonArrayString(env.HealthChecksJSON)
+	packageSpec := environmentRestorePackageSpecFromCompose(compose, workspace)
+	healthChecks := environmentRestoreEffectiveHealthChecks(jsonArrayString(env.HealthChecksJSON), compose)
 	attemptedAt := time.Now().UTC()
 	report := environmentRestoreReport{
 		OK:                   true,
@@ -950,7 +976,7 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 		Workspace:            workspace,
 		Compose:              compose,
 		HealthChecks:         healthChecks,
-		Preflight:            environmentRestorePreflightReport(specs, compose, workspace, cleanupOptions),
+		Preflight:            environmentRestorePreflightReport(packageSpec, specs, compose, workspace, cleanupOptions),
 		Workflow: environmentRestoreWorkflowRun{
 			OK:         !workflowOptions.Run,
 			Action:     "not-requested",
@@ -961,6 +987,10 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 		},
 	}
 	if !report.Preflight.OK {
+		report.OK = false
+	}
+	report.Package = environmentRestorePackage(ctx, packageSpec, execute, pull)
+	if !report.Package.OK {
 		report.OK = false
 	}
 	for _, spec := range specs {
@@ -1006,7 +1036,7 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 	if !execute {
 		report.NextActions = append([]string{"review the Docker Compose plan, then rerun with --execute"}, report.NextActions...)
 	}
-	report.Readiness = environmentRestoreReadinessReport(report, specs, cleanupOptions)
+	report.Readiness = environmentRestoreReadinessReport(report, packageSpec, specs, cleanupOptions)
 	if strings.TrimSpace(workflowOptions.StoreURL) != "" {
 		persisted, err := environmentRestorePersistEnvironment(ctx, workflowOptions.StoreURL, env, report, attemptedAt)
 		if err != nil {
@@ -1016,7 +1046,7 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 				report.Workflow.OK = false
 				report.Workflow.Error = err.Error()
 			}
-			report.Readiness = environmentRestoreReadinessReport(report, specs, cleanupOptions)
+			report.Readiness = environmentRestoreReadinessReport(report, packageSpec, specs, cleanupOptions)
 		} else {
 			report.Environment = environmentPayload(persisted)
 		}
@@ -1054,6 +1084,7 @@ func environmentRestoreSummaryJSON(existing string, report environmentRestoreRep
 			"tools":      environmentRestoreSummaryTools(report.Preflight.Tools),
 			"heavySteps": report.Preflight.HeavySteps,
 		},
+		"package":      environmentRestoreSummaryPackage(report.Package),
 		"repositories": environmentRestoreSummaryRepos(report.Repos),
 		"readiness":    environmentRestoreSummaryReadiness(report.Readiness),
 		"docker":       environmentRestoreSummaryDocker(report.Docker),
@@ -1104,6 +1135,9 @@ func environmentRestorePhase(report environmentRestoreReport) string {
 	if !report.Preflight.OK {
 		return "preflight"
 	}
+	if report.Package.Configured && !report.Package.OK {
+		return "package"
+	}
 	for _, item := range report.Repos {
 		if !item.OK {
 			return "repository"
@@ -1137,6 +1171,20 @@ func environmentRestoreSummaryTools(tools []environmentRestorePreflightTool) []m
 		})
 	}
 	return out
+}
+
+func environmentRestoreSummaryPackage(report environmentRestorePackageReport) map[string]any {
+	return map[string]any{
+		"configured": report.Configured,
+		"action":     report.Action,
+		"ok":         report.OK,
+		"url":        report.URL,
+		"branch":     report.Branch,
+		"ref":        report.Ref,
+		"checkout":   report.Checkout,
+		"exists":     report.Exists,
+		"error":      report.Error,
+	}
 }
 
 func environmentRestoreSummaryRepos(repos []environmentRestoreRepoReport) []map[string]any {
@@ -1291,7 +1339,83 @@ func environmentRestoreRepoSpecs(env store.Environment, workspace string) []envi
 	return out
 }
 
-func environmentRestorePreflightReport(specs []environmentRestoreRepoSpec, compose map[string]any, workspace string, cleanupOptions environmentRestoreDockerCleanupOptions) environmentRestorePreflight {
+func environmentRestorePackageSpecFromCompose(compose map[string]any, workspace string) environmentRestorePackageSpec {
+	pkg := mapFromReportAny(compose["package"])
+	spec := environmentRestorePackageSpec{
+		URL:    strings.TrimSpace(valueString(pkg["url"])),
+		Branch: strings.TrimSpace(valueString(pkg["branch"])),
+		Ref:    strings.TrimSpace(valueString(pkg["ref"])),
+	}
+	checkout := strings.TrimSpace(valueString(pkg["checkout"]))
+	if checkout == "" {
+		checkout = "."
+	}
+	if filepath.IsAbs(checkout) {
+		spec.Checkout = checkout
+	} else {
+		spec.Checkout = filepath.Join(workspace, checkout)
+	}
+	return spec
+}
+
+func environmentRestorePackage(ctx context.Context, spec environmentRestorePackageSpec, execute bool, pull bool) environmentRestorePackageReport {
+	report := environmentRestorePackageReport{
+		Configured: strings.TrimSpace(spec.URL) != "" || strings.TrimSpace(spec.Ref) != "",
+		URL:        spec.URL,
+		Branch:     spec.Branch,
+		Ref:        spec.Ref,
+		Checkout:   spec.Checkout,
+		OK:         true,
+	}
+	if !report.Configured {
+		report.Action = "not-configured"
+		return report
+	}
+	repoReport := environmentRestoreRepo(ctx, environmentRestoreRepoSpec{
+		ServiceID: "environment-package",
+		URL:       spec.URL,
+		Branch:    spec.Branch,
+		Ref:       spec.Ref,
+		Checkout:  spec.Checkout,
+	}, execute, pull)
+	report.Exists = repoReport.Exists
+	report.Action = repoReport.Action
+	report.Command = repoReport.Command
+	report.OK = repoReport.OK
+	report.Output = repoReport.Output
+	report.Error = repoReport.Error
+	return report
+}
+
+func environmentRestoreEffectiveHealthChecks(checks []any, compose map[string]any) []any {
+	out := append([]any{}, checks...)
+	covered := map[string]bool{}
+	for _, raw := range checks {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(valueString(item["kind"])) == "compose-service" {
+			if service := strings.TrimSpace(valueString(item["service"])); service != "" {
+				covered[service] = true
+			}
+		}
+	}
+	for _, service := range stringSliceFromAny(compose["services"]) {
+		if covered[service] {
+			continue
+		}
+		out = append(out, map[string]any{
+			"id":      "compose-service-" + safeReportID(service),
+			"kind":    "compose-service",
+			"service": service,
+		})
+		covered[service] = true
+	}
+	return out
+}
+
+func environmentRestorePreflightReport(packageSpec environmentRestorePackageSpec, specs []environmentRestoreRepoSpec, compose map[string]any, workspace string, cleanupOptions environmentRestoreDockerCleanupOptions) environmentRestorePreflight {
 	report := environmentRestorePreflight{
 		OK: true,
 		Notes: []string{
@@ -1300,6 +1424,9 @@ func environmentRestorePreflightReport(specs []environmentRestoreRepoSpec, compo
 		},
 	}
 	requiresGit := false
+	if strings.TrimSpace(packageSpec.URL) != "" || strings.TrimSpace(packageSpec.Ref) != "" {
+		requiresGit = true
+	}
 	for _, spec := range specs {
 		if strings.TrimSpace(spec.URL) != "" || strings.TrimSpace(spec.Ref) != "" {
 			requiresGit = true
@@ -1344,7 +1471,7 @@ func environmentRestorePreflightReport(specs []environmentRestoreRepoSpec, compo
 	return report
 }
 
-func environmentRestoreReadinessReport(report environmentRestoreReport, specs []environmentRestoreRepoSpec, cleanupOptions environmentRestoreDockerCleanupOptions) environmentRestoreReadiness {
+func environmentRestoreReadinessReport(report environmentRestoreReport, packageSpec environmentRestorePackageSpec, specs []environmentRestoreRepoSpec, cleanupOptions environmentRestoreDockerCleanupOptions) environmentRestoreReadiness {
 	readiness := environmentRestoreReadiness{
 		OK:                         true,
 		Action:                     "ready-for-operator-review",
@@ -1364,6 +1491,13 @@ func environmentRestoreReadinessReport(report environmentRestoreReport, specs []
 
 	addItem("store-boundary", true, true, "sandbox PostgreSQL Store must stay outside the restored Docker target environment")
 	addItem("verification-workflow", true, strings.TrimSpace(report.VerificationWorkflow) != "", "restore is anchored to workflow "+strings.TrimSpace(report.VerificationWorkflow))
+	if strings.TrimSpace(packageSpec.URL) != "" {
+		detail := "environment package will be cloned or validated before Docker startup"
+		if report.Package.Action != "" {
+			detail = "environment package " + report.Package.Action + " at " + report.Package.Checkout
+		}
+		addItem("environment-package", true, report.Package.OK, detail)
+	}
 
 	repoOK := true
 	for _, item := range report.Repos {
@@ -2630,7 +2764,7 @@ func environmentRepoMap(repos stringListFlag, branches stringListFlag, repoRefs 
 	return out
 }
 
-func environmentComposeConfig(composeFiles stringListFlag, startCommand string, projectName string, envFiles stringListFlag, envs stringListFlag, profiles stringListFlag, services stringListFlag, skipPull bool, skipBuild bool) map[string]any {
+func environmentComposeConfig(composeFiles stringListFlag, startCommand string, projectName string, envFiles stringListFlag, envs stringListFlag, profiles stringListFlag, services stringListFlag, skipPull bool, skipBuild bool, packageRepo string, packageBranch string, packageRef string) map[string]any {
 	files := composeFiles.Values()
 	composeFile := ""
 	if len(files) > 0 {
@@ -2663,6 +2797,20 @@ func environmentComposeConfig(composeFiles stringListFlag, startCommand string, 
 	}
 	if skipBuild {
 		out["skipBuild"] = true
+	}
+	packageConfig := map[string]string{}
+	if strings.TrimSpace(packageRepo) != "" {
+		packageConfig["url"] = strings.TrimSpace(packageRepo)
+	}
+	if strings.TrimSpace(packageBranch) != "" {
+		packageConfig["branch"] = strings.TrimSpace(packageBranch)
+	}
+	if strings.TrimSpace(packageRef) != "" {
+		packageConfig["ref"] = strings.TrimSpace(packageRef)
+	}
+	if len(packageConfig) > 0 {
+		packageConfig["checkout"] = "."
+		out["package"] = packageConfig
 	}
 	return out
 }
