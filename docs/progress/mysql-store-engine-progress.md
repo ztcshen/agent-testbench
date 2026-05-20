@@ -1470,3 +1470,36 @@ Current blocker:
   `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+
+## 2026-05-21 MySQL Case Report Read Path Parity Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Added env-gated MySQL named active Store coverage for report/read commands:
+  `case runs`, `case evidence`, and `case timing`.
+- Shared the existing PostgreSQL scenarios across PostgreSQL and MySQL:
+  seeded workflow runs, API case runs, Evidence records, case-run listing,
+  case Evidence rendering, and slowest-case timing summary.
+- Generated unique run/profile/workflow/case ids per run for direct readback
+  checks.
+- Made the timing scenario shared-database tolerant by using a narrow max-age
+  window and a unique slow case that should remain the slowest row even if
+  recent unrelated rows exist.
+
+Validated:
+
+- `go test -v ./cmd/otsandbox -run 'TestCase(RunsCommand(ListsStoredCaseRuns|UsesNamedMySQLActiveStore)|EvidenceCommand(ReadsCaseRunEvidence|UsesNamedMySQLActiveStore)|TimingCommand(SummarizesStoredCaseRuns|UsesNamedMySQLActiveStore))' -count=1`
+  compiled and passed locally; the env-gated PostgreSQL/MySQL cases skipped
+  because local DSNs were not exported in this shell.
+- `git diff --check`
+- `rg -n -i 'fall''back' . --glob '!node_modules/**'`
+- `tools/guardrails/check_store_first_contracts.sh && tools/guardrails/check_no_source_domain_core.sh`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.

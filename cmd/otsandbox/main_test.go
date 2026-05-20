@@ -4004,38 +4004,49 @@ func TestTemplatePackageCatalogIndexCommandReadsStoreCatalog(t *testing.T) {
 }
 
 func TestCaseRunsCommandListsStoredCaseRuns(t *testing.T) {
-	ctx := context.Background()
 	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-case-runs-pg")
+	runCaseRunsCommandListsStoredCaseRuns(t, storeRef, "PostgreSQL")
+}
+
+func TestCaseRunsCommandUsesNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-case-runs-mysql")
+	runCaseRunsCommandListsStoredCaseRuns(t, storeRef, "MySQL")
+}
+
+func runCaseRunsCommandListsStoredCaseRuns(t *testing.T, storeRef string, label string) {
+	t.Helper()
+	ctx := context.Background()
 	s, err := openStore(ctx, storeRef)
 	if err != nil {
-		t.Fatalf("open store: %v", err)
+		t.Fatalf("open %s store: %v", label, err)
 	}
 	defer s.Close()
 	runID := uniqueTestID(t, "run.case-runs")
 	caseRunID := runID + ".case"
+	caseID := uniqueTestID(t, "case.alpha")
 	started := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
 	if _, err := s.CreateRun(ctx, store.Run{
 		ID:           runID,
-		ProfileID:    "sample",
-		WorkflowID:   "workflow.alpha",
+		ProfileID:    uniqueTestID(t, "profile.case-runs"),
+		WorkflowID:   uniqueTestID(t, "workflow.case-runs"),
 		Status:       store.StatusPassed,
 		EvidenceRoot: "/tmp/evidence/" + runID,
 		StartedAt:    started,
 		FinishedAt:   started.Add(time.Second),
 	}); err != nil {
-		t.Fatalf("create run: %v", err)
+		t.Fatalf("create %s run: %v", label, err)
 	}
 	if _, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
 		ID:                   caseRunID,
 		RunID:                runID,
-		CaseID:               "case.alpha",
+		CaseID:               caseID,
 		Status:               store.StatusPassed,
 		RequestSummaryJSON:   `{"method":"POST","path":"/alpha"}`,
 		AssertionSummaryJSON: `{"status":"passed"}`,
 		StartedAt:            started,
 		FinishedAt:           started.Add(250 * time.Millisecond),
 	}); err != nil {
-		t.Fatalf("record case run: %v", err)
+		t.Fatalf("record %s case run: %v", label, err)
 	}
 	if _, err := s.RecordEvidence(ctx, store.EvidenceRecord{
 		ID:        runID + ".evidence",
@@ -4044,7 +4055,7 @@ func TestCaseRunsCommandListsStoredCaseRuns(t *testing.T) {
 		Kind:      "http-response",
 		URI:       "/tmp/evidence/" + runID + "/response.json",
 	}); err != nil {
-		t.Fatalf("record evidence: %v", err)
+		t.Fatalf("record %s evidence: %v", label, err)
 	}
 
 	out := runCLI(t, "case", "runs", "--run", runID, "--json")
@@ -4062,46 +4073,56 @@ func TestCaseRunsCommandListsStoredCaseRuns(t *testing.T) {
 		} `json:"caseRuns"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode case runs json: %v\n%s", err, out)
+		t.Fatalf("decode %s case runs json: %v\n%s", label, err, out)
 	}
 	if !report.OK || len(report.CaseRuns) != 1 {
-		t.Fatalf("case runs report = %#v", report)
+		t.Fatalf("%s case runs report = %#v", label, report)
 	}
 	item := report.CaseRuns[0]
-	if item.ID != caseRunID || item.RunID != runID || item.CaseID != "case.alpha" || item.Status != store.StatusPassed || item.Operation != "POST /alpha" || item.EvidenceCount != 1 || item.EvidencePath != "/tmp/evidence/"+runID {
-		t.Fatalf("case run item = %#v", item)
+	if item.ID != caseRunID || item.RunID != runID || item.CaseID != caseID || item.Status != store.StatusPassed || item.Operation != "POST /alpha" || item.EvidenceCount != 1 || item.EvidencePath != "/tmp/evidence/"+runID {
+		t.Fatalf("%s case run item = %#v", label, item)
 	}
 }
 
 func TestCaseEvidenceCommandReadsCaseRunEvidence(t *testing.T) {
-	ctx := context.Background()
 	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-case-evidence-pg")
+	runCaseEvidenceCommandReadsCaseRunEvidence(t, storeRef, "PostgreSQL")
+}
+
+func TestCaseEvidenceCommandUsesNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-case-evidence-mysql")
+	runCaseEvidenceCommandReadsCaseRunEvidence(t, storeRef, "MySQL")
+}
+
+func runCaseEvidenceCommandReadsCaseRunEvidence(t *testing.T, storeRef string, label string) {
+	t.Helper()
+	ctx := context.Background()
 	s, err := openStore(ctx, storeRef)
 	if err != nil {
-		t.Fatalf("open store: %v", err)
+		t.Fatalf("open %s store: %v", label, err)
 	}
 	defer s.Close()
 	runID := uniqueTestID(t, "run.case-evidence")
 	caseRunID := runID + ".case"
 	if _, err := s.CreateRun(ctx, store.Run{
 		ID:           runID,
-		ProfileID:    "sample",
-		WorkflowID:   "workflow.alpha",
+		ProfileID:    uniqueTestID(t, "profile.case-evidence"),
+		WorkflowID:   uniqueTestID(t, "workflow.case-evidence"),
 		Status:       store.StatusPassed,
 		EvidenceRoot: "/tmp/evidence/" + runID,
 		SummaryJSON:  "{}",
 	}); err != nil {
-		t.Fatalf("create run: %v", err)
+		t.Fatalf("create %s run: %v", label, err)
 	}
 	if _, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
 		ID:                   caseRunID,
 		RunID:                runID,
-		CaseID:               "case.alpha",
+		CaseID:               uniqueTestID(t, "case.alpha"),
 		Status:               store.StatusPassed,
 		RequestSummaryJSON:   `{"method":"GET","path":"/alpha"}`,
 		AssertionSummaryJSON: `{"status":"passed"}`,
 	}); err != nil {
-		t.Fatalf("record case run: %v", err)
+		t.Fatalf("record %s case run: %v", label, err)
 	}
 	if _, err := s.RecordEvidence(ctx, store.EvidenceRecord{
 		ID:        runID + ".response",
@@ -4112,7 +4133,7 @@ func TestCaseEvidenceCommandReadsCaseRunEvidence(t *testing.T) {
 		MediaType: "application/json",
 		Summary:   `{"statusCode":200}`,
 	}); err != nil {
-		t.Fatalf("record evidence: %v", err)
+		t.Fatalf("record %s evidence: %v", label, err)
 	}
 
 	out := runCLI(t, "case", "evidence", "--case-run", caseRunID, "--json")
@@ -4126,36 +4147,48 @@ func TestCaseEvidenceCommandReadsCaseRunEvidence(t *testing.T) {
 		} `json:"evidence"`
 	}
 	if err := json.Unmarshal([]byte(out), &payload); err != nil {
-		t.Fatalf("decode case evidence json: %v\n%s", err, out)
+		t.Fatalf("decode %s case evidence json: %v\n%s", label, err, out)
 	}
 	if !payload.OK || payload.Evidence.Summary["case_run_id"] != caseRunID || payload.Evidence.Summary["operation"] != "GET /alpha" {
-		t.Fatalf("case evidence summary = %#v", payload.Evidence.Summary)
+		t.Fatalf("%s case evidence summary = %#v", label, payload.Evidence.Summary)
 	}
 	if payload.Evidence.Response["http_code"] != float64(200) || payload.Evidence.Response["evidence_uri"] != "/tmp/evidence/"+runID+"/response.json" {
-		t.Fatalf("case evidence response = %#v", payload.Evidence.Response)
+		t.Fatalf("%s case evidence response = %#v", label, payload.Evidence.Response)
 	}
 }
 
 func TestCaseTimingCommandSummarizesStoredCaseRuns(t *testing.T) {
-	ctx := context.Background()
 	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-case-timing-pg")
+	runCaseTimingCommandSummarizesStoredCaseRuns(t, storeRef, "PostgreSQL")
+}
+
+func TestCaseTimingCommandUsesNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-case-timing-mysql")
+	runCaseTimingCommandSummarizesStoredCaseRuns(t, storeRef, "MySQL")
+}
+
+func runCaseTimingCommandSummarizesStoredCaseRuns(t *testing.T, storeRef string, label string) {
+	t.Helper()
+	ctx := context.Background()
 	s, err := openStore(ctx, storeRef)
 	if err != nil {
-		t.Fatalf("open store: %v", err)
+		t.Fatalf("open %s store: %v", label, err)
 	}
+	defer s.Close()
 	fastRunID := uniqueTestID(t, "run.fast")
 	slowRunID := uniqueTestID(t, "run.slow")
 	fastCaseID := uniqueTestID(t, "case.fast")
 	slowCaseID := uniqueTestID(t, "case.slow")
+	base := time.Now().UTC()
 	for _, item := range []struct {
 		runID    string
 		caseID   string
 		duration time.Duration
 	}{
 		{runID: fastRunID, caseID: fastCaseID, duration: 200 * time.Millisecond},
-		{runID: slowRunID, caseID: slowCaseID, duration: 1250 * time.Millisecond},
+		{runID: slowRunID, caseID: slowCaseID, duration: 36 * time.Hour},
 	} {
-		started := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
+		started := base
 		if _, err := s.CreateRun(ctx, store.Run{
 			ID:         item.runID,
 			ProfileID:  "sample",
@@ -4165,7 +4198,7 @@ func TestCaseTimingCommandSummarizesStoredCaseRuns(t *testing.T) {
 			CreatedAt:  started,
 			UpdatedAt:  started.Add(item.duration),
 		}); err != nil {
-			t.Fatalf("create run %s: %v", item.runID, err)
+			t.Fatalf("create %s run %s: %v", label, item.runID, err)
 		}
 		if _, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
 			ID:         item.runID + ".case",
@@ -4176,14 +4209,11 @@ func TestCaseTimingCommandSummarizesStoredCaseRuns(t *testing.T) {
 			FinishedAt: started.Add(item.duration),
 			CreatedAt:  started,
 		}); err != nil {
-			t.Fatalf("record case run %s: %v", item.runID, err)
+			t.Fatalf("record %s case run %s: %v", label, item.runID, err)
 		}
 	}
-	if err := s.Close(); err != nil {
-		t.Fatalf("close store: %v", err)
-	}
 
-	out := runCLI(t, "case", "timing", "--kind", "case", "--json")
+	out := runCLI(t, "case", "timing", "--kind", "case", "--max-age-minutes", "1", "--json")
 
 	var payload struct {
 		OK      bool `json:"ok"`
@@ -4195,14 +4225,14 @@ func TestCaseTimingCommandSummarizesStoredCaseRuns(t *testing.T) {
 		} `json:"summary"`
 	}
 	if err := json.Unmarshal([]byte(out), &payload); err != nil {
-		t.Fatalf("decode case timing json: %v\n%s", err, out)
+		t.Fatalf("decode %s case timing json: %v\n%s", label, err, out)
 	}
-	if !payload.OK || payload.Summary.CaseRunCount != 2 || payload.Summary.DurationMeasuredCount != 2 || payload.Summary.MaxDurationMs != 1250 {
-		t.Fatalf("case timing summary = %#v", payload.Summary)
+	if !payload.OK || payload.Summary.CaseRunCount < 2 || payload.Summary.DurationMeasuredCount < 2 || payload.Summary.MaxDurationMs < int((36*time.Hour).Milliseconds()) {
+		t.Fatalf("%s case timing summary = %#v", label, payload.Summary)
 	}
 	slowest := payload.Summary.SlowestRows["caseRun"].(map[string]any)
-	if slowest["id"] != slowRunID+".case" || slowest["caseId"] != slowCaseID || slowest["durationMs"] != float64(1250) {
-		t.Fatalf("case timing slowest = %#v", slowest)
+	if slowest["id"] != slowRunID+".case" || slowest["caseId"] != slowCaseID || slowest["durationMs"] != float64((36*time.Hour).Milliseconds()) {
+		t.Fatalf("%s case timing slowest = %#v", label, slowest)
 	}
 }
 
