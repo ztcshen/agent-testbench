@@ -162,6 +162,26 @@ test("real MySQL release wrapper requires real SkyWalking sign-off inputs", () =
   assert.doesNotMatch(result.stderr, /secret/);
 });
 
+test("real MySQL release wrapper rejects invalid or non-http SkyWalking GraphQL URLs", () => {
+  for (const graphQLURL of ["not-a-url", "ftp://skywalking.example/graphql"]) {
+    const result = runRealMySQLWrapper({
+      OTSANDBOX_REAL_MYSQL_STORE_DSN: "mysql://user:secret@example.com:3306/otsandbox_smoke?tls=false",
+      OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
+      OTS_TRACE_GRAPHQL_URL: graphQLURL,
+      OTS_SMOKE_TRACE_IDS: JSON.stringify(Object.fromEntries(Array.from({ length: 10 }, (_, index) => {
+        const step = `step-${String(index + 1).padStart(2, "0")}`;
+        return [step, `trace-${step}`];
+      }))),
+      OTSANDBOX_REAL_MYSQL_RELEASE_DRY_RUN: "1",
+    });
+
+    assert.equal(result.status, 1, graphQLURL);
+    assert.match(result.stderr, /requires OTS_TRACE_GRAPHQL_URL to be an http\/https URL/);
+    assert.doesNotMatch(result.stderr, /secret/);
+    assert.doesNotMatch(result.stderr, /Would run: npm run release-check/);
+  }
+});
+
 test("real MySQL release wrapper dry-run masks credentials and accepts smoke database", () => {
   const result = runRealMySQLWrapper({
     OTSANDBOX_REAL_MYSQL_STORE_DSN: "MYSQL://user:secret@example.com:3306/otsandbox_smoke?tls=false",

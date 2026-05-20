@@ -926,3 +926,32 @@ Current blocker:
   `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
   `npm run release-check:mysql-real`.
+
+## 2026-05-21 MySQL Real Release GraphQL URL Validation Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Tightened `npm run release-check:mysql-real` so the required
+  `OTS_TRACE_GRAPHQL_URL` must parse as an `http` or `https` URL before dry-run
+  or full release execution can pass.
+- Added regression coverage proving invalid or non-HTTP SkyWalking GraphQL URLs
+  fail before credentials are printed as raw text or the release gate command
+  is advertised.
+- Updated public MySQL sign-off docs to state the GraphQL URL must use
+  `http` or `https`.
+- Kept the existing dedicated MySQL Store and 10-step trace-id checks
+  unchanged.
+
+Validated:
+
+- `node --test tools/smoke/release-check.test.mjs`
+- `bash -n tools/smoke/mysql-real-store-release-check.sh tools/release-check.sh`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
+  `npm run release-check:mysql-real`.

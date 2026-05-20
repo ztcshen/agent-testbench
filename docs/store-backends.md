@@ -168,7 +168,8 @@ It also runs the MySQL Store contract in existing-database mode, so the company
 account needs normal DDL/DML permissions on that dedicated database but does not
 need permission to create or drop databases. This wrapper is final-signoff
 oriented: it also requires `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`,
-`OTS_TRACE_GRAPHQL_URL`, and `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps.
+an `http` or `https` `OTS_TRACE_GRAPHQL_URL`, and `OTS_SMOKE_TRACE_IDS` for all
+10 workflow steps.
 
 When this flag is set, any accidental SQLite Store open fails immediately.
 This is the repeatable equivalent of taking the local SQLite path offline before

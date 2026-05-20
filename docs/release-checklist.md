@@ -30,7 +30,8 @@ before the expensive gate starts.
 
 For company MySQL final sign-off, use `npm run release-check:mysql-real` with a
 dedicated `mysql://` Store DSN. That wrapper requires the same real SkyWalking
-mode, GraphQL URL, and complete 10-step trace id mapping even in dry-run mode.
+mode, an `http` or `https` GraphQL URL, and complete 10-step trace id mapping
+even in dry-run mode.
 
 The gate verifies:
 

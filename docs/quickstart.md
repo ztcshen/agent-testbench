@@ -84,7 +84,8 @@ to sandbox/smoke/test/CI validation. It uses existing-database contract mode, so
 the company account needs normal DDL/DML permissions on that dedicated Store
 database but does not need permission to create or drop databases. It also
 requires the real SkyWalking release mode and trace ids for all 10 workflow
-steps; synthetic topology smoke is not accepted by this wrapper.
+steps; `OTS_TRACE_GRAPHQL_URL` must be an `http` or `https` URL. Synthetic
+topology smoke is not accepted by this wrapper.
 
 Daily discovery commands do not change when you switch between a local
 PostgreSQL Store, a remote team PostgreSQL Store, and a team MySQL Store. Use
