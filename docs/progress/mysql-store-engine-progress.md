@@ -332,3 +332,27 @@ Current blocker:
 
 - Still requires a dedicated company MySQL Store DSN to run
   `npm run release-check:mysql-real` against the real company test environment.
+
+## 2026-05-21 Release Gate SQL Scheme Robustness Slice
+
+Progress: `[###################-] 97%`
+
+Implemented:
+
+- Made `tools/release-check.sh` recognize PostgreSQL and MySQL Store DSN
+  schemes case-insensitively, matching the Go and Node Store parsers.
+- Covered uppercase `MYSQL://` and `POSTGRESQL://` smoke Store DSNs before the
+  expensive release gates, so copied company DSNs do not fail at the shell
+  preflight just because the scheme casing differs.
+- Extended the guarded company MySQL wrapper dry-run test to prove an uppercase
+  MySQL scheme is still accepted and credential masking remains intact.
+
+Validated:
+
+- `bash -n tools/release-check.sh tools/smoke/mysql-real-store-release-check.sh`
+- `node --test tools/smoke/release-check.test.mjs`
+
+Current blocker:
+
+- Real company MySQL Store DSN is still required for
+  `npm run release-check:mysql-real` and final goal completion.

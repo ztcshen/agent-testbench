@@ -46,6 +46,26 @@ test("release-check real SkyWalking mode requires a GraphQL URL before expensive
   assert.doesNotMatch(result.stdout, /running Go tests/);
 });
 
+test("release-check accepts uppercase SQL Store schemes before expensive gates", () => {
+  const mysql = runReleaseCheck(releaseCheckEnv({
+    OTSANDBOX_SMOKE_STORE_DSN: "MYSQL://user:pass@127.0.0.1:3306/otsandbox_smoke?tls=false",
+    OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
+  }));
+  assert.equal(mysql.status, 1);
+  assert.match(mysql.stderr, /requires OTS_TRACE_GRAPHQL_URL/);
+  assert.doesNotMatch(mysql.stderr, /must be postgres:\/\/, postgresql:\/\/, or mysql:\/\//);
+  assert.doesNotMatch(mysql.stdout, /running Go tests/);
+
+  const postgres = runReleaseCheck(releaseCheckEnv({
+    OTSANDBOX_SMOKE_STORE_DSN: "POSTGRESQL://user:pass@127.0.0.1:5432/otsandbox_smoke?sslmode=disable",
+    OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
+  }));
+  assert.equal(postgres.status, 1);
+  assert.match(postgres.stderr, /requires OTS_TRACE_GRAPHQL_URL/);
+  assert.doesNotMatch(postgres.stderr, /must be postgres:\/\/, postgresql:\/\/, or mysql:\/\//);
+  assert.doesNotMatch(postgres.stdout, /running Go tests/);
+});
+
 test("release-check real SkyWalking mode requires 10-step trace ids before expensive gates", () => {
   const result = runReleaseCheck(releaseCheckEnv({
     OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
@@ -121,7 +141,7 @@ test("real MySQL release wrapper refuses likely business databases", () => {
 
 test("real MySQL release wrapper dry-run masks credentials and accepts smoke database", () => {
   const result = runRealMySQLWrapper({
-    OTSANDBOX_REAL_MYSQL_STORE_DSN: "mysql://user:secret@example.com:3306/otsandbox_smoke?tls=false",
+    OTSANDBOX_REAL_MYSQL_STORE_DSN: "MYSQL://user:secret@example.com:3306/otsandbox_smoke?tls=false",
     OTSANDBOX_REAL_MYSQL_RELEASE_DRY_RUN: "1",
   });
 

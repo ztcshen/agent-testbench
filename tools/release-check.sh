@@ -8,6 +8,14 @@ step() {
   printf '\n==> %s\n' "$*"
 }
 
+is_postgres_store_dsn() {
+  [[ "$1" =~ ^[Pp][Oo][Ss][Tt][Gg][Rr][Ee][Ss]([Qq][Ll])?:// ]]
+}
+
+is_mysql_store_dsn() {
+  [[ "$1" =~ ^[Mm][Yy][Ss][Qq][Ll]:// ]]
+}
+
 step "checking whitespace"
 git diff --check
 
@@ -19,9 +27,9 @@ if [[ -z "${OTSANDBOX_SMOKE_STORE_DSN:-${OTSANDBOX_SMOKE_STORE:-}}" ]]; then
   exit 1
 fi
 smoke_store_dsn="${OTSANDBOX_SMOKE_STORE_DSN:-${OTSANDBOX_SMOKE_STORE:-}}"
-if [[ "$smoke_store_dsn" =~ ^postgres(ql)?:// ]]; then
+if is_postgres_store_dsn "$smoke_store_dsn"; then
   export OTSANDBOX_TEST_PG_DSN="${OTSANDBOX_TEST_PG_DSN:-$smoke_store_dsn}"
-elif [[ "$smoke_store_dsn" =~ ^mysql:// ]]; then
+elif is_mysql_store_dsn "$smoke_store_dsn"; then
   export OTSANDBOX_MYSQL_TEST_DSN="${OTSANDBOX_MYSQL_TEST_DSN:-$smoke_store_dsn}"
 else
   echo "OTSANDBOX_SMOKE_STORE_DSN must be postgres://, postgresql://, or mysql://." >&2
@@ -113,7 +121,7 @@ node --test tools/examples/*.test.mjs tools/smoke/*.test.mjs
 step "running active SQL Store CLI smoke tests"
 npm run smoke:cli:sql-active
 
-if [[ "$smoke_store_dsn" =~ ^mysql:// ]]; then
+if is_mysql_store_dsn "$smoke_store_dsn"; then
   step "running MySQL Store API smoke tests"
   OTSANDBOX_MYSQL_API_SMOKE_DSN="$smoke_store_dsn" npm run smoke:api:mysql-store
 fi
