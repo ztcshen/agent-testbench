@@ -114,7 +114,11 @@ existing checkouts using `git pull --ff-only`. Repository
 facts may also record `--repo-ref SERVICE=REF`; restore checks out that tag,
 commit, or ref after cloning with detached HEAD semantics. Existing checkouts
 with a recorded repo URL must be Git work trees, must match the recorded
-`origin`, and must have no uncommitted changes before restore will use them. Add
+`origin`, and must have no uncommitted changes before restore will use them;
+when `--execute` is set, a clean existing checkout is also detached to the
+recorded ref before Docker starts. For existing checkouts, `--repo-ref` takes
+precedence over `--pull`; if there is no recorded repo URL, restore can only use
+refs that already exist locally and will not fetch or compare `origin`. Add
 `--run-workflow` with `--execute` to run the recorded verification workflow
 after Docker health checks pass; the run, case runs, Evidence indexes, and
 Environment Catalog verification run status are written to the selected Store.

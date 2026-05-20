@@ -1164,6 +1164,147 @@ func TestEnvironmentRestoreChecksOutRequestedRefAfterClone(t *testing.T) {
 	}
 }
 
+func TestEnvironmentRestoreChecksOutRequestedRefForExistingCheckout(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	remoteRepo := createBareGitRepo(t, "main")
+	work := filepath.Join(filepath.Dir(remoteRepo), "work")
+	runGit(t, work, "tag", "v1")
+	runGit(t, work, "push", "origin", "v1")
+	writeFile(t, filepath.Join(work, "README.md"), "# restore fixture\n\nupdated\n")
+	runGit(t, work, "add", "README.md")
+	runGit(t, work, "-c", "user.name=Open Test", "-c", "user.email=open-test@example.com", "commit", "-m", "second")
+	runGit(t, work, "push", "origin", "main")
+
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	checkout := filepath.Join(workspace, "entry-gateway")
+	runGit(t, "", "clone", "--branch", "main", remoteRepo, checkout)
+	fakeDockerEnv, _ := fakeDockerCommand(t)
+	writeFile(t, filepath.Join(workspace, "docker-compose.yml"), "services: {}\n")
+
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.restore.existing.ref",
+		"--repo", "entry-gateway="+remoteRepo,
+		"--branch", "entry-gateway=main",
+		"--repo-ref", "entry-gateway=v1",
+		"--checkout", "entry-gateway=entry-gateway",
+		"--compose-file", "docker-compose.yml",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--json", "env.restore.existing.ref")
+	var report struct {
+		OK    bool `json:"ok"`
+		Repos []struct {
+			Action  string   `json:"action"`
+			Exists  bool     `json:"exists"`
+			Ref     string   `json:"ref"`
+			Command []string `json:"command"`
+			OK      bool     `json:"ok"`
+		} `json:"repos"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode existing ref restore json: %v\n%s", err, out)
+	}
+	if !report.OK || len(report.Repos) != 1 || !report.Repos[0].OK || !report.Repos[0].Exists || report.Repos[0].Action != "checkout-existing-ref" || report.Repos[0].Ref != "v1" {
+		t.Fatalf("existing ref restore report = %#v", report)
+	}
+	command := strings.Join(report.Repos[0].Command, " ")
+	for _, want := range []string{"git -C " + checkout + " fetch --tags origin", "git -C " + checkout + " checkout --detach v1"} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("existing ref command missing %q: %#v", want, report.Repos[0].Command)
+		}
+	}
+	head := strings.TrimSpace(runGit(t, checkout, "rev-parse", "--abbrev-ref", "HEAD"))
+	if head != "HEAD" {
+		t.Fatalf("expected detached checkout at ref, got %q", head)
+	}
+	tagCommit := strings.TrimSpace(runGit(t, checkout, "rev-parse", "v1^{commit}"))
+	headCommit := strings.TrimSpace(runGit(t, checkout, "rev-parse", "HEAD"))
+	if headCommit != tagCommit {
+		t.Fatalf("expected checkout at v1, head=%s tag=%s", headCommit, tagCommit)
+	}
+}
+
+func TestEnvironmentRestoreDetachesExistingCheckoutAlreadyAtRef(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	remoteRepo := createBareGitRepo(t, "main")
+	work := filepath.Join(filepath.Dir(remoteRepo), "work")
+	runGit(t, work, "tag", "v1")
+	runGit(t, work, "push", "origin", "v1")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	checkout := filepath.Join(workspace, "entry-gateway")
+	runGit(t, "", "clone", "--branch", "main", remoteRepo, checkout)
+	fakeDockerEnv, _ := fakeDockerCommand(t)
+	writeFile(t, filepath.Join(workspace, "docker-compose.yml"), "services: {}\n")
+
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.restore.existing.ref.detach",
+		"--repo", "entry-gateway="+remoteRepo,
+		"--branch", "entry-gateway=main",
+		"--repo-ref", "entry-gateway=v1",
+		"--checkout", "entry-gateway=entry-gateway",
+		"--compose-file", "docker-compose.yml",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--json", "env.restore.existing.ref.detach")
+	var report struct {
+		OK    bool `json:"ok"`
+		Repos []struct {
+			Action string `json:"action"`
+			OK     bool   `json:"ok"`
+		} `json:"repos"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode existing same ref restore json: %v\n%s", err, out)
+	}
+	if !report.OK || len(report.Repos) != 1 || !report.Repos[0].OK || report.Repos[0].Action != "checkout-existing-ref" {
+		t.Fatalf("existing same ref restore report = %#v", report)
+	}
+	head := strings.TrimSpace(runGit(t, checkout, "rev-parse", "--abbrev-ref", "HEAD"))
+	if head != "HEAD" {
+		t.Fatalf("expected detached checkout at ref, got %q", head)
+	}
+}
+
+func TestEnvironmentRestorePreflightRequiresGitForExistingCheckoutRef(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	remoteRepo := createBareGitRepo(t, "main")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	checkout := filepath.Join(workspace, "entry-gateway")
+	runGit(t, "", "clone", "--branch", "main", remoteRepo, checkout)
+	writeFile(t, filepath.Join(workspace, "docker-compose.yml"), "services: {}\n")
+
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.restore.preflight.existing.ref",
+		"--repo", "entry-gateway="+remoteRepo,
+		"--repo-ref", "entry-gateway=v1",
+		"--checkout", "entry-gateway=entry-gateway",
+		"--compose-file", "docker-compose.yml",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLI(t, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--json", "env.restore.preflight.existing.ref")
+	var report struct {
+		Preflight struct {
+			Tools []struct {
+				Name     string `json:"name"`
+				Required bool   `json:"required"`
+				OK       bool   `json:"ok"`
+			} `json:"tools"`
+		} `json:"preflight"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode existing ref preflight json: %v\n%s", err, out)
+	}
+	if !restorePreflightHasTool(report.Preflight.Tools, "git", true) {
+		t.Fatalf("existing ref preflight tools = %#v", report.Preflight.Tools)
+	}
+}
+
 func TestEnvironmentRestoreAcceptsExistingCheckoutWithoutRepoURL(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	workspace := filepath.Join(t.TempDir(), "workspace")

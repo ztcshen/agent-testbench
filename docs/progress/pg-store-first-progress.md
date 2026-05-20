@@ -1585,7 +1585,7 @@ Incomplete work:
 
 ## 2026-05-20 Environment Restore Goal Ledger
 
-Estimated overall new-machine environment restore progress: 93%.
+Estimated overall new-machine environment restore progress: 94%.
 
 Completed evidence:
 
@@ -1621,6 +1621,12 @@ Completed evidence:
 - Existing checkouts with a recorded repo URL are now validated as Git work
   trees with matching `origin` and no uncommitted changes before restore uses or
   pulls them.
+- Existing checkouts with a recorded `--repo-ref` are now prepared to the
+  requested tag/commit/ref in execute mode before Docker startup, after origin
+  and clean work tree validation.
+- Restore preflight now also reports `git` when existing checkouts require Git
+  validation or ref preparation, not only when a missing checkout must be
+  cloned.
 
 Latest light validation:
 
@@ -1629,6 +1635,9 @@ Latest light validation:
 - `go test ./cmd/otsandbox -run 'TestEnvironmentCommandsGateVerifiedDiscovery|TestEnvironmentRestore(RejectsExistingCheckoutWithDifferentOrigin|ChecksOutRequestedRefAfterClone|PullsExistingCheckoutWhenRequested|AcceptsExistingCheckoutWithoutRepoURL)' -count=1`
 - `go test ./cmd/otsandbox -run 'Test(StoreDDLCommandPrintsPostgreSQLSchema|EnvironmentCommandsUseNamedPostgreSQLActiveStore|EnvironmentRestore)' -count=1`
 - `go test ./internal/controlplane -run 'TestServerManagesVerifiedEnvironmentCatalogFromStore' -count=1`
+- `go test ./cmd/otsandbox -run 'TestEnvironmentRestore(ChecksOutRequestedRefForExistingCheckout|ChecksOutRequestedRefAfterClone|RejectsExistingCheckoutWithDifferentOrigin|PullsExistingCheckoutWhenRequested)' -count=1`
+- `go test ./cmd/otsandbox -run 'TestEnvironmentRestore(ChecksOutRequestedRefForExistingCheckout|DetachesExistingCheckoutAlreadyAtRef|PreflightRequiresGitForExistingCheckoutRef|ChecksOutRequestedRefAfterClone|RejectsExistingCheckoutWithDifferentOrigin|PullsExistingCheckoutWhenRequested)' -count=1`
+- `go test ./cmd/otsandbox -run 'TestEnvironmentRestore' -count=1`
 - `rg -n -i 'fall''back' . --glob '!node_modules/**'`
 - `git diff --check`
 
@@ -1639,9 +1648,6 @@ Incomplete work:
   or otherwise simulates a clean colleague machine.
 - Restore still needs richer provider hardening for GitHub/GitLab tokens,
   submodules, auth prompts, and persisted restore-run diagnostics.
-- Existing checkout ref enforcement is still limited: new clones detach at the
-  requested `--repo-ref`, but already-present checkouts are not yet proven to be
-  at the requested ref.
 - Docker restore still needs policy guardrails for destructive cleanup,
   container/image backup plans, and explicit approval before clean-machine
   simulation.

@@ -903,11 +903,9 @@ func environmentRestorePreflightReport(specs []environmentRestoreRepoSpec, compo
 	}
 	requiresGit := false
 	for _, spec := range specs {
-		if strings.TrimSpace(spec.URL) != "" {
-			if stat, err := os.Stat(spec.Checkout); err != nil || !stat.IsDir() {
-				requiresGit = true
-				break
-			}
+		if strings.TrimSpace(spec.URL) != "" || strings.TrimSpace(spec.Ref) != "" {
+			requiresGit = true
+			break
 		}
 	}
 	if requiresGit {
@@ -989,13 +987,44 @@ func environmentRestoreRepo(ctx context.Context, spec environmentRestoreRepoSpec
 	}
 	if stat, err := os.Stat(spec.Checkout); err == nil && stat.IsDir() {
 		report.Exists = true
-		if strings.TrimSpace(spec.URL) != "" {
+		if strings.TrimSpace(spec.URL) != "" || strings.TrimSpace(spec.Ref) != "" {
 			if ok, errText := environmentRestoreValidateCheckout(ctx, spec); !ok {
 				report.OK = false
 				report.Action = "invalid-existing-checkout"
 				report.Error = errText
 				return report
 			}
+		}
+		if strings.TrimSpace(spec.Ref) != "" {
+			if atRef, _ := environmentRestoreCheckoutDetachedAtRef(ctx, spec); atRef {
+				report.Action = "use-existing-checkout"
+				return report
+			}
+			checkoutCommands := environmentRestoreExistingRefCommands(spec)
+			report.Action = "checkout-existing-ref"
+			report.Command = flattenRestoreCommands(checkoutCommands)
+			if !execute {
+				return report
+			}
+			outputs := make([]string, 0, len(checkoutCommands))
+			for _, command := range checkoutCommands {
+				if len(command) == 0 {
+					continue
+				}
+				output, errText := runRestoreGitCommand(ctx, command[1:]...)
+				if strings.TrimSpace(output) != "" {
+					outputs = append(outputs, output)
+				}
+				if errText != "" {
+					report.OK = false
+					report.Output = strings.Join(outputs, "\n")
+					report.Error = errText
+					return report
+				}
+			}
+			report.Output = strings.Join(outputs, "\n")
+			report.OK = true
+			return report
 		}
 		if strings.TrimSpace(spec.URL) == "" || !execute || !pull {
 			report.Action = "use-existing-checkout"
@@ -1044,16 +1073,41 @@ func environmentRestoreRepo(ctx context.Context, spec environmentRestoreRepoSpec
 	return report
 }
 
+func environmentRestoreExistingRefCommands(spec environmentRestoreRepoSpec) [][]string {
+	out := [][]string{}
+	if strings.TrimSpace(spec.URL) != "" {
+		out = append(out, []string{"git", "-C", spec.Checkout, "fetch", "--tags", "origin"})
+	}
+	out = append(out, []string{"git", "-C", spec.Checkout, "checkout", "--detach", strings.TrimSpace(spec.Ref)})
+	return out
+}
+
+func flattenRestoreCommands(commands [][]string) []string {
+	out := []string{}
+	for _, command := range commands {
+		if len(command) == 0 {
+			continue
+		}
+		if len(out) > 0 {
+			out = append(out, "&&")
+		}
+		out = append(out, command...)
+	}
+	return out
+}
+
 func environmentRestoreValidateCheckout(ctx context.Context, spec environmentRestoreRepoSpec) (bool, string) {
 	if _, errText := runRestoreGitCommand(ctx, "-C", spec.Checkout, "rev-parse", "--is-inside-work-tree"); errText != "" {
 		return false, "existing checkout is not a Git repository: " + spec.Checkout
 	}
-	remote, errText := runRestoreGitCommand(ctx, "-C", spec.Checkout, "remote", "get-url", "origin")
-	if errText != "" {
-		return false, errText
-	}
-	if strings.TrimSpace(remote) != strings.TrimSpace(spec.URL) {
-		return false, fmt.Sprintf("existing checkout origin mismatch: got %s want %s", strings.TrimSpace(remote), strings.TrimSpace(spec.URL))
+	if strings.TrimSpace(spec.URL) != "" {
+		remote, errText := runRestoreGitCommand(ctx, "-C", spec.Checkout, "remote", "get-url", "origin")
+		if errText != "" {
+			return false, errText
+		}
+		if strings.TrimSpace(remote) != strings.TrimSpace(spec.URL) {
+			return false, fmt.Sprintf("existing checkout origin mismatch: got %s want %s", strings.TrimSpace(remote), strings.TrimSpace(spec.URL))
+		}
 	}
 	if dirty, errText := runRestoreGitCommand(ctx, "-C", spec.Checkout, "status", "--porcelain"); errText != "" {
 		return false, errText
@@ -1061,6 +1115,22 @@ func environmentRestoreValidateCheckout(ctx context.Context, spec environmentRes
 		return false, "existing checkout has uncommitted changes"
 	}
 	return true, ""
+}
+
+func environmentRestoreCheckoutDetachedAtRef(ctx context.Context, spec environmentRestoreRepoSpec) (bool, string) {
+	head, errText := runRestoreGitCommand(ctx, "-C", spec.Checkout, "rev-parse", "HEAD")
+	if errText != "" {
+		return false, errText
+	}
+	target, errText := runRestoreGitCommand(ctx, "-C", spec.Checkout, "rev-parse", strings.TrimSpace(spec.Ref)+"^{commit}")
+	if errText != "" {
+		return false, errText
+	}
+	branch, errText := runRestoreGitCommand(ctx, "-C", spec.Checkout, "rev-parse", "--abbrev-ref", "HEAD")
+	if errText != "" {
+		return false, errText
+	}
+	return strings.TrimSpace(head) == strings.TrimSpace(target) && strings.TrimSpace(branch) == "HEAD", ""
 }
 
 func environmentRestoreDocker(ctx context.Context, compose map[string]any, healthChecks []any, workspace string, execute bool, healthTimeout time.Duration) environmentRestoreDockerReport {
