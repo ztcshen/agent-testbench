@@ -1826,3 +1826,36 @@ Current blocker:
   `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+
+## 2026-05-21 MySQL Case Suite Quality Parity Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Added env-gated MySQL named active Store coverage for `case suite quality`,
+  `case suite quality-plan`, and `case suite quality-report`.
+- Shared each existing PostgreSQL quality scenario through helper functions so
+  PostgreSQL and MySQL assert identical metadata gap counts, authoring actions,
+  JSON output, and HTML report output against the active Store.
+- Replaced the fixed quality profile ids with a unique fixture so shared SQL
+  test databases do not contaminate quality checks.
+
+Validated:
+
+- `go test -v ./cmd/otsandbox -run 'TestCaseSuiteQuality(AuditsMaintainedCaseMetadata|UsesNamedMySQLActiveStore|PlanSuggestsAuthoringActions|PlanUsesNamedMySQLActiveStore|ReportWritesJSONAndHTML|ReportUsesNamedMySQLActiveStore)' -count=1`
+  compiled and passed locally; the env-gated PostgreSQL/MySQL cases skipped
+  because local DSNs were not exported in this shell.
+- Subagent read-only audit confirmed the next remaining PG-only daily-path
+  gaps are `case suite impact`, `case suite impact-report`, and workflow
+  failure report coverage.
+- `git diff --check`
+- `rg -n -i 'fall''back' . --glob '!node_modules/**'`
+- `tools/guardrails/check_store_first_contracts.sh && tools/guardrails/check_no_source_domain_core.sh`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.

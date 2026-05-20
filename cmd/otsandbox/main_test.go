@@ -9279,13 +9279,23 @@ func runCaseSuiteBriefSummarizesMaintainedSuiteForAgents(t *testing.T, storeRef 
 }
 
 func TestCaseSuiteQualityAuditsMaintainedCaseMetadata(t *testing.T) {
-	configureNamedPostgreSQLActiveStore(t, "daily-case-suite-quality-pg")
-	profileDir := writeCaseSuiteQualityProfile(t)
-	runCLI(t, "config", "publish", "--from", profileDir)
+	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-case-suite-quality-pg")
+	runCaseSuiteQualityAuditsMaintainedCaseMetadata(t, storeRef, "PostgreSQL")
+}
+
+func TestCaseSuiteQualityUsesNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-case-suite-quality-mysql")
+	runCaseSuiteQualityAuditsMaintainedCaseMetadata(t, storeRef, "MySQL")
+}
+
+func runCaseSuiteQualityAuditsMaintainedCaseMetadata(t *testing.T, _ string, label string) {
+	t.Helper()
+	fixture := writeUniqueCaseSuiteQualityProfile(t)
+	runCLI(t, "config", "publish", "--from", fixture.profileDir)
 
 	out := runCLI(t,
 		"case", "suite", "quality",
-		"--profile", profileDir,
+		"--profile", fixture.profileDir,
 		"--status", "active",
 		"--json",
 	)
@@ -9312,33 +9322,43 @@ func TestCaseSuiteQualityAuditsMaintainedCaseMetadata(t *testing.T) {
 		} `json:"nodes"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode suite quality json: %v\n%s", err, out)
+		t.Fatalf("decode %s suite quality json: %v\n%s", label, err, out)
 	}
 	if report.OK || report.Counts.Nodes != 2 || report.Counts.NodesWithoutCases != 1 || report.Counts.Cases != 2 || report.Counts.CompleteCases != 1 || report.Counts.IncompleteCases != 1 {
-		t.Fatalf("suite quality report = %#v", report)
+		t.Fatalf("%s suite quality report = %#v", label, report)
 	}
 	if report.Counts.MissingOwner != 1 || report.Counts.MissingRunnable != 1 || report.Counts.MissingExecution != 1 {
-		t.Fatalf("suite quality gaps = %#v", report.Counts)
+		t.Fatalf("%s suite quality gaps = %#v", label, report.Counts)
 	}
-	if len(report.Nodes) != 1 || report.Nodes[0].NodeID != "node.empty" {
-		t.Fatalf("suite quality nodes = %#v", report.Nodes)
+	if len(report.Nodes) != 1 || report.Nodes[0].NodeID != fixture.nodeEmptyID {
+		t.Fatalf("%s suite quality nodes = %#v", label, report.Nodes)
 	}
-	textOut := runCLI(t, "case", "suite", "quality", "--profile", profileDir, "--status", "active")
-	for _, want := range []string{"Case Suite Quality", "Incomplete: 1", "node.empty", "case.gaps"} {
+	textOut := runCLI(t, "case", "suite", "quality", "--profile", fixture.profileDir, "--status", "active")
+	for _, want := range []string{"Case Suite Quality", "Incomplete: 1", fixture.nodeEmptyID, fixture.gapsCaseID} {
 		if !strings.Contains(textOut, want) {
-			t.Fatalf("quality text missing %q:\n%s", want, textOut)
+			t.Fatalf("%s quality text missing %q:\n%s", label, want, textOut)
 		}
 	}
 }
 
 func TestCaseSuiteQualityPlanSuggestsAuthoringActions(t *testing.T) {
-	configureNamedPostgreSQLActiveStore(t, "daily-case-suite-quality-plan-pg")
-	profileDir := writeCaseSuiteQualityProfile(t)
-	runCLI(t, "config", "publish", "--from", profileDir)
+	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-case-suite-quality-plan-pg")
+	runCaseSuiteQualityPlanSuggestsAuthoringActions(t, storeRef, "PostgreSQL")
+}
+
+func TestCaseSuiteQualityPlanUsesNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-case-suite-quality-plan-mysql")
+	runCaseSuiteQualityPlanSuggestsAuthoringActions(t, storeRef, "MySQL")
+}
+
+func runCaseSuiteQualityPlanSuggestsAuthoringActions(t *testing.T, _ string, label string) {
+	t.Helper()
+	fixture := writeUniqueCaseSuiteQualityProfile(t)
+	runCLI(t, "config", "publish", "--from", fixture.profileDir)
 
 	out := runCLI(t,
 		"case", "suite", "quality-plan",
-		"--profile", profileDir,
+		"--profile", fixture.profileDir,
 		"--status", "active",
 		"--json",
 	)
@@ -9361,31 +9381,41 @@ func TestCaseSuiteQualityPlanSuggestsAuthoringActions(t *testing.T) {
 		} `json:"actions"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode suite quality plan json: %v\n%s", err, out)
+		t.Fatalf("decode %s suite quality plan json: %v\n%s", label, err, out)
 	}
 	if !report.OK || report.Counts.Total != 4 || report.Counts.DraftCase != 1 || report.Counts.CompleteMetadata != 1 || report.Counts.AddRunnable != 1 || report.Counts.AddExecution != 1 {
-		t.Fatalf("suite quality plan report = %#v", report)
+		t.Fatalf("%s suite quality plan report = %#v", label, report)
 	}
-	if len(report.Actions) != 4 || report.Actions[0].Type != "draft-case" || report.Actions[0].NodeID != "node.empty" || report.Actions[0].SuggestedCaseID != "case.node-empty.default" {
-		t.Fatalf("suite quality plan actions = %#v", report.Actions)
+	if len(report.Actions) != 4 || report.Actions[0].Type != "draft-case" || report.Actions[0].NodeID != fixture.nodeEmptyID || report.Actions[0].SuggestedCaseID != fixture.suggestedEmptyCaseID {
+		t.Fatalf("%s suite quality plan actions = %#v", label, report.Actions)
 	}
-	textOut := runCLI(t, "case", "suite", "quality-plan", "--profile", profileDir, "--status", "active")
-	for _, want := range []string{"Case Suite Quality Plan", "Draft Case: 1", "case.node-empty.default", "case.gaps"} {
+	textOut := runCLI(t, "case", "suite", "quality-plan", "--profile", fixture.profileDir, "--status", "active")
+	for _, want := range []string{"Case Suite Quality Plan", "Draft Case: 1", fixture.suggestedEmptyCaseID, fixture.gapsCaseID} {
 		if !strings.Contains(textOut, want) {
-			t.Fatalf("quality plan text missing %q:\n%s", want, textOut)
+			t.Fatalf("%s quality plan text missing %q:\n%s", label, want, textOut)
 		}
 	}
 }
 
 func TestCaseSuiteQualityReportWritesJSONAndHTML(t *testing.T) {
-	configureNamedPostgreSQLActiveStore(t, "daily-case-suite-quality-report-pg")
-	profileDir := writeCaseSuiteQualityProfile(t)
+	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-case-suite-quality-report-pg")
+	runCaseSuiteQualityReportWritesJSONAndHTML(t, storeRef, "PostgreSQL")
+}
+
+func TestCaseSuiteQualityReportUsesNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-case-suite-quality-report-mysql")
+	runCaseSuiteQualityReportWritesJSONAndHTML(t, storeRef, "MySQL")
+}
+
+func runCaseSuiteQualityReportWritesJSONAndHTML(t *testing.T, _ string, label string) {
+	t.Helper()
+	fixture := writeUniqueCaseSuiteQualityProfile(t)
 	outputDir := filepath.Join(t.TempDir(), "quality-report")
-	runCLI(t, "config", "publish", "--from", profileDir)
+	runCLI(t, "config", "publish", "--from", fixture.profileDir)
 
 	out := runCLI(t,
 		"case", "suite", "quality-report",
-		"--profile", profileDir,
+		"--profile", fixture.profileDir,
 		"--status", "active",
 		"--output-dir", outputDir,
 		"--json",
@@ -9411,37 +9441,37 @@ func TestCaseSuiteQualityReportWritesJSONAndHTML(t *testing.T) {
 		} `json:"qualityPlan"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode suite quality report json: %v\n%s", err, out)
+		t.Fatalf("decode %s suite quality report json: %v\n%s", label, err, out)
 	}
-	if !report.OK || report.ProfileID != "sample" || report.QualityPlan.Counts.Total != 4 || report.QualityPlan.Counts.DraftCase != 1 || report.QualityPlan.Counts.CompleteMetadata != 1 || report.QualityPlan.Counts.AddRunnable != 1 || report.QualityPlan.Counts.AddExecution != 1 {
-		t.Fatalf("suite quality report = %#v", report)
+	if !report.OK || report.ProfileID != fixture.profileID || report.QualityPlan.Counts.Total != 4 || report.QualityPlan.Counts.DraftCase != 1 || report.QualityPlan.Counts.CompleteMetadata != 1 || report.QualityPlan.Counts.AddRunnable != 1 || report.QualityPlan.Counts.AddExecution != 1 {
+		t.Fatalf("%s suite quality report = %#v", label, report)
 	}
 	if report.ReportURL != filepath.Join(outputDir, "report.html") || report.JSONReportURL != filepath.Join(outputDir, "report.json") {
-		t.Fatalf("suite quality report paths = %#v", report)
+		t.Fatalf("%s suite quality report paths = %#v", label, report)
 	}
 	jsonReportRaw, err := os.ReadFile(filepath.Join(outputDir, "report.json"))
 	if err != nil {
-		t.Fatalf("read quality json report: %v", err)
+		t.Fatalf("read %s quality json report: %v", label, err)
 	}
 	htmlReportRaw, err := os.ReadFile(filepath.Join(outputDir, "report.html"))
 	if err != nil {
-		t.Fatalf("read quality html report: %v", err)
+		t.Fatalf("read %s quality html report: %v", label, err)
 	}
 	jsonReport := string(jsonReportRaw)
 	htmlReport := string(htmlReportRaw)
-	for _, want := range []string{"Case Suite Quality Report", "case.node-empty.default", "case.gaps", "complete-case-metadata", "add-execution-config"} {
+	for _, want := range []string{"Case Suite Quality Report", fixture.suggestedEmptyCaseID, fixture.gapsCaseID, "complete-case-metadata", "add-execution-config"} {
 		if !strings.Contains(htmlReport, want) {
-			t.Fatalf("quality html missing %q:\n%s", want, htmlReport)
+			t.Fatalf("%s quality html missing %q:\n%s", label, want, htmlReport)
 		}
 	}
-	if !strings.Contains(jsonReport, `"qualityPlan"`) || !strings.Contains(jsonReport, `"case.node-empty.default"`) {
-		t.Fatalf("quality json report missing expected content:\n%s", jsonReport)
+	if !strings.Contains(jsonReport, `"qualityPlan"`) || !strings.Contains(jsonReport, fixture.suggestedEmptyCaseID) {
+		t.Fatalf("%s quality json report missing expected content:\n%s", label, jsonReport)
 	}
 
-	textOut := runCLI(t, "case", "suite", "quality-report", "--profile", profileDir, "--status", "active", "--output-dir", filepath.Join(t.TempDir(), "text-quality-report"))
+	textOut := runCLI(t, "case", "suite", "quality-report", "--profile", fixture.profileDir, "--status", "active", "--output-dir", filepath.Join(t.TempDir(), "text-quality-report"))
 	for _, want := range []string{"Case Suite Quality Report", "Total Actions: 4", "Report:"} {
 		if !strings.Contains(textOut, want) {
-			t.Fatalf("quality report text missing %q:\n%s", want, textOut)
+			t.Fatalf("%s quality report text missing %q:\n%s", label, want, textOut)
 		}
 	}
 }
@@ -10994,37 +11024,79 @@ func writeCaseSuiteCoverageProfile(t *testing.T) string {
 	return dir
 }
 
-func writeCaseSuiteQualityProfile(t *testing.T) string {
+type caseSuiteQualityFixture struct {
+	profileDir           string
+	profileID            string
+	nodeAlphaID          string
+	nodeEmptyID          string
+	completeCaseID       string
+	gapsCaseID           string
+	completeConfigID     string
+	suggestedEmptyCaseID string
+}
+
+func writeUniqueCaseSuiteQualityProfile(t *testing.T) caseSuiteQualityFixture {
 	t.Helper()
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "profile.json"), `{
-  "id": "sample",
+	fixture := caseSuiteQualityFixture{
+		profileDir:       t.TempDir(),
+		profileID:        uniqueTestID(t, "profile.case-suite-quality"),
+		nodeAlphaID:      uniqueTestID(t, "node.alpha"),
+		nodeEmptyID:      uniqueTestID(t, "node.empty"),
+		completeCaseID:   uniqueTestID(t, "case.complete"),
+		gapsCaseID:       uniqueTestID(t, "case.gaps"),
+		completeConfigID: uniqueTestID(t, "config.case.complete"),
+	}
+	fixture.suggestedEmptyCaseID = suggestedCaseIDForTest(fixture.nodeEmptyID)
+	writeFile(t, filepath.Join(fixture.profileDir, "profile.json"), fmt.Sprintf(`{
+  "id": %q,
   "displayName": "Sample Profile",
   "services": [{"id":"service.alpha","displayName":"Service Alpha"}],
   "workflows": [],
   "interfaceNodes": [
-    {"id":"node.alpha","displayName":"Node Alpha","serviceId":"service.alpha","operation":"Alpha","method":"GET","path":"/alpha"},
-    {"id":"node.empty","displayName":"Node Empty","serviceId":"service.alpha","operation":"Empty","method":"GET","path":"/empty"}
+    {"id":%q,"displayName":"Node Alpha","serviceId":"service.alpha","operation":"Alpha","method":"GET","path":"/alpha"},
+    {"id":%q,"displayName":"Node Empty","serviceId":"service.alpha","operation":"Empty","method":"GET","path":"/empty"}
   ],
   "apiCases": [
-    {"id":"case.complete","displayName":"Complete Case","description":"Ready maintained case.","nodeId":"node.alpha","sortOrder":1,"tags":["regression"],"priority":"p0","owner":"team-a","casePath":"cases/complete.json"},
-    {"id":"case.gaps","displayName":"Gap Case","nodeId":"node.alpha","sortOrder":2}
+    {"id":%q,"displayName":"Complete Case","description":"Ready maintained case.","nodeId":%q,"sortOrder":1,"tags":["regression"],"priority":"p0","owner":"team-a","casePath":"cases/complete.json"},
+    {"id":%q,"displayName":"Gap Case","nodeId":%q,"sortOrder":2}
   ],
   "requestTemplates": [],
   "templateConfigs": [
     {
-      "id": "config.case.complete",
+      "id": %q,
       "scopeType": "case",
-      "scopeId": "case.complete",
+      "scopeId": %q,
       "status": "active",
-      "configJson": "{\"caseId\":\"case.complete\",\"caseExecution\":{\"method\":\"GET\",\"nodeId\":\"node.alpha\",\"path\":\"/alpha\",\"expectedHttpCodes\":[200]}}"
+      "configJson": %q
     }
   ],
   "caseDependencies": [],
   "workflowBindings": [],
   "fixtures": []
-}`)
-	return dir
+}`, fixture.profileID, fixture.nodeAlphaID, fixture.nodeEmptyID, fixture.completeCaseID, fixture.nodeAlphaID, fixture.gapsCaseID, fixture.nodeAlphaID, fixture.completeConfigID, fixture.completeCaseID, fmt.Sprintf(`{"caseId":%q,"caseExecution":{"method":"GET","nodeId":%q,"path":"/alpha","expectedHttpCodes":[200]}}`, fixture.completeCaseID, fixture.nodeAlphaID)))
+	return fixture
+}
+
+func suggestedCaseIDForTest(nodeID string) string {
+	value := strings.ToLower(strings.TrimSpace(nodeID))
+	var builder strings.Builder
+	lastDash := false
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			builder.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash && builder.Len() > 0 {
+			builder.WriteByte('-')
+			lastDash = true
+		}
+	}
+	out := strings.Trim(builder.String(), "-")
+	if out == "" {
+		return "case.case.default"
+	}
+	return "case." + out + ".default"
 }
 
 func recordCaseRunForCoverage(t *testing.T, ctx context.Context, s store.Store, runID string, caseID string, status string, at time.Time) {
