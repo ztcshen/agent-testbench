@@ -1764,47 +1764,58 @@ func TestEnvironmentRestoreSQLStoreAcceptsStoreGeneratedComposeStartupAssets(t *
 }
 
 func TestEnvironmentRestoreMaterializesComponentAssetsAsStartupFiles(t *testing.T) {
-	workspace := filepath.Join(t.TempDir(), "workspace")
-	fakeBin := t.TempDir()
-	writeFile(t, filepath.Join(fakeBin, "git"), "#!/bin/sh\nexit 0\n")
-	writeFile(t, filepath.Join(fakeBin, "docker"), "#!/bin/sh\nif [ \"$1\" = compose ] && [ \"$2\" = version ]; then exit 0; fi\nexit 0\n")
-	if err := os.Chmod(filepath.Join(fakeBin, "git"), 0o755); err != nil {
-		t.Fatalf("chmod fake git: %v", err)
+	tests := []struct {
+		name     string
+		storeURL string
+	}{
+		{name: "postgres", storeURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable"},
+		{name: "mysql", storeURL: "mysql://tester:secret@127.0.0.1:3306/otsandbox?tls=false"},
 	}
-	if err := os.Chmod(filepath.Join(fakeBin, "docker"), 0o755); err != nil {
-		t.Fatalf("chmod fake docker: %v", err)
-	}
-	t.Setenv("PATH", fakeBin)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := filepath.Join(t.TempDir(), "workspace")
+			fakeBin := t.TempDir()
+			writeFile(t, filepath.Join(fakeBin, "git"), "#!/bin/sh\nexit 0\n")
+			writeFile(t, filepath.Join(fakeBin, "docker"), "#!/bin/sh\nif [ \"$1\" = compose ] && [ \"$2\" = version ]; then exit 0; fi\nexit 0\n")
+			if err := os.Chmod(filepath.Join(fakeBin, "git"), 0o755); err != nil {
+				t.Fatalf("chmod fake git: %v", err)
+			}
+			if err := os.Chmod(filepath.Join(fakeBin, "docker"), 0o755); err != nil {
+				t.Fatalf("chmod fake docker: %v", err)
+			}
+			t.Setenv("PATH", fakeBin)
 
-	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
-		ID:                     "env.component.assets",
-		ReposJSON:              `{"app":{"url":"https://example.com/team/app.git","checkout":"app"}}`,
-		ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  mysql:\n    image: mysql:8\n    volumes:\n      - ./mysql/init:/docker-entrypoint-initdb.d\n  app:\n    image: alpine:3.20\n    command: [\"/bin/sh\", \"/sandbox/compose/scripts/run-app.sh\"]\n    volumes:\n      - ${DOCKER_APP_REPO:-/tmp/app}:/workspace/app\n      - ${SANDBOX_ROOT:-/tmp/sandbox}:/sandbox\n"},"env":{"DOCKER_APP_REPO":"$OTS_WORKSPACE/app","SANDBOX_ROOT":"$OTS_WORKSPACE"}}`,
-		HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:18080/health"}]`,
-		VerificationWorkflowID: "workflow.core-10",
-	}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
-		StoreURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable",
-	}, environmentRestoreDockerCleanupOptions{}, store.EnvironmentComponentGraph{
-		Components: []store.EnvironmentComponent{
-			{ComponentID: "mysql", Kind: "middleware", Role: "database", Required: true, HealthCheckJSON: `{"type":"compose-service","service":"mysql"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
-			{ComponentID: "app", Kind: "app", Role: "business-service", Required: true, HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18080/health"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
-		},
-		Assets: []store.ComponentConfigAsset{
-			{OwnerComponentID: "app", AssetID: "app.mysql.schema", AssetKind: "mysql-ddl", TargetComponentID: "mysql", TargetPath: "compose/mysql/init/schema.sql", ContentInline: "create database app;\n", SummaryJSON: `{}`},
-			{OwnerComponentID: "app", AssetID: "app.run-script", AssetKind: "container-start-script", TargetComponentID: "app", TargetPath: "compose/scripts/run-app.sh", ContentInline: "#!/bin/sh\nexit 0\n", SummaryJSON: `{}`},
-		},
-	})
-	if err != nil {
-		t.Fatalf("build restore component asset report: %v", err)
-	}
-	if len(report.Preflight.StartupAssets) != 2 {
-		t.Fatalf("component asset startup report = %#v readiness=%#v", report.Preflight.StartupAssets, report.Readiness)
-	}
-	if !restoreTypedReadinessHasItem(report.Readiness.Items, "startup-assets", true, "2 Compose startup asset") {
-		t.Fatalf("readiness should accept component asset startup files: %#v", report.Readiness.Items)
-	}
-	if _, ok := stringMapFromAny(report.Compose["generatedFiles"])["compose/mysql/init/schema.sql"]; !ok {
-		t.Fatalf("component schema asset was not projected into generatedFiles: %#v", report.Compose["generatedFiles"])
+			report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+				ID:                     "env." + tt.name + ".component.assets",
+				ReposJSON:              `{"app":{"url":"https://example.com/team/app.git","checkout":"app"}}`,
+				ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  mysql:\n    image: mysql:8\n    volumes:\n      - ./mysql/init:/docker-entrypoint-initdb.d\n  app:\n    image: alpine:3.20\n    command: [\"/bin/sh\", \"/sandbox/compose/scripts/run-app.sh\"]\n    volumes:\n      - ${DOCKER_APP_REPO:-/tmp/app}:/workspace/app\n      - ${SANDBOX_ROOT:-/tmp/sandbox}:/sandbox\n"},"env":{"DOCKER_APP_REPO":"$OTS_WORKSPACE/app","SANDBOX_ROOT":"$OTS_WORKSPACE"}}`,
+				HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:18080/health"}]`,
+				VerificationWorkflowID: "workflow.core-10",
+			}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
+				StoreURL: tt.storeURL,
+			}, environmentRestoreDockerCleanupOptions{}, store.EnvironmentComponentGraph{
+				Components: []store.EnvironmentComponent{
+					{ComponentID: "mysql", Kind: "middleware", Role: "database", Required: true, HealthCheckJSON: `{"type":"compose-service","service":"mysql"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+					{ComponentID: "app", Kind: "app", Role: "business-service", Required: true, HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18080/health"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+				},
+				Assets: []store.ComponentConfigAsset{
+					{OwnerComponentID: "app", AssetID: "app.mysql.schema", AssetKind: "mysql-ddl", TargetComponentID: "mysql", TargetPath: "compose/mysql/init/schema.sql", ContentInline: "create database app;\n", SummaryJSON: `{}`},
+					{OwnerComponentID: "app", AssetID: "app.run-script", AssetKind: "container-start-script", TargetComponentID: "app", TargetPath: "compose/scripts/run-app.sh", ContentInline: "#!/bin/sh\nexit 0\n", SummaryJSON: `{}`},
+				},
+			})
+			if err != nil {
+				t.Fatalf("build %s restore component asset report: %v", tt.name, err)
+			}
+			if len(report.Preflight.StartupAssets) != 2 {
+				t.Fatalf("%s component asset startup report = %#v readiness=%#v", tt.name, report.Preflight.StartupAssets, report.Readiness)
+			}
+			if !restoreTypedReadinessHasItem(report.Readiness.Items, "startup-assets", true, "2 Compose startup asset") {
+				t.Fatalf("%s readiness should accept component asset startup files: %#v", tt.name, report.Readiness.Items)
+			}
+			if _, ok := stringMapFromAny(report.Compose["generatedFiles"])["compose/mysql/init/schema.sql"]; !ok {
+				t.Fatalf("%s component schema asset was not projected into generatedFiles: %#v", tt.name, report.Compose["generatedFiles"])
+			}
+		})
 	}
 }
 
