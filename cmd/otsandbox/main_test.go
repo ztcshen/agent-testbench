@@ -9110,31 +9110,41 @@ func TestCaseSuiteStabilityReportsTransitions(t *testing.T) {
 }
 
 func TestCaseSuitePriorityBuildsRankedBatchRequest(t *testing.T) {
-	ctx := context.Background()
 	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-case-suite-priority-pg")
-	profileDir := writeCaseSuiteCoverageProfile(t)
-	runCLI(t, "config", "publish", "--from", profileDir)
+	runCaseSuitePriorityBuildsRankedBatchRequest(t, storeRef, "pg", "PostgreSQL")
+}
+
+func TestCaseSuitePriorityUsesNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-case-suite-priority-mysql")
+	runCaseSuitePriorityBuildsRankedBatchRequest(t, storeRef, "mysql", "MySQL")
+}
+
+func runCaseSuitePriorityBuildsRankedBatchRequest(t *testing.T, storeRef string, runLabel string, label string) {
+	t.Helper()
+	ctx := context.Background()
+	fixture := writeUniqueCaseSuiteCoverageProfile(t)
+	runCLI(t, "config", "publish", "--from", fixture.profileDir)
 
 	s, err := openStore(ctx, storeRef)
 	if err != nil {
-		t.Fatalf("open store: %v", err)
+		t.Fatalf("open %s store: %v", label, err)
 	}
 	base := time.Now().UTC()
-	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.default.1"), "case.default", store.StatusPassed, base.Add(-2*time.Minute))
-	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.variant.1"), "case.variant", store.StatusPassed, base.Add(-time.Minute))
-	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.variant.2"), "case.variant", store.StatusFailed, base)
+	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.default.1"), fixture.defaultCaseID, store.StatusPassed, base.Add(-2*time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.variant.1"), fixture.variantCaseID, store.StatusPassed, base.Add(-time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.variant.2"), fixture.variantCaseID, store.StatusFailed, base)
 	if err := s.Close(); err != nil {
-		t.Fatalf("close store: %v", err)
+		t.Fatalf("close %s store: %v", label, err)
 	}
 
 	out := runCLI(t,
 		"case", "suite", "priority",
-		"--profile", profileDir,
+		"--profile", fixture.profileDir,
 		"--tag", "regression",
 		"--status", "active",
 		"--signal", "Variant",
 		"--limit", "2",
-		"--request-id", "change-011",
+		"--request-id", runLabel+"-change-011",
 		"--base-url", "http://127.0.0.1:8080",
 		"--json",
 	)
@@ -9159,22 +9169,22 @@ func TestCaseSuitePriorityBuildsRankedBatchRequest(t *testing.T) {
 		} `json:"batchRequest"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode suite priority json: %v\n%s", err, out)
+		t.Fatalf("decode %s suite priority json: %v\n%s", label, err, out)
 	}
-	if !report.OK || report.Counts.Total != 3 || report.Counts.Selected != 2 || report.Counts.Blocked != 1 || strings.Join(report.CaseIDs, ",") != "case.variant,case.default" {
-		t.Fatalf("suite priority report = %#v", report)
+	if !report.OK || report.Counts.Total != 3 || report.Counts.Selected != 2 || report.Counts.Blocked != 1 || strings.Join(report.CaseIDs, ",") != fixture.variantCaseID+","+fixture.defaultCaseID {
+		t.Fatalf("%s suite priority report = %#v", label, report)
 	}
-	if report.Selected[0].CaseID != "case.variant" || report.Selected[0].Score <= report.Selected[1].Score || len(report.Selected[0].Reasons) == 0 {
-		t.Fatalf("suite priority selected = %#v", report.Selected)
+	if report.Selected[0].CaseID != fixture.variantCaseID || report.Selected[0].Score <= report.Selected[1].Score || len(report.Selected[0].Reasons) == 0 {
+		t.Fatalf("%s suite priority selected = %#v", label, report.Selected)
 	}
-	if report.BatchRequest.RequestID != "change-011" || strings.Join(report.BatchRequest.CaseIDs, ",") != "case.variant,case.default" || report.BatchRequest.BaseURL != "http://127.0.0.1:8080" {
-		t.Fatalf("suite priority batch = %#v", report.BatchRequest)
+	if report.BatchRequest.RequestID != runLabel+"-change-011" || strings.Join(report.BatchRequest.CaseIDs, ",") != fixture.variantCaseID+","+fixture.defaultCaseID || report.BatchRequest.BaseURL != "http://127.0.0.1:8080" {
+		t.Fatalf("%s suite priority batch = %#v", label, report.BatchRequest)
 	}
 
-	textOut := runCLI(t, "case", "suite", "priority", "--profile", profileDir, "--tag", "regression", "--signal", "Variant", "--limit", "1")
-	for _, want := range []string{"Case Suite Priority", "Selected: 1", "case.variant"} {
+	textOut := runCLI(t, "case", "suite", "priority", "--profile", fixture.profileDir, "--tag", "regression", "--signal", "Variant", "--limit", "1")
+	for _, want := range []string{"Case Suite Priority", "Selected: 1", fixture.variantCaseID} {
 		if !strings.Contains(textOut, want) {
-			t.Fatalf("priority text missing %q:\n%s", want, textOut)
+			t.Fatalf("%s priority text missing %q:\n%s", label, want, textOut)
 		}
 	}
 }
