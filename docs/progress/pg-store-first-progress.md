@@ -1978,3 +1978,27 @@ Remote source policy slice:
   Docker. This means real Docker up on this machine now requires an operator
   choice: reuse the existing running environment for acceptance, or approve a
   backup/down/clean-machine simulation step first.
+- 2026-05-20T10:30Z: added explicit non-destructive adoption via
+  `environment restore --use-existing-containers`. This path writes the
+  Store-backed startup files, skips Docker Compose startup, converts
+  `compose-service` checks into fixed `docker inspect` container checks, and can
+  then trigger the same async acceptance workflow.
+- Real restore-driven acceptance on the currently running Docker environment
+  passed without Docker lifecycle changes:
+  `environment restore --store local-pg --workspace /tmp/ots-restore-isolated
+  --execute --use-existing-containers --run-workflow --server-url
+  http://127.0.0.1:58663 --acceptance-timeout-seconds 180 --json
+  scf-chain-core10-local-docker` reported `docker.action=use-existing-containers`,
+  `healthPassed=19/19`, `workflow.action=run-acceptance-workflow`,
+  `workflow.ok=true`, `expectedSteps=10`, `passedSteps=10`, and
+  `topologyProvider=skywalking`. `environment publish-verified --store local-pg`
+  then promoted `scf-chain-core10-local-docker` to `status=verified` with
+  `evidenceComplete=true` and `topologyComplete=true`.
+- Re-ran the same restore-driven acceptance after the adoption implementation
+  changes to keep evidence current. Latest run:
+  `batch.restore.scf-chain-core10-local-docker.20260520T070947.377509000Z.20260520T070947.569388000Z`.
+  Current-code result remains `ok=true`, `docker.action=use-existing-containers`,
+  `healthPassed=19/19`, `expectedSteps=10`, `passedSteps=10`,
+  `templateId=environment.workflow.skywalking.v1`, and
+  `topologyProvider=skywalking`; `publish-verified` again reports
+  `status=verified`, `evidenceComplete=true`, and `topologyComplete=true`.

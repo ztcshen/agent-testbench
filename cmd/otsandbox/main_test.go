@@ -1696,6 +1696,41 @@ func TestEnvironmentRestoreBlocksDockerWhenContainerNamesAlreadyExist(t *testing
 	}
 }
 
+func TestEnvironmentRestoreCanAdoptExistingContainers(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	fakeBin := t.TempDir()
+	writeFile(t, filepath.Join(fakeBin, "git"), "#!/bin/sh\nexit 0\n")
+	writeFile(t, filepath.Join(fakeBin, "docker"), "#!/bin/sh\nif [ \"$1\" = compose ] && [ \"$2\" = version ]; then exit 0; fi\nif [ \"$1\" = ps ]; then printf 'sandbox-mysql\\n'; exit 0; fi\nif [ \"$1\" = inspect ]; then printf 'running healthy\\n'; exit 0; fi\nexit 0\n")
+	if err := os.Chmod(filepath.Join(fakeBin, "git"), 0o755); err != nil {
+		t.Fatalf("chmod fake git: %v", err)
+	}
+	if err := os.Chmod(filepath.Join(fakeBin, "docker"), 0o755); err != nil {
+		t.Fatalf("chmod fake docker: %v", err)
+	}
+	t.Setenv("PATH", fakeBin)
+
+	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+		ID:                     "env.adopt.container",
+		ComposeJSON:            `{"composeFile":"compose.yml","services":["mysql"],"generatedFiles":{"compose.yml":"services:\n  mysql:\n    image: mysql:8\n    container_name: sandbox-mysql\n"}}`,
+		HealthChecksJSON:       `[]`,
+		VerificationWorkflowID: "workflow.core-10",
+	}, workspace, true, false, false, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{
+		UseExistingContainers: true,
+	})
+	if err != nil {
+		t.Fatalf("build restore adopt existing container report: %v", err)
+	}
+	if !report.OK || !report.Preflight.OK || report.Docker.Action != "use-existing-containers" || len(report.Docker.Commands) != 0 || len(report.Docker.HealthChecks) != 1 || !report.Docker.HealthChecks[0].OK || report.Docker.HealthChecks[0].Container != "sandbox-mysql" {
+		t.Fatalf("adopt existing container report = %#v", report)
+	}
+	if !restoreTypedReadinessHasItem(report.Readiness.Items, "docker-container-conflicts", true, "explicitly adopted") {
+		t.Fatalf("readiness should acknowledge explicit adoption: %#v", report.Readiness.Items)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "compose.yml")); err != nil {
+		t.Fatalf("adopt existing containers should write Store startup file: %v", err)
+	}
+}
+
 func TestEnvironmentStartupFilePutMergesGeneratedFilesWithoutReRegistering(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	sourceCompose := filepath.Join(t.TempDir(), "source-compose.yml")

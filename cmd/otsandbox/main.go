@@ -253,7 +253,7 @@ Usage:
   otsandbox environment inspect ENV_ID [--store NAME_OR_DSN] [--json]
   otsandbox environment bootstrap ENV_ID [--store NAME_OR_DSN] [--json]
   otsandbox environment startup-file put ENV_ID --file TARGET=SOURCE_FILE [--store NAME_OR_DSN] [--json]
-  otsandbox environment restore ENV_ID --workspace PATH [--store NAME_OR_DSN] [--execute] [--pull] [--prepare-repos-only] [--clean-docker-state] [--clean-docker-images] [--allow-destructive-docker-cleanup] [--run-workflow --server-url URL] [--base-url URL] [--workflow-output-dir PATH] [--health-timeout-seconds N] [--json]
+  otsandbox environment restore ENV_ID --workspace PATH [--store NAME_OR_DSN] [--execute] [--pull] [--prepare-repos-only] [--use-existing-containers] [--clean-docker-state] [--clean-docker-images] [--allow-destructive-docker-cleanup] [--run-workflow --server-url URL] [--base-url URL] [--workflow-output-dir PATH] [--health-timeout-seconds N] [--json]
   otsandbox environment acceptance start ENV_ID --server-url URL --request-id ID [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
   otsandbox environment acceptance report ENV_ID --server-url URL --run ID [--json]
   otsandbox environment verify ENV_ID --run ID --status STATUS [--evidence-complete] [--topology-complete] [--store NAME_OR_DSN] [--json]
@@ -853,6 +853,7 @@ type environmentRestoreHealthCheckReport struct {
 	Address    string `json:"address,omitempty"`
 	Command    string `json:"command,omitempty"`
 	Service    string `json:"service,omitempty"`
+	Container  string `json:"container,omitempty"`
 	OK         bool   `json:"ok"`
 	StatusCode int    `json:"statusCode,omitempty"`
 	State      string `json:"state,omitempty"`
@@ -895,9 +896,10 @@ type environmentRestoreWorkflowOptions struct {
 }
 
 type environmentRestoreDockerCleanupOptions struct {
-	Requested     bool
-	IncludeImages bool
-	Allowed       bool
+	Requested             bool
+	IncludeImages         bool
+	Allowed               bool
+	UseExistingContainers bool
 }
 
 func runEnvironmentRestore(ctx context.Context, args []string) error {
@@ -915,6 +917,7 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 	workflowOutputDir := flags.String("workflow-output-dir", "", "Verification workflow report output directory")
 	acceptanceTimeoutSeconds := flags.Int("acceptance-timeout-seconds", 120, "Seconds to wait for async environment acceptance report")
 	healthTimeoutSeconds := flags.Int("health-timeout-seconds", 60, "Seconds to wait for recorded Docker service health checks")
+	useExistingContainers := flags.Bool("use-existing-containers", false, "Adopt already-running fixed-name Docker containers instead of running Docker Compose up")
 	cleanDockerState := flags.Bool("clean-docker-state", false, "Plan or run Docker Compose cleanup before startup")
 	cleanDockerImages := flags.Bool("clean-docker-images", false, "Include Docker Compose image removal in cleanup plan")
 	allowDestructiveDockerCleanup := flags.Bool("allow-destructive-docker-cleanup", false, "Allow --execute to run requested Docker cleanup commands")
@@ -940,6 +943,9 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 	}
 	if *prepareReposOnly && *runWorkflow {
 		return errors.New("--prepare-repos-only cannot be combined with --run-workflow")
+	}
+	if *useExistingContainers && (*cleanDockerState || *cleanDockerImages) {
+		return errors.New("--use-existing-containers cannot be combined with Docker cleanup flags")
 	}
 	if *runWorkflow && strings.TrimSpace(*serverURL) == "" {
 		return errors.New("--run-workflow requires --server-url for async environment acceptance")
@@ -969,9 +975,10 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 		OutputDir:      *workflowOutputDir,
 		TimeoutSeconds: *acceptanceTimeoutSeconds,
 	}, environmentRestoreDockerCleanupOptions{
-		Requested:     *cleanDockerState || *cleanDockerImages,
-		IncludeImages: *cleanDockerImages,
-		Allowed:       *allowDestructiveDockerCleanup,
+		Requested:             *cleanDockerState || *cleanDockerImages,
+		IncludeImages:         *cleanDockerImages,
+		Allowed:               *allowDestructiveDockerCleanup,
+		UseExistingContainers: *useExistingContainers,
 	})
 	if err != nil {
 		return err
@@ -1139,6 +1146,11 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 				report.Docker.Error = item.Error
 				break
 			}
+		}
+	} else if report.OK && cleanupOptions.UseExistingContainers {
+		report.Docker = environmentRestoreUseExistingContainers(ctx, compose, healthChecks, workspace, execute, healthTimeout)
+		if !report.Docker.OK {
+			report.OK = false
 		}
 	} else if report.OK {
 		report.Docker = environmentRestoreDocker(ctx, compose, healthChecks, workspace, execute, healthTimeout, cleanupOptions)
@@ -1418,6 +1430,7 @@ func environmentRestoreSummaryFailedHealth(checks []environmentRestoreHealthChec
 			"url":        redaction.URL(item.URL),
 			"address":    item.Address,
 			"service":    item.Service,
+			"container":  item.Container,
 			"statusCode": item.StatusCode,
 			"state":      item.State,
 			"health":     item.Health,
@@ -1651,18 +1664,20 @@ func environmentRestoreContainerNameConflicts(compose map[string]any, workspace 
 }
 
 func environmentRestoreContainerNames(compose map[string]any, workspace string) []string {
-	seen := map[string]bool{}
+	byService := environmentRestoreContainerNameByService(compose, workspace)
+	names := make([]string, 0, len(byService))
+	for _, name := range byService {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func environmentRestoreContainerNameByService(compose map[string]any, workspace string) map[string]string {
+	out := map[string]string{}
 	addContent := func(content string) {
-		for _, line := range strings.Split(content, "\n") {
-			line = strings.TrimSpace(line)
-			if !strings.HasPrefix(line, "container_name:") {
-				continue
-			}
-			name := strings.TrimSpace(strings.TrimPrefix(line, "container_name:"))
-			name = strings.Trim(name, `"'`)
-			if name != "" {
-				seen[name] = true
-			}
+		for service, container := range parseComposeContainerNames(content) {
+			out[service] = container
 		}
 	}
 	for _, content := range stringMapFromAny(compose["generatedFiles"]) {
@@ -1675,12 +1690,41 @@ func environmentRestoreContainerNames(compose map[string]any, workspace string) 
 			addContent(string(raw))
 		}
 	}
-	names := make([]string, 0, len(seen))
-	for name := range seen {
-		names = append(names, name)
+	return out
+}
+
+func parseComposeContainerNames(content string) map[string]string {
+	out := map[string]string{}
+	inServices := false
+	currentService := ""
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " "))
+		if indent == 0 {
+			inServices = trimmed == "services:"
+			currentService = ""
+			continue
+		}
+		if !inServices {
+			continue
+		}
+		if indent == 2 && strings.HasSuffix(trimmed, ":") {
+			currentService = strings.TrimSuffix(trimmed, ":")
+			continue
+		}
+		if currentService == "" || !strings.HasPrefix(trimmed, "container_name:") {
+			continue
+		}
+		name := strings.TrimSpace(strings.TrimPrefix(trimmed, "container_name:"))
+		name = strings.Trim(name, `"'`)
+		if name != "" {
+			out[currentService] = name
+		}
 	}
-	sort.Strings(names)
-	return names
+	return out
 }
 
 func environmentRestorePreflightReport(packageSpec environmentRestorePackageSpec, specs []environmentRestoreRepoSpec, compose map[string]any, workspace string, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool) environmentRestorePreflight {
@@ -1722,7 +1766,7 @@ func environmentRestorePreflightReport(packageSpec environmentRestorePackageSpec
 			if cleanupOptions.IncludeImages {
 				report.HeavySteps = append(report.HeavySteps, "docker compose down --rmi all may remove local images")
 			}
-		} else if !prepareReposOnly {
+		} else if !prepareReposOnly && !cleanupOptions.UseExistingContainers {
 			conflicts := environmentRestoreContainerNameConflicts(compose, workspace)
 			if len(conflicts) > 0 {
 				report.ContainerConflicts = conflicts
@@ -1767,6 +1811,8 @@ func environmentRestoreReadinessReport(report environmentRestoreReport, packageS
 	addItem("verification-workflow", true, strings.TrimSpace(report.VerificationWorkflow) != "", "restore is anchored to workflow "+strings.TrimSpace(report.VerificationWorkflow))
 	if len(report.Preflight.ContainerConflicts) > 0 {
 		addItem("docker-container-conflicts", true, false, "existing Docker containers would be reused or replaced by fixed container_name values: "+strings.Join(report.Preflight.ContainerConflicts, ", "))
+	} else if cleanupOptions.UseExistingContainers {
+		addItem("docker-container-conflicts", true, true, "existing fixed-name Docker containers are explicitly adopted; Docker Compose up will not run")
 	} else if strings.TrimSpace(valueString(report.Compose["composeFile"])) != "" {
 		addItem("docker-container-conflicts", true, true, "no existing Docker container_name conflicts detected for non-destructive restore")
 	}
@@ -1805,7 +1851,7 @@ func environmentRestoreReadinessReport(report environmentRestoreReport, packageS
 		addItem("service-repositories", true, repoOK, fmt.Sprintf("%d service repository checkout(s) will be cloned or validated before Docker startup", len(specs)))
 	}
 
-	dockerPlanOK := report.Docker.OK && (report.Docker.Action == "plan-docker-compose" || report.Docker.Action == "run-docker-compose" || report.Docker.Action == "plan-start-command" || report.Docker.Action == "run-start-command" || report.Docker.Action == "skipped-after-repository-preparation")
+	dockerPlanOK := report.Docker.OK && (report.Docker.Action == "plan-docker-compose" || report.Docker.Action == "run-docker-compose" || report.Docker.Action == "plan-start-command" || report.Docker.Action == "run-start-command" || report.Docker.Action == "plan-use-existing-containers" || report.Docker.Action == "use-existing-containers" || report.Docker.Action == "skipped-after-repository-preparation")
 	addItem("docker-start-plan", true, dockerPlanOK, environmentRestoreReadinessDockerDetail(report))
 
 	composeServices := stringSliceFromAny(report.Compose["services"])
@@ -1868,6 +1914,8 @@ func environmentRestoreReadinessDockerDetail(report environmentRestoreReport) st
 		return "Docker Compose plan is recorded"
 	case "plan-start-command", "run-start-command":
 		return "recorded start command will run from workspace"
+	case "plan-use-existing-containers", "use-existing-containers":
+		return "existing Docker containers are adopted; Docker Compose startup is skipped"
 	case "skipped-due-to-repository-error":
 		return "Docker startup is blocked until repository preparation succeeds"
 	case "skipped-due-to-preflight":
@@ -2121,6 +2169,75 @@ func environmentRestoreCheckoutDetachedAtRef(ctx context.Context, spec environme
 		return false, errText
 	}
 	return strings.TrimSpace(head) == strings.TrimSpace(target) && strings.TrimSpace(branch) == "HEAD", ""
+}
+
+func environmentRestoreUseExistingContainers(ctx context.Context, compose map[string]any, healthChecks []any, workspace string, execute bool, healthTimeout time.Duration) environmentRestoreDockerReport {
+	report := environmentRestoreDockerReport{
+		OK:          true,
+		Action:      "plan-use-existing-containers",
+		Workdir:     workspace,
+		ComposeFile: strings.Join(environmentRestoreResolvedComposeFiles(workspace, environmentRestoreComposeFiles(compose)), ","),
+		Generated:   prepareEnvironmentRestoreGeneratedFiles(compose, workspace, execute),
+	}
+	for _, item := range report.Generated {
+		if !item.OK {
+			report.OK = false
+			report.Action = "prepare-generated-files"
+			report.Error = item.Error
+			return report
+		}
+	}
+	if !execute {
+		return report
+	}
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		report.OK = false
+		report.Action = "prepare-workspace"
+		report.Error = err.Error()
+		return report
+	}
+	if envFile, err := writeEnvironmentRestoreGeneratedEnvFile(workspace, compose); err != nil {
+		report.OK = false
+		report.Action = "prepare-compose-env"
+		report.Error = err.Error()
+		return report
+	} else if envFile != "" {
+		report.Output = append(report.Output, "generated compose env file: "+envFile)
+	}
+	report.Action = "use-existing-containers"
+	report.HealthChecks = waitEnvironmentRestoreHealthChecks(ctx, environmentRestoreAdoptedContainerHealthChecks(healthChecks, compose, workspace), healthTimeout, workspace, nil)
+	for _, check := range report.HealthChecks {
+		if !check.OK {
+			report.OK = false
+		}
+	}
+	return report
+}
+
+func environmentRestoreAdoptedContainerHealthChecks(checks []any, compose map[string]any, workspace string) []any {
+	containers := environmentRestoreContainerNameByService(compose, workspace)
+	out := make([]any, 0, len(checks))
+	for _, raw := range checks {
+		item, ok := raw.(map[string]any)
+		if !ok || strings.TrimSpace(valueString(item["kind"])) != "compose-service" {
+			out = append(out, raw)
+			continue
+		}
+		service := strings.TrimSpace(valueString(item["service"]))
+		container := strings.TrimSpace(containers[service])
+		if service == "" || container == "" {
+			out = append(out, raw)
+			continue
+		}
+		converted := map[string]any{}
+		for key, value := range item {
+			converted[key] = value
+		}
+		converted["kind"] = "container"
+		converted["container"] = container
+		out = append(out, converted)
+	}
+	return out
 }
 
 func environmentRestoreDocker(ctx context.Context, compose map[string]any, healthChecks []any, workspace string, execute bool, healthTimeout time.Duration, cleanupOptions environmentRestoreDockerCleanupOptions) environmentRestoreDockerReport {
@@ -2638,12 +2755,13 @@ func waitEnvironmentRestoreHealthChecks(ctx context.Context, checks []any, timeo
 			kind = "url"
 		}
 		check := environmentRestoreHealthCheckReport{
-			ID:      strings.TrimSpace(valueString(item["id"])),
-			Kind:    kind,
-			URL:     strings.TrimSpace(valueString(item["url"])),
-			Address: strings.TrimSpace(valueString(item["address"])),
-			Command: strings.TrimSpace(valueString(item["command"])),
-			Service: strings.TrimSpace(valueString(item["service"])),
+			ID:        strings.TrimSpace(valueString(item["id"])),
+			Kind:      kind,
+			URL:       strings.TrimSpace(valueString(item["url"])),
+			Address:   strings.TrimSpace(valueString(item["address"])),
+			Command:   strings.TrimSpace(valueString(item["command"])),
+			Service:   strings.TrimSpace(valueString(item["service"])),
+			Container: strings.TrimSpace(valueString(item["container"])),
 		}
 		switch check.Kind {
 		case "url", "":
@@ -2666,6 +2784,11 @@ func waitEnvironmentRestoreHealthChecks(ctx context.Context, checks []any, timeo
 				continue
 			}
 			out = append(out, waitEnvironmentRestoreComposeServiceHealthCheck(ctx, check, timeout, workspace, composeBaseArgs))
+		case "container":
+			if check.Container == "" {
+				continue
+			}
+			out = append(out, waitEnvironmentRestoreContainerHealthCheck(ctx, check, timeout))
 		default:
 			check.Error = "unsupported health check kind: " + check.Kind
 			out = append(out, check)
@@ -2755,6 +2878,21 @@ func waitEnvironmentRestoreComposeServiceHealthCheck(ctx context.Context, check 
 		check.State = state
 		check.Health = health
 		return state == "running" && (health == "" || health == "healthy")
+	})
+}
+
+func waitEnvironmentRestoreContainerHealthCheck(ctx context.Context, check environmentRestoreHealthCheckReport, timeout time.Duration) environmentRestoreHealthCheckReport {
+	command := []string{"docker", "inspect", "--format", "{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}", check.Container}
+	return waitEnvironmentRestoreCommand(ctx, check, timeout, "", command, func(check *environmentRestoreHealthCheckReport, output string) bool {
+		check.Output = truncateReportText(output, 200)
+		fields := strings.Fields(output)
+		if len(fields) > 0 {
+			check.State = strings.TrimSpace(fields[0])
+		}
+		if len(fields) > 1 {
+			check.Health = strings.TrimSpace(fields[1])
+		}
+		return check.State == "running" && (check.Health == "" || check.Health == "healthy")
 	})
 }
 
