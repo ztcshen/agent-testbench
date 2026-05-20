@@ -281,7 +281,7 @@ func TestDailyStoreReferenceRejectsLegacySQLiteStoreURL(t *testing.T) {
 		if err == nil {
 			t.Fatalf("daily Store reference should reject legacy SQLite store URL %q", legacyStoreURL)
 		}
-		for _, want := range []string{"--store-url", "daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://"} {
+		for _, want := range []string{"--store-url", "daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://", "mysql://"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Fatalf("daily Store reference error missing %q: %v", want, err)
 			}
@@ -304,7 +304,7 @@ func TestDailyStoreReferenceRejectsNamedSQLiteConfig(t *testing.T) {
 	if err == nil {
 		t.Fatal("daily Store reference should reject named SQLite config")
 	}
-	for _, want := range []string{`Store config "legacy-local"`, "daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://"} {
+	for _, want := range []string{`Store config "legacy-local"`, "daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://", "mysql://"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("daily Store reference error missing %q: %v", want, err)
 		}
@@ -379,7 +379,7 @@ func TestEnvironmentCommandsRejectActiveSQLiteStore(t *testing.T) {
 				t.Fatalf("%s unexpectedly succeeded", tt.name)
 			}
 			out := err.Error()
-			for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://"} {
+			for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://", "mysql://"} {
 				if !strings.Contains(out, want) {
 					t.Fatalf("%s output missing %q: %q", tt.name, want, out)
 				}
@@ -4265,7 +4265,7 @@ func TestCaseReadCommandsRejectActiveSQLiteStore(t *testing.T) {
 			}
 
 			out := runCLIFails(t, tt.args...)
-			for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://"} {
+			for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://", "mysql://"} {
 				if !strings.Contains(out, want) {
 					t.Fatalf("%s output missing %q: %q", tt.name, want, out)
 				}
@@ -6236,7 +6236,7 @@ func TestWorkflowRunReadCommandsRejectActiveSQLiteStore(t *testing.T) {
 			}
 
 			out := runCLIFails(t, tt.args...)
-			for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://"} {
+			for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://", "mysql://"} {
 				if !strings.Contains(out, want) {
 					t.Fatalf("%s output missing %q: %q", tt.name, want, out)
 				}
@@ -6813,7 +6813,7 @@ func TestEvidenceReadCommandsRejectActiveSQLiteStore(t *testing.T) {
 			}
 
 			out := runCLIFails(t, tt.args...)
-			for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://"} {
+			for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://", "mysql://"} {
 				if !strings.Contains(out, want) {
 					t.Fatalf("%s output missing %q: %q", tt.name, want, out)
 				}
@@ -6957,7 +6957,7 @@ func TestCaseRunCommandRejectsActiveSQLiteStoreBeforeFileExecution(t *testing.T)
 	}
 
 	out := runCLIFails(t, "case", "run", "--case", casePath, "--base-url", server.URL, "--run-id", "case-run-active-sqlite")
-	for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://"} {
+	for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://", "mysql://"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("case run with active SQLite store output missing %q: %q", want, out)
 		}
@@ -7879,7 +7879,7 @@ func TestDiscoverCommandsRejectActiveSQLiteStore(t *testing.T) {
 			}
 
 			out := runCLIFails(t, tt.args...)
-			for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://"} {
+			for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://", "mysql://"} {
 				if !strings.Contains(out, want) {
 					t.Fatalf("%s output missing %q: %q", tt.name, want, out)
 				}

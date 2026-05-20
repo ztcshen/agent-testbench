@@ -288,3 +288,25 @@ Current blocker:
 
 - Still waiting for a dedicated company MySQL Store DSN to run
   `npm run release-check:mysql-real` against the real test environment.
+
+## 2026-05-21 MySQL Daily Store Guidance Slice
+
+Progress: `[###################-] 97%`
+
+Implemented:
+
+- Updated the README status section to mention the guarded company MySQL
+  release sign-off command, not only the generic SQL Store release gate.
+- Strengthened daily-command SQLite rejection tests so they require both
+  `postgres://` and `mysql://` setup guidance. This keeps MySQL visible as an
+  equal daily Store path across environment, case, workflow, Evidence, and
+  discovery commands.
+
+Validated:
+
+- `go test ./cmd/otsandbox -run 'TestDailyStoreReferenceRejectsLegacySQLiteStoreURL|TestDailyStoreReferenceRejectsNamedSQLiteConfig|TestEnvironmentCommandsRejectActiveSQLiteStore|TestCaseReadCommandsRejectActiveSQLiteStore|TestWorkflowRunReadCommandsRejectActiveSQLiteStore|TestEvidenceReadCommandsRejectActiveSQLiteStore|TestCaseRunCommandRejectsActiveSQLiteStoreBeforeFileExecution|TestDiscoverCommandsRejectActiveSQLiteStore' -count=1`
+
+Current blocker:
+
+- Real company MySQL Store DSN is still required for
+  `npm run release-check:mysql-real` and final completion.

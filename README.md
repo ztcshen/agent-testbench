@@ -160,7 +160,8 @@ Current working areas:
 - Evidence: request, response, assertions, summaries, logs, topology, timing;
 - workbench: local React pages backed by Control plane APIs;
 - release gate: `OTSANDBOX_SMOKE_STORE_DSN=postgres://... npm run release-check`
-  or `OTSANDBOX_SMOKE_STORE_DSN=mysql://... npm run release-check`.
+  or `OTSANDBOX_SMOKE_STORE_DSN=mysql://... npm run release-check`; for a
+  company MySQL Store sign-off, use `npm run release-check:mysql-real`.
 
 Next areas are Store-first registration APIs, a cleaner current-state workbench,
 stronger post-process scheduling, verified environment bootstrap, and richer
