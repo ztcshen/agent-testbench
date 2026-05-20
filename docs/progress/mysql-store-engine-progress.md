@@ -2128,3 +2128,29 @@ Current blocker:
   `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+
+## 2026-05-21 MySQL Control Plane Store API Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Added MySQL coverage for the control-plane `/api/store/current` payload.
+- Kept the existing PostgreSQL case and added a MySQL StoreInfo case that
+  asserts backend metadata, active-config source, and masked MySQL DSN output.
+- This tightens API parity for workbench callers that inspect the active named
+  Store before running daily commands.
+
+Validated:
+
+- `go test -v ./internal/controlplane -run '^TestServerExposesCurrentStoreAPIWithMaskedURL$' -count=1`
+- `git diff --check`
+- `rg -n -i 'fall''back' . --glob '!node_modules/**'`
+- `tools/guardrails/check_store_first_contracts.sh && tools/guardrails/check_no_source_domain_core.sh`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.

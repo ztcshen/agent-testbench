@@ -124,30 +124,56 @@ func TestServerExecutorPlanPrefersStoreCatalog(t *testing.T) {
 }
 
 func TestServerExposesCurrentStoreAPIWithMaskedURL(t *testing.T) {
-	server := httptest.NewServer(controlplane.NewWithOptions(profile.Bundle{ID: "sample"}, controlplane.Options{
-		StoreInfo: controlplane.StoreInfo{
-			Configured: true,
-			Name:       "team-verified",
-			Backend:    "postgres",
-			URL:        "postgres://tester:xxxxx@example.com:5432/team_verified?sslmode=require",
-			Source:     "active-config",
+	tests := []struct {
+		name    string
+		info    controlplane.StoreInfo
+		wantURL string
+	}{
+		{
+			name: "postgres",
+			info: controlplane.StoreInfo{
+				Configured: true,
+				Name:       "team-verified",
+				Backend:    "postgres",
+				URL:        "postgres://tester:xxxxx@example.com:5432/team_verified?sslmode=require",
+				Source:     "active-config",
+			},
+			wantURL: "postgres://tester:xxxxx@example.com:5432/team_verified?sslmode=require",
 		},
-	}))
-	defer server.Close()
+		{
+			name: "mysql",
+			info: controlplane.StoreInfo{
+				Configured: true,
+				Name:       "team-mysql",
+				Backend:    "mysql",
+				URL:        "mysql://tester:xxxxx@example.com:3306/otsandbox_team?tls=false",
+				Source:     "active-config",
+			},
+			wantURL: "mysql://tester:xxxxx@example.com:3306/otsandbox_team?tls=false",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(controlplane.NewWithOptions(profile.Bundle{ID: "sample"}, controlplane.Options{
+				StoreInfo: tt.info,
+			}))
+			defer server.Close()
 
-	payload := decodeJSONResponse(t, server.URL+"/api/store/current", http.StatusOK)
-	if payload["ok"] != true || payload["configured"] != true {
-		t.Fatalf("store current flags = %#v", payload)
-	}
-	if payload["name"] != "team-verified" || payload["backend"] != "postgres" || payload["source"] != "active-config" {
-		t.Fatalf("store current metadata = %#v", payload)
-	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("marshal payload: %v", err)
-	}
-	if strings.Contains(string(raw), "secret") || payload["url"] != "postgres://tester:xxxxx@example.com:5432/team_verified?sslmode=require" {
-		t.Fatalf("store current url was not masked: %s", raw)
+			payload := decodeJSONResponse(t, server.URL+"/api/store/current", http.StatusOK)
+			if payload["ok"] != true || payload["configured"] != true {
+				t.Fatalf("store current flags = %#v", payload)
+			}
+			if payload["name"] != tt.info.Name || payload["backend"] != tt.info.Backend || payload["source"] != "active-config" {
+				t.Fatalf("store current metadata = %#v", payload)
+			}
+			raw, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatalf("marshal payload: %v", err)
+			}
+			if strings.Contains(string(raw), "secret") || payload["url"] != tt.wantURL {
+				t.Fatalf("store current url was not masked: %s", raw)
+			}
+		})
 	}
 }
 
