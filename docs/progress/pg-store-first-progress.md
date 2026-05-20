@@ -2561,4 +2561,8 @@ Remote source policy slice:
   scoped validation. PostgreSQL Store stayed outside Docker; Docker-side
   business/middleware/observability services were reconstructed from Store
   metadata and remote repositories; health gates and the acceptance workflow
-  proved the environment is usable.
+  proved the environment is usable. The environment was then published through
+  `environment publish-verified`; `environment discover` now lists
+  `scf-chain-core10-local-docker` with `status=verified`, `verified=true`,
+  `lastVerificationStatus=passed`, `evidenceComplete=true`, and
+  `topologyComplete=true`.
