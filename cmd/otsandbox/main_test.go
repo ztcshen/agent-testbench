@@ -3812,20 +3812,30 @@ func TestSandboxRegisterCommandsWriteStoreCatalog(t *testing.T) {
 
 func TestSandboxRegisterCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-sandbox-register-pg")
+	runSandboxRegisterCommandsUseNamedActiveStore(t, storeRef, "pg", "PostgreSQL")
+}
+
+func TestSandboxRegisterCommandsUseNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-sandbox-register-mysql")
+	runSandboxRegisterCommandsUseNamedActiveStore(t, storeRef, "mysql", "MySQL")
+}
+
+func runSandboxRegisterCommandsUseNamedActiveStore(t *testing.T, storeRef string, suffixLabel string, label string) {
+	t.Helper()
 	suffix := time.Now().UTC().Format("20060102150405.000000000")
-	serviceID := "service.gateway.pg." + suffix
-	nodeID := "node.create-order.pg." + suffix
-	caseID := "case.create-order.pg." + suffix
+	serviceID := "service.gateway." + suffixLabel + "." + suffix
+	nodeID := "node.create-order." + suffixLabel + "." + suffix
+	caseID := "case.create-order." + suffixLabel + "." + suffix
 
 	serviceOut := runCLI(t, "sandbox", "service", "register",
 		"--id", serviceID,
-		"--display-name", "Gateway PG",
+		"--display-name", "Gateway "+label,
 		"--kind", "http",
 		"--service-port", "18080",
 		"--health-url", "http://127.0.0.1:18080/health",
 	)
 	if !strings.Contains(serviceOut, "Registered service: "+serviceID) {
-		t.Fatalf("PostgreSQL service register output = %q", serviceOut)
+		t.Fatalf("%s service register output = %q", label, serviceOut)
 	}
 
 	interfaceOut := runCLI(t, "sandbox", "interface", "register",
@@ -3838,7 +3848,7 @@ func TestSandboxRegisterCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		"--required-for-admission",
 	)
 	if !strings.Contains(interfaceOut, "Registered interface: "+nodeID) || !strings.Contains(interfaceOut, "Case: "+caseID) {
-		t.Fatalf("PostgreSQL interface register output = %q", interfaceOut)
+		t.Fatalf("%s interface register output = %q", label, interfaceOut)
 	}
 
 	s, err := openStore(context.Background(), storeRef)
@@ -3848,7 +3858,7 @@ func TestSandboxRegisterCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 	defer s.Close()
 	catalog, err := s.GetProfileCatalog(context.Background())
 	if err != nil {
-		t.Fatalf("get PostgreSQL catalog: %v", err)
+		t.Fatalf("get %s catalog: %v", label, err)
 	}
 	serviceFound := false
 	for _, service := range catalog.Services {
@@ -3858,7 +3868,7 @@ func TestSandboxRegisterCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		}
 	}
 	if !serviceFound {
-		t.Fatalf("PostgreSQL catalog services = %#v", catalog.Services)
+		t.Fatalf("%s catalog services = %#v", label, catalog.Services)
 	}
 	nodeFound := false
 	for _, node := range catalog.InterfaceNodes {
@@ -3868,7 +3878,7 @@ func TestSandboxRegisterCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		}
 	}
 	if !nodeFound {
-		t.Fatalf("PostgreSQL catalog interface nodes = %#v", catalog.InterfaceNodes)
+		t.Fatalf("%s catalog interface nodes = %#v", label, catalog.InterfaceNodes)
 	}
 	templateFound := false
 	for _, template := range catalog.RequestTemplates {
@@ -3878,7 +3888,7 @@ func TestSandboxRegisterCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		}
 	}
 	if !templateFound {
-		t.Fatalf("PostgreSQL catalog request templates = %#v", catalog.RequestTemplates)
+		t.Fatalf("%s catalog request templates = %#v", label, catalog.RequestTemplates)
 	}
 	caseFound := false
 	for _, apiCase := range catalog.APICases {
@@ -3888,7 +3898,7 @@ func TestSandboxRegisterCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		}
 	}
 	if !caseFound {
-		t.Fatalf("PostgreSQL catalog api cases = %#v", catalog.APICases)
+		t.Fatalf("%s catalog api cases = %#v", label, catalog.APICases)
 	}
 }
 
