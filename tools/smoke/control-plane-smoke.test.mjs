@@ -41,9 +41,9 @@ describe("control-plane smoke Store selection", () => {
       [
         "import { prepareSmokeStoreReference } from './tools/smoke/control-plane-smoke.mjs';",
         "const calls = [];",
-        "const ref = await prepareSmokeStoreReference('/tmp/ots-smoke', { OTSANDBOX_SMOKE_STORE_DSN: 'mysql://user:secret@example.com:3306/ots?tls=false' }, (command, args, options) => calls.push({ command, args, env: options.env }));",
+        "const ref = await prepareSmokeStoreReference('/tmp/ots-smoke', { OTSANDBOX_SMOKE_STORE_DSN: 'mysql://user:secret@example.com:3306/otsandbox_smoke?tls=false' }, (command, args, options) => calls.push({ command, args, env: options.env }));",
         "if (ref.storeRef !== 'smoke-mysql') throw new Error(JSON.stringify(ref));",
-        "if (calls[0].args.join(' ') !== 'run ./cmd/otsandbox store config set smoke-mysql --url mysql://user:secret@example.com:3306/ots?tls=false') throw new Error(JSON.stringify(calls));",
+        "if (calls[0].args.join(' ') !== 'run ./cmd/otsandbox store config set smoke-mysql --url mysql://user:secret@example.com:3306/otsandbox_smoke?tls=false') throw new Error(JSON.stringify(calls));",
         "if (calls[1].args.join(' ') !== 'run ./cmd/otsandbox store use smoke-mysql') throw new Error(JSON.stringify(calls));",
         "if (calls[2].args.join(' ') !== 'run ./cmd/otsandbox store upgrade --store smoke-mysql') throw new Error(JSON.stringify(calls));",
       ].join("\n"),
@@ -53,6 +53,25 @@ describe("control-plane smoke Store selection", () => {
       env: { ...process.env, OTSANDBOX_SMOKE_IMPORT_ONLY: "1" },
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
+  });
+
+  it("refuses likely business MySQL databases before preparing the smoke Store", () => {
+    const result = spawnSync(process.execPath, [
+      "--input-type=module",
+      "-e",
+      [
+        "import { prepareSmokeStoreReference } from './tools/smoke/control-plane-smoke.mjs';",
+        "const calls = [];",
+        "await prepareSmokeStoreReference('/tmp/ots-smoke', { OTSANDBOX_SMOKE_STORE_DSN: 'mysql://user:secret@example.com:3306/business_prod?tls=false' }, (command, args, options) => calls.push({ command, args, env: options.env }));",
+      ].join("\n"),
+    ], {
+      cwd: rootDir,
+      encoding: "utf8",
+      env: { ...process.env, OTSANDBOX_SMOKE_IMPORT_ONLY: "1" },
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /refuses database 'business_prod'/);
+    assert.doesNotMatch(result.stderr, /secret/);
   });
 
   it("requires a SQL DSN unless SQLite compatibility smoke is explicit", () => {

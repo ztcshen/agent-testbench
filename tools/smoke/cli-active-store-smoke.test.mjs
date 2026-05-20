@@ -22,3 +22,10 @@ test("active SQL Store CLI smoke rejects non-SQL shared Store env", () => {
     /requires a PostgreSQL or MySQL DSN/,
   );
 });
+
+test("active SQL Store CLI smoke refuses likely business MySQL databases", () => {
+  assert.throws(
+    () => requiredSQLStoreDSN({ OTSANDBOX_SMOKE_STORE: "mysql://user:secret@example.com:3306/business_prod?tls=false" }),
+    /refuses database 'business_prod'/,
+  );
+});

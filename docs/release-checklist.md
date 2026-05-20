@@ -34,7 +34,7 @@ mode, an `http` or `https` GraphQL URL, and complete 10-step trace id mapping
 even in dry-run mode.
 The generic MySQL `npm run release-check` path also refuses MySQL database
 names that do not look dedicated to sandbox/smoke/test/CI validation before it
-runs Store migrations, tests, or API smoke writes.
+runs Store migrations, tests, CLI smoke, API smoke, or frontend smoke writes.
 
 The gate verifies:
 

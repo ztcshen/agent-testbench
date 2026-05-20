@@ -164,8 +164,9 @@ npm run release-check:mysql-real
 The wrapper accepts only `mysql://` and refuses database names that do not look
 like a sandbox, smoke, test, or CI database. This keeps the sandbox control-plane
 Store separate from business schemas used by the services under test.
-The generic MySQL release-check and standalone MySQL API smoke use the same
-database-name guard before Store upgrades or smoke writes begin.
+The generic MySQL release-check, CLI smoke, frontend smoke, and standalone
+MySQL API smoke use the same database-name guard before Store upgrades or smoke
+writes begin.
 It also runs the MySQL Store contract in existing-database mode, so the company
 account needs normal DDL/DML permissions on that dedicated database but does not
 need permission to create or drop databases. This wrapper is final-signoff

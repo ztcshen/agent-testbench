@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { assertSkyWalkingTopologyEvidence, assertWorkflowCaseEvidence, prepareSmokeTraceProvider, smokeTraceID, writeSmokeProfile } from "./control-plane-smoke.mjs";
+import { requireSafeMySQLStoreDSN } from "./mysql-store-dsn-guard.mjs";
 
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const cliSmokeSteps = Array.from({ length: 10 }, (_, index) => {
@@ -33,6 +34,9 @@ export function requiredSQLStoreDSN(env = process.env) {
   }
   if (!storeBackend(dsn)) {
     throw new Error("The active Store CLI smoke requires a PostgreSQL or MySQL DSN");
+  }
+  if (/^mysql:\/\//i.test(dsn)) {
+    requireSafeMySQLStoreDSN(dsn, { label: "The active Store CLI smoke" });
   }
   return dsn;
 }

@@ -927,6 +927,36 @@ Current blocker:
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
   `npm run release-check:mysql-real`.
 
+## 2026-05-21 MySQL CLI and Frontend Smoke DSN Guard Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Reused the shared MySQL smoke Store DSN guard in the active SQL Store CLI
+  smoke so direct `npm run smoke:cli:sql-active` runs refuse likely business
+  database names before Store writes.
+- Reused the same guard in the control-plane/frontend smoke Store preparation
+  path so direct `npm run smoke:frontend` and `npm run smoke:frontend:sql-active`
+  runs refuse unsafe MySQL smoke databases before named Store configuration,
+  Store upgrade, or workbench writes begin.
+- Added regression coverage for both direct smoke entrypoints and updated
+  quickstart, Store backend docs, and release checklist to state the guard now
+  covers release-check, CLI smoke, frontend smoke, and standalone MySQL API
+  smoke.
+
+Validated:
+
+- `node --test tools/smoke/cli-active-store-smoke.test.mjs tools/smoke/control-plane-smoke.test.mjs`
+- `node --check tools/smoke/cli-active-store-smoke.mjs tools/smoke/control-plane-smoke.mjs`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
+  `npm run release-check:mysql-real`.
+
 ## 2026-05-21 Shared SkyWalking Release Guard Slice
 
 Progress: `[###################-] 98%`

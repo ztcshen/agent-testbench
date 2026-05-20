@@ -7,6 +7,8 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 
+import { requireSafeMySQLStoreDSN } from "./mysql-store-dsn-guard.mjs";
+
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const smokeStepIDs = Array.from({ length: 10 }, (_, index) => `step-${String(index + 1).padStart(2, "0")}`);
 
@@ -329,6 +331,9 @@ export async function prepareSmokeStoreReference(tempDir, env = process.env, run
   const backend = /^postgres(?:ql)?:\/\//i.test(smokeStoreDSN) ? "postgres" : /^mysql:\/\//i.test(smokeStoreDSN) ? "mysql" : "";
   if (!backend) {
     throw new Error("OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE must be a PostgreSQL or MySQL Store DSN");
+  }
+  if (backend === "mysql") {
+    requireSafeMySQLStoreDSN(smokeStoreDSN, { label: "The control-plane smoke" });
   }
   const storeName = backend === "mysql" ? "smoke-mysql" : "smoke-postgres";
   const configHome = path.join(tempDir, "store-config");
