@@ -38,7 +38,7 @@ var errNoActiveStoreConfigured = errors.New("no active store configured")
 const legacyStoreURLFlagHelp = "Deprecated compatibility Store URL or path; daily commands reject SQLite paths"
 
 func activeStoreRequiredError() error {
-	return fmt.Errorf("%w; run `otsandbox store config set NAME --url postgres://...` or `mysql://...`, then `otsandbox store use NAME`", errNoActiveStoreConfigured)
+	return fmt.Errorf("%w; run `otsandbox store config set NAME --url postgres://...` or `otsandbox store config set NAME --url mysql://...`, then `otsandbox store use NAME`", errNoActiveStoreConfigured)
 }
 
 func dailyStoreRequiresSQLStoreError(name string, backend string) error {

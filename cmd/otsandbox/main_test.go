@@ -185,7 +185,7 @@ func TestStoreStatusAndUpgradeRequireActiveStore(t *testing.T) {
 	env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}
 	for _, command := range []string{"status", "upgrade"} {
 		out := runCLIFailsWithEnv(t, env, "store", command)
-		if !strings.Contains(out, "no active store configured") || !strings.Contains(out, "store config set NAME --url postgres://") {
+		if !strings.Contains(out, "no active store configured") || !strings.Contains(out, "store config set NAME --url postgres://") || !strings.Contains(out, "store config set NAME --url mysql://") {
 			t.Fatalf("store %s should guide active SQL Store setup, got %q", command, out)
 		}
 	}
@@ -224,6 +224,20 @@ func TestStoreStatusCanUseNamedPostgresStore(t *testing.T) {
 	out := runStoreCommand(t, "status", "--store", "team-verified")
 	if !strings.Contains(out, "Store: postgres") || !strings.Contains(out, "team_verified") || strings.Contains(out, "secret") {
 		t.Fatalf("named postgres status output = %q", out)
+	}
+}
+
+func TestStoreStatusCanUseNamedMySQLStore(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("OTSANDBOX_CONFIG_HOME", configHome)
+	withMySQLSchemaStatus(t, func(_ context.Context, cfg mysql.Config) (mysql.SchemaStatusResult, error) {
+		return mysql.SchemaStatusResult{URL: cfg.URL, CurrentVersion: 0, TargetVersion: sqlstore.CurrentSchemaVersion}, nil
+	})
+	runStoreCommand(t, "config", "set", "team-mysql", "--url", "mysql://user:secret@example.com:3306/team_verified?tls=false")
+
+	out := runStoreCommand(t, "status", "--store", "team-mysql")
+	if !strings.Contains(out, "Store: mysql") || !strings.Contains(out, "team_verified") || strings.Contains(out, "secret") {
+		t.Fatalf("named mysql status output = %q", out)
 	}
 }
 

@@ -558,3 +558,29 @@ Current blocker:
   `npm run release-check:mysql-real`.
 - Remaining MySQL parity work is now mostly DSN-gated daily CLI/API active
   Store coverage, plus the real company MySQL release proof.
+
+## 2026-05-21 Named MySQL Store Status Guidance Slice
+
+Progress: `[###################-] 97%`
+
+Implemented:
+
+- Made the no-active-Store setup guidance include a complete copyable MySQL
+  command: `otsandbox store config set NAME --url mysql://...`.
+- Added named MySQL Store status coverage using the same schema-status injection
+  shape as PostgreSQL, proving `store status --store NAME` resolves a named
+  MySQL Store, masks credentials, and stays on the MySQL backend path without
+  requiring a live database.
+- Kept PostgreSQL and MySQL on the same named Store command shape for Store
+  management; SQLite remains outside the daily Store path.
+
+Validated:
+
+- `go test ./cmd/otsandbox -run '^(TestStoreStatusAndUpgradeRequireActiveStore|TestStoreStatusCanUseNamedMySQLStore|TestStoreStatusCanUseNamedPostgresStore|TestStoreStatusSupportsMySQLURLs|TestStoreConfigCommandsManageActiveMySQLStore)$' -count=1`
+
+Current blocker:
+
+- Final completion still requires a real dedicated company MySQL Store DSN for
+  `npm run release-check:mysql-real`.
+- Daily CLI/API named active Store parity still has deeper DSN-gated coverage
+  to add beyond this Store-management slice.
