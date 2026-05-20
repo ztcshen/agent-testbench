@@ -97,13 +97,23 @@ endpoint before publishing a verified environment.
 `environment restore` is anchored to the environment's verification workflow,
 for example the team core 10-step workflow. It prepares the local machine from
 the Store-backed environment facts instead of acting as a generic Docker
-launcher. By default it is a dry run: it resolves optional repository checkouts
-under `--workspace`, shows Git clone commands when repos are recorded, and
-prints preflight tool checks, Docker Compose pull/build/up commands, and
-recorded health checks. Preflight checks `git` when a missing checkout must be
-cloned, then checks both `docker` and `docker compose version` when a compose
-plan is recorded; it also labels heavy Docker steps so an operator can review
-them before destructive local validation. Add
+launcher. PostgreSQL stores compact source pointers and restore rules, not
+source archives, Docker images, logs, or Evidence payloads. For
+PostgreSQL-backed one-click environments, source pointers must be cloneable
+remote Git URLs, including private GitLab and public GitHub repositories. Local
+paths are reserved for SQLite compatibility tests and ad-hoc development, not
+published one-click environments. The optional environment package repository
+contains the Compose files and validation assets; service repositories contain
+the business code mounted or built by Compose. Small service-adjacent cert/key
+material can be stored as bounded, redacted environment metadata when it is
+required for startup, but large source/runtime artifacts stay outside PG. By
+default restore is a dry run: it resolves the optional package and service
+checkouts under `--workspace`, shows Git clone commands when sources are
+recorded, and prints preflight tool checks, Docker Compose pull/build/up
+commands, and recorded health checks. Preflight checks `git` when a missing
+checkout must be cloned, then checks both `docker` and `docker compose version`
+when a compose plan is recorded; it also labels heavy Docker steps so an
+operator can review them before destructive local validation. Add
 `--execute` to clone missing remote repositories, run Docker Compose, and wait
 for recorded health checks. If the environment records `startCommand` without a
 compose file, restore reports and can execute that command as the local start

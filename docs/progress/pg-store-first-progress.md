@@ -1851,9 +1851,11 @@ Environment package and PG size-boundary slice:
   definition cap covers compact fields such as id/display/description, services,
   repo pointers, compose pointers/env entries, health checks, and workflow
   binding. PostgreSQL must store only restore metadata and acceptance
-  summaries/indexes; code packages, Docker images, logs, Evidence payloads, and
-  other large files are rejected by this boundary and must live in Git, Docker
-  registry, object storage, or the workspace.
+  summaries/indexes; small service-adjacent cert/key material may be stored as
+  bounded, redacted environment metadata when it is required for startup. Code
+  packages, Docker images, logs, Evidence payloads, and other large files are
+  rejected by this boundary and must live in Git, Docker registry, object
+  storage, or the workspace.
 - Expected size for the current 10-step Docker environment definition remains
   in the tens-of-KB class at most; the current `scf-chain-core10-local-docker`
   PG row is about 3211 bytes for definition metadata and about 13151 bytes for
@@ -1887,3 +1889,24 @@ Docker service startup gate slice:
   'TestEnvironmentRestoreHonorsComposeOptionsFromStore|TestEnvironment(RegisterRejectsOversizedDefinitionMetadata|RestoreCanPreparePackageRepositoryBeforeDocker)'
   -count=1`; dry-run against `local-pg` returned `ok=True`,
   `healthChecks=19`, readiness `ready-for-operator-review`.
+
+Remote source policy slice:
+
+- 2026-05-20T08:20Z: tightened the PostgreSQL-backed one-click environment
+  path to require remote Git sources for environment package and service repos.
+  SQLite compatibility and unit-test fixtures can still use local bare repos,
+  but `local-pg` restore now adds a `remote-git-sources` readiness item and
+  blocks Docker startup when package or service sources are local paths.
+- Created and pushed public GitHub repo
+  `git@github.com:ztcshen/open-test-sandbox-llt-simulator.git`; local push used
+  the `github-personal` SSH alias and commit
+  `a38c0c9 Keep LLT encrypted fields compatible`.
+- Updated active PG environment `scf-chain-core10-local-docker` so LLT now uses
+  `git@github-personal:ztcshen/open-test-sandbox-llt-simulator.git`; the other
+  six business service repositories remain on company GitLab. This gives the
+  same restore plan both GitHub and GitLab source coverage.
+- Current remaining source-policy blocker is the validation environment package:
+  it still points at local path `/Users/zlh/codes/open-test-sandbox-validation`.
+  The package itself now has local commit
+  `ce4aedc2b4b9994e7c7bb4324d6f4fbcf6103b66`, but it still needs a remote Git
+  URL before real one-click Docker restore can proceed.

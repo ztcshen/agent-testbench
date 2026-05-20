@@ -999,6 +999,28 @@ func TestEnvironmentRestorePreflightReportsMissingGitForMissingCheckout(t *testi
 	}
 }
 
+func TestEnvironmentRestoreRequiresRemoteGitSourcesForPostgreSQLOneClickEnvironment(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+		ID:                     "env.remote.sources",
+		ReposJSON:              `{"llt":{"url":"/Users/zlh/codes/open-test-sandbox-llt-simulator","checkout":"llt"}}`,
+		ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","package":{"url":"/Users/zlh/codes/open-test-sandbox-validation","checkout":"."}}`,
+		HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:28080/health"}]`,
+		VerificationWorkflowID: "workflow.core-10",
+	}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
+		StoreURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable",
+	}, environmentRestoreDockerCleanupOptions{})
+	if err != nil {
+		t.Fatalf("build restore remote source policy report: %v", err)
+	}
+	if report.OK || report.SourcePolicy.OK || !report.SourcePolicy.RemoteOnly || len(report.SourcePolicy.Violations) != 2 || report.Docker.Action != "skipped-due-to-source-policy" {
+		t.Fatalf("remote source policy report = %#v", report)
+	}
+	if !restoreTypedReadinessHasItem(report.Readiness.Items, "remote-git-sources", false, "remote Git URL") {
+		t.Fatalf("readiness should include remote source violation: %#v", report.Readiness.Items)
+	}
+}
+
 func TestEnvironmentRestorePreflightReportsMissingDockerComposePlugin(t *testing.T) {
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	fakeBin := t.TempDir()
@@ -1024,6 +1046,18 @@ func TestEnvironmentRestorePreflightReportsMissingDockerComposePlugin(t *testing
 	if report.OK || report.Preflight.OK || !restoreTypedPreflightHasTool(report.Preflight.Tools, "docker", true) || !restoreTypedPreflightHasTool(report.Preflight.Tools, "docker compose", false) {
 		t.Fatalf("missing docker compose preflight report = %#v", report.Preflight)
 	}
+}
+
+func restoreTypedReadinessHasItem(items []environmentRestoreReadinessItem, name string, ok bool, detailContains string) bool {
+	for _, item := range items {
+		if item.Name != name || item.OK != ok {
+			continue
+		}
+		if detailContains == "" || strings.Contains(item.Detail, detailContains) {
+			return true
+		}
+	}
+	return false
 }
 
 func restorePreflightHasTool(tools []struct {
@@ -1374,6 +1408,9 @@ func TestEnvironmentRestoreCanPreparePackageRepositoryBeforeDocker(t *testing.T)
 		"README.md":                  "# environment package\n",
 	})
 	workspace := filepath.Join(t.TempDir(), "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatalf("create empty workspace: %v", err)
+	}
 	fakeDockerEnv, dockerCallsPath := fakeDockerCommand(t)
 	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

@@ -621,6 +621,7 @@ type environmentRestoreReport struct {
 	Error                string                          `json:"error,omitempty"`
 	Package              environmentRestorePackageReport `json:"package,omitempty"`
 	Repos                []environmentRestoreRepoReport  `json:"repos"`
+	SourcePolicy         environmentRestoreSourcePolicy  `json:"sourcePolicy,omitempty"`
 	Compose              map[string]any                  `json:"compose"`
 	HealthChecks         []any                           `json:"healthChecks"`
 	Preflight            environmentRestorePreflight     `json:"preflight"`
@@ -628,6 +629,12 @@ type environmentRestoreReport struct {
 	Docker               environmentRestoreDockerReport  `json:"docker"`
 	Workflow             environmentRestoreWorkflowRun   `json:"workflow"`
 	NextActions          []string                        `json:"nextActions"`
+}
+
+type environmentRestoreSourcePolicy struct {
+	RemoteOnly bool     `json:"remoteOnly"`
+	OK         bool     `json:"ok"`
+	Violations []string `json:"violations,omitempty"`
 }
 
 type environmentRestorePackageReport struct {
@@ -977,6 +984,7 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 		Compose:              compose,
 		HealthChecks:         healthChecks,
 		Preflight:            environmentRestorePreflightReport(packageSpec, specs, compose, workspace, cleanupOptions),
+		SourcePolicy:         environmentRestoreSourcePolicyReport(packageSpec, specs, environmentRestoreRequiresRemoteSources(workflowOptions.StoreURL)),
 		Workflow: environmentRestoreWorkflowRun{
 			OK:         !workflowOptions.Run,
 			Action:     "not-requested",
@@ -987,6 +995,9 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 		},
 	}
 	if !report.Preflight.OK {
+		report.OK = false
+	}
+	if !report.SourcePolicy.OK {
 		report.OK = false
 	}
 	report.Package = environmentRestorePackage(ctx, packageSpec, execute, pull)
@@ -1010,6 +1021,13 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 		report.Docker = environmentRestoreDocker(ctx, compose, healthChecks, workspace, execute, healthTimeout, cleanupOptions)
 		if !report.Docker.OK {
 			report.OK = false
+		}
+	} else if !report.SourcePolicy.OK {
+		report.Docker = environmentRestoreDockerReport{
+			OK:      false,
+			Action:  "skipped-due-to-source-policy",
+			Workdir: workspace,
+			Error:   "remote Git source policy did not pass",
 		}
 	} else {
 		report.Docker = environmentRestoreDockerReport{
@@ -1085,6 +1103,7 @@ func environmentRestoreSummaryJSON(existing string, report environmentRestoreRep
 			"heavySteps": report.Preflight.HeavySteps,
 		},
 		"package":      environmentRestoreSummaryPackage(report.Package),
+		"sourcePolicy": report.SourcePolicy,
 		"repositories": environmentRestoreSummaryRepos(report.Repos),
 		"readiness":    environmentRestoreSummaryReadiness(report.Readiness),
 		"docker":       environmentRestoreSummaryDocker(report.Docker),
@@ -1415,6 +1434,47 @@ func environmentRestoreEffectiveHealthChecks(checks []any, compose map[string]an
 	return out
 }
 
+func environmentRestoreRequiresRemoteSources(storeURL string) bool {
+	storeURL = strings.TrimSpace(strings.ToLower(storeURL))
+	return strings.HasPrefix(storeURL, "postgres://") || strings.HasPrefix(storeURL, "postgresql://")
+}
+
+func environmentRestoreSourcePolicyReport(packageSpec environmentRestorePackageSpec, specs []environmentRestoreRepoSpec, remoteOnly bool) environmentRestoreSourcePolicy {
+	report := environmentRestoreSourcePolicy{
+		RemoteOnly: remoteOnly,
+		OK:         true,
+	}
+	if !remoteOnly {
+		return report
+	}
+	addViolation := func(label string, rawURL string) {
+		rawURL = strings.TrimSpace(rawURL)
+		if rawURL == "" || environmentRestoreIsRemoteGitURL(rawURL) {
+			return
+		}
+		report.OK = false
+		report.Violations = append(report.Violations, label+" must use a remote Git URL, got local path/source: "+rawURL)
+	}
+	addViolation("environment package", packageSpec.URL)
+	for _, spec := range specs {
+		addViolation("service "+spec.ServiceID, spec.URL)
+	}
+	return report
+}
+
+func environmentRestoreIsRemoteGitURL(rawURL string) bool {
+	rawURL = strings.TrimSpace(rawURL)
+	lower := strings.ToLower(rawURL)
+	for _, prefix := range []string{"https://", "http://", "ssh://", "git://"} {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	at := strings.Index(rawURL, "@")
+	colon := strings.Index(rawURL, ":")
+	return at > 0 && colon > at+1
+}
+
 func environmentRestorePreflightReport(packageSpec environmentRestorePackageSpec, specs []environmentRestoreRepoSpec, compose map[string]any, workspace string, cleanupOptions environmentRestoreDockerCleanupOptions) environmentRestorePreflight {
 	report := environmentRestorePreflight{
 		OK: true,
@@ -1491,6 +1551,13 @@ func environmentRestoreReadinessReport(report environmentRestoreReport, packageS
 
 	addItem("store-boundary", true, true, "sandbox PostgreSQL Store must stay outside the restored Docker target environment")
 	addItem("verification-workflow", true, strings.TrimSpace(report.VerificationWorkflow) != "", "restore is anchored to workflow "+strings.TrimSpace(report.VerificationWorkflow))
+	if report.SourcePolicy.RemoteOnly {
+		detail := "all package and service sources must be remote Git URLs for PostgreSQL-backed one-click environments"
+		if len(report.SourcePolicy.Violations) > 0 {
+			detail = strings.Join(report.SourcePolicy.Violations, "; ")
+		}
+		addItem("remote-git-sources", true, report.SourcePolicy.OK, detail)
+	}
 	if strings.TrimSpace(packageSpec.URL) != "" {
 		detail := "environment package will be cloned or validated before Docker startup"
 		if report.Package.Action != "" {
@@ -1582,6 +1649,8 @@ func environmentRestoreReadinessDockerDetail(report environmentRestoreReport) st
 		return "Docker startup is blocked until repository preparation succeeds"
 	case "skipped-after-repository-preparation":
 		return "repository preparation completed; Docker startup intentionally skipped"
+	case "skipped-due-to-source-policy":
+		return "Docker startup is blocked until package and service sources use remote Git URLs"
 	case "missing-docker-plan":
 		return "composeFile or startCommand is required"
 	default:
@@ -1642,6 +1711,16 @@ func environmentRestoreRepo(ctx context.Context, spec environmentRestoreRepoSpec
 	}
 	if stat, err := os.Stat(spec.Checkout); err == nil && stat.IsDir() {
 		report.Exists = true
+		if strings.TrimSpace(spec.URL) != "" && environmentRestoreDirIsEmpty(spec.Checkout) {
+			if !execute {
+				report.Exists = false
+				report.Action = "clone"
+				args := restoreGitCloneArgs(spec)
+				report.Command = append([]string{"git"}, args...)
+				return report
+			}
+			return environmentRestoreCloneIntoCheckout(ctx, spec, report)
+		}
 		if strings.TrimSpace(spec.URL) != "" || strings.TrimSpace(spec.Ref) != "" {
 			if ok, errText := environmentRestoreValidateCheckout(ctx, spec); !ok {
 				report.OK = false
@@ -1710,6 +1789,10 @@ func environmentRestoreRepo(ctx context.Context, spec environmentRestoreRepoSpec
 		report.Error = err.Error()
 		return report
 	}
+	return environmentRestoreCloneIntoCheckout(ctx, spec, report)
+}
+
+func environmentRestoreCloneIntoCheckout(ctx context.Context, spec environmentRestoreRepoSpec, report environmentRestoreRepoReport) environmentRestoreRepoReport {
 	args := restoreGitCloneArgs(spec)
 	report.Action = "clone"
 	report.Command = append([]string{"git"}, args...)
@@ -1726,6 +1809,11 @@ func environmentRestoreRepo(ctx context.Context, spec environmentRestoreRepoSpec
 		report.OK = report.Error == ""
 	}
 	return report
+}
+
+func environmentRestoreDirIsEmpty(path string) bool {
+	entries, err := os.ReadDir(path)
+	return err == nil && len(entries) == 0
 }
 
 func environmentRestoreExistingRefCommands(spec environmentRestoreRepoSpec) [][]string {
