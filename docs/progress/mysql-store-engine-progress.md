@@ -1704,3 +1704,33 @@ Current blocker:
   `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+
+## 2026-05-21 MySQL Case Suite Plan Parity Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Added env-gated MySQL named active Store coverage for `case suite plan`
+  JSON and text output.
+- Shared the existing PostgreSQL batch-request scenario through a helper so
+  PostgreSQL and MySQL assert identical selected case and batch request
+  behavior against the active Store.
+- Reused the unique case suite fixture and parameterized request ids by backend
+  label so shared SQL test databases do not contaminate planning checks.
+
+Validated:
+
+- `go test -v ./cmd/otsandbox -run 'TestCaseSuitePlan(BuildsExecutableBatchRequest|UsesNamedMySQLActiveStore)' -count=1`
+  compiled and passed locally; the env-gated PostgreSQL/MySQL cases skipped
+  because local DSNs were not exported in this shell.
+- `git diff --check`
+- `rg -n -i 'fall''back' . --glob '!node_modules/**'`
+- `tools/guardrails/check_store_first_contracts.sh && tools/guardrails/check_no_source_domain_core.sh`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.

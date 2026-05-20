@@ -8949,30 +8949,40 @@ func runCaseSuiteInspectReportsReadinessByMaintenanceFilters(t *testing.T, store
 }
 
 func TestCaseSuitePlanBuildsExecutableBatchRequest(t *testing.T) {
-	ctx := context.Background()
 	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-case-suite-plan-pg")
-	profileDir := writeCaseSuiteCoverageProfile(t)
-	runCLI(t, "config", "publish", "--from", profileDir)
+	runCaseSuitePlanBuildsExecutableBatchRequest(t, storeRef, "pg", "PostgreSQL")
+}
+
+func TestCaseSuitePlanUsesNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-case-suite-plan-mysql")
+	runCaseSuitePlanBuildsExecutableBatchRequest(t, storeRef, "mysql", "MySQL")
+}
+
+func runCaseSuitePlanBuildsExecutableBatchRequest(t *testing.T, storeRef string, runLabel string, label string) {
+	t.Helper()
+	ctx := context.Background()
+	fixture := writeUniqueCaseSuiteCoverageProfile(t)
+	runCLI(t, "config", "publish", "--from", fixture.profileDir)
 
 	s, err := openStore(ctx, storeRef)
 	if err != nil {
-		t.Fatalf("open store: %v", err)
+		t.Fatalf("open %s store: %v", label, err)
 	}
 	base := time.Now().UTC()
-	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.default.latest"), "case.default", store.StatusPassed, base.Add(-time.Minute))
-	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.variant.latest"), "case.variant", store.StatusFailed, base)
+	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.default.latest"), fixture.defaultCaseID, store.StatusPassed, base.Add(-time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.variant.latest"), fixture.variantCaseID, store.StatusFailed, base)
 	if err := s.Close(); err != nil {
-		t.Fatalf("close store: %v", err)
+		t.Fatalf("close %s store: %v", label, err)
 	}
 
 	out := runCLI(t,
 		"case", "suite", "plan",
-		"--profile", profileDir,
+		"--profile", fixture.profileDir,
 		"--tag", "regression",
 		"--status", "active",
 		"--action", "run",
 		"--action", "rerun",
-		"--request-id", "change-001",
+		"--request-id", runLabel+"-change-001",
 		"--base-url", "http://127.0.0.1:8080",
 		"--evidence-dir", ".runtime/evidence",
 		"--timeout-seconds", "7",
@@ -8998,19 +9008,19 @@ func TestCaseSuitePlanBuildsExecutableBatchRequest(t *testing.T) {
 		} `json:"batchRequest"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode suite plan json: %v\n%s", err, out)
+		t.Fatalf("decode %s suite plan json: %v\n%s", label, err, out)
 	}
-	if !report.OK || strings.Join(report.CaseIDs, ",") != "case.variant" || report.Counts.Total != 3 || report.Counts.Ready != 2 || report.Counts.Blocked != 1 || report.Counts.Selected != 1 || report.Counts.Skipped != 1 {
-		t.Fatalf("suite plan report = %#v", report)
+	if !report.OK || strings.Join(report.CaseIDs, ",") != fixture.variantCaseID || report.Counts.Total != 3 || report.Counts.Ready != 2 || report.Counts.Blocked != 1 || report.Counts.Selected != 1 || report.Counts.Skipped != 1 {
+		t.Fatalf("%s suite plan report = %#v", label, report)
 	}
-	if report.BatchRequest.RequestID != "change-001" || strings.Join(report.BatchRequest.CaseIDs, ",") != "case.variant" || report.BatchRequest.BaseURL != "http://127.0.0.1:8080" || report.BatchRequest.EvidenceDir != ".runtime/evidence" || report.BatchRequest.TimeoutSeconds != 7 {
-		t.Fatalf("batch request = %#v", report.BatchRequest)
+	if report.BatchRequest.RequestID != runLabel+"-change-001" || strings.Join(report.BatchRequest.CaseIDs, ",") != fixture.variantCaseID || report.BatchRequest.BaseURL != "http://127.0.0.1:8080" || report.BatchRequest.EvidenceDir != ".runtime/evidence" || report.BatchRequest.TimeoutSeconds != 7 {
+		t.Fatalf("%s batch request = %#v", label, report.BatchRequest)
 	}
 
-	textOut := runCLI(t, "case", "suite", "plan", "--profile", profileDir, "--tag", "regression", "--action", "rerun")
-	for _, want := range []string{"Case Suite Plan", "Selected: 1", "case.variant"} {
+	textOut := runCLI(t, "case", "suite", "plan", "--profile", fixture.profileDir, "--tag", "regression", "--action", "rerun")
+	for _, want := range []string{"Case Suite Plan", "Selected: 1", fixture.variantCaseID} {
 		if !strings.Contains(textOut, want) {
-			t.Fatalf("plan text missing %q:\n%s", want, textOut)
+			t.Fatalf("%s plan text missing %q:\n%s", label, want, textOut)
 		}
 	}
 }
