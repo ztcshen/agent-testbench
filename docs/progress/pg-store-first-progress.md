@@ -2278,3 +2278,19 @@ Remote source policy slice:
   component readiness `ok=true`, 24 components, 47 dependencies, 41 blocking
   edges, 6 runtime edges, 27 assets, 20 required health checks, zero missing
   health checks, four remote assets, and zero missing remote refs.
+- 2026-05-20T09:29Z implementation slice: PostgreSQL one-click Docker restore
+  now requires a Store component graph as a required readiness gate. If the
+  selected Store is PostgreSQL and the environment has no component graph,
+  readiness fails with guidance to model services, middleware, mocks,
+  observability, dependencies, assets, and health gates before clean-machine
+  Docker validation. Legacy non-PostgreSQL compatibility paths can still report
+  the older service/compose metadata path as optional.
+- Verification stayed lightweight. Focused CLI restore tests cover the new
+  PostgreSQL component-graph-required gate, existing component graph readiness,
+  blocking dependency cycles, invalid component health checks, and invalid
+  remote asset refs. A `local-pg` restore dry-run confirmed the real
+  `scf-chain-core10-local-docker` component graph remains present and
+  `ok=true` with 24 components, 47 dependencies, 27 assets, 20 required health
+  checks, and zero missing health checks or remote refs; the dry-run remains
+  blocked by other pre-existing restore readiness items, not the component
+  graph gate.

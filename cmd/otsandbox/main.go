@@ -2334,6 +2334,8 @@ func environmentRestoreReadinessReport(report environmentRestoreReport, packageS
 			detail = report.ComponentGraph.Error
 		}
 		addItem("component-graph", true, report.ComponentGraph.OK, detail)
+	} else if report.SourcePolicy.RemoteOnly {
+		addItem("component-graph", true, false, "PostgreSQL one-click Docker restore requires a Store component graph for services, middleware, mocks, observability, dependencies, assets, and health gates")
 	} else {
 		addItem("component-graph", false, true, "no Store component graph recorded yet; restore will use legacy service and compose metadata")
 	}

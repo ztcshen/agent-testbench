@@ -1091,6 +1091,27 @@ func TestEnvironmentRestoreReportsComponentGraphReadiness(t *testing.T) {
 	}
 }
 
+func TestEnvironmentRestoreRequiresComponentGraphForPostgresOneClick(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+		ID:                     "env.pg.component.required",
+		ComposeJSON:            `{"startCommand":"true"}`,
+		HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:18080/health"}]`,
+		VerificationWorkflowID: "workflow.core-10",
+	}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
+		StoreURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable",
+	}, environmentRestoreDockerCleanupOptions{})
+	if err != nil {
+		t.Fatalf("build restore without component graph: %v", err)
+	}
+	if report.OK || report.Readiness.OK || report.ComponentGraph.Configured {
+		t.Fatalf("PostgreSQL restore without component graph should fail readiness: %#v", report)
+	}
+	if !restoreTypedReadinessHasItem(report.Readiness.Items, "component-graph", false, "requires a Store component graph") {
+		t.Fatalf("readiness should require component graph: %#v", report.Readiness.Items)
+	}
+}
+
 func TestEnvironmentRestoreRejectsBlockingComponentDependencyCycle(t *testing.T) {
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
