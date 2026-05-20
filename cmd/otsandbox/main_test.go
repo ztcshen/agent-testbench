@@ -9026,30 +9026,40 @@ func runCaseSuitePlanBuildsExecutableBatchRequest(t *testing.T, storeRef string,
 }
 
 func TestCaseSuiteStabilityReportsTransitions(t *testing.T) {
-	ctx := context.Background()
 	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-case-suite-stability-pg")
-	profileDir := writeCaseSuiteCoverageProfile(t)
-	runCLI(t, "config", "publish", "--from", profileDir)
+	runCaseSuiteStabilityReportsTransitions(t, storeRef, "PostgreSQL")
+}
+
+func TestCaseSuiteStabilityUsesNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-case-suite-stability-mysql")
+	runCaseSuiteStabilityReportsTransitions(t, storeRef, "MySQL")
+}
+
+func runCaseSuiteStabilityReportsTransitions(t *testing.T, storeRef string, label string) {
+	t.Helper()
+	ctx := context.Background()
+	fixture := writeUniqueCaseSuiteCoverageProfile(t)
+	runCLI(t, "config", "publish", "--from", fixture.profileDir)
 
 	s, err := openStore(ctx, storeRef)
 	if err != nil {
-		t.Fatalf("open store: %v", err)
+		t.Fatalf("open %s store: %v", label, err)
 	}
 	base := time.Now().UTC()
 	variantRun1ID := uniqueTestID(t, "run.variant.1")
 	variantRun2ID := uniqueTestID(t, "run.variant.2")
 	variantRun3ID := uniqueTestID(t, "run.variant.3")
-	recordCaseRunForCoverage(t, ctx, s, variantRun1ID, "case.variant", store.StatusPassed, base.Add(-3*time.Minute))
-	recordCaseRunForCoverage(t, ctx, s, variantRun2ID, "case.variant", store.StatusFailed, base.Add(-2*time.Minute))
-	recordCaseRunForCoverage(t, ctx, s, variantRun3ID, "case.variant", store.StatusPassed, base.Add(-time.Minute))
-	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.default.1"), "case.default", store.StatusPassed, base)
+	recordCaseRunForCoverage(t, ctx, s, variantRun1ID, fixture.variantCaseID, store.StatusPassed, base.Add(-3*time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, variantRun2ID, fixture.variantCaseID, store.StatusFailed, base.Add(-2*time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, variantRun3ID, fixture.variantCaseID, store.StatusPassed, base.Add(-time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.default.1"), fixture.defaultCaseID, store.StatusPassed, base)
 	if err := s.Close(); err != nil {
-		t.Fatalf("close store: %v", err)
+		t.Fatalf("close %s store: %v", label, err)
 	}
 
 	out := runCLI(t,
 		"case", "suite", "stability",
-		"--profile", profileDir,
+		"--profile", fixture.profileDir,
 		"--tag", "regression",
 		"--status", "active",
 		"--limit", "3",
@@ -9074,10 +9084,10 @@ func TestCaseSuiteStabilityReportsTransitions(t *testing.T) {
 		} `json:"items"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode suite stability json: %v\n%s", err, out)
+		t.Fatalf("decode %s suite stability json: %v\n%s", label, err, out)
 	}
 	if report.OK || report.Counts.Total != 3 || report.Counts.Unstable != 1 || report.Counts.Stable != 1 || report.Counts.NotRun != 1 {
-		t.Fatalf("suite stability report = %#v", report)
+		t.Fatalf("%s suite stability report = %#v", label, report)
 	}
 	byCase := map[string]struct {
 		LatestStatus string
@@ -9097,14 +9107,14 @@ func TestCaseSuiteStabilityReportsTransitions(t *testing.T) {
 			}
 		}{item.LatestStatus, item.Transitions, item.Unstable, item.Recent}
 	}
-	if !byCase["case.variant"].Unstable || byCase["case.variant"].Transitions != 2 || byCase["case.variant"].LatestStatus != store.StatusPassed || byCase["case.variant"].Recent[0].RunID != variantRun3ID {
-		t.Fatalf("variant stability = %#v", byCase["case.variant"])
+	if !byCase[fixture.variantCaseID].Unstable || byCase[fixture.variantCaseID].Transitions != 2 || byCase[fixture.variantCaseID].LatestStatus != store.StatusPassed || byCase[fixture.variantCaseID].Recent[0].RunID != variantRun3ID {
+		t.Fatalf("%s variant stability = %#v", label, byCase[fixture.variantCaseID])
 	}
 
-	textOut := runCLI(t, "case", "suite", "stability", "--profile", profileDir, "--tag", "regression", "--limit", "3")
-	for _, want := range []string{"Case Suite Stability", "Unstable: 1", "case.variant"} {
+	textOut := runCLI(t, "case", "suite", "stability", "--profile", fixture.profileDir, "--tag", "regression", "--limit", "3")
+	for _, want := range []string{"Case Suite Stability", "Unstable: 1", fixture.variantCaseID} {
 		if !strings.Contains(textOut, want) {
-			t.Fatalf("stability text missing %q:\n%s", want, textOut)
+			t.Fatalf("%s stability text missing %q:\n%s", label, want, textOut)
 		}
 	}
 }
