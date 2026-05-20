@@ -32,6 +32,24 @@ test("MySQL API smoke rejects non-MySQL shared Store env", () => {
   );
 });
 
+test("MySQL API smoke rejects MySQL DSNs without a database", () => {
+  assert.throws(
+    () => requiredMySQLDSN({
+      OTSANDBOX_SMOKE_STORE: "mysql://user:secret@example.com:3306?tls=false",
+    }),
+    /requires a mysql:\/\/ Store DSN with a database path/,
+  );
+});
+
+test("MySQL API smoke refuses likely business databases", () => {
+  assert.throws(
+    () => requiredMySQLDSN({
+      OTSANDBOX_SMOKE_STORE: "mysql://user:secret@example.com:3306/business_prod?tls=false",
+    }),
+    /refuses database 'business_prod'/,
+  );
+});
+
 test("MySQL API smoke validates the async 10-step workflow batch report", () => {
   assertWorkflowBatchReport({
     ok: true,

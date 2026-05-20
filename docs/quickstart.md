@@ -86,6 +86,9 @@ database but does not need permission to create or drop databases. It also
 requires the real SkyWalking release mode and trace ids for all 10 workflow
 steps; `OTS_TRACE_GRAPHQL_URL` must be an `http` or `https` URL. Synthetic
 topology smoke is not accepted by this wrapper.
+The generic MySQL release-check path and standalone MySQL API smoke apply the
+same dedicated database-name guard before running Store upgrades or smoke
+writes, so do not point them at a business schema.
 
 Daily discovery commands do not change when you switch between a local
 PostgreSQL Store, a remote team PostgreSQL Store, and a team MySQL Store. Use

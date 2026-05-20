@@ -48,6 +48,17 @@ test("release-check missing Store guidance lists every supported smoke Store env
   assert.doesNotMatch(result.stdout, /checking SkyWalking smoke provider mode/);
 });
 
+test("release-check refuses unsafe MySQL smoke database names before expensive gates", () => {
+  const result = runReleaseCheck(releaseCheckEnv({
+    OTSANDBOX_SMOKE_STORE_DSN: "mysql://user:secret@example.com:3306/business_prod?tls=false",
+  }));
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Refusing to run release-check against MySQL database 'business_prod'/);
+  assert.doesNotMatch(result.stderr, /secret/);
+  assert.doesNotMatch(result.stdout, /running Go tests/);
+});
+
 test("release-check real SkyWalking mode requires a GraphQL URL before expensive gates", () => {
   const result = runReleaseCheck(releaseCheckEnv({
     OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",

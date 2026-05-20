@@ -927,6 +927,36 @@ Current blocker:
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
   `npm run release-check:mysql-real`.
 
+## 2026-05-21 MySQL Smoke Store Safe Database Guard Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Tightened generic `npm run release-check` for MySQL Store DSNs so it refuses
+  likely business database names before Go tests, Store migrations, API smoke,
+  or browser smoke can run.
+- Tightened standalone `npm run smoke:api:mysql-store` DSN selection so it
+  requires a parseable `mysql://` URL with a database path and the same
+  sandbox/smoke/test/CI-looking database-name guard.
+- Added regression coverage proving unsafe MySQL database names fail early and
+  raw passwords are not printed.
+- Updated quickstart, Store backend docs, and release checklist to state that
+  generic MySQL release/API smoke paths must use a dedicated sandbox Store
+  database, not a business schema.
+
+Validated:
+
+- `node --test tools/smoke/release-check.test.mjs tools/smoke/mysql-store-api-smoke.test.mjs`
+- `bash -n tools/release-check.sh tools/smoke/mysql-store-api-smoke.mjs`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
+  `npm run release-check:mysql-real`.
+
 ## 2026-05-21 MySQL Real Release GraphQL URL Validation Slice
 
 Progress: `[###################-] 98%`
