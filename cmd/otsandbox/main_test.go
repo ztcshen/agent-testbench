@@ -8432,7 +8432,17 @@ func TestWorkflowDiscoverRequiresStoreUnlessOfflineTemplatePackage(t *testing.T)
 }
 
 func TestCaseSuiteReportRunsCasesByMaintenanceFilters(t *testing.T) {
-	configureNamedPostgreSQLActiveStore(t, "daily-case-suite-report-pg")
+	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-case-suite-report-pg")
+	runCaseSuiteReportRunsCasesByMaintenanceFilters(t, storeRef, "PostgreSQL")
+}
+
+func TestCaseSuiteReportUsesNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-case-suite-report-mysql")
+	runCaseSuiteReportRunsCasesByMaintenanceFilters(t, storeRef, "MySQL")
+}
+
+func runCaseSuiteReportRunsCasesByMaintenanceFilters(t *testing.T, _ string, label string) {
+	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Query().Get("mode") {
 		case "bad":
@@ -8444,8 +8454,8 @@ func TestCaseSuiteReportRunsCasesByMaintenanceFilters(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	profileDir := writeInterfaceNodeBatchReportProfile(t)
-	runCLI(t, "config", "publish", "--from", profileDir)
+	fixture := writeUniqueInterfaceNodeBatchReportProfile(t)
+	runCLI(t, "config", "publish", "--from", fixture.profileDir)
 
 	outputDir := filepath.Join(t.TempDir(), "suite-report")
 	out := runCLI(t,
@@ -8482,47 +8492,47 @@ func TestCaseSuiteReportRunsCasesByMaintenanceFilters(t *testing.T) {
 		} `json:"results"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode suite report json: %v\n%s", err, out)
+		t.Fatalf("decode %s suite report json: %v\n%s", label, err, out)
 	}
 	if !report.OK || report.Counts.Total != 1 || report.Counts.Passed != 1 || report.Counts.Failed != 0 {
-		t.Fatalf("suite report = %#v", report)
+		t.Fatalf("%s suite report = %#v", label, report)
 	}
 	if strings.Join(report.Filters.Tags, ",") != "smoke" || report.Filters.Owner != "team-a" {
-		t.Fatalf("suite filters = %#v", report.Filters)
+		t.Fatalf("%s suite filters = %#v", label, report.Filters)
 	}
 	if len(report.Results) != 1 {
-		t.Fatalf("suite results = %#v", report.Results)
+		t.Fatalf("%s suite results = %#v", label, report.Results)
 	}
 	item := report.Results[0]
-	if item.CaseID != "case.alpha.default" || item.NodeID != "node.alpha" || item.Priority != "p0" || item.Owner != "team-a" || item.CaseRunID == "" || item.DetailURL == "" {
-		t.Fatalf("suite result item = %#v", item)
+	if item.CaseID != fixture.defaultCaseID || item.NodeID != fixture.nodeAlphaID || item.Priority != "p0" || item.Owner != "team-a" || item.CaseRunID == "" || item.DetailURL == "" {
+		t.Fatalf("%s suite result item = %#v", label, item)
 	}
 	if strings.Join(item.Tags, ",") != "smoke,regression" {
-		t.Fatalf("suite result tags = %#v", item.Tags)
+		t.Fatalf("%s suite result tags = %#v", label, item.Tags)
 	}
 	html, err := os.ReadFile(filepath.Join(outputDir, "report.html"))
 	if err != nil {
-		t.Fatalf("suite html report missing: %v", err)
+		t.Fatalf("%s suite html report missing: %v", label, err)
 	}
 	for _, want := range []string{"Case Suite Report", "Case Alpha Default", "team-a", "smoke", "p0", "caseRunId"} {
 		if !strings.Contains(string(html), want) {
-			t.Fatalf("suite html missing %q:\n%s", want, html)
+			t.Fatalf("%s suite html missing %q:\n%s", label, want, html)
 		}
 	}
 	if strings.Contains(string(html), "Case Alpha Variant") {
-		t.Fatalf("suite html should not include unselected case:\n%s", html)
+		t.Fatalf("%s suite html should not include unselected case:\n%s", label, html)
 	}
 	junitPath := filepath.Join(outputDir, "report.junit.xml")
 	junitRaw, err := os.ReadFile(junitPath)
 	if err != nil {
-		t.Fatalf("suite junit report missing: %v", err)
+		t.Fatalf("%s suite junit report missing: %v", label, err)
 	}
 	if report.JUnitReportURL != junitPath {
-		t.Fatalf("junit report url = %q want %q", report.JUnitReportURL, junitPath)
+		t.Fatalf("%s junit report url = %q want %q", label, report.JUnitReportURL, junitPath)
 	}
-	for _, want := range []string{`<testsuite name="Case Suite Report" tests="1" failures="0"`, `name="case.alpha.default"`, `classname="node.alpha"`} {
+	for _, want := range []string{`<testsuite name="Case Suite Report" tests="1" failures="0"`, `name="` + fixture.defaultCaseID + `"`, `classname="` + fixture.nodeAlphaID + `"`} {
 		if !strings.Contains(string(junitRaw), want) {
-			t.Fatalf("suite junit missing %q:\n%s", want, junitRaw)
+			t.Fatalf("%s suite junit missing %q:\n%s", label, want, junitRaw)
 		}
 	}
 
@@ -8548,13 +8558,13 @@ func TestCaseSuiteReportRunsCasesByMaintenanceFilters(t *testing.T) {
 		} `json:"results"`
 	}
 	if err := json.Unmarshal([]byte(variantOut), &variantReport); err != nil {
-		t.Fatalf("decode variant suite report json: %v\n%s", err, variantOut)
+		t.Fatalf("decode %s variant suite report json: %v\n%s", label, err, variantOut)
 	}
 	if !variantReport.OK || variantReport.Counts.Total != 1 || variantReport.Counts.Passed != 1 || variantReport.Counts.DerivedConfigs != 1 {
-		t.Fatalf("variant suite report = %#v", variantReport)
+		t.Fatalf("%s variant suite report = %#v", label, variantReport)
 	}
-	if len(variantReport.Results) != 1 || variantReport.Results[0].CaseID != "case.alpha.variant" || variantReport.Results[0].HTTPCode != http.StatusBadRequest {
-		t.Fatalf("variant suite result = %#v", variantReport.Results)
+	if len(variantReport.Results) != 1 || variantReport.Results[0].CaseID != fixture.variantCaseID || variantReport.Results[0].HTTPCode != http.StatusBadRequest {
+		t.Fatalf("%s variant suite result = %#v", label, variantReport.Results)
 	}
 }
 
