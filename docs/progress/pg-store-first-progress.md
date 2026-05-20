@@ -2536,3 +2536,29 @@ Remote source policy slice:
   needs a fresh two-step clean-machine replay from an empty disposable
   workspace/Docker scope using the recorded prepare command and execute
   command.
+- 2026-05-20T12:22Z final destructive replay: completed the requested fresh
+  two-step clean-machine proof from disposable workspace
+  `/tmp/ots-clean-machine-final-20260520200754`. Step 1 ran
+  `environment restore --execute --prepare-repos-only` against `local-pg` and
+  cloned/prepared the seven remote service repositories plus Store-generated
+  startup files without starting Docker. Step 2 ran
+  `environment restore --execute --clean-docker-state
+  --allow-destructive-docker-cleanup --run-workflow` against the same
+  workspace, performing Compose-scoped Docker cleanup, Docker restore, health
+  gates, and the bound workflow acceptance.
+- Verification: final execute report returned `ok=true`,
+  `docker.ok=true`, `docker.action=run-docker-compose`, 19 Docker health
+  checks with no failures, `readiness.ok=true`, and workflow
+  `action=run-acceptance-workflow`. The bound workflow was
+  `sandbox.financing_to_repay_result_query`; run
+  `batch.restore.scf-chain-core10-local-docker.20260520T122134.212867000Z.20260520T122134.402418000Z`
+  reported `total=10`, `passed=10`, `failed=0`, and
+  `acceptance.ok=true` with template
+  `environment.workflow.skywalking.v1`, `expectedSteps=10`,
+  `completedSteps=10`, `passedSteps=10`, and
+  `topologyProvider=skywalking`.
+- Final status: clean-machine Docker restore objective is 100% for the current
+  scoped validation. PostgreSQL Store stayed outside Docker; Docker-side
+  business/middleware/observability services were reconstructed from Store
+  metadata and remote repositories; health gates and the acceptance workflow
+  proved the environment is usable.
