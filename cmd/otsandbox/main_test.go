@@ -9477,30 +9477,40 @@ func runCaseSuiteQualityReportWritesJSONAndHTML(t *testing.T, _ string, label st
 }
 
 func TestCaseSuiteImpactBuildsExecutableBatchRequest(t *testing.T) {
-	ctx := context.Background()
 	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-case-suite-impact-pg")
-	profileDir := writeCaseSuiteCoverageProfile(t)
-	runCLI(t, "config", "publish", "--from", profileDir)
+	runCaseSuiteImpactBuildsExecutableBatchRequest(t, storeRef, "pg", "PostgreSQL")
+}
+
+func TestCaseSuiteImpactUsesNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-case-suite-impact-mysql")
+	runCaseSuiteImpactBuildsExecutableBatchRequest(t, storeRef, "mysql", "MySQL")
+}
+
+func runCaseSuiteImpactBuildsExecutableBatchRequest(t *testing.T, storeRef string, runLabel string, label string) {
+	t.Helper()
+	ctx := context.Background()
+	fixture := writeUniqueCaseSuiteCoverageProfile(t)
+	runCLI(t, "config", "publish", "--from", fixture.profileDir)
 
 	s, err := openStore(ctx, storeRef)
 	if err != nil {
-		t.Fatalf("open store: %v", err)
+		t.Fatalf("open %s store: %v", label, err)
 	}
 	base := time.Now().UTC()
-	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.default.latest"), "case.default", store.StatusPassed, base.Add(-time.Minute))
-	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.variant.latest"), "case.variant", store.StatusFailed, base)
+	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.default.latest"), fixture.defaultCaseID, store.StatusPassed, base.Add(-time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.variant.latest"), fixture.variantCaseID, store.StatusFailed, base)
 	if err := s.Close(); err != nil {
-		t.Fatalf("close store: %v", err)
+		t.Fatalf("close %s store: %v", label, err)
 	}
 
 	out := runCLI(t,
 		"case", "suite", "impact",
-		"--profile", profileDir,
+		"--profile", fixture.profileDir,
 		"--signal", "/alpha",
 		"--status", "active",
 		"--action", "run",
 		"--action", "rerun",
-		"--request-id", "change-002",
+		"--request-id", runLabel+"-change-002",
 		"--base-url", "http://127.0.0.1:8080",
 		"--json",
 	)
@@ -9525,22 +9535,22 @@ func TestCaseSuiteImpactBuildsExecutableBatchRequest(t *testing.T) {
 		} `json:"cases"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode suite impact json: %v\n%s", err, out)
+		t.Fatalf("decode %s suite impact json: %v\n%s", label, err, out)
 	}
 	if !report.OK || report.Counts.Signals != 1 || report.Counts.Nodes != 1 || report.Counts.Cases != 3 || report.Counts.Selected != 1 || report.Counts.Blocked != 1 {
-		t.Fatalf("suite impact report = %#v", report)
+		t.Fatalf("%s suite impact report = %#v", label, report)
 	}
-	if report.BatchRequest.RequestID != "change-002" || strings.Join(report.BatchRequest.CaseIDs, ",") != "case.variant" || report.BatchRequest.BaseURL != "http://127.0.0.1:8080" {
-		t.Fatalf("impact batch request = %#v", report.BatchRequest)
+	if report.BatchRequest.RequestID != runLabel+"-change-002" || strings.Join(report.BatchRequest.CaseIDs, ",") != fixture.variantCaseID || report.BatchRequest.BaseURL != "http://127.0.0.1:8080" {
+		t.Fatalf("%s impact batch request = %#v", label, report.BatchRequest)
 	}
 	if len(report.Cases) != 3 || len(report.Cases[0].Reasons) == 0 {
-		t.Fatalf("impact cases = %#v", report.Cases)
+		t.Fatalf("%s impact cases = %#v", label, report.Cases)
 	}
 
-	textOut := runCLI(t, "case", "suite", "impact", "--profile", profileDir, "--signal", "/alpha", "--action", "rerun")
-	for _, want := range []string{"Case Suite Impact", "Selected: 1", "case.variant"} {
+	textOut := runCLI(t, "case", "suite", "impact", "--profile", fixture.profileDir, "--signal", "/alpha", "--action", "rerun")
+	for _, want := range []string{"Case Suite Impact", "Selected: 1", fixture.variantCaseID} {
 		if !strings.Contains(textOut, want) {
-			t.Fatalf("impact text missing %q:\n%s", want, textOut)
+			t.Fatalf("%s impact text missing %q:\n%s", label, want, textOut)
 		}
 	}
 }
