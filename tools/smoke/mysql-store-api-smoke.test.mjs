@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { assertCaseEvidencePayload, assertWorkflowBatchReport, requiredMySQLDSN } from "./mysql-store-api-smoke.mjs";
+import { assertCaseEvidencePayload, assertRegisteredInterfaceCatalog, assertWorkflowBatchReport, requiredMySQLDSN } from "./mysql-store-api-smoke.mjs";
 
 test("MySQL API smoke accepts the shared SQL smoke Store env", () => {
   assert.equal(
@@ -81,5 +81,22 @@ test("MySQL API smoke validates workflow case Evidence payloads", () => {
     caseID: "case.step-01",
     stepID: "step-01",
     path: "/v1/items/step-01",
+  });
+});
+
+test("MySQL API smoke validates registered interface catalog data", () => {
+  assertRegisteredInterfaceCatalog({
+    interfaceNodes: [
+      { id: "interface.mysql-api-smoke", serviceId: "service.mysql-api-smoke" },
+    ],
+    apiCases: [
+      { id: "case.mysql-api-smoke.default", nodeId: "interface.mysql-api-smoke", requiredForAdmission: true },
+    ],
+    requestTemplates: [
+      { id: "template.mysql-api-smoke", nodeId: "interface.mysql-api-smoke" },
+    ],
+    templateConfigs: [
+      { id: "cfg.case.mysql-api-smoke.default.execution", scopeType: "case", scopeId: "case.mysql-api-smoke.default" },
+    ],
   });
 });

@@ -774,3 +774,31 @@ Current blocker:
   for all 10 workflow steps.
 - MySQL daily parity still has deeper DSN-gated coverage to add for environment
   lifecycle and interface registration APIs.
+
+## 2026-05-21 MySQL API Interface Registration Smoke Slice
+
+Progress: `[###################-] 97%`
+
+Implemented:
+
+- Extended the MySQL Store API smoke to register an interface through
+  `/api/sandbox/interfaces` after registering a Store-backed service.
+- The smoke now verifies that the registered interface node, API case, request
+  template, and case execution config are persisted to the Store-backed catalog.
+- Added focused helper coverage so the MySQL API smoke fails clearly if
+  interface registration stops writing the expected catalog records.
+
+Validated:
+
+- `node --test tools/smoke/mysql-store-api-smoke.test.mjs`
+- `node --check tools/smoke/mysql-store-api-smoke.mjs`
+
+Current blocker:
+
+- Final completion still requires a real dedicated company MySQL Store DSN for
+  `npm run release-check:mysql-real`.
+- Real SkyWalking release proof still requires
+  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and trace ids
+  for all 10 workflow steps.
+- MySQL daily parity still has deeper DSN-gated coverage to add for environment
+  lifecycle APIs and final live release proof.

@@ -165,6 +165,31 @@ export function assertCaseEvidencePayload(payload, { runID, caseID, stepID, path
   }
 }
 
+export function assertRegisteredInterfaceCatalog(catalog, {
+  interfaceID = "interface.mysql-api-smoke",
+  serviceID = "service.mysql-api-smoke",
+  caseID = "case.mysql-api-smoke.default",
+  templateID = "template.mysql-api-smoke",
+  configID = "cfg.case.mysql-api-smoke.default.execution",
+} = {}) {
+  const node = catalog?.interfaceNodes?.find((item) => item.id === interfaceID);
+  if (!node || node.serviceId !== serviceID) {
+    throw new Error(`MySQL API interface registration did not persist interface node: ${JSON.stringify(catalog?.interfaceNodes)}`);
+  }
+  const apiCase = catalog?.apiCases?.find((item) => item.id === caseID);
+  if (!apiCase || apiCase.nodeId !== interfaceID || apiCase.requiredForAdmission !== true) {
+    throw new Error(`MySQL API interface registration did not persist API case: ${JSON.stringify(catalog?.apiCases)}`);
+  }
+  const template = catalog?.requestTemplates?.find((item) => item.id === templateID);
+  if (!template || template.nodeId !== interfaceID) {
+    throw new Error(`MySQL API interface registration did not persist request template: ${JSON.stringify(catalog?.requestTemplates)}`);
+  }
+  const config = catalog?.templateConfigs?.find((item) => item.id === configID);
+  if (!config || config.scopeType !== "case" || config.scopeId !== caseID) {
+    throw new Error(`MySQL API interface registration did not persist case execution config: ${JSON.stringify(catalog?.templateConfigs)}`);
+  }
+}
+
 async function waitForWorkflowBatchReport(baseURL, reportURL, timeoutMs = 30000) {
   if (!reportURL) {
     throw new Error("workflow batch start did not return reportUrl");
@@ -334,11 +359,41 @@ async function main() {
     if (!registration.ok || registration.counts?.services !== 11) {
       throw new Error(`unexpected MySQL service registration payload: ${JSON.stringify(registration)}`);
     }
+    const interfaceRegistration = await postJSON(`${baseURL}/api/sandbox/interfaces`, {
+      id: "interface.mysql-api-smoke",
+      displayName: "MySQL API Smoke Interface",
+      serviceId: "service.mysql-api-smoke",
+      operation: "mysql.api.smoke",
+      method: "GET",
+      path: "/v1/mysql-api-smoke",
+      timeoutMs: 1200,
+      requestTemplate: {
+        id: "template.mysql-api-smoke",
+        templateJson: { query: { id: "{{override:id|demo}}" } },
+      },
+      case: {
+        id: "case.mysql-api-smoke.default",
+        displayName: "MySQL API Smoke Default",
+        caseType: "success",
+        requiredForAdmission: true,
+        expectedJson: { ok: true },
+        timeoutSeconds: 5,
+      },
+      caseExecution: {
+        method: "GET",
+        path: "/v1/mysql-api-smoke",
+        expectedHttpCodes: [200],
+      },
+    });
+    if (!interfaceRegistration.ok || interfaceRegistration.interface?.id !== "interface.mysql-api-smoke" || interfaceRegistration.interface?.caseId !== "case.mysql-api-smoke.default") {
+      throw new Error(`unexpected MySQL interface registration payload: ${JSON.stringify(interfaceRegistration)}`);
+    }
 
     const updatedCatalog = await waitForJSON(`${baseURL}/api/catalog`);
     if (!updatedCatalog.services?.some((service) => service.id === "service.mysql-api-smoke")) {
       throw new Error(`MySQL API write did not persist to Store-backed catalog: ${JSON.stringify(updatedCatalog.services)}`);
     }
+    assertRegisteredInterfaceCatalog(updatedCatalog);
   } finally {
     await closeHTTPServer(targetServer);
     await stopServer(server);
