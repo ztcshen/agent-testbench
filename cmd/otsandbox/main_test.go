@@ -1675,69 +1675,91 @@ func TestEnvironmentRestoreSQLStoreRejectsLocalStartupFilesWithoutStoreGenerated
 	}
 }
 
-func TestEnvironmentRestorePostgreSQLRejectsMissingComposeStartupAssets(t *testing.T) {
-	workspace := filepath.Join(t.TempDir(), "workspace")
-	fakeBin := t.TempDir()
-	writeFile(t, filepath.Join(fakeBin, "git"), "#!/bin/sh\nexit 0\n")
-	writeFile(t, filepath.Join(fakeBin, "docker"), "#!/bin/sh\nif [ \"$1\" = compose ] && [ \"$2\" = version ]; then exit 0; fi\nexit 0\n")
-	if err := os.Chmod(filepath.Join(fakeBin, "git"), 0o755); err != nil {
-		t.Fatalf("chmod fake git: %v", err)
+func TestEnvironmentRestoreSQLStoreRejectsMissingComposeStartupAssets(t *testing.T) {
+	tests := []struct {
+		name     string
+		storeURL string
+	}{
+		{name: "postgres", storeURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable"},
+		{name: "mysql", storeURL: "mysql://tester:secret@127.0.0.1:3306/otsandbox?tls=false"},
 	}
-	if err := os.Chmod(filepath.Join(fakeBin, "docker"), 0o755); err != nil {
-		t.Fatalf("chmod fake docker: %v", err)
-	}
-	t.Setenv("PATH", fakeBin)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := filepath.Join(t.TempDir(), "workspace")
+			fakeBin := t.TempDir()
+			writeFile(t, filepath.Join(fakeBin, "git"), "#!/bin/sh\nexit 0\n")
+			writeFile(t, filepath.Join(fakeBin, "docker"), "#!/bin/sh\nif [ \"$1\" = compose ] && [ \"$2\" = version ]; then exit 0; fi\nexit 0\n")
+			if err := os.Chmod(filepath.Join(fakeBin, "git"), 0o755); err != nil {
+				t.Fatalf("chmod fake git: %v", err)
+			}
+			if err := os.Chmod(filepath.Join(fakeBin, "docker"), 0o755); err != nil {
+				t.Fatalf("chmod fake docker: %v", err)
+			}
+			t.Setenv("PATH", fakeBin)
 
-	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
-		ID:                     "env.pg.missing.assets",
-		ReposJSON:              `{"app":{"url":"git@example.com:team/app.git","checkout":"app"}}`,
-		ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  mysql:\n    image: mysql:8\n    volumes:\n      - ./mysql/init:/docker-entrypoint-initdb.d\n  app:\n    image: alpine:3.20\n    command: [\"/bin/sh\", \"/sandbox/compose/scripts/run-app.sh\"]\n    volumes:\n      - ${DOCKER_APP_REPO:-/tmp/app}:/workspace/app\n      - ${SANDBOX_ROOT:-/tmp/sandbox}:/sandbox\n"},"env":{"DOCKER_APP_REPO":"$OTS_WORKSPACE/app","SANDBOX_ROOT":"$OTS_WORKSPACE"}}`,
-		HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:18080/health"}]`,
-		VerificationWorkflowID: "workflow.core-10",
-	}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
-		StoreURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable",
-	}, environmentRestoreDockerCleanupOptions{})
-	if err != nil {
-		t.Fatalf("build restore missing startup assets report: %v", err)
-	}
-	if report.OK || report.Preflight.OK || len(report.Preflight.StartupAssets) != 2 {
-		t.Fatalf("missing startup assets report = %#v", report.Preflight.StartupAssets)
-	}
-	if !restoreTypedReadinessHasItem(report.Readiness.Items, "startup-assets", false, "compose/mysql/init") {
-		t.Fatalf("readiness should include missing startup assets: %#v", report.Readiness.Items)
+			report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+				ID:                     "env." + tt.name + ".missing.assets",
+				ReposJSON:              `{"app":{"url":"git@example.com:team/app.git","checkout":"app"}}`,
+				ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  mysql:\n    image: mysql:8\n    volumes:\n      - ./mysql/init:/docker-entrypoint-initdb.d\n  app:\n    image: alpine:3.20\n    command: [\"/bin/sh\", \"/sandbox/compose/scripts/run-app.sh\"]\n    volumes:\n      - ${DOCKER_APP_REPO:-/tmp/app}:/workspace/app\n      - ${SANDBOX_ROOT:-/tmp/sandbox}:/sandbox\n"},"env":{"DOCKER_APP_REPO":"$OTS_WORKSPACE/app","SANDBOX_ROOT":"$OTS_WORKSPACE"}}`,
+				HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:18080/health"}]`,
+				VerificationWorkflowID: "workflow.core-10",
+			}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
+				StoreURL: tt.storeURL,
+			}, environmentRestoreDockerCleanupOptions{})
+			if err != nil {
+				t.Fatalf("build %s restore missing startup assets report: %v", tt.name, err)
+			}
+			if report.OK || report.Preflight.OK || len(report.Preflight.StartupAssets) != 2 {
+				t.Fatalf("%s missing startup assets report = %#v", tt.name, report.Preflight.StartupAssets)
+			}
+			if !restoreTypedReadinessHasItem(report.Readiness.Items, "startup-assets", false, "compose/mysql/init") {
+				t.Fatalf("%s readiness should include missing startup assets: %#v", tt.name, report.Readiness.Items)
+			}
+		})
 	}
 }
 
-func TestEnvironmentRestorePostgreSQLAcceptsStoreGeneratedComposeStartupAssets(t *testing.T) {
-	workspace := filepath.Join(t.TempDir(), "workspace")
-	fakeBin := t.TempDir()
-	writeFile(t, filepath.Join(fakeBin, "git"), "#!/bin/sh\nexit 0\n")
-	writeFile(t, filepath.Join(fakeBin, "docker"), "#!/bin/sh\nif [ \"$1\" = compose ] && [ \"$2\" = version ]; then exit 0; fi\nexit 0\n")
-	if err := os.Chmod(filepath.Join(fakeBin, "git"), 0o755); err != nil {
-		t.Fatalf("chmod fake git: %v", err)
+func TestEnvironmentRestoreSQLStoreAcceptsStoreGeneratedComposeStartupAssets(t *testing.T) {
+	tests := []struct {
+		name     string
+		storeURL string
+	}{
+		{name: "postgres", storeURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable"},
+		{name: "mysql", storeURL: "mysql://tester:secret@127.0.0.1:3306/otsandbox?tls=false"},
 	}
-	if err := os.Chmod(filepath.Join(fakeBin, "docker"), 0o755); err != nil {
-		t.Fatalf("chmod fake docker: %v", err)
-	}
-	t.Setenv("PATH", fakeBin)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := filepath.Join(t.TempDir(), "workspace")
+			fakeBin := t.TempDir()
+			writeFile(t, filepath.Join(fakeBin, "git"), "#!/bin/sh\nexit 0\n")
+			writeFile(t, filepath.Join(fakeBin, "docker"), "#!/bin/sh\nif [ \"$1\" = compose ] && [ \"$2\" = version ]; then exit 0; fi\nexit 0\n")
+			if err := os.Chmod(filepath.Join(fakeBin, "git"), 0o755); err != nil {
+				t.Fatalf("chmod fake git: %v", err)
+			}
+			if err := os.Chmod(filepath.Join(fakeBin, "docker"), 0o755); err != nil {
+				t.Fatalf("chmod fake docker: %v", err)
+			}
+			t.Setenv("PATH", fakeBin)
 
-	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
-		ID:                     "env.pg.assets",
-		ReposJSON:              `{"app":{"url":"git@example.com:team/app.git","checkout":"app"}}`,
-		ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  mysql:\n    image: mysql:8\n    volumes:\n      - ./mysql/init:/docker-entrypoint-initdb.d\n  app:\n    image: alpine:3.20\n    command: [\"/bin/sh\", \"/sandbox/compose/scripts/run-app.sh\"]\n    volumes:\n      - ${DOCKER_APP_REPO:-/tmp/app}:/workspace/app\n      - ${SANDBOX_ROOT:-/tmp/sandbox}:/sandbox\n","compose/mysql/init/schema.sql":"create database app;\n","compose/scripts/run-app.sh":"#!/bin/sh\nexit 0\n"},"env":{"DOCKER_APP_REPO":"$OTS_WORKSPACE/app","SANDBOX_ROOT":"$OTS_WORKSPACE"}}`,
-		HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:18080/health"}]`,
-		VerificationWorkflowID: "workflow.core-10",
-	}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
-		StoreURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable",
-	}, environmentRestoreDockerCleanupOptions{})
-	if err != nil {
-		t.Fatalf("build restore startup assets report: %v", err)
-	}
-	if !report.Preflight.OK || len(report.Preflight.StartupAssets) != 2 {
-		t.Fatalf("startup assets report = %#v readiness=%#v docker=%#v", report.Preflight.StartupAssets, report.Readiness, report.Docker)
-	}
-	if !restoreTypedReadinessHasItem(report.Readiness.Items, "startup-assets", true, "2 Compose startup asset") {
-		t.Fatalf("readiness should accept Store generated startup assets: %#v", report.Readiness.Items)
+			report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+				ID:                     "env." + tt.name + ".assets",
+				ReposJSON:              `{"app":{"url":"git@example.com:team/app.git","checkout":"app"}}`,
+				ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  mysql:\n    image: mysql:8\n    volumes:\n      - ./mysql/init:/docker-entrypoint-initdb.d\n  app:\n    image: alpine:3.20\n    command: [\"/bin/sh\", \"/sandbox/compose/scripts/run-app.sh\"]\n    volumes:\n      - ${DOCKER_APP_REPO:-/tmp/app}:/workspace/app\n      - ${SANDBOX_ROOT:-/tmp/sandbox}:/sandbox\n","compose/mysql/init/schema.sql":"create database app;\n","compose/scripts/run-app.sh":"#!/bin/sh\nexit 0\n"},"env":{"DOCKER_APP_REPO":"$OTS_WORKSPACE/app","SANDBOX_ROOT":"$OTS_WORKSPACE"}}`,
+				HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:18080/health"}]`,
+				VerificationWorkflowID: "workflow.core-10",
+			}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
+				StoreURL: tt.storeURL,
+			}, environmentRestoreDockerCleanupOptions{})
+			if err != nil {
+				t.Fatalf("build %s restore startup assets report: %v", tt.name, err)
+			}
+			if !report.Preflight.OK || len(report.Preflight.StartupAssets) != 2 {
+				t.Fatalf("%s startup assets report = %#v readiness=%#v docker=%#v", tt.name, report.Preflight.StartupAssets, report.Readiness, report.Docker)
+			}
+			if !restoreTypedReadinessHasItem(report.Readiness.Items, "startup-assets", true, "2 Compose startup asset") {
+				t.Fatalf("%s readiness should accept Store generated startup assets: %#v", tt.name, report.Readiness.Items)
+			}
+		})
 	}
 }
 
