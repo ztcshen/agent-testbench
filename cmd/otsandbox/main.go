@@ -888,9 +888,17 @@ type environmentRestoreReport struct {
 }
 
 type environmentRestoreCleanMachinePlan struct {
-	Ready          bool     `json:"ready"`
-	ExecuteCommand []string `json:"executeCommand,omitempty"`
-	Notes          []string `json:"notes,omitempty"`
+	Ready          bool                                         `json:"ready"`
+	ExecuteCommand []string                                     `json:"executeCommand,omitempty"`
+	Prerequisites  []environmentRestoreCleanMachinePrerequisite `json:"prerequisites,omitempty"`
+	Notes          []string                                     `json:"notes,omitempty"`
+}
+
+type environmentRestoreCleanMachinePrerequisite struct {
+	Name     string `json:"name"`
+	Required bool   `json:"required"`
+	OK       bool   `json:"ok"`
+	Detail   string `json:"detail,omitempty"`
 }
 
 type environmentRestoreSourcePolicy struct {
@@ -1476,6 +1484,7 @@ func environmentRestoreCleanMachinePlanForReport(report environmentRestoreReport
 			"--execute",
 			"--json",
 		},
+		Prerequisites: environmentRestoreCleanMachinePrerequisites(report, workflowOptions),
 		Notes: []string{
 			"Run this command on the colleague/new machine after the PostgreSQL Store is configured and reachable outside the target Docker environment.",
 			"The dry-run assumption is not included in the execute command; Docker will be checked on the target machine before startup.",
@@ -1486,6 +1495,61 @@ func environmentRestoreCleanMachinePlanForReport(report environmentRestoreReport
 		plan.Ready = false
 	}
 	return plan
+}
+
+func environmentRestoreCleanMachinePrerequisites(report environmentRestoreReport, workflowOptions environmentRestoreWorkflowOptions) []environmentRestoreCleanMachinePrerequisite {
+	out := []environmentRestoreCleanMachinePrerequisite{
+		{
+			Name:     "postgresql-store",
+			Required: true,
+			OK:       environmentRestoreRequiresRemoteSources(workflowOptions.StoreURL),
+			Detail:   "configure the named PostgreSQL Store or pass the PostgreSQL DSN before running restore; the Store must stay outside the target Docker environment",
+		},
+	}
+	for _, tool := range report.Preflight.Tools {
+		detail := "required on the colleague machine"
+		if tool.Path != "" {
+			detail += "; current dry-run found " + tool.Path
+		}
+		if tool.Error != "" {
+			detail = tool.Error
+		}
+		out = append(out, environmentRestoreCleanMachinePrerequisite{
+			Name:     "tool:" + tool.Name,
+			Required: tool.Required,
+			OK:       tool.OK,
+			Detail:   detail,
+		})
+	}
+	for _, name := range []string{
+		"component-graph",
+		"component-startup-plan",
+		"remote-git-sources",
+		"store-startup-files",
+		"startup-assets",
+		"service-repositories",
+		"docker-start-plan",
+		"health-probes",
+	} {
+		if item, ok := environmentRestoreReadinessItemByName(report.Readiness.Items, name); ok {
+			out = append(out, environmentRestoreCleanMachinePrerequisite{
+				Name:     name,
+				Required: item.Required,
+				OK:       item.OK,
+				Detail:   item.Detail,
+			})
+		}
+	}
+	return out
+}
+
+func environmentRestoreReadinessItemByName(items []environmentRestoreReadinessItem, name string) (environmentRestoreReadinessItem, bool) {
+	for _, item := range items {
+		if item.Name == name {
+			return item, true
+		}
+	}
+	return environmentRestoreReadinessItem{}, false
 }
 
 func environmentRestorePersistEnvironment(ctx context.Context, storeURL string, env store.Environment, report environmentRestoreReport, attemptedAt time.Time) (store.Environment, error) {

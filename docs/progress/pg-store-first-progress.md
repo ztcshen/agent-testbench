@@ -2356,3 +2356,18 @@ Remote source policy slice:
   readiness action `ready-for-clean-machine-execute`, no failed readiness
   items, and the structured execute command using the named PostgreSQL Store
   `local-pg`.
+- 2026-05-20T09:53Z implementation slice: the `cleanMachine` block now also
+  exposes machine-readable prerequisites for the colleague/new-machine
+  execution step. The prerequisites include the PostgreSQL Store boundary,
+  required local tools (`git`, `docker`, and Docker Compose), component graph,
+  component startup plan, remote Git source policy, Store-generated startup
+  files, startup assets, service repository preparation, Docker start plan, and
+  health probes.
+- Verification: focused CLI coverage passed for the clean-machine prerequisite
+  structure. A real `local-pg` dry-run returned `ok=true`,
+  `cleanMachine.ready=true`, the structured execute command for
+  `scf-chain-core10-local-docker`, and 12 green prerequisites including
+  `postgresql-store`, `tool:git`, `tool:docker`, `tool:docker compose`,
+  `component-graph`, `component-startup-plan`, `remote-git-sources`,
+  `store-startup-files`, `startup-assets`, `service-repositories`,
+  `docker-start-plan`, and `health-probes`.
