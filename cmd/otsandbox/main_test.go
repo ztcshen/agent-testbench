@@ -6300,31 +6300,42 @@ func runWorkflowPlanCommandRejectsMissingWorkflow(t *testing.T, dir string, labe
 }
 
 func TestWorkflowRunCommandsReadStoredRuns(t *testing.T) {
-	ctx := context.Background()
 	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-workflow-runs-pg")
+	runWorkflowRunCommandsReadStoredRuns(t, storeRef, "PostgreSQL")
+}
+
+func TestWorkflowRunCommandsUseNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-workflow-runs-mysql")
+	runWorkflowRunCommandsReadStoredRuns(t, storeRef, "MySQL")
+}
+
+func runWorkflowRunCommandsReadStoredRuns(t *testing.T, storeRef string, label string) {
+	t.Helper()
+	ctx := context.Background()
 	s, err := openStore(ctx, storeRef)
 	if err != nil {
-		t.Fatalf("open store: %v", err)
+		t.Fatalf("open %s store: %v", label, err)
 	}
 	defer s.Close()
 	runID := uniqueTestID(t, "run.workflow")
 	workflowID := uniqueTestID(t, "workflow.alpha")
+	caseID := uniqueTestID(t, "case.alpha")
 	started := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
 	if _, err := s.CreateRun(ctx, store.Run{
 		ID:         runID,
-		ProfileID:  "sample",
+		ProfileID:  uniqueTestID(t, "profile.workflow-runs"),
 		WorkflowID: workflowID,
 		Status:     store.StatusPassed,
-		SummaryJSON: `{
+		SummaryJSON: fmt.Sprintf(`{
 			"summary":{"stepCount":1,"passed":1},
-			"steps":[{"stepId":"step.one","caseId":"case.alpha","status":"passed"}]
-		}`,
+			"steps":[{"stepId":"step.one","caseId":%q,"status":"passed"}]
+		}`, caseID),
 		StartedAt:  started,
 		FinishedAt: started.Add(time.Second),
 		CreatedAt:  started,
 		UpdatedAt:  started.Add(time.Second),
 	}); err != nil {
-		t.Fatalf("create run: %v", err)
+		t.Fatalf("create %s run: %v", label, err)
 	}
 
 	listOut := runCLI(t, "workflow", "runs", "--json")
@@ -6338,17 +6349,17 @@ func TestWorkflowRunCommandsReadStoredRuns(t *testing.T) {
 		} `json:"workflowRuns"`
 	}
 	if err := json.Unmarshal([]byte(listOut), &list); err != nil {
-		t.Fatalf("decode workflow runs json: %v\n%s", err, listOut)
+		t.Fatalf("decode %s workflow runs json: %v\n%s", label, err, listOut)
 	}
 	foundRun := false
 	for _, item := range list.WorkflowRuns {
-		if item.ID == runID && item.StepCount == 1 {
+		if item.ID == runID && item.WorkflowID == workflowID && item.StepCount == 1 {
 			foundRun = true
 			break
 		}
 	}
 	if !list.OK || !foundRun {
-		t.Fatalf("workflow runs = %#v", list)
+		t.Fatalf("%s workflow runs = %#v", label, list)
 	}
 
 	detailOut := runCLI(t, "workflow", "run", "--run", runID, "--json")
@@ -6360,10 +6371,10 @@ func TestWorkflowRunCommandsReadStoredRuns(t *testing.T) {
 		} `json:"summary"`
 	}
 	if err := json.Unmarshal([]byte(detailOut), &detail); err != nil {
-		t.Fatalf("decode workflow run json: %v\n%s", err, detailOut)
+		t.Fatalf("decode %s workflow run json: %v\n%s", label, err, detailOut)
 	}
 	if !detail.OK || detail.Run["id"] != runID || len(detail.Summary.Steps) != 1 || detail.Summary.Steps[0]["stepId"] != "step.one" {
-		t.Fatalf("workflow run detail = %#v", detail)
+		t.Fatalf("%s workflow run detail = %#v", label, detail)
 	}
 
 	stepOut := runCLI(t, "workflow", "step", "--run", runID, "--step", "step.one", "--json")
@@ -6375,10 +6386,10 @@ func TestWorkflowRunCommandsReadStoredRuns(t *testing.T) {
 		} `json:"summary"`
 	}
 	if err := json.Unmarshal([]byte(stepOut), &stepDetail); err != nil {
-		t.Fatalf("decode workflow step json: %v\n%s", err, stepOut)
+		t.Fatalf("decode %s workflow step json: %v\n%s", label, err, stepOut)
 	}
 	if !stepDetail.OK || stepDetail.Run["id"] != runID || len(stepDetail.Summary.Steps) != 1 || stepDetail.Summary.Steps[0]["stepId"] != "step.one" {
-		t.Fatalf("workflow step detail = %#v", stepDetail)
+		t.Fatalf("%s workflow step detail = %#v", label, stepDetail)
 	}
 
 	latestOut := runCLI(t, "workflow", "latest-step", "--workflow", workflowID, "--step", "step.one", "--json")
@@ -6390,23 +6401,23 @@ func TestWorkflowRunCommandsReadStoredRuns(t *testing.T) {
 		} `json:"summary"`
 	}
 	if err := json.Unmarshal([]byte(latestOut), &latestDetail); err != nil {
-		t.Fatalf("decode latest workflow step json: %v\n%s", err, latestOut)
+		t.Fatalf("decode latest %s workflow step json: %v\n%s", label, err, latestOut)
 	}
-	if !latestDetail.OK || latestDetail.Run["id"] != runID || len(latestDetail.Summary.Steps) != 1 || latestDetail.Summary.Steps[0]["caseId"] != "case.alpha" {
-		t.Fatalf("latest workflow step detail = %#v", latestDetail)
+	if !latestDetail.OK || latestDetail.Run["id"] != runID || len(latestDetail.Summary.Steps) != 1 || latestDetail.Summary.Steps[0]["caseId"] != caseID {
+		t.Fatalf("latest %s workflow step detail = %#v", label, latestDetail)
 	}
 
 	if out := runCLI(t, "workflow", "runs", "--store", storeRef, "--json"); !strings.Contains(out, runID) {
-		t.Fatalf("workflow runs --store output = %q", out)
+		t.Fatalf("%s workflow runs --store output = %q", label, out)
 	}
 	if out := runCLI(t, "workflow", "run", "--store", storeRef, "--run", runID, "--json"); !strings.Contains(out, "step.one") {
-		t.Fatalf("workflow run --store output = %q", out)
+		t.Fatalf("%s workflow run --store output = %q", label, out)
 	}
-	if out := runCLI(t, "workflow", "step", "--store", storeRef, "--run", runID, "--step", "step.one", "--json"); !strings.Contains(out, "case.alpha") {
-		t.Fatalf("workflow step --store output = %q", out)
+	if out := runCLI(t, "workflow", "step", "--store", storeRef, "--run", runID, "--step", "step.one", "--json"); !strings.Contains(out, caseID) {
+		t.Fatalf("%s workflow step --store output = %q", label, out)
 	}
 	if out := runCLI(t, "workflow", "latest-step", "--store", storeRef, "--workflow", workflowID, "--step", "step.one", "--json"); !strings.Contains(out, runID) {
-		t.Fatalf("workflow latest-step --store output = %q", out)
+		t.Fatalf("%s workflow latest-step --store output = %q", label, out)
 	}
 }
 
