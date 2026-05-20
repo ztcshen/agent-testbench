@@ -1930,3 +1930,19 @@ Remote source policy slice:
   content has been pushed yet; pushing it is the next explicit external
   transmission decision because the package contains deterministic local-test
   keys, passwords, SQL, and mappings.
+- 2026-05-20T09:35Z: corrected the restore direction after product review:
+  `open-test-sandbox-validation` is not a formal one-click environment service
+  source. PostgreSQL restore now treats package repositories as compatibility
+  inputs, ignores them in the PostgreSQL daily restore path, and enforces remote
+  Git only for business service repositories. New `compose.generatedFiles` /
+  `environment register --compose-generated-file TARGET=SOURCE_FILE` support lets
+  compact Store metadata write compose/startup files under the restore workspace
+  before Docker starts. The top-level restore `ok` now fails when readiness fails.
+  Current `local-pg` dry-run no longer reports the validation package as a
+  source-policy blocker; it reports the real remaining blocker:
+  `store-startup-files` is missing generated Store content for
+  `compose/docker-compose.yml` and `compose/docker-compose.apps.yml`.
+- Also removed the stale `compose.package` field from the active `local-pg`
+  environment row for `scf-chain-core10-local-docker`; current dry-run reports
+  `package=not-configured`, `sourcePolicy.ok=true`, and readiness blocked only
+  on missing Store startup files.

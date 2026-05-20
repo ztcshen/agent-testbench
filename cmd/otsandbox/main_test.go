@@ -1013,11 +1013,83 @@ func TestEnvironmentRestoreRequiresRemoteGitSourcesForPostgreSQLOneClickEnvironm
 	if err != nil {
 		t.Fatalf("build restore remote source policy report: %v", err)
 	}
-	if report.OK || report.SourcePolicy.OK || !report.SourcePolicy.RemoteOnly || len(report.SourcePolicy.Violations) != 2 || report.Docker.Action != "skipped-due-to-source-policy" {
+	if report.OK || report.SourcePolicy.OK || !report.SourcePolicy.RemoteOnly || len(report.SourcePolicy.Violations) != 1 || report.Docker.Action != "skipped-due-to-source-policy" {
 		t.Fatalf("remote source policy report = %#v", report)
+	}
+	if !strings.Contains(report.SourcePolicy.Violations[0], "service llt") {
+		t.Fatalf("source policy should only reject service repositories, got %#v", report.SourcePolicy.Violations)
 	}
 	if !restoreTypedReadinessHasItem(report.Readiness.Items, "remote-git-sources", false, "remote Git URL") {
 		t.Fatalf("readiness should include remote source violation: %#v", report.Readiness.Items)
+	}
+}
+
+func TestEnvironmentRestorePostgreSQLUsesStoreGeneratedStartupFiles(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	fakeBin := t.TempDir()
+	writeFile(t, filepath.Join(fakeBin, "git"), "#!/bin/sh\nexit 0\n")
+	writeFile(t, filepath.Join(fakeBin, "docker"), "#!/bin/sh\nif [ \"$1\" = compose ] && [ \"$2\" = version ]; then exit 0; fi\nexit 0\n")
+	if err := os.Chmod(filepath.Join(fakeBin, "git"), 0o755); err != nil {
+		t.Fatalf("chmod fake git: %v", err)
+	}
+	if err := os.Chmod(filepath.Join(fakeBin, "docker"), 0o755); err != nil {
+		t.Fatalf("chmod fake docker: %v", err)
+	}
+	t.Setenv("PATH", fakeBin)
+
+	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+		ID:                     "env.pg.generated",
+		ReposJSON:              `{"llt":{"url":"git@github.com:ztcshen/open-test-sandbox-llt-simulator.git","checkout":"llt"}}`,
+		ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  llt:\n    image: alpine:3.20\n"},"package":{"url":"/Users/zlh/codes/open-test-sandbox-validation","checkout":"."}}`,
+		HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:28080/health"}]`,
+		VerificationWorkflowID: "workflow.core-10",
+	}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
+		StoreURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable",
+	}, environmentRestoreDockerCleanupOptions{})
+	if err != nil {
+		t.Fatalf("build restore PostgreSQL generated startup report: %v", err)
+	}
+	if !report.SourcePolicy.OK || !report.SourcePolicy.RemoteOnly || report.Package.Action != "ignored-for-postgresql-store-restore" || report.Docker.Action != "plan-docker-compose" {
+		t.Fatalf("PostgreSQL generated startup report = %#v", report)
+	}
+	if len(report.Docker.Generated) != 1 || report.Docker.Generated[0].Action != "plan-write" || !report.Docker.Generated[0].OK {
+		t.Fatalf("generated startup file report = %#v", report.Docker.Generated)
+	}
+	if !restoreTypedReadinessHasItem(report.Readiness.Items, "store-startup-files", true, "generated from Store metadata") {
+		t.Fatalf("readiness should accept Store generated startup files: %#v", report.Readiness.Items)
+	}
+}
+
+func TestEnvironmentRestorePostgreSQLRejectsLocalStartupFilesWithoutStoreGeneratedContent(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	fakeBin := t.TempDir()
+	writeFile(t, filepath.Join(fakeBin, "git"), "#!/bin/sh\nexit 0\n")
+	writeFile(t, filepath.Join(fakeBin, "docker"), "#!/bin/sh\nif [ \"$1\" = compose ] && [ \"$2\" = version ]; then exit 0; fi\nexit 0\n")
+	if err := os.Chmod(filepath.Join(fakeBin, "git"), 0o755); err != nil {
+		t.Fatalf("chmod fake git: %v", err)
+	}
+	if err := os.Chmod(filepath.Join(fakeBin, "docker"), 0o755); err != nil {
+		t.Fatalf("chmod fake docker: %v", err)
+	}
+	t.Setenv("PATH", fakeBin)
+
+	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+		ID:                     "env.pg.local.compose",
+		ReposJSON:              `{"llt":{"url":"git@github.com:ztcshen/open-test-sandbox-llt-simulator.git","checkout":"llt"}}`,
+		ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"package":{"url":"/Users/zlh/codes/open-test-sandbox-validation","checkout":"."}}`,
+		HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:28080/health"}]`,
+		VerificationWorkflowID: "workflow.core-10",
+	}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
+		StoreURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable",
+	}, environmentRestoreDockerCleanupOptions{})
+	if err != nil {
+		t.Fatalf("build restore PostgreSQL local startup report: %v", err)
+	}
+	if !report.SourcePolicy.OK || report.Package.Action != "ignored-for-postgresql-store-restore" {
+		t.Fatalf("PostgreSQL local startup pre-readiness report = %#v", report)
+	}
+	if !restoreTypedReadinessHasItem(report.Readiness.Items, "store-startup-files", false, "missing generatedFiles") {
+		t.Fatalf("readiness should reject local startup files without Store content: %#v", report.Readiness.Items)
 	}
 }
 
@@ -1467,6 +1539,80 @@ func TestEnvironmentRestoreCanPreparePackageRepositoryBeforeDocker(t *testing.T)
 	}
 	if strings.Contains(string(dockerCalls), " compose ") {
 		t.Fatalf("prepare package should not invoke Docker Compose:\n%s", dockerCalls)
+	}
+}
+
+func TestEnvironmentRestoreWritesStoreGeneratedComposeFileBeforeDocker(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	sourceCompose := filepath.Join(t.TempDir(), "source-compose.yml")
+	writeFile(t, sourceCompose, "services:\n  generated-service:\n    image: alpine:3.20\n")
+	fakeDockerEnv, dockerCallsPath := fakeDockerCommand(t)
+	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer healthServer.Close()
+
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.generated.compose",
+		"--compose-file", "compose/docker-compose.yml",
+		"--compose-generated-file", "compose/docker-compose.yml="+sourceCompose,
+		"--compose-skip-pull",
+		"--compose-skip-build",
+		"--health-url", healthServer.URL+"/ready",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	dryRunOut := runCLIWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--json", "env.generated.compose")
+	var dryRun struct {
+		OK     bool `json:"ok"`
+		Docker struct {
+			Generated []struct {
+				Path   string `json:"path"`
+				Action string `json:"action"`
+				OK     bool   `json:"ok"`
+			} `json:"generatedFiles"`
+		} `json:"docker"`
+	}
+	if err := json.Unmarshal([]byte(dryRunOut), &dryRun); err != nil {
+		t.Fatalf("decode generated compose dry-run json: %v\n%s", err, dryRunOut)
+	}
+	generatedPath := filepath.Join(workspace, "compose", "docker-compose.yml")
+	if !dryRun.OK || len(dryRun.Docker.Generated) != 1 || dryRun.Docker.Generated[0].Action != "plan-write" || dryRun.Docker.Generated[0].Path != generatedPath || !dryRun.Docker.Generated[0].OK {
+		t.Fatalf("generated compose dry-run = %#v", dryRun)
+	}
+	if _, err := os.Stat(generatedPath); !os.IsNotExist(err) {
+		t.Fatalf("dry-run should not write generated compose file, stat err=%v", err)
+	}
+
+	executeOut := runCLIWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--json", "env.generated.compose")
+	var executed struct {
+		OK     bool `json:"ok"`
+		Docker struct {
+			Action    string `json:"action"`
+			Generated []struct {
+				Path   string `json:"path"`
+				Action string `json:"action"`
+				OK     bool   `json:"ok"`
+			} `json:"generatedFiles"`
+		} `json:"docker"`
+	}
+	if err := json.Unmarshal([]byte(executeOut), &executed); err != nil {
+		t.Fatalf("decode generated compose execute json: %v\n%s", err, executeOut)
+	}
+	if !executed.OK || executed.Docker.Action != "run-docker-compose" || len(executed.Docker.Generated) != 1 || executed.Docker.Generated[0].Action != "write" || !executed.Docker.Generated[0].OK {
+		t.Fatalf("generated compose execute = %#v", executed)
+	}
+	if raw, err := os.ReadFile(generatedPath); err != nil || !strings.Contains(string(raw), "generated-service") {
+		t.Fatalf("generated compose file raw=%q err=%v", raw, err)
+	}
+	dockerCalls, err := os.ReadFile(dockerCallsPath)
+	if err != nil {
+		t.Fatalf("read fake docker calls: %v", err)
+	}
+	if !strings.Contains(string(dockerCalls), "compose -f "+generatedPath+" up -d") {
+		t.Fatalf("fake docker calls should use generated compose file:\n%s", dockerCalls)
 	}
 }
 

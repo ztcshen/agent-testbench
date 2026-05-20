@@ -474,13 +474,14 @@ func runEnvironmentRegister(ctx context.Context, args []string) error {
 	packageRef := flags.String("package-ref", "", "Environment package Git ref to checkout detached")
 	startCommand := flags.String("start-command", "", "Local startup command")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	var services, repos, branches, repoRefs, checkouts, healthURLs, healthTCPs, healthCommands, healthComposeServices, composeFiles, composeEnvFiles, composeEnvs, composeProfiles, composeServices stringListFlag
+	var services, repos, branches, repoRefs, checkouts, healthURLs, healthTCPs, healthCommands, healthComposeServices, composeFiles, composeGeneratedFiles, composeEnvFiles, composeEnvs, composeProfiles, composeServices stringListFlag
 	flags.Var(&services, "service", "Service id; repeat for multiple services")
 	flags.Var(&repos, "repo", "Service repo as SERVICE=PATH_OR_URL; repeat for multiple services")
 	flags.Var(&branches, "branch", "Service branch as SERVICE=BRANCH; repeat for multiple services")
 	flags.Var(&repoRefs, "repo-ref", "Service Git ref as SERVICE=REF; repeat for multiple services")
 	flags.Var(&checkouts, "checkout", "Service checkout path as SERVICE=PATH; repeat for multiple services")
 	flags.Var(&composeFiles, "compose-file", "Local compose file path; repeat for multiple compose files")
+	flags.Var(&composeGeneratedFiles, "compose-generated-file", "Store-backed generated file as TARGET=SOURCE_FILE; repeat for compose/env startup files")
 	flags.Var(&composeEnvFiles, "compose-env-file", "Docker Compose env file path; repeat for multiple files")
 	flags.Var(&composeEnvs, "compose-env", "Generated Docker Compose env entry as KEY=VALUE; repeat for multiple entries")
 	flags.Var(&composeProfiles, "compose-profile", "Docker Compose profile; repeat for multiple profiles")
@@ -503,6 +504,10 @@ func runEnvironmentRegister(ctx context.Context, args []string) error {
 		return err
 	}
 	defer cleanup()
+	composeConfig, err := environmentComposeConfig(composeFiles, composeGeneratedFiles, *startCommand, *composeProjectName, composeEnvFiles, composeEnvs, composeProfiles, composeServices, *composeSkipPull, *composeSkipBuild, *packageRepo, *packageBranch, *packageRef)
+	if err != nil {
+		return err
+	}
 	env := store.Environment{
 		ID:                     strings.TrimSpace(*id),
 		DisplayName:            strings.TrimSpace(*displayName),
@@ -510,7 +515,7 @@ func runEnvironmentRegister(ctx context.Context, args []string) error {
 		Status:                 stringDefault(strings.TrimSpace(*status), "draft"),
 		ServicesJSON:           mustCompactJSON(environmentServices(services, repos, branches, repoRefs, checkouts)),
 		ReposJSON:              mustCompactJSON(environmentRepoMap(repos, branches, repoRefs, checkouts)),
-		ComposeJSON:            mustCompactJSON(environmentComposeConfig(composeFiles, *startCommand, *composeProjectName, composeEnvFiles, composeEnvs, composeProfiles, composeServices, *composeSkipPull, *composeSkipBuild, *packageRepo, *packageBranch, *packageRef)),
+		ComposeJSON:            mustCompactJSON(composeConfig),
 		HealthChecksJSON:       mustCompactJSON(environmentHealthChecks(healthURLs, healthTCPs, healthCommands, healthComposeServices)),
 		VerificationWorkflowID: strings.TrimSpace(*verificationWorkflowID),
 		SummaryJSON:            mustCompactJSON(map[string]any{"source": "cli"}),
@@ -715,11 +720,20 @@ type environmentRestoreDockerReport struct {
 	Action       string                                `json:"action"`
 	ComposeFile  string                                `json:"composeFile,omitempty"`
 	Workdir      string                                `json:"workdir,omitempty"`
+	Generated    []environmentRestoreGeneratedFile     `json:"generatedFiles,omitempty"`
 	Cleanup      environmentRestoreDockerCleanupReport `json:"cleanup,omitempty"`
 	Commands     [][]string                            `json:"commands,omitempty"`
 	Output       []string                              `json:"output,omitempty"`
 	Error        string                                `json:"error,omitempty"`
 	HealthChecks []environmentRestoreHealthCheckReport `json:"healthChecks,omitempty"`
+}
+
+type environmentRestoreGeneratedFile struct {
+	Path   string `json:"path"`
+	Bytes  int    `json:"bytes"`
+	Action string `json:"action"`
+	OK     bool   `json:"ok"`
+	Error  string `json:"error,omitempty"`
 }
 
 type environmentRestoreDockerCleanupReport struct {
@@ -974,6 +988,7 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 	packageSpec := environmentRestorePackageSpecFromCompose(compose, workspace)
 	healthChecks := environmentRestoreEffectiveHealthChecks(jsonArrayString(env.HealthChecksJSON), compose)
 	attemptedAt := time.Now().UTC()
+	remoteOnly := environmentRestoreRequiresRemoteSources(workflowOptions.StoreURL)
 	report := environmentRestoreReport{
 		OK:                   true,
 		RestoreID:            "restore." + safeReportID(env.ID) + "." + attemptedAt.Format("20060102T150405.000000000Z"),
@@ -984,7 +999,7 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 		Compose:              compose,
 		HealthChecks:         healthChecks,
 		Preflight:            environmentRestorePreflightReport(packageSpec, specs, compose, workspace, cleanupOptions),
-		SourcePolicy:         environmentRestoreSourcePolicyReport(packageSpec, specs, environmentRestoreRequiresRemoteSources(workflowOptions.StoreURL)),
+		SourcePolicy:         environmentRestoreSourcePolicyReport(packageSpec, specs, remoteOnly),
 		Workflow: environmentRestoreWorkflowRun{
 			OK:         !workflowOptions.Run,
 			Action:     "not-requested",
@@ -1000,7 +1015,7 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 	if !report.SourcePolicy.OK {
 		report.OK = false
 	}
-	report.Package = environmentRestorePackage(ctx, packageSpec, execute, pull)
+	report.Package = environmentRestorePackage(ctx, packageSpec, execute, pull, remoteOnly)
 	if !report.Package.OK {
 		report.OK = false
 	}
@@ -1055,6 +1070,12 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 		report.NextActions = append([]string{"review the Docker Compose plan, then rerun with --execute"}, report.NextActions...)
 	}
 	report.Readiness = environmentRestoreReadinessReport(report, packageSpec, specs, cleanupOptions)
+	if !report.Readiness.OK {
+		report.OK = false
+		if strings.TrimSpace(report.Error) == "" {
+			report.Error = "restore readiness did not pass"
+		}
+	}
 	if strings.TrimSpace(workflowOptions.StoreURL) != "" {
 		persisted, err := environmentRestorePersistEnvironment(ctx, workflowOptions.StoreURL, env, report, attemptedAt)
 		if err != nil {
@@ -1156,6 +1177,9 @@ func environmentRestorePhase(report environmentRestoreReport) string {
 	}
 	if report.Package.Configured && !report.Package.OK {
 		return "package"
+	}
+	if !report.Readiness.OK {
+		return "readiness"
 	}
 	for _, item := range report.Repos {
 		if !item.OK {
@@ -1377,7 +1401,7 @@ func environmentRestorePackageSpecFromCompose(compose map[string]any, workspace 
 	return spec
 }
 
-func environmentRestorePackage(ctx context.Context, spec environmentRestorePackageSpec, execute bool, pull bool) environmentRestorePackageReport {
+func environmentRestorePackage(ctx context.Context, spec environmentRestorePackageSpec, execute bool, pull bool, storeGeneratedRestore bool) environmentRestorePackageReport {
 	report := environmentRestorePackageReport{
 		Configured: strings.TrimSpace(spec.URL) != "" || strings.TrimSpace(spec.Ref) != "",
 		URL:        spec.URL,
@@ -1388,6 +1412,10 @@ func environmentRestorePackage(ctx context.Context, spec environmentRestorePacka
 	}
 	if !report.Configured {
 		report.Action = "not-configured"
+		return report
+	}
+	if storeGeneratedRestore {
+		report.Action = "ignored-for-postgresql-store-restore"
 		return report
 	}
 	repoReport := environmentRestoreRepo(ctx, environmentRestoreRepoSpec{
@@ -1439,7 +1467,7 @@ func environmentRestoreRequiresRemoteSources(storeURL string) bool {
 	return strings.HasPrefix(storeURL, "postgres://") || strings.HasPrefix(storeURL, "postgresql://")
 }
 
-func environmentRestoreSourcePolicyReport(packageSpec environmentRestorePackageSpec, specs []environmentRestoreRepoSpec, remoteOnly bool) environmentRestoreSourcePolicy {
+func environmentRestoreSourcePolicyReport(_ environmentRestorePackageSpec, specs []environmentRestoreRepoSpec, remoteOnly bool) environmentRestoreSourcePolicy {
 	report := environmentRestoreSourcePolicy{
 		RemoteOnly: remoteOnly,
 		OK:         true,
@@ -1455,7 +1483,6 @@ func environmentRestoreSourcePolicyReport(packageSpec environmentRestorePackageS
 		report.OK = false
 		report.Violations = append(report.Violations, label+" must use a remote Git URL, got local path/source: "+rawURL)
 	}
-	addViolation("environment package", packageSpec.URL)
 	for _, spec := range specs {
 		addViolation("service "+spec.ServiceID, spec.URL)
 	}
@@ -1552,7 +1579,7 @@ func environmentRestoreReadinessReport(report environmentRestoreReport, packageS
 	addItem("store-boundary", true, true, "sandbox PostgreSQL Store must stay outside the restored Docker target environment")
 	addItem("verification-workflow", true, strings.TrimSpace(report.VerificationWorkflow) != "", "restore is anchored to workflow "+strings.TrimSpace(report.VerificationWorkflow))
 	if report.SourcePolicy.RemoteOnly {
-		detail := "all package and service sources must be remote Git URLs for PostgreSQL-backed one-click environments"
+		detail := "all service source repositories must be remote Git URLs for PostgreSQL-backed one-click environments; environment startup files come from compact Store metadata"
 		if len(report.SourcePolicy.Violations) > 0 {
 			detail = strings.Join(report.SourcePolicy.Violations, "; ")
 		}
@@ -1564,6 +1591,10 @@ func environmentRestoreReadinessReport(report environmentRestoreReport, packageS
 			detail = "environment package " + report.Package.Action + " at " + report.Package.Checkout
 		}
 		addItem("environment-package", true, report.Package.OK, detail)
+	}
+	if report.SourcePolicy.RemoteOnly {
+		ok, detail := environmentRestoreStoreStartupFilesReady(report.Compose)
+		addItem("store-startup-files", true, ok, detail)
 	}
 
 	repoOK := true
@@ -1659,6 +1690,28 @@ func environmentRestoreReadinessDockerDetail(report environmentRestoreReport) st
 		}
 		return "Docker startup plan is not ready"
 	}
+}
+
+func environmentRestoreStoreStartupFilesReady(compose map[string]any) (bool, string) {
+	composeFiles := environmentRestoreComposeFiles(compose)
+	if len(composeFiles) == 0 {
+		if strings.TrimSpace(valueString(compose["startCommand"])) != "" {
+			return true, "restore uses a recorded start command; no compose startup file is required"
+		}
+		return false, "composeFile or startCommand is required"
+	}
+	generated := stringMapFromAny(compose["generatedFiles"])
+	missing := []string{}
+	for _, file := range composeFiles {
+		clean := filepath.Clean(strings.TrimSpace(file))
+		if _, ok := generated[clean]; !ok {
+			missing = append(missing, file)
+		}
+	}
+	if len(missing) > 0 {
+		return false, "PostgreSQL restore must write compose startup files from compact Store metadata; missing generatedFiles for: " + strings.Join(missing, ", ")
+	}
+	return true, fmt.Sprintf("%d compose startup file(s) will be generated from Store metadata", len(composeFiles))
 }
 
 func environmentRestoreTool(name string, required bool) environmentRestorePreflightTool {
@@ -1922,6 +1975,15 @@ func environmentRestoreDocker(ctx context.Context, compose map[string]any, healt
 		report.Error = "composeFile or startCommand is required to restore Docker services"
 		return report
 	}
+	report.Generated = prepareEnvironmentRestoreGeneratedFiles(compose, workspace, false)
+	for _, item := range report.Generated {
+		if !item.OK {
+			report.OK = false
+			report.Action = "prepare-generated-files"
+			report.Error = item.Error
+			return report
+		}
+	}
 	if !execute {
 		return report
 	}
@@ -1930,6 +1992,15 @@ func environmentRestoreDocker(ctx context.Context, compose map[string]any, healt
 		report.Action = "prepare-workspace"
 		report.Error = err.Error()
 		return report
+	}
+	report.Generated = prepareEnvironmentRestoreGeneratedFiles(compose, workspace, true)
+	for _, item := range report.Generated {
+		if !item.OK {
+			report.OK = false
+			report.Action = "prepare-generated-files"
+			report.Error = item.Error
+			return report
+		}
 	}
 	if envFile, err := writeEnvironmentRestoreGeneratedEnvFile(workspace, compose); err != nil {
 		report.OK = false
@@ -2178,6 +2249,66 @@ func environmentRestoreResolvedComposeFiles(workspace string, files []string) []
 		}
 	}
 	return out
+}
+
+func prepareEnvironmentRestoreGeneratedFiles(compose map[string]any, workspace string, execute bool) []environmentRestoreGeneratedFile {
+	files := stringMapFromAny(compose["generatedFiles"])
+	if len(files) == 0 {
+		return nil
+	}
+	paths := make([]string, 0, len(files))
+	for path := range files {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	out := make([]environmentRestoreGeneratedFile, 0, len(paths))
+	for _, path := range paths {
+		content := files[path]
+		report := environmentRestoreGeneratedFile{
+			Path:   restoreWorkspacePath(workspace, path),
+			Bytes:  len(content),
+			Action: "plan-write",
+			OK:     true,
+		}
+		if ok, errText := environmentRestoreGeneratedFileTargetOK(path, workspace); !ok {
+			report.OK = false
+			report.Error = errText
+			out = append(out, report)
+			continue
+		}
+		if execute {
+			report.Action = "write"
+			if err := os.MkdirAll(filepath.Dir(report.Path), 0o755); err != nil {
+				report.OK = false
+				report.Error = err.Error()
+			} else if err := os.WriteFile(report.Path, []byte(content), 0o644); err != nil {
+				report.OK = false
+				report.Error = err.Error()
+			}
+		}
+		out = append(out, report)
+	}
+	return out
+}
+
+func environmentRestoreGeneratedFileTargetOK(path string, workspace string) (bool, string) {
+	raw := strings.TrimSpace(path)
+	if raw == "" {
+		return false, "generated file path is empty"
+	}
+	if filepath.IsAbs(raw) {
+		return false, "generated file path must be relative to the restore workspace: " + raw
+	}
+	clean := filepath.Clean(raw)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
+		return false, "generated file path must stay inside the restore workspace: " + raw
+	}
+	target := restoreWorkspacePath(workspace, clean)
+	rel, err := filepath.Rel(workspace, target)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return false, "generated file path must stay inside the restore workspace: " + raw
+	}
+	return true, ""
 }
 
 func environmentRestoreComposeBaseArgs(compose map[string]any, workspace string, composeFiles []string) []string {
@@ -2852,7 +2983,7 @@ func environmentRepoMap(repos stringListFlag, branches stringListFlag, repoRefs 
 	return out
 }
 
-func environmentComposeConfig(composeFiles stringListFlag, startCommand string, projectName string, envFiles stringListFlag, envs stringListFlag, profiles stringListFlag, services stringListFlag, skipPull bool, skipBuild bool, packageRepo string, packageBranch string, packageRef string) map[string]any {
+func environmentComposeConfig(composeFiles stringListFlag, generatedFiles stringListFlag, startCommand string, projectName string, envFiles stringListFlag, envs stringListFlag, profiles stringListFlag, services stringListFlag, skipPull bool, skipBuild bool, packageRepo string, packageBranch string, packageRef string) (map[string]any, error) {
 	files := composeFiles.Values()
 	composeFile := ""
 	if len(files) > 0 {
@@ -2864,6 +2995,13 @@ func environmentComposeConfig(composeFiles stringListFlag, startCommand string, 
 	}
 	if len(files) > 0 {
 		out["composeFiles"] = files
+	}
+	generated, err := generatedFileContentMapFromFlags(generatedFiles)
+	if err != nil {
+		return nil, err
+	}
+	if len(generated) > 0 {
+		out["generatedFiles"] = generated
 	}
 	if strings.TrimSpace(projectName) != "" {
 		out["projectName"] = strings.TrimSpace(projectName)
@@ -2900,7 +3038,28 @@ func environmentComposeConfig(composeFiles stringListFlag, startCommand string, 
 		packageConfig["checkout"] = "."
 		out["package"] = packageConfig
 	}
-	return out
+	return out, nil
+}
+
+func generatedFileContentMapFromFlags(values stringListFlag) (map[string]string, error) {
+	out := map[string]string{}
+	for _, raw := range values.Values() {
+		target, source, ok := strings.Cut(raw, "=")
+		target = strings.TrimSpace(target)
+		source = strings.TrimSpace(source)
+		if !ok || target == "" || source == "" {
+			return nil, fmt.Errorf("generated compose file must be TARGET=SOURCE_FILE, got %q", raw)
+		}
+		if filepath.IsAbs(target) || target == "." || target == ".." || strings.HasPrefix(filepath.Clean(target), ".."+string(os.PathSeparator)) {
+			return nil, fmt.Errorf("generated compose file target must be relative to the restore workspace: %s", target)
+		}
+		content, err := os.ReadFile(source)
+		if err != nil {
+			return nil, fmt.Errorf("read generated compose source %s: %w", source, err)
+		}
+		out[filepath.Clean(target)] = string(content)
+	}
+	return out, nil
 }
 
 func keyValueMapFromFlags(values stringListFlag) map[string]string {
