@@ -8853,25 +8853,35 @@ func writeUniqueCaseSuiteCoverageProfile(t *testing.T) caseSuiteCoverageFixture 
 }
 
 func TestCaseSuiteInspectReportsReadinessByMaintenanceFilters(t *testing.T) {
-	ctx := context.Background()
 	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-case-suite-inspect-pg")
-	profileDir := writeCaseSuiteCoverageProfile(t)
-	runCLI(t, "config", "publish", "--from", profileDir)
+	runCaseSuiteInspectReportsReadinessByMaintenanceFilters(t, storeRef, "PostgreSQL")
+}
+
+func TestCaseSuiteInspectUsesNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-case-suite-inspect-mysql")
+	runCaseSuiteInspectReportsReadinessByMaintenanceFilters(t, storeRef, "MySQL")
+}
+
+func runCaseSuiteInspectReportsReadinessByMaintenanceFilters(t *testing.T, storeRef string, label string) {
+	t.Helper()
+	ctx := context.Background()
+	fixture := writeUniqueCaseSuiteCoverageProfile(t)
+	runCLI(t, "config", "publish", "--from", fixture.profileDir)
 
 	s, err := openStore(ctx, storeRef)
 	if err != nil {
-		t.Fatalf("open store: %v", err)
+		t.Fatalf("open %s store: %v", label, err)
 	}
 	base := time.Now().UTC()
-	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.default.latest"), "case.default", store.StatusPassed, base.Add(-time.Minute))
-	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.variant.latest"), "case.variant", store.StatusFailed, base)
+	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.default.latest"), fixture.defaultCaseID, store.StatusPassed, base.Add(-time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.variant.latest"), fixture.variantCaseID, store.StatusFailed, base)
 	if err := s.Close(); err != nil {
-		t.Fatalf("close store: %v", err)
+		t.Fatalf("close %s store: %v", label, err)
 	}
 
 	out := runCLI(t,
 		"case", "suite", "inspect",
-		"--profile", profileDir,
+		"--profile", fixture.profileDir,
 		"--tag", "regression",
 		"--status", "active",
 		"--json",
@@ -8897,10 +8907,10 @@ func TestCaseSuiteInspectReportsReadinessByMaintenanceFilters(t *testing.T) {
 		} `json:"items"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode suite inspection json: %v\n%s", err, out)
+		t.Fatalf("decode %s suite inspection json: %v\n%s", label, err, out)
 	}
 	if report.OK || report.Counts.Total != 3 || report.Counts.Ready != 2 || report.Counts.Blocked != 1 || report.Counts.Failed != 1 || report.Counts.NotRun != 1 {
-		t.Fatalf("suite inspection report = %#v", report)
+		t.Fatalf("%s suite inspection report = %#v", label, report)
 	}
 	byCase := map[string]struct {
 		Ready              bool
@@ -8920,20 +8930,20 @@ func TestCaseSuiteInspectReportsReadinessByMaintenanceFilters(t *testing.T) {
 			SuggestedAction    string
 		}{item.Ready, item.HasRunnableFile, item.HasExecutionConfig, item.LatestStatus, item.Issues, item.SuggestedAction}
 	}
-	if !byCase["case.default"].Ready || !byCase["case.default"].HasRunnableFile || byCase["case.default"].LatestStatus != store.StatusPassed {
-		t.Fatalf("default inspection = %#v", byCase["case.default"])
+	if !byCase[fixture.defaultCaseID].Ready || !byCase[fixture.defaultCaseID].HasRunnableFile || byCase[fixture.defaultCaseID].LatestStatus != store.StatusPassed {
+		t.Fatalf("%s default inspection = %#v", label, byCase[fixture.defaultCaseID])
 	}
-	if !byCase["case.variant"].Ready || !byCase["case.variant"].HasExecutionConfig || byCase["case.variant"].SuggestedAction != "rerun" {
-		t.Fatalf("variant inspection = %#v", byCase["case.variant"])
+	if !byCase[fixture.variantCaseID].Ready || !byCase[fixture.variantCaseID].HasExecutionConfig || byCase[fixture.variantCaseID].SuggestedAction != "rerun" {
+		t.Fatalf("%s variant inspection = %#v", label, byCase[fixture.variantCaseID])
 	}
-	if byCase["case.unrun"].Ready || byCase["case.unrun"].SuggestedAction != "add-runnable-source" || len(byCase["case.unrun"].Issues) == 0 {
-		t.Fatalf("unrun inspection = %#v", byCase["case.unrun"])
+	if byCase[fixture.unrunCaseID].Ready || byCase[fixture.unrunCaseID].SuggestedAction != "add-runnable-source" || len(byCase[fixture.unrunCaseID].Issues) == 0 {
+		t.Fatalf("%s unrun inspection = %#v", label, byCase[fixture.unrunCaseID])
 	}
 
-	textOut := runCLI(t, "case", "suite", "inspect", "--profile", profileDir, "--tag", "regression")
-	for _, want := range []string{"Case Suite Inspection", "Total: 3 Ready: 2 Blocked: 1", "case.unrun", "add-runnable-source"} {
+	textOut := runCLI(t, "case", "suite", "inspect", "--profile", fixture.profileDir, "--tag", "regression")
+	for _, want := range []string{"Case Suite Inspection", "Total: 3 Ready: 2 Blocked: 1", fixture.unrunCaseID, "add-runnable-source"} {
 		if !strings.Contains(textOut, want) {
-			t.Fatalf("inspection text missing %q:\n%s", want, textOut)
+			t.Fatalf("%s inspection text missing %q:\n%s", label, want, textOut)
 		}
 	}
 }
