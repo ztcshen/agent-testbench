@@ -130,6 +130,17 @@ you want a fixed local report directory. When `composeFile` is recorded, the
 file must exist under `--workspace` after optional repository preparation;
 restore fails before invoking Docker if it is missing.
 
+Every restore attempt writes a compact diagnostic back to the selected Store's
+Environment Catalog entry. `summary.lastRestore` is the quick pointer, and
+`summary.restoreAttempts` keeps the most recent 20 attempts. The summary
+includes restore id, phase, preflight status, repository actions, Docker
+action/cleanup status, health check counts, workflow action, and next actions.
+It is intentionally not full Evidence: full command output, workflow reports,
+and runtime logs stay in the existing local report/Evidence paths, and the
+summary must not contain credentials, raw DSNs, or full logs. This keeps
+dry-runs, blocked cleanup attempts, and successful executions visible through
+`environment inspect` and the control-plane API.
+
 For a colleague-machine simulation, add `--clean-docker-state` during dry-run
 review to include a Compose-scoped cleanup plan before startup. Add
 `--clean-docker-images` only when local images should also be removed with the

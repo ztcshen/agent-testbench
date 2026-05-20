@@ -41,6 +41,7 @@ import (
 )
 
 const version = "0.1.0"
+const environmentRestoreAttemptLimit = 20
 
 var postgresSchemaStatus = postgres.SchemaStatus
 var postgresUpgradeSchema = postgres.UpgradeSchema
@@ -593,11 +594,13 @@ func runEnvironmentBootstrap(ctx context.Context, args []string) error {
 
 type environmentRestoreReport struct {
 	OK                   bool                           `json:"ok"`
+	RestoreID            string                         `json:"restoreId"`
 	Executed             bool                           `json:"executed"`
 	EnvironmentID        string                         `json:"environmentId"`
 	VerificationWorkflow string                         `json:"verificationWorkflow"`
 	Workspace            string                         `json:"workspace"`
 	Environment          map[string]any                 `json:"environment,omitempty"`
+	Error                string                         `json:"error,omitempty"`
 	Repos                []environmentRestoreRepoReport `json:"repos"`
 	Compose              map[string]any                 `json:"compose"`
 	HealthChecks         []any                          `json:"healthChecks"`
@@ -782,8 +785,10 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 	specs := environmentRestoreRepoSpecs(env, workspace)
 	compose := jsonObjectString(env.ComposeJSON)
 	healthChecks := jsonArrayString(env.HealthChecksJSON)
+	attemptedAt := time.Now().UTC()
 	report := environmentRestoreReport{
 		OK:                   true,
+		RestoreID:            "restore." + safeReportID(env.ID) + "." + attemptedAt.Format("20060102T150405.000000000Z"),
 		Executed:             execute,
 		EnvironmentID:        env.ID,
 		VerificationWorkflow: workflowID,
@@ -835,29 +840,187 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 			env.TopologyComplete = false
 			env.Verified = false
 			env.Status = "verification-recorded"
-			env.UpdatedAt = time.Now().UTC()
-			report.Environment = environmentPayload(env)
-			if err := environmentRestoreUpdateEnvironment(ctx, workflowOptions.StoreURL, env); err != nil {
-				report.OK = false
-				report.Workflow.OK = false
-				report.Workflow.Error = err.Error()
-			}
 		}
 	}
 	if !execute {
 		report.NextActions = append([]string{"review the Docker Compose plan, then rerun with --execute"}, report.NextActions...)
 	}
+	if strings.TrimSpace(workflowOptions.StoreURL) != "" {
+		persisted, err := environmentRestorePersistEnvironment(ctx, workflowOptions.StoreURL, env, report, attemptedAt)
+		if err != nil {
+			report.OK = false
+			report.Error = err.Error()
+			if report.Workflow.Action == "run-verification-workflow" {
+				report.Workflow.OK = false
+				report.Workflow.Error = err.Error()
+			}
+		} else {
+			report.Environment = environmentPayload(persisted)
+		}
+	}
 	return report, nil
 }
 
-func environmentRestoreUpdateEnvironment(ctx context.Context, storeURL string, env store.Environment) error {
+func environmentRestorePersistEnvironment(ctx context.Context, storeURL string, env store.Environment, report environmentRestoreReport, attemptedAt time.Time) (store.Environment, error) {
+	env.SummaryJSON = environmentRestoreSummaryJSON(env.SummaryJSON, report, attemptedAt)
+	env.UpdatedAt = time.Now().UTC()
 	runtime, err := openStore(ctx, storeURL)
 	if err != nil {
-		return err
+		return env, err
 	}
 	defer func() { _ = runtime.Close() }()
-	_, err = runtime.UpsertEnvironment(ctx, env)
-	return err
+	return runtime.UpsertEnvironment(ctx, env)
+}
+
+func environmentRestoreSummaryJSON(existing string, report environmentRestoreReport, attemptedAt time.Time) string {
+	summary := jsonObjectString(existing)
+	finishedAt := time.Now().UTC()
+	lastRestore := map[string]any{
+		"id":                   report.RestoreID,
+		"attemptedAt":          attemptedAt.Format(time.RFC3339Nano),
+		"finishedAt":           finishedAt.Format(time.RFC3339Nano),
+		"durationMs":           maxInt64(0, finishedAt.Sub(attemptedAt).Milliseconds()),
+		"ok":                   report.OK,
+		"executed":             report.Executed,
+		"phase":                environmentRestorePhase(report),
+		"environmentId":        report.EnvironmentID,
+		"verificationWorkflow": report.VerificationWorkflow,
+		"workspace":            report.Workspace,
+		"preflight": map[string]any{
+			"ok":         report.Preflight.OK,
+			"tools":      environmentRestoreSummaryTools(report.Preflight.Tools),
+			"heavySteps": report.Preflight.HeavySteps,
+		},
+		"repositories": environmentRestoreSummaryRepos(report.Repos),
+		"docker":       environmentRestoreSummaryDocker(report.Docker),
+		"workflow": map[string]any{
+			"action":     report.Workflow.Action,
+			"ok":         report.Workflow.OK,
+			"workflowId": report.Workflow.WorkflowID,
+			"runId":      report.Workflow.RunID,
+			"outputDir":  report.Workflow.OutputDir,
+			"counts":     report.Workflow.Counts,
+			"error":      report.Workflow.Error,
+		},
+		"environmentMutation": map[string]any{
+			"lastVerificationRunId":  report.Workflow.RunID,
+			"lastVerificationStatus": statusText(report.Workflow.OK),
+			"evidenceComplete":       report.Workflow.Action == "run-verification-workflow" && report.Workflow.OK,
+			"topologyComplete":       false,
+			"verified":               false,
+		},
+		"nextActions": report.NextActions,
+	}
+	if strings.TrimSpace(report.Error) != "" {
+		lastRestore["error"] = report.Error
+	}
+	summary["lastRestore"] = lastRestore
+	summary["restoreAttempts"] = appendRestoreAttemptSummary(summary["restoreAttempts"], lastRestore)
+	return mustCompactJSON(summary)
+}
+
+func appendRestoreAttemptSummary(existing any, attempt map[string]any) []any {
+	out := []any{}
+	if values, ok := existing.([]any); ok {
+		out = append(out, values...)
+	}
+	out = append(out, attempt)
+	if len(out) > environmentRestoreAttemptLimit {
+		out = out[len(out)-environmentRestoreAttemptLimit:]
+	}
+	return out
+}
+
+func environmentRestorePhase(report environmentRestoreReport) string {
+	if report.OK {
+		return "completed"
+	}
+	if !report.Preflight.OK {
+		return "preflight"
+	}
+	for _, item := range report.Repos {
+		if !item.OK {
+			return "repository"
+		}
+	}
+	if !report.Docker.OK {
+		for _, item := range report.Docker.HealthChecks {
+			if !item.OK {
+				return "health-check"
+			}
+		}
+		return "docker"
+	}
+	if report.Workflow.Action == "run-verification-workflow" && !report.Workflow.OK {
+		return "workflow"
+	}
+	if strings.TrimSpace(report.Error) != "" {
+		return "persist"
+	}
+	return "completed"
+}
+
+func environmentRestoreSummaryTools(tools []environmentRestorePreflightTool) []map[string]any {
+	out := make([]map[string]any, 0, len(tools))
+	for _, item := range tools {
+		out = append(out, map[string]any{
+			"name":     item.Name,
+			"required": item.Required,
+			"ok":       item.OK,
+			"error":    item.Error,
+		})
+	}
+	return out
+}
+
+func environmentRestoreSummaryRepos(repos []environmentRestoreRepoReport) []map[string]any {
+	out := make([]map[string]any, 0, len(repos))
+	for _, item := range repos {
+		out = append(out, map[string]any{
+			"serviceId": item.ServiceID,
+			"action":    item.Action,
+			"ok":        item.OK,
+			"exists":    item.Exists,
+			"branch":    item.Branch,
+			"ref":       item.Ref,
+			"checkout":  item.Checkout,
+			"error":     item.Error,
+		})
+	}
+	return out
+}
+
+func environmentRestoreSummaryDocker(report environmentRestoreDockerReport) map[string]any {
+	passedHealth := 0
+	for _, item := range report.HealthChecks {
+		if item.OK {
+			passedHealth++
+		}
+	}
+	out := map[string]any{
+		"action":         report.Action,
+		"ok":             report.OK,
+		"composeFile":    report.ComposeFile,
+		"commandCount":   len(report.Commands),
+		"healthChecks":   len(report.HealthChecks),
+		"healthPassed":   passedHealth,
+		"cleanup":        environmentRestoreSummaryCleanup(report.Cleanup),
+		"error":          report.Error,
+		"capturedOutput": len(report.Output),
+	}
+	return out
+}
+
+func environmentRestoreSummaryCleanup(report environmentRestoreDockerCleanupReport) map[string]any {
+	return map[string]any{
+		"requested":          report.Requested,
+		"allowed":            report.Allowed,
+		"includeImages":      report.IncludeImages,
+		"action":             report.Action,
+		"reviewCommandCount": len(report.BackupCommands),
+		"commandCount":       len(report.Commands),
+		"error":              report.Error,
+	}
 }
 
 func environmentRestoreRepoSpecs(env store.Environment, workspace string) []environmentRestoreRepoSpec {
@@ -1486,6 +1649,12 @@ func printEnvironmentRestoreReport(report environmentRestoreReport) {
 	fmt.Printf("Executed: %t\n", report.Executed)
 	fmt.Printf("Workspace: %s\n", report.Workspace)
 	fmt.Printf("Verification Workflow: %s\n", report.VerificationWorkflow)
+	if report.RestoreID != "" {
+		fmt.Printf("Restore ID: %s\n", report.RestoreID)
+	}
+	if report.Error != "" {
+		fmt.Printf("Error: %s\n", report.Error)
+	}
 	for _, repo := range report.Repos {
 		state := repo.Action
 		if !repo.OK {
@@ -5415,6 +5584,13 @@ func truncateReportText(value string, limit int) string {
 		return value[:limit]
 	}
 	return value[:limit-3] + "..."
+}
+
+func maxInt64(a int64, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func safeReportID(value string) string {

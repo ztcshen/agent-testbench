@@ -675,9 +675,10 @@ func TestEnvironmentRestoreClonesRemoteReposForVerifiedWorkflow(t *testing.T) {
 
 	executeOut := runCLIWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--json", "env.restore")
 	var executed struct {
-		OK       bool `json:"ok"`
-		Executed bool `json:"executed"`
-		Repos    []struct {
+		OK        bool   `json:"ok"`
+		RestoreID string `json:"restoreId"`
+		Executed  bool   `json:"executed"`
+		Repos     []struct {
 			Action string `json:"action"`
 			OK     bool   `json:"ok"`
 		} `json:"repos"`
@@ -714,6 +715,46 @@ func TestEnvironmentRestoreClonesRemoteReposForVerifiedWorkflow(t *testing.T) {
 	}
 	if raw, err := os.ReadFile(filepath.Join(expectedCheckout, "README.md")); err != nil || !strings.Contains(string(raw), "restore fixture") {
 		t.Fatalf("restored checkout missing fixture file raw=%q err=%v", raw, err)
+	}
+	inspectOut := runCLI(t, "environment", "inspect", "--store", "sqlite://"+storePath, "--json", "env.restore")
+	var inspected struct {
+		Environment struct {
+			Summary struct {
+				LastRestore struct {
+					ID                   string `json:"id"`
+					OK                   bool   `json:"ok"`
+					Executed             bool   `json:"executed"`
+					Phase                string `json:"phase"`
+					VerificationWorkflow string `json:"verificationWorkflow"`
+					Docker               struct {
+						Action       string `json:"action"`
+						OK           bool   `json:"ok"`
+						HealthChecks int    `json:"healthChecks"`
+						HealthPassed int    `json:"healthPassed"`
+					} `json:"docker"`
+					Repositories []struct {
+						ServiceID string `json:"serviceId"`
+						Action    string `json:"action"`
+						OK        bool   `json:"ok"`
+					} `json:"repositories"`
+				} `json:"lastRestore"`
+				RestoreAttempts []struct {
+					ID    string `json:"id"`
+					Phase string `json:"phase"`
+				} `json:"restoreAttempts"`
+			} `json:"summary"`
+		} `json:"environment"`
+	}
+	if err := json.Unmarshal([]byte(inspectOut), &inspected); err != nil {
+		t.Fatalf("decode restored environment inspect json: %v\n%s", err, inspectOut)
+	}
+	lastRestore := inspected.Environment.Summary.LastRestore
+	if lastRestore.ID != executed.RestoreID || !lastRestore.OK || !lastRestore.Executed || lastRestore.Phase != "completed" || lastRestore.VerificationWorkflow != "workflow.core-10" || lastRestore.Docker.Action != "run-docker-compose" || !lastRestore.Docker.OK || lastRestore.Docker.HealthChecks != 1 || lastRestore.Docker.HealthPassed != 1 || len(lastRestore.Repositories) != 1 || lastRestore.Repositories[0].Action != "clone" || !lastRestore.Repositories[0].OK {
+		t.Fatalf("persisted restore summary = %#v; executed restore id=%s", lastRestore, executed.RestoreID)
+	}
+	attempts := inspected.Environment.Summary.RestoreAttempts
+	if len(attempts) != 2 || attempts[0].ID == attempts[1].ID || attempts[1].ID != executed.RestoreID || attempts[1].Phase != "completed" {
+		t.Fatalf("persisted restore attempts = %#v; executed restore id=%s", attempts, executed.RestoreID)
 	}
 }
 
@@ -951,6 +992,39 @@ func TestEnvironmentRestoreBlocksDockerCleanupWithoutExplicitAllow(t *testing.T)
 				t.Fatalf("blocked cleanup should not run docker command %q:\n%s", forbidden, calls)
 			}
 		}
+	}
+	inspectOut := runCLI(t, "environment", "inspect", "--store", "sqlite://"+storePath, "--json", "env.cleanup.block")
+	var inspected struct {
+		Environment struct {
+			Summary struct {
+				LastRestore struct {
+					OK     bool   `json:"ok"`
+					Phase  string `json:"phase"`
+					Docker struct {
+						Action  string `json:"action"`
+						OK      bool   `json:"ok"`
+						Cleanup struct {
+							Requested bool   `json:"requested"`
+							Action    string `json:"action"`
+							Error     string `json:"error"`
+						} `json:"cleanup"`
+					} `json:"docker"`
+				} `json:"lastRestore"`
+				RestoreAttempts []struct {
+					Phase string `json:"phase"`
+				} `json:"restoreAttempts"`
+			} `json:"summary"`
+		} `json:"environment"`
+	}
+	if err := json.Unmarshal([]byte(inspectOut), &inspected); err != nil {
+		t.Fatalf("decode cleanup block inspect json: %v\n%s", err, inspectOut)
+	}
+	lastRestore := inspected.Environment.Summary.LastRestore
+	if lastRestore.OK || lastRestore.Phase != "docker" || lastRestore.Docker.OK || lastRestore.Docker.Action != "plan-docker-compose" || !lastRestore.Docker.Cleanup.Requested || lastRestore.Docker.Cleanup.Action != "cleanup-blocked" || !strings.Contains(lastRestore.Docker.Cleanup.Error, "--allow-destructive-docker-cleanup") {
+		t.Fatalf("persisted blocked cleanup summary = %#v", lastRestore)
+	}
+	if len(inspected.Environment.Summary.RestoreAttempts) != 1 || inspected.Environment.Summary.RestoreAttempts[0].Phase != "docker" {
+		t.Fatalf("persisted blocked cleanup attempts = %#v", inspected.Environment.Summary.RestoreAttempts)
 	}
 }
 

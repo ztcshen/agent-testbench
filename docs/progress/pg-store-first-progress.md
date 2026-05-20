@@ -1585,7 +1585,7 @@ Incomplete work:
 
 ## 2026-05-20 Environment Restore Goal Ledger
 
-Estimated overall new-machine environment restore progress: 95%.
+Estimated overall new-machine environment restore progress: 96%.
 
 Completed evidence:
 
@@ -1637,6 +1637,12 @@ Completed evidence:
 - Documentation now repeats the hard boundary that cleanup targets only the
   recorded Compose project and must not clean or host the sandbox PostgreSQL
   control-plane Store.
+- Restore attempts now persist compact diagnostics back into the selected
+  Environment Catalog entry: `summary.lastRestore` points at the latest attempt
+  and `summary.restoreAttempts` keeps the most recent 20 attempts with restore
+  id, phase, preflight, repository actions, Docker/cleanup status, health check
+  counts, workflow action, and next actions for later `environment inspect` or
+  API review.
 
 Latest light validation:
 
@@ -1649,6 +1655,8 @@ Latest light validation:
 - `go test ./cmd/otsandbox -run 'TestEnvironmentRestore(ChecksOutRequestedRefForExistingCheckout|DetachesExistingCheckoutAlreadyAtRef|PreflightRequiresGitForExistingCheckoutRef|ChecksOutRequestedRefAfterClone|RejectsExistingCheckoutWithDifferentOrigin|PullsExistingCheckoutWhenRequested)' -count=1`
 - `go test ./cmd/otsandbox -run 'TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL|TestEnvironmentRestore(PlansDockerCleanupWithoutExecuting|BlocksDockerCleanupWithoutExplicitAllow|RunsAllowedDockerCleanupBeforeStartup|HonorsComposeOptionsFromStore|FailsBeforeDockerWhenComposeFileIsMissing)' -count=1`
 - `go test ./cmd/otsandbox -run 'TestEnvironmentRestore' -count=1`
+- `go test ./cmd/otsandbox -run 'TestEnvironmentRestore(ClonesRemoteReposForVerifiedWorkflow|BlocksDockerCleanupWithoutExplicitAllow)' -count=1`
+- `go test ./cmd/otsandbox -run 'TestEnvironmentRestore' -count=1`
 - `rg -n -i 'fall''back' . --glob '!node_modules/**'`
 - `git diff --check`
 
@@ -1658,10 +1666,10 @@ Incomplete work:
   heavy validation pass that backs up/deletes current Docker containers/images
   or otherwise simulates a clean colleague machine.
 - Restore still needs richer provider hardening for GitHub/GitLab tokens,
-  submodules, auth prompts, and persisted restore-run diagnostics.
-- Docker restore still needs persisted restore-run diagnostics and a real
-  operator-approved clean-machine proof; destructive cleanup policy guardrails
-  are now present at CLI level but not live-validated against real Docker state.
+  submodules, and auth prompts.
+- Docker restore still needs a real operator-approved clean-machine proof;
+  destructive cleanup policy guardrails are now present at CLI level but not
+  live-validated against real Docker state.
 - Health checks are still HTTP GET 2xx only; future work should add Compose
   service health, port probes, command probes, dependency ordering, and more
   durable restore-run records.
