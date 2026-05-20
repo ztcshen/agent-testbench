@@ -295,7 +295,7 @@ func TestDailyStoreReferenceRejectsLegacySQLiteStoreURL(t *testing.T) {
 		if err == nil {
 			t.Fatalf("daily Store reference should reject legacy SQLite store URL %q", legacyStoreURL)
 		}
-		for _, want := range []string{"--store-url", "daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://", "mysql://"} {
+		for _, want := range []string{"--store-url", "daily commands require PostgreSQL or MySQL Store", "SQLite", "store config set NAME --url postgres://", "store config set NAME --url mysql://"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Fatalf("daily Store reference error missing %q: %v", want, err)
 			}
@@ -318,7 +318,7 @@ func TestDailyStoreReferenceRejectsNamedSQLiteConfig(t *testing.T) {
 	if err == nil {
 		t.Fatal("daily Store reference should reject named SQLite config")
 	}
-	for _, want := range []string{`Store config "legacy-local"`, "daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://", "mysql://"} {
+	for _, want := range []string{`Store config "legacy-local"`, "daily commands require PostgreSQL or MySQL Store", "SQLite", "store config set NAME --url postgres://", "store config set NAME --url mysql://"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("daily Store reference error missing %q: %v", want, err)
 		}

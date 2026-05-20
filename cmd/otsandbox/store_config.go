@@ -48,7 +48,7 @@ func dailyStoreRequiresSQLStoreError(name string, backend string) error {
 	} else if !strings.HasPrefix(name, "--") {
 		name = fmt.Sprintf("Store config %q", name)
 	}
-	return fmt.Errorf("%s uses %s; daily commands require PostgreSQL or MySQL Store. Use `otsandbox store config set NAME --url postgres://...` or `mysql://...`, then `otsandbox store use NAME`; use SQLite only through migration/compatibility commands", name, backend)
+	return fmt.Errorf("%s uses %s; daily commands require PostgreSQL or MySQL Store. Use `otsandbox store config set NAME --url postgres://...` or `otsandbox store config set NAME --url mysql://...`, then `otsandbox store use NAME`; use SQLite only through migration/compatibility commands", name, backend)
 }
 
 func runStoreConfig(args []string) error {

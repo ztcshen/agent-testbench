@@ -584,3 +584,30 @@ Current blocker:
   `npm run release-check:mysql-real`.
 - Daily CLI/API named active Store parity still has deeper DSN-gated coverage
   to add beyond this Store-management slice.
+
+## 2026-05-21 SQLite Daily Rejection MySQL Guidance Slice
+
+Progress: `[###################-] 97%`
+
+Implemented:
+
+- Tightened the daily Store SQLite rejection guidance so both PostgreSQL and
+  MySQL setup paths are complete copyable commands.
+- Updated the legacy `--store-url` SQLite rejection and named SQLite config
+  rejection tests to require `store config set NAME --url mysql://...`, not only
+  a bare MySQL DSN fragment.
+- Kept the daily path boundary unchanged: PostgreSQL and MySQL are valid daily
+  Store backends; SQLite stays explicit compatibility/migration only.
+
+Validated:
+
+- `go test ./cmd/otsandbox -run '^(TestDailyStoreReferenceRejectsLegacySQLiteStoreURL|TestDailyStoreReferenceRejectsNamedSQLiteConfig|TestEnvironmentCommandsRejectActiveSQLiteStore|TestCaseReadCommandsRejectActiveSQLiteStore|TestWorkflowRunReadCommandsRejectActiveSQLiteStore|TestEvidenceReadCommandsRejectActiveSQLiteStore|TestDiscoverCommandsRejectActiveSQLiteStore)$' -count=1`
+
+Current blocker:
+
+- Final completion still requires a real dedicated company MySQL Store DSN for
+  `npm run release-check:mysql-real`.
+- Daily CLI/API named active Store parity still has deeper DSN-gated coverage
+  to add beyond Store guidance.
+- A non-blocking scan found follow-up MySQL guidance cleanup in demo/share docs
+  and `tools/examples/api-case-demo.mjs`; that is queued as a separate slice.
