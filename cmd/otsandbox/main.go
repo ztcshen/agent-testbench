@@ -1414,7 +1414,11 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 		}
 	}
 	if !execute {
-		report.NextActions = append([]string{"review the Docker Compose plan, then rerun with --execute"}, report.NextActions...)
+		nextAction := "review the Docker Compose plan, then rerun with --execute"
+		if cleanupOptions.AssumeCleanDocker {
+			nextAction = "run this environment on the colleague machine with --execute after reviewing the clean-machine Docker plan"
+		}
+		report.NextActions = append([]string{nextAction}, report.NextActions...)
 	}
 	report.Readiness = environmentRestoreReadinessReport(report, packageSpec, specs, cleanupOptions)
 	if !report.Readiness.OK {
@@ -2516,6 +2520,11 @@ func environmentRestoreReadinessReport(report environmentRestoreReport, packageS
 	if report.Executed {
 		readiness.Action = "ready-for-workflow-verification"
 		readiness.NextStep = "run the anchored async environment acceptance workflow and collect Evidence/topology"
+		return readiness
+	}
+	if cleanupOptions.AssumeCleanDocker {
+		readiness.Action = "ready-for-clean-machine-execute"
+		readiness.NextStep = "run the same restore on the colleague machine with --execute; this dry-run did not delete or reuse local Docker containers"
 		return readiness
 	}
 	readiness.NextStep = "review the plan, then ask for operator approval before destructive Docker cleanup or image removal"

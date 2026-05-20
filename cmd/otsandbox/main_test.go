@@ -2450,6 +2450,12 @@ func TestEnvironmentRestoreAssumeCleanDockerIgnoresLocalContainerConflicts(t *te
 	if !restoreTypedReadinessHasItem(report.Readiness.Items, "docker-container-conflicts", true, "clean-machine dry-run") {
 		t.Fatalf("readiness should document clean-machine assumption: %#v", report.Readiness.Items)
 	}
+	if report.Readiness.Action != "ready-for-clean-machine-execute" || !strings.Contains(report.Readiness.NextStep, "--execute") {
+		t.Fatalf("clean-machine readiness should point to execute: %#v", report.Readiness)
+	}
+	if len(report.NextActions) == 0 || !strings.Contains(report.NextActions[0], "colleague machine") {
+		t.Fatalf("clean-machine next actions should point to colleague machine: %#v", report.NextActions)
+	}
 }
 
 func TestEnvironmentRestoreCanAdoptExistingContainers(t *testing.T) {

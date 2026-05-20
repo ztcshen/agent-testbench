@@ -2332,3 +2332,14 @@ Remote source policy slice:
   batches and 24 health gates, seven service repositories are ready to clone or
   validate before Docker, and the persisted environment summary is about
   27 KB.
+- 2026-05-20T09:47Z implementation slice: clean-machine dry-run success now
+  points operators at the real next action instead of local cleanup review.
+  When `--assume-clean-docker` readiness is green, the readiness action is
+  `ready-for-clean-machine-execute`, `nextStep` says to run the same restore on
+  the colleague machine with `--execute`, and `nextActions` starts with the
+  colleague-machine execute instruction.
+- Verification: focused CLI coverage passed for the clean-machine assumption
+  path, and a real `local-pg` dry-run for `scf-chain-core10-local-docker`
+  returned `ok=true`, readiness `ok=true`, action
+  `ready-for-clean-machine-execute`, zero failed readiness items, three Docker
+  Compose plan commands, and seven repository preparations.
