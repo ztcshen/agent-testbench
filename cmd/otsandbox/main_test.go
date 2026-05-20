@@ -166,6 +166,21 @@ func TestStoreConfigCommandsManageActiveMySQLStore(t *testing.T) {
 	}
 }
 
+func TestStoreConfigSetRejectsInvalidMySQLDSNBeforePersisting(t *testing.T) {
+	configHome := t.TempDir()
+	env := []string{"OTSANDBOX_CONFIG_HOME=" + configHome}
+
+	out := runCLIFailsWithEnv(t, env, "store", "config", "set", "broken-mysql", "--url", "mysql://user:secret@example.com:3306")
+	if !strings.Contains(out, `store config "broken-mysql" has invalid mysql DSN`) || !strings.Contains(out, "requires database name") {
+		t.Fatalf("invalid mysql config output = %q", out)
+	}
+
+	listOut := runCLIWithEnv(t, env, "store", "config", "list", "--json")
+	if strings.Contains(listOut, "broken-mysql") || strings.Contains(listOut, "secret") {
+		t.Fatalf("invalid mysql config should not be persisted or leak credentials = %q", listOut)
+	}
+}
+
 func TestStoreStatusAndUpgradeRequireActiveStore(t *testing.T) {
 	env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}
 	for _, command := range []string{"status", "upgrade"} {

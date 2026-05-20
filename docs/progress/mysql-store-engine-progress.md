@@ -265,3 +265,26 @@ Current blocker:
   company MySQL release proof is still not executed. Once a dedicated company
   MySQL Store DSN is provided, run:
   `OTSANDBOX_REAL_MYSQL_STORE_DSN='mysql://user:pass@host:3306/otsandbox_smoke?tls=false' npm run release-check:mysql-real`.
+
+## 2026-05-21 MySQL Named Store DSN Guard Slice
+
+Progress: `[###################-] 97%`
+
+Implemented:
+
+- Moved backend-specific DSN validation into `store config set`, so named MySQL
+  Stores are rejected before persistence when the DSN is structurally invalid.
+- Added CLI coverage proving `mysql://host:3306` without a database name is
+  rejected, does not persist the named Store, and does not leak credentials.
+- Kept PostgreSQL and MySQL on the same named Store configuration path while
+  preserving SQLite as compatibility-only.
+
+Validated:
+
+- `go test ./cmd/otsandbox -run 'TestStoreConfigCommandsManageActiveMySQLStore|TestStoreConfigSetRejectsInvalidMySQLDSNBeforePersisting|TestStoreStatusSupportsMySQLURLs' -count=1`
+- `go test ./internal/store/mysql ./internal/store/open ./internal/store/sqlstore -count=1`
+
+Current blocker:
+
+- Still waiting for a dedicated company MySQL Store DSN to run
+  `npm run release-check:mysql-real` against the real test environment.

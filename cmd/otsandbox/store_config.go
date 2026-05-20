@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"open-test-sandbox/internal/store/mysql"
+	"open-test-sandbox/internal/store/postgres"
 )
 
 type storeConfigFile struct {
@@ -351,7 +354,23 @@ func newStoreConfigEntry(name string, rawURL string) (storeConfigEntry, error) {
 	if !isDailyStoreBackend(backend) {
 		return storeConfigEntry{}, fmt.Errorf("store config %q must use postgres://, postgresql://, or mysql://", name)
 	}
+	if err := validateStoreConfigURL(backend, rawURL); err != nil {
+		return storeConfigEntry{}, fmt.Errorf("store config %q has invalid %s DSN: %w", name, backend, err)
+	}
 	return storeConfigEntry{Name: name, URL: rawURL, Backend: backend}, nil
+}
+
+func validateStoreConfigURL(backend string, rawURL string) error {
+	switch backend {
+	case "postgres":
+		_, err := postgres.ParseConfigFromURL(rawURL)
+		return err
+	case "mysql":
+		_, err := mysql.ParseConfigFromURL(rawURL)
+		return err
+	default:
+		return fmt.Errorf("unsupported store backend %q", backend)
+	}
 }
 
 func storeBackendFromURL(rawURL string) (string, error) {
