@@ -8052,9 +8052,19 @@ func TestAuditCommandsRequireExplicitStoreOrOfflineReviewBeforeProfileLoad(t *te
 }
 
 func TestCaseDiscoverFiltersByMaintenanceMetadata(t *testing.T) {
-	profileDir := writeInterfaceNodeBatchReportProfile(t)
-	configureNamedPostgreSQLActiveStore(t, "daily-case-discover-pg")
-	runCLI(t, "config", "publish", "--from", profileDir)
+	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-case-discover-pg")
+	runCaseDiscoverFiltersByMaintenanceMetadata(t, storeRef, "PostgreSQL")
+}
+
+func TestCaseDiscoverUsesNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-case-discover-mysql")
+	runCaseDiscoverFiltersByMaintenanceMetadata(t, storeRef, "MySQL")
+}
+
+func runCaseDiscoverFiltersByMaintenanceMetadata(t *testing.T, _ string, label string) {
+	t.Helper()
+	fixture := writeUniqueInterfaceNodeBatchReportProfile(t)
+	runCLI(t, "config", "publish", "--from", fixture.profileDir)
 
 	out := runCLI(t,
 		"case", "discover",
@@ -8078,17 +8088,17 @@ func TestCaseDiscoverFiltersByMaintenanceMetadata(t *testing.T) {
 		} `json:"items"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode case discover json: %v\n%s", err, out)
+		t.Fatalf("decode %s case discover json: %v\n%s", label, err, out)
 	}
 	if !report.OK || report.Count != 1 || len(report.Items) != 1 {
-		t.Fatalf("case discover report = %#v", report)
+		t.Fatalf("%s case discover report = %#v", label, report)
 	}
 	item := report.Items[0]
-	if item.ID != "case.alpha.default" || item.NodeID != "node.alpha" || item.Priority != "p0" || item.Owner != "team-a" {
-		t.Fatalf("case discover item = %#v", item)
+	if item.ID != fixture.defaultCaseID || item.NodeID != fixture.nodeAlphaID || item.Priority != "p0" || item.Owner != "team-a" {
+		t.Fatalf("%s case discover item = %#v", label, item)
 	}
 	if strings.Join(item.Tags, ",") != "smoke,regression" || item.Description == "" {
-		t.Fatalf("case discover metadata = %#v", item)
+		t.Fatalf("%s case discover metadata = %#v", label, item)
 	}
 
 	filtered := runCLI(t, "case", "discover", "--filter", "variant", "--json")
@@ -8100,10 +8110,10 @@ func TestCaseDiscoverFiltersByMaintenanceMetadata(t *testing.T) {
 		} `json:"items"`
 	}
 	if err := json.Unmarshal([]byte(filtered), &filteredReport); err != nil {
-		t.Fatalf("decode filtered case discover json: %v\n%s", err, filtered)
+		t.Fatalf("decode %s filtered case discover json: %v\n%s", label, err, filtered)
 	}
-	if len(filteredReport.Items) != 1 || filteredReport.Items[0].ID != "case.alpha.variant" || filteredReport.Items[0].Owner != "team-b" {
-		t.Fatalf("filtered case discover = %#v", filteredReport.Items)
+	if len(filteredReport.Items) != 1 || filteredReport.Items[0].ID != fixture.variantCaseID || filteredReport.Items[0].Owner != "team-b" {
+		t.Fatalf("%s filtered case discover = %#v", label, filteredReport.Items)
 	}
 }
 
