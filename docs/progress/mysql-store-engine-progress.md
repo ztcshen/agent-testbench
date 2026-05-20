@@ -1503,3 +1503,30 @@ Current blocker:
   `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+
+## 2026-05-21 MySQL Baseline and Workflow Plan Parity Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Added env-gated MySQL named active Store coverage for baseline gate daily
+  commands: `baseline set`, `baseline get`, and missing gate rejection.
+- Added env-gated MySQL named active Store coverage for workflow planning:
+  text output, JSON output, and missing workflow rejection after
+  `config publish`.
+- Shared the existing PostgreSQL scenarios through helpers so PostgreSQL and
+  MySQL assert the same CLI behavior against the active Store.
+
+Validated:
+
+- `go test -v ./cmd/otsandbox -run 'Test(BaselineGateCommands(SetAndGetState|UseNamedMySQLActiveStore)|BaselineGetCommandRejectsMissingGate(WithMySQLStore)?|WorkflowPlanCommand(PrintsBoundSteps|PrintsBoundStepsWithMySQLStore|CanEmitJSONFromStore|CanEmitJSONFromMySQLStore|RejectsMissingWorkflow|RejectsMissingWorkflowWithMySQLStore))' -count=1`
+  compiled and passed locally; the env-gated PostgreSQL/MySQL cases skipped
+  because local DSNs were not exported in this shell.
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.

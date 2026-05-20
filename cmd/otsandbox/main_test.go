@@ -6142,28 +6142,48 @@ func TestExecutorPlanCommandReportsProfileDescriptors(t *testing.T) {
 
 func TestBaselineGateCommandsSetAndGetState(t *testing.T) {
 	configureNamedPostgreSQLActiveStore(t, "daily-baseline-pg")
+	runBaselineGateCommandsSetAndGetState(t, "PostgreSQL")
+}
+
+func TestBaselineGateCommandsUseNamedMySQLActiveStore(t *testing.T) {
+	configureNamedMySQLActiveStore(t, "daily-baseline-mysql")
+	runBaselineGateCommandsSetAndGetState(t, "MySQL")
+}
+
+func runBaselineGateCommandsSetAndGetState(t *testing.T, label string) {
+	t.Helper()
 	subjectID := uniqueTestID(t, "workflow.alpha")
 
 	out := runCLI(t, "baseline", "set", "--profile", "sample", "--subject", subjectID, "--status", "passed", "--required")
 	if !strings.Contains(out, "Baseline Gate: sample "+subjectID) || !strings.Contains(out, "Status: passed") {
-		t.Fatalf("baseline set output = %q", out)
+		t.Fatalf("%s baseline set output = %q", label, out)
 	}
 
 	out = runCLI(t, "baseline", "get", "--profile", "sample", "--subject", subjectID)
 	for _, want := range []string{"Baseline Gate: sample " + subjectID, "Status: passed", "Required: true"} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("baseline get output missing %q: %q", want, out)
+			t.Fatalf("%s baseline get output missing %q: %q", label, want, out)
 		}
 	}
 }
 
 func TestBaselineGetCommandRejectsMissingGate(t *testing.T) {
 	configureNamedPostgreSQLActiveStore(t, "daily-baseline-missing-pg")
+	runBaselineGetCommandRejectsMissingGate(t, "PostgreSQL")
+}
+
+func TestBaselineGetCommandRejectsMissingGateWithMySQLStore(t *testing.T) {
+	configureNamedMySQLActiveStore(t, "daily-baseline-missing-mysql")
+	runBaselineGetCommandRejectsMissingGate(t, "MySQL")
+}
+
+func runBaselineGetCommandRejectsMissingGate(t *testing.T, label string) {
+	t.Helper()
 	subjectID := uniqueTestID(t, "workflow.missing")
 
 	out := runCLIFails(t, "baseline", "get", "--profile", "sample", "--subject", subjectID)
 	if !strings.Contains(out, "baseline gate not found") || !strings.Contains(out, "sample "+subjectID) {
-		t.Fatalf("missing baseline gate output = %q", out)
+		t.Fatalf("%s missing baseline gate output = %q", label, out)
 	}
 }
 
@@ -6171,6 +6191,18 @@ func TestWorkflowPlanCommandPrintsBoundSteps(t *testing.T) {
 	dir := t.TempDir()
 	writeWorkflowProfile(t, dir)
 	configureNamedPostgreSQLActiveStore(t, "daily-workflow-plan-pg")
+	runWorkflowPlanCommandPrintsBoundSteps(t, dir, "PostgreSQL")
+}
+
+func TestWorkflowPlanCommandPrintsBoundStepsWithMySQLStore(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkflowProfile(t, dir)
+	configureNamedMySQLActiveStore(t, "daily-workflow-plan-mysql")
+	runWorkflowPlanCommandPrintsBoundSteps(t, dir, "MySQL")
+}
+
+func runWorkflowPlanCommandPrintsBoundSteps(t *testing.T, dir string, label string) {
+	t.Helper()
 	runCLI(t, "config", "publish", "--from", dir)
 
 	out := runCLI(t, "workflow", "plan", "--workflow", "workflow.alpha")
@@ -6183,7 +6215,7 @@ func TestWorkflowPlanCommandPrintsBoundSteps(t *testing.T) {
 		"Required: true",
 	} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("workflow plan output missing %q: %q", want, out)
+			t.Fatalf("%s workflow plan output missing %q: %q", label, want, out)
 		}
 	}
 }
@@ -6192,6 +6224,18 @@ func TestWorkflowPlanCommandCanEmitJSONFromStore(t *testing.T) {
 	profileDir := t.TempDir()
 	writeWorkflowProfile(t, profileDir)
 	configureNamedPostgreSQLActiveStore(t, "daily-workflow-plan-json-pg")
+	runWorkflowPlanCommandCanEmitJSONFromStore(t, profileDir, "PostgreSQL")
+}
+
+func TestWorkflowPlanCommandCanEmitJSONFromMySQLStore(t *testing.T) {
+	profileDir := t.TempDir()
+	writeWorkflowProfile(t, profileDir)
+	configureNamedMySQLActiveStore(t, "daily-workflow-plan-json-mysql")
+	runWorkflowPlanCommandCanEmitJSONFromStore(t, profileDir, "MySQL")
+}
+
+func runWorkflowPlanCommandCanEmitJSONFromStore(t *testing.T, profileDir string, label string) {
+	t.Helper()
 	runCLI(t, "config", "publish", "--from", profileDir)
 
 	out := runCLI(t, "workflow", "plan", "--workflow", "workflow.alpha", "--json")
@@ -6211,13 +6255,13 @@ func TestWorkflowPlanCommandCanEmitJSONFromStore(t *testing.T) {
 		} `json:"steps"`
 	}
 	if err := json.Unmarshal([]byte(out), &payload); err != nil {
-		t.Fatalf("decode workflow plan json: %v\n%s", err, out)
+		t.Fatalf("decode %s workflow plan json: %v\n%s", label, err, out)
 	}
 	if !payload.OK || payload.ProfileID != "sample" || payload.WorkflowID != "workflow.alpha" || payload.Counts.Steps != 1 || payload.Counts.RequiredSteps != 1 {
-		t.Fatalf("workflow plan json summary = %#v", payload)
+		t.Fatalf("%s workflow plan json summary = %#v", label, payload)
 	}
 	if len(payload.Steps) != 1 || payload.Steps[0].StepID != "step.one" || payload.Steps[0].NodeID != "node.alpha" || payload.Steps[0].CaseID != "case.alpha" {
-		t.Fatalf("workflow plan json steps = %#v", payload.Steps)
+		t.Fatalf("%s workflow plan json steps = %#v", label, payload.Steps)
 	}
 }
 
@@ -6225,11 +6269,23 @@ func TestWorkflowPlanCommandRejectsMissingWorkflow(t *testing.T) {
 	dir := t.TempDir()
 	writeWorkflowProfile(t, dir)
 	configureNamedPostgreSQLActiveStore(t, "daily-workflow-plan-missing-pg")
+	runWorkflowPlanCommandRejectsMissingWorkflow(t, dir, "PostgreSQL")
+}
+
+func TestWorkflowPlanCommandRejectsMissingWorkflowWithMySQLStore(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkflowProfile(t, dir)
+	configureNamedMySQLActiveStore(t, "daily-workflow-plan-missing-mysql")
+	runWorkflowPlanCommandRejectsMissingWorkflow(t, dir, "MySQL")
+}
+
+func runWorkflowPlanCommandRejectsMissingWorkflow(t *testing.T, dir string, label string) {
+	t.Helper()
 	runCLI(t, "config", "publish", "--from", dir)
 
 	out := runCLIFails(t, "workflow", "plan", "--workflow", "workflow.missing")
 	if !strings.Contains(out, "workflow not found") || !strings.Contains(out, "workflow.missing") {
-		t.Fatalf("missing workflow output = %q", out)
+		t.Fatalf("%s missing workflow output = %q", label, out)
 	}
 }
 
