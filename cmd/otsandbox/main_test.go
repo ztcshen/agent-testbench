@@ -472,6 +472,91 @@ func TestEnvironmentCommandsGateVerifiedDiscovery(t *testing.T) {
 	}
 }
 
+func TestWorkflowAcceptanceCLIStartsAndReadsAsyncReport(t *testing.T) {
+	var startPayload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/cases/batch-runs":
+			if err := json.NewDecoder(r.Body).Decode(&startPayload); err != nil {
+				t.Fatalf("decode start payload: %v", err)
+			}
+			writeTestJSON(t, w, http.StatusAccepted, map[string]any{
+				"ok":         true,
+				"batchRunId": "batch.acceptance.001",
+				"requestId":  "acceptance-001",
+				"workflowId": "workflow.core-10",
+				"status":     "running",
+				"total":      10,
+				"reportUrl":  "/api/cases/batch-runs/batch.acceptance.001",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/cases/batch-runs/batch.acceptance.001":
+			writeTestJSON(t, w, http.StatusOK, map[string]any{
+				"ok":         true,
+				"batchRunId": "batch.acceptance.001",
+				"workflowId": "workflow.core-10",
+				"status":     "passed",
+				"total":      10,
+				"acceptance": map[string]any{
+					"ok":               true,
+					"templateId":       "environment.workflow.skywalking.v1",
+					"workflowId":       "workflow.core-10",
+					"expectedSteps":    10,
+					"completedSteps":   10,
+					"passedSteps":      10,
+					"failedSteps":      0,
+					"topologyProvider": "skywalking",
+				},
+			})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	startOut := runCLI(t, "workflow", "acceptance", "start",
+		"--server-url", server.URL,
+		"--workflow", "workflow.core-10",
+		"--request-id", "acceptance-001",
+		"--base-url", "http://127.0.0.1:18080",
+		"--timeout-seconds", "30",
+		"--json",
+	)
+	var started struct {
+		OK         bool   `json:"ok"`
+		BatchRunID string `json:"batchRunId"`
+		WorkflowID string `json:"workflowId"`
+		Status     string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(startOut), &started); err != nil {
+		t.Fatalf("decode workflow acceptance start: %v\n%s", err, startOut)
+	}
+	if !started.OK || started.BatchRunID != "batch.acceptance.001" || started.WorkflowID != "workflow.core-10" || started.Status != "running" {
+		t.Fatalf("workflow acceptance start = %#v", started)
+	}
+	if startPayload["workflowId"] != "workflow.core-10" || startPayload["requestId"] != "acceptance-001" || startPayload["baseUrl"] != "http://127.0.0.1:18080" || startPayload["timeoutSeconds"] != float64(30) {
+		t.Fatalf("workflow acceptance start payload = %#v", startPayload)
+	}
+
+	reportOut := runCLI(t, "workflow", "acceptance", "report",
+		"--server-url", server.URL,
+		"--run", "batch.acceptance.001",
+		"--json",
+	)
+	var report struct {
+		Acceptance struct {
+			OK               bool   `json:"ok"`
+			TemplateID       string `json:"templateId"`
+			TopologyProvider string `json:"topologyProvider"`
+		} `json:"acceptance"`
+	}
+	if err := json.Unmarshal([]byte(reportOut), &report); err != nil {
+		t.Fatalf("decode workflow acceptance report: %v\n%s", err, reportOut)
+	}
+	if !report.Acceptance.OK || report.Acceptance.TemplateID != "environment.workflow.skywalking.v1" || report.Acceptance.TopologyProvider != "skywalking" {
+		t.Fatalf("workflow acceptance report = %#v", report.Acceptance)
+	}
+}
+
 func TestEnvironmentCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-environment-pg")
 	runID := "run.core-10." + time.Now().UTC().Format("20060102150405.000000000")
@@ -8011,6 +8096,15 @@ func mustJSON(t *testing.T, value any) string {
 	return string(raw)
 }
 
+func writeTestJSON(t *testing.T, w http.ResponseWriter, status int, value any) {
+	t.Helper()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		t.Fatalf("write json: %v", err)
+	}
+}
+
 func configureNamedPostgreSQLActiveStore(t *testing.T, name string) string {
 	t.Helper()
 	dsn := strings.TrimSpace(os.Getenv("OTSANDBOX_TEST_PG_DSN"))
@@ -8045,6 +8139,9 @@ func seedEnvironmentVerificationArtifacts(t *testing.T, storeRef string, runID s
 		ProfileID:  "sample",
 		WorkflowID: "workflow.core-10",
 		Status:     store.StatusPassed,
+		SummaryJSON: `{"acceptance":{"templateId":"environment.workflow.skywalking.v1","ok":true,"workflowId":"workflow.core-10",
+"expectedSteps":1,"completedSteps":1,"passedSteps":1,"failedSteps":0,"topologyProvider":"skywalking",
+"steps":[{"stepId":"step.core-10","caseId":"case.core-10","status":"passed","elapsedMs":12,"evidenceComplete":true,"topologyComplete":true}]}}`,
 		StartedAt:  now.Add(-time.Second),
 		FinishedAt: now,
 		CreatedAt:  now,

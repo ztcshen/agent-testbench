@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -291,6 +292,8 @@ Usage:
   otsandbox workflow step --run ID --step ID [--store NAME_OR_DSN] [--json]
   otsandbox workflow latest-step --workflow ID --step ID [--store NAME_OR_DSN] [--json]
   otsandbox workflow report --workflow ID [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--base-url URL] [--output-dir PATH] [--json]
+  otsandbox workflow acceptance start --server-url URL --workflow ID --request-id ID [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
+  otsandbox workflow acceptance report --server-url URL --run ID [--json]
   otsandbox baseline get --profile ID --subject ID [--store NAME_OR_DSN]
   otsandbox baseline set --profile ID --subject ID --status STATUS [--required] [--store NAME_OR_DSN]
   otsandbox template render [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] --template ID [--fixture ID]
@@ -5992,9 +5995,145 @@ func runWorkflow(args []string) error {
 		return runWorkflowLatestStep(context.Background(), args[1:])
 	case "report":
 		return runWorkflowReport(context.Background(), args[1:])
+	case "acceptance":
+		return runWorkflowAcceptance(context.Background(), args[1:])
 	default:
 		return fmt.Errorf("unknown workflow command: %s", args[0])
 	}
+}
+
+func runWorkflowAcceptance(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing workflow acceptance command")
+	}
+	switch args[0] {
+	case "start":
+		return runWorkflowAcceptanceStart(ctx, args[1:])
+	case "report":
+		return runWorkflowAcceptanceReport(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown workflow acceptance command: %s", args[0])
+	}
+}
+
+func runWorkflowAcceptanceStart(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("workflow acceptance start", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	serverURL := flags.String("server-url", "", "Running control plane base URL")
+	workflowID := flags.String("workflow", "", "Workflow id")
+	requestID := flags.String("request-id", "", "Acceptance request id")
+	baseURL := flags.String("base-url", "", "Base URL for live request execution")
+	evidenceDir := flags.String("evidence-dir", "", "Evidence output directory")
+	timeoutSeconds := flags.Int("timeout-seconds", 0, "Per-step timeout in seconds")
+	jsonOutput := flags.Bool("json", false, "Emit machine-readable JSON")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*serverURL) == "" || strings.TrimSpace(*workflowID) == "" || strings.TrimSpace(*requestID) == "" {
+		return errors.New("--server-url, --workflow, and --request-id are required")
+	}
+	payload := map[string]any{
+		"requestId":  strings.TrimSpace(*requestID),
+		"workflowId": strings.TrimSpace(*workflowID),
+	}
+	if strings.TrimSpace(*baseURL) != "" {
+		payload["baseUrl"] = strings.TrimSpace(*baseURL)
+	}
+	if strings.TrimSpace(*evidenceDir) != "" {
+		payload["evidenceDir"] = strings.TrimSpace(*evidenceDir)
+	}
+	if *timeoutSeconds > 0 {
+		payload["timeoutSeconds"] = *timeoutSeconds
+	}
+	result, err := postWorkflowAcceptanceJSON(ctx, workflowAcceptanceURL(*serverURL, "/api/cases/batch-runs"), payload)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(result)
+	}
+	printWorkflowAcceptanceStart(result)
+	return nil
+}
+
+func runWorkflowAcceptanceReport(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("workflow acceptance report", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	serverURL := flags.String("server-url", "", "Running control plane base URL")
+	runID := flags.String("run", "", "Acceptance batch run id")
+	jsonOutput := flags.Bool("json", false, "Emit machine-readable JSON")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*serverURL) == "" || strings.TrimSpace(*runID) == "" {
+		return errors.New("--server-url and --run are required")
+	}
+	result, err := fetchWorkflowAcceptanceJSON(ctx, workflowAcceptanceURL(*serverURL, "/api/cases/batch-runs/"+url.PathEscape(strings.TrimSpace(*runID))))
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(result)
+	}
+	printWorkflowAcceptanceReport(result)
+	return nil
+}
+
+func workflowAcceptanceURL(serverURL string, apiPath string) string {
+	return strings.TrimRight(strings.TrimSpace(serverURL), "/") + apiPath
+}
+
+func postWorkflowAcceptanceJSON(ctx context.Context, endpoint string, payload map[string]any) (map[string]any, error) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(raw)))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return doWorkflowAcceptanceJSON(req)
+}
+
+func fetchWorkflowAcceptanceJSON(ctx context.Context, endpoint string) (map[string]any, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	return doWorkflowAcceptanceJSON(req)
+}
+
+func doWorkflowAcceptanceJSON(req *http.Request) (map[string]any, error) {
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return payload, fmt.Errorf("%s %s failed with http status %d: %s", req.Method, req.URL.String(), resp.StatusCode, valueString(payload["error"]))
+	}
+	return payload, nil
+}
+
+func printWorkflowAcceptanceStart(payload map[string]any) {
+	fmt.Printf("Workflow Acceptance Run: %s\n", valueString(payload["batchRunId"]))
+	fmt.Printf("Workflow: %s\n", valueString(payload["workflowId"]))
+	fmt.Printf("Status: %s\n", valueString(payload["status"]))
+	fmt.Printf("Report: %s\n", valueString(payload["reportUrl"]))
+}
+
+func printWorkflowAcceptanceReport(payload map[string]any) {
+	acceptance := mapFromReportAny(payload["acceptance"])
+	fmt.Printf("Workflow Acceptance Report: %s\n", valueString(payload["batchRunId"]))
+	fmt.Printf("Workflow: %s\n", firstNonEmpty(valueString(acceptance["workflowId"]), valueString(payload["workflowId"])))
+	fmt.Printf("Status: %s\n", valueString(payload["status"]))
+	fmt.Printf("Accepted: %t\n", boolFromReportAny(acceptance["ok"]))
+	fmt.Printf("Template: %s\n", valueString(acceptance["templateId"]))
 }
 
 func runWorkflowStep(ctx context.Context, args []string) error {

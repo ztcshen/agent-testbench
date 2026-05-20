@@ -116,7 +116,7 @@ type caseSuiteImpactRunResponse struct {
 	Status     string                 `json:"status"`
 }
 
-func handleCaseSuiteImpactRun(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store, runner *apiCaseBatchRunner) {
+func handleCaseSuiteImpactRun(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store, runner *apiCaseBatchRunner, collector traceCollector) {
 	payload, err := readJSONPayload(r)
 	if err != nil {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json"})
@@ -141,7 +141,7 @@ func handleCaseSuiteImpactRun(w http.ResponseWriter, r *http.Request, bundle pro
 		TimeoutSeconds: impact.BatchRequest.TimeoutSeconds,
 		Overrides:      mapValue(payload["overrides"]),
 	}
-	report, status, err := startAPICaseBatchRun(r.Context(), bundle, runtime, runner, batchRequest)
+	report, status, err := startAPICaseBatchRun(r.Context(), bundle, runtime, runner, batchRequest, collector)
 	if err != nil {
 		writeJSONStatus(w, status, map[string]any{"ok": false, "error": err.Error(), "impact": impact})
 		return

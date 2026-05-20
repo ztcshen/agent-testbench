@@ -463,7 +463,7 @@ func NewWithOptions(bundle profile.Bundle, options Options) http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		handleCaseSuiteImpactRun(w, r, profiles.Current(), runtime, caseBatchRunner)
+		handleCaseSuiteImpactRun(w, r, profiles.Current(), runtime, caseBatchRunner, collector)
 	})
 	mux.HandleFunc("/api/replay/evidence", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -496,7 +496,7 @@ func NewWithOptions(bundle profile.Bundle, options Options) http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		handleAPICaseBatchRunStart(w, r, profiles.Current(), runtime, caseBatchRunner)
+		handleAPICaseBatchRunStart(w, r, profiles.Current(), runtime, caseBatchRunner, collector)
 	})
 	mux.HandleFunc("/api/cases/batch-runs/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

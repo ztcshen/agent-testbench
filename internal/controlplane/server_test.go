@@ -1111,6 +1111,66 @@ func TestServerManagesVerifiedEnvironmentCatalogFromStore(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed verification topology: %v", err)
 	}
+	stillDenied = postJSONResponse(t, server.URL+"/api/environments/env.team.api/publish-verified", `{}`, http.StatusConflict)
+	if !strings.Contains(fmt.Sprint(stillDenied["error"]), "acceptance report") {
+		t.Fatalf("publish without workflow acceptance report should be denied: %#v", stillDenied)
+	}
+	acceptedRunID := "run.core-10.accepted"
+	verified = postJSONResponse(t, server.URL+"/api/environments/env.team.api/verify", `{
+  "runId": "run.core-10.accepted",
+  "status": "passed",
+  "evidenceComplete": true,
+  "topologyComplete": true
+}`, http.StatusOK)
+	verifiedEnv = verified["environment"].(map[string]any)
+	if verifiedEnv["lastVerificationRunId"] != acceptedRunID {
+		t.Fatalf("accepted verification environment = %#v", verifiedEnv)
+	}
+	if _, err := s.CreateRun(ctx, store.Run{
+		ID:         acceptedRunID,
+		ProfileID:  "sample",
+		WorkflowID: "workflow.core-10",
+		Status:     store.StatusPassed,
+		SummaryJSON: `{"acceptance":{"templateId":"environment.workflow.skywalking.v1","ok":true,"workflowId":"workflow.core-10",
+"expectedSteps":1,"completedSteps":1,"passedSteps":1,"failedSteps":0,"topologyProvider":"skywalking",
+"steps":[{"stepId":"step.core-10","caseId":"case.core-10","status":"passed","elapsedMs":12,"evidenceComplete":true,"topologyComplete":true}]}}`,
+		StartedAt:  now.Add(-time.Second),
+		FinishedAt: now,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}); err != nil {
+		t.Fatalf("seed accepted verification run summary: %v", err)
+	}
+	if _, err := s.RecordEvidence(ctx, store.EvidenceRecord{
+		ID:         acceptedRunID + ".summary",
+		RunID:      acceptedRunID,
+		Kind:       "summary",
+		URI:        "store://verification/" + acceptedRunID + "/summary.json",
+		MediaType:  "application/json",
+		SHA256:     "verification-summary-sha256",
+		SizeBytes:  2,
+		Summary:    `{"status":"passed"}`,
+		Category:   "verification",
+		Visibility: "internal",
+		CreatedAt:  now,
+	}); err != nil {
+		t.Fatalf("seed accepted verification Evidence: %v", err)
+	}
+	if _, err := s.SaveTraceTopology(ctx, store.TraceTopology{
+		ID:            acceptedRunID + ".topology.skywalking",
+		WorkflowRunID: acceptedRunID,
+		WorkflowID:    "workflow.core-10",
+		StepID:        "step.core-10",
+		CaseID:        "case.core-10",
+		RequestID:     "request.core-10",
+		TraceID:       "trace.core-10",
+		Status:        "complete",
+		TopologyJSON:  `{"provider":"skywalking","status":"complete","traceId":"trace.core-10","spanCount":2,"confirmedEdges":[{"source":"service.entry","target":"service.worker"}],"observedNodes":["service.entry","service.worker"]}`,
+		TextTopology:  "service.entry -> service.worker",
+		CreatedAt:     now,
+	}); err != nil {
+		t.Fatalf("seed accepted verification topology: %v", err)
+	}
 
 	published := postJSONResponse(t, server.URL+"/api/environments/env.team.api/publish-verified", `{}`, http.StatusOK)
 	publishedEnv := published["environment"].(map[string]any)
@@ -7895,6 +7955,12 @@ func TestServerStartsAsyncAPICaseBatchRunForWorkflow(t *testing.T) {
 	if !report.OK || report.Status != store.StatusPassed || report.WorkflowID != "workflow.ten" || report.Completed != 10 || report.Passed != 10 || len(report.Cases) != 10 {
 		t.Fatalf("workflow batch report = %#v", report)
 	}
+	if report.Acceptance.TemplateID != "environment.workflow.skywalking.v1" || report.Acceptance.WorkflowID != "workflow.ten" || report.Acceptance.OK || report.Acceptance.ExpectedSteps != 10 || report.Acceptance.CompletedSteps != 10 || report.Acceptance.PassedSteps != 10 || report.Acceptance.TopologyProvider != "skywalking" {
+		t.Fatalf("workflow acceptance report should require SkyWalking topology: %#v", report.Acceptance)
+	}
+	if len(report.Acceptance.Steps) != 10 || !report.Acceptance.Steps[0].EvidenceComplete || report.Acceptance.Steps[0].TopologyComplete {
+		t.Fatalf("workflow acceptance steps = %#v", report.Acceptance.Steps)
+	}
 	if report.Cases[0].StepID != "step-01" || report.Cases[9].StepID != "step-10" {
 		t.Fatalf("workflow step order = %#v", report.Cases)
 	}
@@ -7912,6 +7978,112 @@ func TestServerStartsAsyncAPICaseBatchRunForWorkflow(t *testing.T) {
 	if batchRun.Status != store.StatusPassed || batchRun.WorkflowID != "workflow.ten" {
 		t.Fatalf("stored workflow batch run = %#v", batchRun)
 	}
+	var storedSummary struct {
+		Acceptance struct {
+			OK               bool   `json:"ok"`
+			TemplateID       string `json:"templateId"`
+			TopologyProvider string `json:"topologyProvider"`
+		} `json:"acceptance"`
+	}
+	if err := json.Unmarshal([]byte(batchRun.SummaryJSON), &storedSummary); err != nil {
+		t.Fatalf("decode stored workflow batch summary: %v", err)
+	}
+	if storedSummary.Acceptance.OK || storedSummary.Acceptance.TemplateID != "environment.workflow.skywalking.v1" || storedSummary.Acceptance.TopologyProvider != "skywalking" {
+		t.Fatalf("stored workflow acceptance summary = %#v", storedSummary.Acceptance)
+	}
+}
+
+func TestServerAsyncWorkflowAcceptancePassesWithSkyWalkingTopology(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Request-Id", "request.acceptance")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer target.Close()
+
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode provider request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(payload.Query, "queryBasicTraces"):
+			_, _ = w.Write([]byte(`{"data":{"queryBasicTraces":{"traces":[{"endpointNames":["GET:/v1/acceptance"],"duration":80,"start":"2026-05-20 0320","isError":false,"traceIds":["trace.acceptance"]}]}}}`))
+		case strings.Contains(payload.Query, "queryTrace"):
+			_, _ = w.Write([]byte(`{"data":{"queryTrace":{"spans":[{"traceId":"trace.acceptance","segmentId":"segment.entry","spanId":0,"parentSpanId":-1,"refs":[],"serviceCode":"service.entry","endpointName":"/v1/acceptance","type":"Entry","component":"Tomcat"},{"traceId":"trace.acceptance","segmentId":"segment.worker","spanId":0,"parentSpanId":-1,"refs":[{"traceId":"trace.acceptance","parentSegmentId":"segment.entry","parentSpanId":0,"type":"CrossProcess"}],"serviceCode":"service.worker","endpointName":"GET:/v1/acceptance","type":"Entry","component":"Server"}]}}}`))
+		default:
+			t.Fatalf("unexpected provider query: %s", payload.Query)
+		}
+	}))
+	defer provider.Close()
+
+	dir := t.TempDir()
+	casePath := filepath.Join(dir, "case-acceptance.json")
+	if err := os.WriteFile(casePath, []byte(`{
+  "id": "case.acceptance",
+  "title": "Acceptance Step",
+  "request": {"method": "GET", "path": "/v1/acceptance"},
+  "assertions": {"expectedStatusCodes": [200], "responseContains": ["ok"]}
+}`), 0o644); err != nil {
+		t.Fatalf("write api case: %v", err)
+	}
+	bundle := profile.Bundle{
+		ID:             "sample",
+		Workflows:      []profile.Workflow{{ID: "workflow.acceptance", DisplayName: "Acceptance Workflow"}},
+		InterfaceNodes: []profile.InterfaceNode{{ID: "node.acceptance", DisplayName: "Acceptance Node"}},
+		APICases: []profile.APICase{{
+			ID:          "case.acceptance",
+			DisplayName: "Acceptance Step",
+			NodeID:      "node.acceptance",
+			CasePath:    casePath,
+			BaseURL:     target.URL,
+			EvidenceDir: filepath.Join(dir, "evidence"),
+		}},
+		WorkflowBindings: []profile.WorkflowBinding{{
+			WorkflowID: "workflow.acceptance",
+			StepID:     "step.acceptance",
+			NodeID:     "node.acceptance",
+			CaseID:     "case.acceptance",
+			Required:   true,
+			SortOrder:  1,
+		}},
+	}
+	server := httptest.NewServer(controlplane.NewWithOptions(bundle, controlplane.Options{
+		Runtime:         s,
+		TraceGraphQLURL: provider.URL,
+	}))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/api/cases/batch-runs", "application/json", strings.NewReader(`{"requestId":"workflow-acceptance-001","workflowId":"workflow.acceptance"}`))
+	if err != nil {
+		t.Fatalf("post api case batch run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("api case batch run status = %d body=%s", resp.StatusCode, raw)
+	}
+	var created struct {
+		ReportURL string `json:"reportUrl"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode batch response: %v", err)
+	}
+	report := waitAPICaseBatchReport(t, server.URL+created.ReportURL)
+	if !report.Acceptance.OK || len(report.Acceptance.Steps) != 1 || !report.Acceptance.Steps[0].EvidenceComplete || !report.Acceptance.Steps[0].TopologyComplete {
+		t.Fatalf("workflow acceptance with SkyWalking = %#v", report.Acceptance)
+	}
 }
 
 type apiCaseBatchReportForTest struct {
@@ -7928,7 +8100,24 @@ type apiCaseBatchReportForTest struct {
 	Completed            int    `json:"completed"`
 	Passed               int    `json:"passed"`
 	Failed               int    `json:"failed"`
-	Nodes                []struct {
+	Acceptance           struct {
+		OK               bool   `json:"ok"`
+		TemplateID       string `json:"templateId"`
+		WorkflowID       string `json:"workflowId"`
+		ExpectedSteps    int    `json:"expectedSteps"`
+		CompletedSteps   int    `json:"completedSteps"`
+		PassedSteps      int    `json:"passedSteps"`
+		TopologyProvider string `json:"topologyProvider"`
+		Steps            []struct {
+			StepID           string `json:"stepId"`
+			CaseID           string `json:"caseId"`
+			Status           string `json:"status"`
+			ElapsedMs        int64  `json:"elapsedMs"`
+			EvidenceComplete bool   `json:"evidenceComplete"`
+			TopologyComplete bool   `json:"topologyComplete"`
+		} `json:"steps"`
+	} `json:"acceptance"`
+	Nodes []struct {
 		ID          string `json:"id"`
 		DisplayName string `json:"displayName"`
 		Operation   string `json:"operation"`

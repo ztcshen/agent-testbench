@@ -38,6 +38,9 @@ func ValidateEnvironmentPublishable(ctx context.Context, runtime store.Store, en
 	}
 	for _, row := range rows {
 		if completeSkyWalkingTopologyRow(row) {
+			if err := workflowAcceptancePassed(run.SummaryJSON, env.VerificationWorkflowID); err != nil {
+				return fmt.Errorf("environment %s is not publishable: %w", env.ID, err)
+			}
 			return nil
 		}
 	}

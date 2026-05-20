@@ -1701,6 +1701,41 @@ Manual self-test hold:
   for manual workbench verification at `http://127.0.0.1:58663/`.
 - Existing target Docker containers are still intact: no container/image
   deletion, cleanup, rebuild, or colleague-machine simulation has been run.
+- Manual run failure at 2026-05-20T03:14Z was caused by target services being
+  stopped, not by the control-plane page: step 1 attempted
+  `127.0.0.1:21116` and got connection refused.
+- Existing `scf-chain-sandbox` containers were started with Docker Compose
+  `start` only. No image pull, build, delete, cleanup, or recreated clean-machine
+  simulation was run. Dashboard then reported 9/9 services healthy and
+  `127.0.0.1:21116` was reachable.
+
+Acceptance report gate slice:
+
+- 2026-05-20T03:32:27Z: added the environment workflow acceptance report as a
+  pure report template, not a PostgreSQL-specific rule. The current template is
+  `environment.workflow.skywalking.v1` and explicitly requires real SkyWalking
+  topology for every workflow step.
+- Async workflow batch runs now persist an `acceptance` section with workflow
+  step count, completed/passed/failed counts, each step status and elapsed time,
+  indexed Evidence completeness, SkyWalking topology completeness, and the
+  final acceptance result.
+- When the control plane is configured with a SkyWalking GraphQL provider, async
+  workflow acceptance runs now collect real topology during the background
+  runner before computing the report result. If the provider is unavailable or
+  unset, the run records a trace topology post-process skip/failure and the
+  acceptance result remains false.
+- Added CLI surfaces for manual asynchronous acceptance flow against a running
+  control plane:
+  `workflow acceptance start --server-url URL --workflow ID --request-id ID`
+  and `workflow acceptance report --server-url URL --run ID`.
+- `environment publish-verified` now rejects a verified-ready environment when
+  the referenced run has Evidence and topology rows but lacks
+  `acceptance.ok=true` for the environment verification workflow.
+- Light validation for this slice:
+  `go test ./internal/controlplane -run 'TestServerStartsAsyncAPICaseBatchRunForWorkflow|TestServerManagesVerifiedEnvironmentCatalogFromStore'`;
+  `go test ./internal/controlplane -run 'TestServerAsyncWorkflowAcceptancePassesWithSkyWalkingTopology'`;
+  `go test ./cmd/otsandbox -run 'TestWorkflowAcceptanceCLIStartsAndReadsAsyncReport|TestEnvironmentCommandsGateVerifiedDiscovery|TestEnvironmentCommandsUseNamedPostgreSQLActiveStore'`;
+  `rg -n -i 'fall''back' . --glob '!node_modules/**'`.
 - Restore still needs richer provider hardening for GitHub/GitLab tokens,
   submodules, and auth prompts.
 - Docker restore still needs a real operator-approved clean-machine proof;

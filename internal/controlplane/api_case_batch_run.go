@@ -113,6 +113,7 @@ type apiCaseBatchRunReport struct {
 	FinishedAt           string                     `json:"finishedAt,omitempty"`
 	Nodes                []apiCaseBatchNodeReport   `json:"nodes,omitempty"`
 	Cases                []apiCaseBatchCaseReport   `json:"cases"`
+	Acceptance           workflowAcceptanceReport   `json:"acceptance,omitempty"`
 	Error                string                     `json:"error,omitempty"`
 	HTMLReportPath       string                     `json:"htmlReportPath,omitempty"`
 	HTMLReportURL        string                     `json:"htmlReportUrl,omitempty"`
@@ -168,7 +169,7 @@ func newAPICaseBatchRunner() *apiCaseBatchRunner {
 	return &apiCaseBatchRunner{runs: map[string]apiCaseBatchRunReport{}}
 }
 
-func handleAPICaseBatchRunStart(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store, runner *apiCaseBatchRunner) {
+func handleAPICaseBatchRunStart(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store, runner *apiCaseBatchRunner, collector traceCollector) {
 	payload, err := readJSONPayload(r)
 	if err != nil {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json"})
@@ -185,7 +186,7 @@ func handleAPICaseBatchRunStart(w http.ResponseWriter, r *http.Request, bundle p
 		TimeoutSeconds: intValue(payload["timeoutSeconds"]),
 		Overrides:      mapValue(payload["overrides"]),
 	}
-	report, status, err := startAPICaseBatchRun(r.Context(), bundle, runtime, runner, request)
+	report, status, err := startAPICaseBatchRun(r.Context(), bundle, runtime, runner, request, collector)
 	if err != nil {
 		writeJSONStatus(w, status, map[string]any{"ok": false, "error": err.Error()})
 		return
@@ -193,7 +194,7 @@ func handleAPICaseBatchRunStart(w http.ResponseWriter, r *http.Request, bundle p
 	writeJSONStatus(w, http.StatusAccepted, report)
 }
 
-func startAPICaseBatchRun(ctx context.Context, bundle profile.Bundle, runtime store.Store, runner *apiCaseBatchRunner, request apiCaseBatchRunRequest) (apiCaseBatchRunReport, int, error) {
+func startAPICaseBatchRun(ctx context.Context, bundle profile.Bundle, runtime store.Store, runner *apiCaseBatchRunner, request apiCaseBatchRunRequest, collector traceCollector) (apiCaseBatchRunReport, int, error) {
 	if request.RequestID == "" {
 		return apiCaseBatchRunReport{}, http.StatusBadRequest, errors.New("requestId is required")
 	}
@@ -268,7 +269,7 @@ func startAPICaseBatchRun(ctx context.Context, bundle profile.Bundle, runtime st
 	}
 	runner.save(report)
 
-	go runner.run(context.Background(), batchRunID, bundle.ID, request.WorkflowID, plans, runtime, bundle.FailureCategories)
+	go runner.run(context.Background(), batchRunID, bundle.ID, request.WorkflowID, plans, runtime, bundle.FailureCategories, collector)
 	return report, http.StatusAccepted, nil
 }
 
@@ -319,7 +320,7 @@ func handleAPICaseBatchRunReport(w http.ResponseWriter, r *http.Request, runner 
 	writeJSON(w, report)
 }
 
-func (r *apiCaseBatchRunner) run(ctx context.Context, batchRunID string, profileID string, workflowID string, plans []apiCaseBatchCasePlan, runtime store.Store, rules []profile.FailureCategoryRule) {
+func (r *apiCaseBatchRunner) run(ctx context.Context, batchRunID string, profileID string, workflowID string, plans []apiCaseBatchCasePlan, runtime store.Store, rules []profile.FailureCategoryRule, collector traceCollector) {
 	for index, plan := range plans {
 		caseCtx := ctx
 		var cancel context.CancelFunc
@@ -373,11 +374,36 @@ func (r *apiCaseBatchRunner) run(ctx context.Context, batchRunID string, profile
 					item.Error = err.Error()
 					item.FailureCategory = apiCaseBatchApplyFailureCategoryRules(rules, item.Status, apiCaseBatchFailureCategoryFromError(err), item.Error)
 				}
+				if item.Status == store.StatusPassed && strings.TrimSpace(workflowID) != "" && strings.TrimSpace(plan.StepID) != "" {
+					collectAPICaseBatchTraceTopology(ctx, runtime, collector, workflowID, plan, result)
+				}
 			}
 		}
 		r.updateCase(batchRunID, index, item)
 	}
 	r.finish(ctx, batchRunID, profileID, workflowID, runtime)
+}
+
+func collectAPICaseBatchTraceTopology(ctx context.Context, runtime store.Store, collector traceCollector, workflowID string, plan apiCaseBatchCasePlan, result apicase.RunResult) {
+	if runtime == nil || result.Status != store.StatusPassed {
+		return
+	}
+	request, _ := jsonFileObject(filepath.Join(result.EvidencePath, "request.json"))
+	response, _ := jsonFileObject(filepath.Join(result.EvidencePath, "response.json"))
+	payload := map[string]any{
+		"workflowId": workflowID,
+		"stepId":     plan.StepID,
+	}
+	resultPayload := map[string]any{
+		"ok":     true,
+		"caseId": result.CaseID,
+		"stepId": plan.StepID,
+		"result": map[string]any{
+			"request":  request,
+			"response": response,
+		},
+	}
+	collectAndRecordTestKitTraceTopology(ctx, runtime, collector, result.RunID, payload, resultPayload)
 }
 
 func (r *apiCaseBatchRunner) save(report apiCaseBatchRunReport) {
@@ -420,6 +446,9 @@ func (r *apiCaseBatchRunner) finish(ctx context.Context, batchRunID string, prof
 		report.OK = true
 	}
 	report.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	if strings.TrimSpace(report.WorkflowID) != "" {
+		report.Acceptance = buildWorkflowAcceptanceReport(ctx, runtime, report)
+	}
 	_ = writeAPICaseBatchHTMLReport(report)
 	_ = writeAPICaseBatchJUnitReport(report)
 	_ = writeAPICaseBatchArtifactManifest(report)
@@ -987,6 +1016,8 @@ func cloneAPICaseBatchReport(report apiCaseBatchRunReport) apiCaseBatchRunReport
 	}
 	report.Nodes = append([]apiCaseBatchNodeReport(nil), report.Nodes...)
 	report.Cases = append([]apiCaseBatchCaseReport(nil), report.Cases...)
+	report.Acceptance.Steps = append([]workflowAcceptanceStep(nil), report.Acceptance.Steps...)
+	report.Acceptance.Requirements = append([]workflowAcceptanceRequirement(nil), report.Acceptance.Requirements...)
 	return report
 }
 
