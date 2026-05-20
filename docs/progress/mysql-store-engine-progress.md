@@ -427,3 +427,27 @@ Current blocker:
 
 - Real company MySQL Store proof still requires a dedicated DSN for
   `npm run release-check:mysql-real`.
+
+## 2026-05-21 MySQL Timeout Param Canonicalization Slice
+
+Progress: `[###################-] 97%`
+
+Implemented:
+
+- Canonicalized explicit MySQL Store network timeout query keys before building
+  the driver DSN: `timeout`, `readTimeout`, and `writeTimeout`.
+- Preserved operator-provided timeout values even when copied DSNs use mixed
+  key casing such as `Timeout=2s`, while ensuring the generated driver DSN uses
+  the key names the MySQL driver recognizes.
+- Added a focused TDD regression test that first showed mixed-case timeout keys
+  leaking into the driver DSN, then now verifies canonical keys and no duplicate
+  default timeout values.
+
+Validated:
+
+- `go test ./internal/store/mysql -run 'TestParseConfigFromURLAcceptsMySQLURL|TestParseConfigFromURLKeepsStoreTimeParsingAuthoritative|TestParseConfigFromURLAddsBoundedNetworkTimeouts|TestParseConfigFromURLKeepsExplicitNetworkTimeouts|TestParseConfigFromURLCanonicalizesExplicitNetworkTimeoutKeys|TestParseConfigFromURLRejectsNonMySQLDSN|TestParseConfigFromURLRequiresDatabaseName' -count=1`
+
+Current blocker:
+
+- Final completion still requires a dedicated company MySQL Store DSN for
+  `npm run release-check:mysql-real`.

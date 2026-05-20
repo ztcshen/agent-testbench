@@ -73,6 +73,23 @@ func TestParseConfigFromURLKeepsExplicitNetworkTimeouts(t *testing.T) {
 	}
 }
 
+func TestParseConfigFromURLCanonicalizesExplicitNetworkTimeoutKeys(t *testing.T) {
+	cfg, err := mysql.ParseConfigFromURL("mysql://user:secret@example.com:3306/otsandbox?Timeout=2s&READTIMEOUT=3s&writetimeout=4s")
+	if err != nil {
+		t.Fatalf("parse mysql url: %v", err)
+	}
+	for _, want := range []string{"timeout=2s", "readTimeout=3s", "writeTimeout=4s"} {
+		if !strings.Contains(cfg.DSN, want) {
+			t.Fatalf("mysql driver dsn should canonicalize explicit network timeout key %q: %q", want, cfg.DSN)
+		}
+	}
+	for _, reject := range []string{"Timeout=2s", "READTIMEOUT=3s", "writetimeout=4s", "timeout=10s", "readTimeout=30s", "writeTimeout=30s"} {
+		if strings.Contains(cfg.DSN, reject) {
+			t.Fatalf("mysql driver dsn should not keep mixed-case or default timeout key %q: %q", reject, cfg.DSN)
+		}
+	}
+}
+
 func TestParseConfigFromURLRejectsNonMySQLDSN(t *testing.T) {
 	_, err := mysql.ParseConfigFromURL("postgres://localhost/otsandbox")
 	if err == nil {

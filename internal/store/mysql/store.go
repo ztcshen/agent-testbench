@@ -145,6 +145,7 @@ func driverDSNFromURL(parsed *url.URL) (string, error) {
 		case "parsetime", "loc":
 			continue
 		}
+		key = canonicalMySQLParamKey(key)
 		params[key] = values[len(values)-1]
 	}
 	if _, ok := params["loc"]; !ok {
@@ -172,4 +173,17 @@ func setDefaultMySQLParam(params map[string]string, key string, value string) {
 		}
 	}
 	params[key] = value
+}
+
+func canonicalMySQLParamKey(key string) string {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "timeout":
+		return "timeout"
+	case "readtimeout":
+		return "readTimeout"
+	case "writetimeout":
+		return "writeTimeout"
+	default:
+		return key
+	}
 }
