@@ -9190,31 +9190,41 @@ func runCaseSuitePriorityBuildsRankedBatchRequest(t *testing.T, storeRef string,
 }
 
 func TestCaseSuiteBriefSummarizesMaintainedSuiteForAgents(t *testing.T) {
-	ctx := context.Background()
 	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-case-suite-brief-pg")
-	profileDir := writeCaseSuiteCoverageProfile(t)
-	runCLI(t, "config", "publish", "--from", profileDir)
+	runCaseSuiteBriefSummarizesMaintainedSuiteForAgents(t, storeRef, "pg", "PostgreSQL")
+}
+
+func TestCaseSuiteBriefUsesNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-case-suite-brief-mysql")
+	runCaseSuiteBriefSummarizesMaintainedSuiteForAgents(t, storeRef, "mysql", "MySQL")
+}
+
+func runCaseSuiteBriefSummarizesMaintainedSuiteForAgents(t *testing.T, storeRef string, runLabel string, label string) {
+	t.Helper()
+	ctx := context.Background()
+	fixture := writeUniqueCaseSuiteCoverageProfile(t)
+	runCLI(t, "config", "publish", "--from", fixture.profileDir)
 
 	s, err := openStore(ctx, storeRef)
 	if err != nil {
-		t.Fatalf("open store: %v", err)
+		t.Fatalf("open %s store: %v", label, err)
 	}
 	base := time.Now().UTC()
-	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.default.1"), "case.default", store.StatusPassed, base.Add(-2*time.Minute))
-	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.variant.1"), "case.variant", store.StatusPassed, base.Add(-time.Minute))
-	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.variant.2"), "case.variant", store.StatusFailed, base)
+	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.default.1"), fixture.defaultCaseID, store.StatusPassed, base.Add(-2*time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.variant.1"), fixture.variantCaseID, store.StatusPassed, base.Add(-time.Minute))
+	recordCaseRunForCoverage(t, ctx, s, uniqueTestID(t, "run.variant.2"), fixture.variantCaseID, store.StatusFailed, base)
 	if err := s.Close(); err != nil {
-		t.Fatalf("close store: %v", err)
+		t.Fatalf("close %s store: %v", label, err)
 	}
 
 	out := runCLI(t,
 		"case", "suite", "brief",
-		"--profile", profileDir,
+		"--profile", fixture.profileDir,
 		"--tag", "regression",
 		"--status", "active",
 		"--signal", "Variant",
 		"--limit", "2",
-		"--request-id", "change-012",
+		"--request-id", runLabel+"-change-012",
 		"--base-url", "http://127.0.0.1:8080",
 		"--json",
 	)
@@ -9238,22 +9248,22 @@ func TestCaseSuiteBriefSummarizesMaintainedSuiteForAgents(t *testing.T) {
 		} `json:"batchRequest"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode suite brief json: %v\n%s", err, out)
+		t.Fatalf("decode %s suite brief json: %v\n%s", label, err, out)
 	}
 	if !report.OK || report.Counts.Total != 3 || report.Counts.Ready != 2 || report.Counts.Blocked != 1 || report.Counts.Failed != 1 || report.Counts.PrioritySelected != 2 {
-		t.Fatalf("suite brief report = %#v", report)
+		t.Fatalf("%s suite brief report = %#v", label, report)
 	}
-	if len(report.Recommended) != 2 || report.Recommended[0].CaseID != "case.variant" || report.Recommended[0].Score <= report.Recommended[1].Score {
-		t.Fatalf("suite brief recommended = %#v", report.Recommended)
+	if len(report.Recommended) != 2 || report.Recommended[0].CaseID != fixture.variantCaseID || report.Recommended[0].Score <= report.Recommended[1].Score {
+		t.Fatalf("%s suite brief recommended = %#v", label, report.Recommended)
 	}
-	if report.BatchRequest.RequestID != "change-012" || strings.Join(report.BatchRequest.CaseIDs, ",") != "case.variant,case.default" || report.BatchRequest.BaseURL != "http://127.0.0.1:8080" {
-		t.Fatalf("suite brief batch = %#v", report.BatchRequest)
+	if report.BatchRequest.RequestID != runLabel+"-change-012" || strings.Join(report.BatchRequest.CaseIDs, ",") != fixture.variantCaseID+","+fixture.defaultCaseID || report.BatchRequest.BaseURL != "http://127.0.0.1:8080" {
+		t.Fatalf("%s suite brief batch = %#v", label, report.BatchRequest)
 	}
 
-	textOut := runCLI(t, "case", "suite", "brief", "--profile", profileDir, "--tag", "regression", "--signal", "Variant")
-	for _, want := range []string{"Case Suite Brief", "Ready: 2", "Recommended: 2", "case.variant"} {
+	textOut := runCLI(t, "case", "suite", "brief", "--profile", fixture.profileDir, "--tag", "regression", "--signal", "Variant")
+	for _, want := range []string{"Case Suite Brief", "Ready: 2", "Recommended: 2", fixture.variantCaseID} {
 		if !strings.Contains(textOut, want) {
-			t.Fatalf("brief text missing %q:\n%s", want, textOut)
+			t.Fatalf("%s brief text missing %q:\n%s", label, want, textOut)
 		}
 	}
 }
