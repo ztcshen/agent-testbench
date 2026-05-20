@@ -248,10 +248,11 @@ Usage:
   otsandbox store status [--store NAME_OR_DSN]
   otsandbox store upgrade [--store NAME_OR_DSN]
   otsandbox store ddl [--backend postgres]
-  otsandbox environment register --id ID [--store NAME_OR_DSN] [--display-name NAME] [--service ID] [--repo SERVICE=PATH] [--branch SERVICE=BRANCH] [--checkout SERVICE=PATH] [--package-repo URL] [--package-branch BRANCH] [--package-ref REF] [--compose-file PATH]... [--compose-env KEY=VALUE]... [--start-command TEXT] [--health-url URL] [--health-tcp HOST:PORT] [--health-command CMD] [--health-compose-service SERVICE] [--verification-workflow ID] [--json]
+  otsandbox environment register --id ID [--store NAME_OR_DSN] [--display-name NAME] [--service ID] [--repo SERVICE=PATH] [--branch SERVICE=BRANCH] [--checkout SERVICE=PATH] [--package-repo URL] [--package-branch BRANCH] [--package-ref REF] [--compose-file PATH]... [--compose-generated-file TARGET=SOURCE_FILE]... [--compose-env KEY=VALUE]... [--start-command TEXT] [--health-url URL] [--health-tcp HOST:PORT] [--health-command CMD] [--health-compose-service SERVICE] [--verification-workflow ID] [--json]
   otsandbox environment discover [--store NAME_OR_DSN] [--all] [--json]
   otsandbox environment inspect ENV_ID [--store NAME_OR_DSN] [--json]
   otsandbox environment bootstrap ENV_ID [--store NAME_OR_DSN] [--json]
+  otsandbox environment startup-file put ENV_ID --file TARGET=SOURCE_FILE [--store NAME_OR_DSN] [--json]
   otsandbox environment restore ENV_ID --workspace PATH [--store NAME_OR_DSN] [--execute] [--pull] [--prepare-repos-only] [--clean-docker-state] [--clean-docker-images] [--allow-destructive-docker-cleanup] [--run-workflow --server-url URL] [--base-url URL] [--workflow-output-dir PATH] [--health-timeout-seconds N] [--json]
   otsandbox environment acceptance start ENV_ID --server-url URL --request-id ID [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
   otsandbox environment acceptance report ENV_ID --server-url URL --run ID [--json]
@@ -443,6 +444,8 @@ func runEnvironment(ctx context.Context, args []string) error {
 		return runEnvironmentInspect(ctx, args[1:])
 	case "bootstrap":
 		return runEnvironmentBootstrap(ctx, args[1:])
+	case "startup-file":
+		return runEnvironmentStartupFile(ctx, args[1:])
 	case "restore":
 		return runEnvironmentRestore(ctx, args[1:])
 	case "acceptance":
@@ -613,6 +616,100 @@ func runEnvironmentBootstrap(ctx context.Context, args []string) error {
 	fmt.Printf("Repos: %s\n", env.ReposJSON)
 	fmt.Printf("Compose: %s\n", env.ComposeJSON)
 	return nil
+}
+
+func runEnvironmentStartupFile(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing environment startup-file command")
+	}
+	switch args[0] {
+	case "put":
+		return runEnvironmentStartupFilePut(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown environment startup-file command: %s", args[0])
+	}
+}
+
+func runEnvironmentStartupFilePut(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("environment startup-file put", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	var files stringListFlag
+	flags.Var(&files, "file", "Generated startup file as TARGET=SOURCE_FILE; repeat for multiple files")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	id := strings.TrimSpace(flags.Arg(0))
+	if id == "" {
+		return errors.New("environment id is required")
+	}
+	if len(files.Values()) == 0 {
+		return errors.New("--file TARGET=SOURCE_FILE is required")
+	}
+	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	env, err := runtime.GetEnvironment(ctx, id)
+	if err != nil {
+		return err
+	}
+	generated, err := generatedFileContentMapFromFlags(files)
+	if err != nil {
+		return err
+	}
+	compose := jsonObjectString(env.ComposeJSON)
+	current := stringMapFromAny(compose["generatedFiles"])
+	for path, content := range generated {
+		current[path] = content
+	}
+	compose["generatedFiles"] = current
+	env.ComposeJSON = mustCompactJSON(compose)
+	env.SummaryJSON = environmentStartupFileSummaryJSON(env.SummaryJSON, generated)
+	env, err = runtime.UpsertEnvironment(ctx, env)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"environment":    environmentPayload(env),
+		"generatedFiles": environmentStartupFilePayload(generated),
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(payload)
+	}
+	fmt.Printf("Updated Environment Startup Files: %s\n", env.ID)
+	for _, item := range environmentStartupFilePayload(generated) {
+		fmt.Printf("- %s (%d bytes)\n", item["path"], item["bytes"])
+	}
+	return nil
+}
+
+func environmentStartupFilePayload(files map[string]string) []map[string]any {
+	paths := make([]string, 0, len(files))
+	for path := range files {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	out := make([]map[string]any, 0, len(paths))
+	for _, path := range paths {
+		out = append(out, map[string]any{
+			"path":  path,
+			"bytes": len(files[path]),
+		})
+	}
+	return out
+}
+
+func environmentStartupFileSummaryJSON(existing string, files map[string]string) string {
+	summary := jsonObjectString(existing)
+	summary["startupFiles"] = map[string]any{
+		"updatedAt": time.Now().UTC().Format(time.RFC3339Nano),
+		"files":     environmentStartupFilePayload(files),
+	}
+	return mustCompactJSON(summary)
 }
 
 type environmentRestoreReport struct {
@@ -1028,9 +1125,19 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 	}
 	if report.OK && prepareReposOnly {
 		report.Docker = environmentRestoreDockerReport{
-			OK:      true,
-			Action:  "skipped-after-repository-preparation",
-			Workdir: workspace,
+			OK:        true,
+			Action:    "skipped-after-repository-preparation",
+			Workdir:   workspace,
+			Generated: prepareEnvironmentRestoreGeneratedFiles(compose, workspace, execute),
+		}
+		for _, item := range report.Docker.Generated {
+			if !item.OK {
+				report.OK = false
+				report.Docker.OK = false
+				report.Docker.Action = "prepare-generated-files"
+				report.Docker.Error = item.Error
+				break
+			}
 		}
 	} else if report.OK {
 		report.Docker = environmentRestoreDocker(ctx, compose, healthChecks, workspace, execute, healthTimeout, cleanupOptions)

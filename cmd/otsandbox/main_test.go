@@ -1616,6 +1616,112 @@ func TestEnvironmentRestoreWritesStoreGeneratedComposeFileBeforeDocker(t *testin
 	}
 }
 
+func TestEnvironmentRestorePrepareReposOnlyWritesStoreGeneratedComposeFile(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	sourceCompose := filepath.Join(t.TempDir(), "source-compose.yml")
+	writeFile(t, sourceCompose, "services:\n  generated-service:\n    image: alpine:3.20\n")
+	fakeDockerEnv, dockerCallsPath := fakeDockerCommand(t)
+	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer healthServer.Close()
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.generated.prepare",
+		"--compose-file", "compose/docker-compose.yml",
+		"--compose-generated-file", "compose/docker-compose.yml="+sourceCompose,
+		"--health-url", healthServer.URL+"/ready",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--prepare-repos-only", "--json", "env.generated.prepare")
+	var report struct {
+		OK     bool `json:"ok"`
+		Docker struct {
+			Action    string `json:"action"`
+			Generated []struct {
+				Path   string `json:"path"`
+				Action string `json:"action"`
+				OK     bool   `json:"ok"`
+			} `json:"generatedFiles"`
+		} `json:"docker"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode generated prepare-only restore json: %v\n%s", err, out)
+	}
+	generatedPath := filepath.Join(workspace, "compose", "docker-compose.yml")
+	if !report.OK || report.Docker.Action != "skipped-after-repository-preparation" || len(report.Docker.Generated) != 1 || report.Docker.Generated[0].Action != "write" || report.Docker.Generated[0].Path != generatedPath || !report.Docker.Generated[0].OK {
+		t.Fatalf("generated prepare-only report = %#v", report)
+	}
+	if raw, err := os.ReadFile(generatedPath); err != nil || !strings.Contains(string(raw), "generated-service") {
+		t.Fatalf("generated compose file raw=%q err=%v", raw, err)
+	}
+	dockerCalls, err := os.ReadFile(dockerCallsPath)
+	if err != nil {
+		t.Fatalf("read fake docker calls: %v", err)
+	}
+	if strings.Contains(string(dockerCalls), " compose ") {
+		t.Fatalf("prepare-only should not invoke Docker Compose:\n%s", dockerCalls)
+	}
+}
+
+func TestEnvironmentStartupFilePutMergesGeneratedFilesWithoutReRegistering(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	sourceCompose := filepath.Join(t.TempDir(), "source-compose.yml")
+	writeFile(t, sourceCompose, "services:\n  generated-service:\n    image: alpine:3.20\n")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.startup.files",
+		"--repo", "entry-gateway=https://example.com/team/entry-gateway.git",
+		"--checkout", "entry-gateway=services/entry-gateway",
+		"--compose-file", "compose/docker-compose.yml",
+		"--health-url", "http://127.0.0.1:18080/health",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLI(t, "environment", "startup-file", "put",
+		"--store", "sqlite://"+storePath,
+		"--file", "compose/docker-compose.yml="+sourceCompose,
+		"--json",
+		"env.startup.files",
+	)
+	var payload struct {
+		GeneratedFiles []struct {
+			Path  string `json:"path"`
+			Bytes int    `json:"bytes"`
+		} `json:"generatedFiles"`
+		Environment struct {
+			Repos   map[string]any `json:"repos"`
+			Compose struct {
+				GeneratedFiles map[string]string `json:"generatedFiles"`
+			} `json:"compose"`
+			Summary struct {
+				StartupFiles struct {
+					Files []struct {
+						Path string `json:"path"`
+					} `json:"files"`
+				} `json:"startupFiles"`
+			} `json:"summary"`
+		} `json:"environment"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("decode startup-file put json: %v\n%s", err, out)
+	}
+	if len(payload.GeneratedFiles) != 1 || payload.GeneratedFiles[0].Path != "compose/docker-compose.yml" || payload.GeneratedFiles[0].Bytes == 0 {
+		t.Fatalf("startup-file payload = %#v", payload.GeneratedFiles)
+	}
+	if payload.Environment.Repos["entry-gateway"] == nil {
+		t.Fatalf("startup-file put should preserve existing repositories: %#v", payload.Environment.Repos)
+	}
+	if !strings.Contains(payload.Environment.Compose.GeneratedFiles["compose/docker-compose.yml"], "generated-service") {
+		t.Fatalf("generated file was not stored in compose metadata: %#v", payload.Environment.Compose.GeneratedFiles)
+	}
+	if len(payload.Environment.Summary.StartupFiles.Files) != 1 || payload.Environment.Summary.StartupFiles.Files[0].Path != "compose/docker-compose.yml" {
+		t.Fatalf("startup-file summary = %#v", payload.Environment.Summary.StartupFiles)
+	}
+}
+
 func TestEnvironmentRestorePlansDockerCleanupWithoutExecuting(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	workspace := filepath.Join(t.TempDir(), "workspace")

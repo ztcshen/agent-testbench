@@ -1946,3 +1946,21 @@ Remote source policy slice:
   environment row for `scf-chain-core10-local-docker`; current dry-run reports
   `package=not-configured`, `sourcePolicy.ok=true`, and readiness blocked only
   on missing Store startup files.
+- 2026-05-20T09:55Z: added `environment startup-file put ENV_ID --file
+  TARGET=SOURCE_FILE`, a Store-first way to attach compact startup files to an
+  existing Environment Catalog row without re-registering its workflow, repos,
+  services, or health checks. Also fixed `--execute --prepare-repos-only` so it
+  writes Store-backed startup files while still skipping Docker.
+- Updated active `local-pg` environment `scf-chain-core10-local-docker` with
+  generated content for `compose/docker-compose.yml` and
+  `compose/docker-compose.apps.yml`. The resulting `compose_json` is 19,740
+  bytes, below the 64 KB environment definition limit and still only metadata:
+  no Docker images, code packages, runtime logs, or Evidence payloads are stored
+  in PostgreSQL.
+- Non-destructive verification: `environment restore --store local-pg
+  --workspace /tmp/ots-policy-check --json scf-chain-core10-local-docker`
+  reports `ok=true`, `sourcePolicy.ok=true`, `readiness.ok=true`, and two
+  planned Store-generated compose files. Isolated prepare-only execution at
+  `/tmp/ots-restore-isolated` reports `ok=true`, cloned seven service repos
+  from GitLab/GitHub, wrote both compose files, and stopped before Docker with
+  `docker.action=skipped-after-repository-preparation`.
