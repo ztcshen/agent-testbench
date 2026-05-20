@@ -1127,28 +1127,39 @@ func TestEnvironmentRestorePreflightReportsMissingGitForMissingCheckout(t *testi
 	}
 }
 
-func TestEnvironmentRestoreRequiresRemoteGitSourcesForPostgreSQLOneClickEnvironment(t *testing.T) {
-	workspace := filepath.Join(t.TempDir(), "workspace")
-	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
-		ID:                     "env.remote.sources",
-		ReposJSON:              `{"llt":{"url":"/Users/zlh/codes/open-test-sandbox-llt-simulator","checkout":"llt"}}`,
-		ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","package":{"url":"/Users/zlh/codes/open-test-sandbox-validation","checkout":"."}}`,
-		HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:28080/health"}]`,
-		VerificationWorkflowID: "workflow.core-10",
-	}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
-		StoreURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable",
-	}, environmentRestoreDockerCleanupOptions{})
-	if err != nil {
-		t.Fatalf("build restore remote source policy report: %v", err)
+func TestEnvironmentRestoreRequiresRemoteGitSourcesForSQLOneClickEnvironment(t *testing.T) {
+	tests := []struct {
+		name     string
+		storeURL string
+	}{
+		{name: "postgres", storeURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable"},
+		{name: "mysql", storeURL: "mysql://tester:secret@127.0.0.1:3306/otsandbox?tls=false"},
 	}
-	if report.OK || report.SourcePolicy.OK || !report.SourcePolicy.RemoteOnly || len(report.SourcePolicy.Violations) != 1 || report.Docker.Action != "skipped-due-to-source-policy" {
-		t.Fatalf("remote source policy report = %#v", report)
-	}
-	if !strings.Contains(report.SourcePolicy.Violations[0], "service llt") {
-		t.Fatalf("source policy should only reject service repositories, got %#v", report.SourcePolicy.Violations)
-	}
-	if !restoreTypedReadinessHasItem(report.Readiness.Items, "remote-git-sources", false, "remote Git URL") {
-		t.Fatalf("readiness should include remote source violation: %#v", report.Readiness.Items)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := filepath.Join(t.TempDir(), "workspace")
+			report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+				ID:                     "env.remote.sources." + tt.name,
+				ReposJSON:              `{"llt":{"url":"/Users/zlh/codes/open-test-sandbox-llt-simulator","checkout":"llt"}}`,
+				ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","package":{"url":"/Users/zlh/codes/open-test-sandbox-validation","checkout":"."}}`,
+				HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:28080/health"}]`,
+				VerificationWorkflowID: "workflow.core-10",
+			}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
+				StoreURL: tt.storeURL,
+			}, environmentRestoreDockerCleanupOptions{})
+			if err != nil {
+				t.Fatalf("build %s restore remote source policy report: %v", tt.name, err)
+			}
+			if report.OK || report.SourcePolicy.OK || !report.SourcePolicy.RemoteOnly || len(report.SourcePolicy.Violations) != 1 || report.Docker.Action != "skipped-due-to-source-policy" {
+				t.Fatalf("%s remote source policy report = %#v", tt.name, report)
+			}
+			if !strings.Contains(report.SourcePolicy.Violations[0], "service llt") {
+				t.Fatalf("%s source policy should only reject service repositories, got %#v", tt.name, report.SourcePolicy.Violations)
+			}
+			if !restoreTypedReadinessHasItem(report.Readiness.Items, "remote-git-sources", false, "remote Git URL") {
+				t.Fatalf("%s readiness should include remote source violation: %#v", tt.name, report.Readiness.Items)
+			}
+		})
 	}
 }
 
@@ -1245,24 +1256,35 @@ func TestEnvironmentRestoreReportsComponentGraphReadiness(t *testing.T) {
 	}
 }
 
-func TestEnvironmentRestoreRequiresComponentGraphForPostgresOneClick(t *testing.T) {
-	workspace := filepath.Join(t.TempDir(), "workspace")
-	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
-		ID:                     "env.pg.component.required",
-		ComposeJSON:            `{"startCommand":"true"}`,
-		HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:18080/health"}]`,
-		VerificationWorkflowID: "workflow.core-10",
-	}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
-		StoreURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable",
-	}, environmentRestoreDockerCleanupOptions{})
-	if err != nil {
-		t.Fatalf("build restore without component graph: %v", err)
+func TestEnvironmentRestoreRequiresComponentGraphForSQLOneClick(t *testing.T) {
+	tests := []struct {
+		name     string
+		storeURL string
+	}{
+		{name: "postgres", storeURL: "postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable"},
+		{name: "mysql", storeURL: "mysql://tester:secret@127.0.0.1:3306/otsandbox?tls=false"},
 	}
-	if report.OK || report.Readiness.OK || report.ComponentGraph.Configured {
-		t.Fatalf("PostgreSQL restore without component graph should fail readiness: %#v", report)
-	}
-	if !restoreTypedReadinessHasItem(report.Readiness.Items, "component-graph", false, "requires a Store component graph") {
-		t.Fatalf("readiness should require component graph: %#v", report.Readiness.Items)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := filepath.Join(t.TempDir(), "workspace")
+			report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+				ID:                     "env." + tt.name + ".component.required",
+				ComposeJSON:            `{"startCommand":"true"}`,
+				HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:18080/health"}]`,
+				VerificationWorkflowID: "workflow.core-10",
+			}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
+				StoreURL: tt.storeURL,
+			}, environmentRestoreDockerCleanupOptions{})
+			if err != nil {
+				t.Fatalf("build %s restore without component graph: %v", tt.name, err)
+			}
+			if report.OK || report.Readiness.OK || report.ComponentGraph.Configured {
+				t.Fatalf("%s restore without component graph should fail readiness: %#v", tt.name, report)
+			}
+			if !restoreTypedReadinessHasItem(report.Readiness.Items, "component-graph", false, "requires a Store component graph") {
+				t.Fatalf("%s readiness should require component graph: %#v", tt.name, report.Readiness.Items)
+			}
+		})
 	}
 }
 
