@@ -1525,6 +1525,56 @@ func TestEnvironmentRestoreMaterializesComponentAssetsAsStartupFiles(t *testing.
 	}
 }
 
+func TestEnvironmentRestoreOrdersComponentAssetsByBlockingDependencyOrder(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+		ID:                     "env.component.asset-order",
+		ComposeJSON:            `{"startCommand":"true"}`,
+		HealthChecksJSON:       `[]`,
+		VerificationWorkflowID: "workflow.core-10",
+	}, workspace, false, false, true, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{}, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "worker", Kind: "app", Role: "worker", ComposeService: "worker", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+			{ComponentID: "db", Kind: "middleware", Role: "database", ComposeService: "db", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"type":"compose-service"}`, RuntimeJSON: `{}`, SummaryJSON: `{}`},
+		},
+		Dependencies: []store.ComponentDependency{
+			{ConsumerComponentID: "app", ProviderComponentID: "db", Phase: "startup", Capability: "sql", Required: true, ProfileJSON: `{}`},
+			{ConsumerComponentID: "worker", ProviderComponentID: "app", Phase: "startup", Capability: "http", Required: true, ProfileJSON: `{}`},
+		},
+		Assets: []store.ComponentConfigAsset{
+			{OwnerComponentID: "worker", AssetID: "worker.remote", AssetKind: "script", TargetPath: "b-worker-remote.sh", RemoteRefJSON: `{"url":"git@example.com:team/assets.git","path":"b-worker-remote.sh"}`, ApplyOrder: 1, SummaryJSON: `{}`},
+			{OwnerComponentID: "app", AssetID: "app.late", AssetKind: "config", TargetPath: "a-app-late.txt", ContentInline: "app late\n", ApplyOrder: 20, SummaryJSON: `{}`},
+			{OwnerComponentID: "db", AssetID: "db.schema", AssetKind: "mysql-ddl", TargetPath: "z-db-schema.sql", ContentInline: "create database app;\n", ApplyOrder: 10, SummaryJSON: `{}`},
+			{OwnerComponentID: "app", AssetID: "app.remote", AssetKind: "script", TargetPath: "c-app-remote.sh", RemoteRefJSON: `{"url":"git@example.com:team/assets.git","path":"c-app-remote.sh"}`, ApplyOrder: 5, SummaryJSON: `{}`},
+			{OwnerComponentID: "app", AssetID: "app.early", AssetKind: "config", TargetPath: "d-app-early.txt", ContentInline: "app early\n", ApplyOrder: 1, SummaryJSON: `{}`},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build component asset order report: %v", err)
+	}
+	if !report.OK {
+		t.Fatalf("component asset order report should be OK: %#v", report)
+	}
+	if got := strings.Join(report.ComponentGraph.BlockingOrder, ","); got != "db,app,worker" {
+		t.Fatalf("blocking order = %s", got)
+	}
+	var generatedPaths []string
+	for _, item := range report.Docker.Generated {
+		generatedPaths = append(generatedPaths, strings.TrimPrefix(item.Path, workspace+string(os.PathSeparator)))
+	}
+	if got := strings.Join(generatedPaths, ","); got != "z-db-schema.sql,d-app-early.txt,a-app-late.txt" {
+		t.Fatalf("generated file order = %s reports=%#v", got, report.Docker.Generated)
+	}
+	var remoteAssetIDs []string
+	for _, item := range report.ComponentAssets {
+		remoteAssetIDs = append(remoteAssetIDs, item.AssetID)
+	}
+	if got := strings.Join(remoteAssetIDs, ","); got != "app.remote,worker.remote" {
+		t.Fatalf("remote asset order = %s reports=%#v", got, report.ComponentAssets)
+	}
+}
+
 func TestEnvironmentRestorePreflightReportsMissingDockerComposePlugin(t *testing.T) {
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	fakeBin := t.TempDir()

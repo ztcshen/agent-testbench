@@ -898,6 +898,7 @@ type environmentRestoreComponentAsset struct {
 	Checkout         string   `json:"checkout,omitempty"`
 	TargetPath       string   `json:"targetPath"`
 	Bytes            int64    `json:"bytes,omitempty"`
+	ApplyOrder       int      `json:"applyOrder,omitempty"`
 	Action           string   `json:"action"`
 	RepoAction       string   `json:"repoAction,omitempty"`
 	Command          []string `json:"command,omitempty"`
@@ -2112,6 +2113,47 @@ func environmentRestoreCycleText(cycles [][]string) string {
 	return strings.Join(parts, "; ")
 }
 
+func environmentRestoreOrderedComponentAssets(g store.EnvironmentComponentGraph) []store.ComponentConfigAsset {
+	out := append([]store.ComponentConfigAsset{}, g.Assets...)
+	if len(out) == 0 {
+		return out
+	}
+	componentOrder, _, _ := environmentRestoreBlockingDependencyOrder(g)
+	ownerIndex := map[string]int{}
+	for i, id := range componentOrder {
+		ownerIndex[id] = i
+	}
+	defaultRank := len(componentOrder) + len(g.Components) + 1
+	sort.SliceStable(out, func(i, j int) bool {
+		left := out[i]
+		right := out[j]
+		leftOwner := strings.TrimSpace(left.OwnerComponentID)
+		rightOwner := strings.TrimSpace(right.OwnerComponentID)
+		leftRank, leftOK := ownerIndex[leftOwner]
+		if !leftOK {
+			leftRank = defaultRank
+		}
+		rightRank, rightOK := ownerIndex[rightOwner]
+		if !rightOK {
+			rightRank = defaultRank
+		}
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
+		if leftOwner != rightOwner {
+			return leftOwner < rightOwner
+		}
+		if left.ApplyOrder != right.ApplyOrder {
+			return left.ApplyOrder < right.ApplyOrder
+		}
+		if left.AssetID != right.AssetID {
+			return left.AssetID < right.AssetID
+		}
+		return left.TargetPath < right.TargetPath
+	})
+	return out
+}
+
 func environmentRestoreComponentAssetRemoteRefOK(asset store.ComponentConfigAsset) bool {
 	ref := jsonObjectString(asset.RemoteRefJSON)
 	path := strings.TrimSpace(valueString(ref["path"]))
@@ -2135,7 +2177,14 @@ func environmentRestoreComposeWithComponentAssets(compose map[string]any, graph 
 		out[key] = value
 	}
 	generated := stringMapFromAny(out["generatedFiles"])
-	for _, asset := range graph.Assets {
+	generatedOrder := stringSliceFromAny(out["generatedFileOrder"])
+	if len(generatedOrder) == 0 && len(generated) > 0 {
+		for target := range generated {
+			generatedOrder = append(generatedOrder, target)
+		}
+		sort.Strings(generatedOrder)
+	}
+	for _, asset := range environmentRestoreOrderedComponentAssets(graph) {
 		target := filepath.Clean(strings.TrimSpace(asset.TargetPath))
 		if target == "." || target == "" || strings.HasPrefix(target, ".."+string(os.PathSeparator)) || filepath.IsAbs(target) {
 			continue
@@ -2147,16 +2196,20 @@ func environmentRestoreComposeWithComponentAssets(compose map[string]any, graph 
 			continue
 		}
 		generated[target] = asset.ContentInline
+		generatedOrder = append(generatedOrder, target)
 	}
 	if len(generated) > 0 {
 		out["generatedFiles"] = generated
+	}
+	if len(generatedOrder) > 0 {
+		out["generatedFileOrder"] = dedupeStrings(generatedOrder)
 	}
 	return out
 }
 
 func environmentRestoreRemoteComponentAssets(ctx context.Context, graph store.EnvironmentComponentGraph, workspace string, execute bool, pull bool) []environmentRestoreComponentAsset {
 	out := []environmentRestoreComponentAsset{}
-	for _, asset := range graph.Assets {
+	for _, asset := range environmentRestoreOrderedComponentAssets(graph) {
 		if strings.TrimSpace(asset.ContentInline) != "" || strings.TrimSpace(asset.RemoteRefJSON) == "" {
 			continue
 		}
@@ -2180,6 +2233,7 @@ func environmentRestoreRemoteComponentAssets(ctx context.Context, graph store.En
 			Checkout:         checkout,
 			TargetPath:       restoreWorkspacePath(workspace, asset.TargetPath),
 			Bytes:            asset.SizeBytes,
+			ApplyOrder:       asset.ApplyOrder,
 			Action:           "plan-materialize",
 			OK:               true,
 		}
@@ -3445,11 +3499,7 @@ func prepareEnvironmentRestoreGeneratedFiles(compose map[string]any, workspace s
 	if len(files) == 0 {
 		return nil
 	}
-	paths := make([]string, 0, len(files))
-	for path := range files {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
+	paths := environmentRestoreGeneratedFilePaths(compose, files)
 	out := make([]environmentRestoreGeneratedFile, 0, len(paths))
 	for _, path := range paths {
 		content := files[path]
@@ -3476,6 +3526,47 @@ func prepareEnvironmentRestoreGeneratedFiles(compose map[string]any, workspace s
 			}
 		}
 		out = append(out, report)
+	}
+	return out
+}
+
+func environmentRestoreGeneratedFilePaths(compose map[string]any, files map[string]string) []string {
+	paths := make([]string, 0, len(files))
+	seen := map[string]bool{}
+	for _, path := range stringSliceFromAny(compose["generatedFileOrder"]) {
+		clean := filepath.Clean(strings.TrimSpace(path))
+		if clean == "." || clean == "" || seen[clean] {
+			continue
+		}
+		if _, exists := files[clean]; !exists {
+			continue
+		}
+		paths = append(paths, clean)
+		seen[clean] = true
+	}
+	remaining := make([]string, 0, len(files)-len(paths))
+	for path := range files {
+		clean := filepath.Clean(strings.TrimSpace(path))
+		if clean == "." || clean == "" || seen[clean] {
+			continue
+		}
+		remaining = append(remaining, clean)
+	}
+	sort.Strings(remaining)
+	paths = append(paths, remaining...)
+	return paths
+}
+
+func dedupeStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
 	}
 	return out
 }

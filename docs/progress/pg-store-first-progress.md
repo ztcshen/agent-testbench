@@ -2203,3 +2203,16 @@ Remote source policy slice:
   blocking order, and zero blocking cycles. The only failed readiness items on
   this already-running machine remain `docker-container-conflicts` and
   `docker-start-plan`.
+- 2026-05-20T08:56Z implementation slice: component assets now consume the
+  Gonum-derived blocking dependency order instead of only reporting it. Restore
+  orders component-owned inline startup files and remote component asset
+  materialization by provider-before-consumer component order, then owner,
+  `applyOrder`, asset id, and target path. The generated file writer now
+  honors the Store-derived `generatedFileOrder`, so the written startup files
+  follow the same component graph order rather than plain path sorting.
+- Verified the active `local-pg` environment with a non-destructive restore
+  plan after the asset-order change. It reports a 24-component blocking order,
+  25 ordered Store-generated startup files, and four remote component assets
+  in materialization order. The remaining failed readiness items are still
+  only `docker-container-conflicts` and `docker-start-plan` on this
+  already-running machine.
