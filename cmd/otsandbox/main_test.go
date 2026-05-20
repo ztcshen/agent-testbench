@@ -794,11 +794,21 @@ func TestEnvironmentAcceptanceCLIStartsAndReadsAsyncReport(t *testing.T) {
 
 func TestEnvironmentCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-environment-pg")
+	runEnvironmentCommandsUseNamedActiveStore(t, storeRef, "env.team.pg", "PostgreSQL")
+}
+
+func TestEnvironmentCommandsUseNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-environment-mysql")
+	runEnvironmentCommandsUseNamedActiveStore(t, storeRef, "env.team.mysql", "MySQL")
+}
+
+func runEnvironmentCommandsUseNamedActiveStore(t *testing.T, storeRef string, envID string, label string) {
+	t.Helper()
 	runID := "run.core-10." + time.Now().UTC().Format("20060102150405.000000000")
 
 	registerOut := runCLI(t, "environment", "register",
-		"--id", "env.team.pg",
-		"--display-name", "Team PostgreSQL Environment",
+		"--id", envID,
+		"--display-name", "Team "+label+" Environment",
 		"--description", "Accepted local Docker environment",
 		"--service", "entry-gateway",
 		"--repo", "entry-gateway=../entry-gateway",
@@ -823,11 +833,11 @@ func TestEnvironmentCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 	if err := json.Unmarshal([]byte(registerOut), &registered); err != nil {
 		t.Fatalf("decode environment register json: %v\n%s", err, registerOut)
 	}
-	if !registered.OK || registered.Environment.ID != "env.team.pg" || registered.Environment.Status != "draft" || registered.Environment.Verified {
-		t.Fatalf("registered PostgreSQL environment = %#v", registered.Environment)
+	if !registered.OK || registered.Environment.ID != envID || registered.Environment.Status != "draft" || registered.Environment.Verified {
+		t.Fatalf("registered %s environment = %#v", label, registered.Environment)
 	}
 	if registered.Environment.VerificationWorkflowID != "workflow.core-10" || registered.Environment.Repos["entry-gateway"] == nil {
-		t.Fatalf("registered PostgreSQL environment catalog fields = %#v", registered.Environment)
+		t.Fatalf("registered %s environment catalog fields = %#v", label, registered.Environment)
 	}
 
 	discoverOut := runCLI(t, "environment", "discover", "--json")
@@ -838,10 +848,10 @@ func TestEnvironmentCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		t.Fatalf("decode discover json: %v\n%s", err, discoverOut)
 	}
 	if discovered.Count != 0 {
-		t.Fatalf("unverified PostgreSQL environment should stay out of default discovery: %#v", discovered)
+		t.Fatalf("unverified %s environment should stay out of default discovery: %#v", label, discovered)
 	}
 
-	publishDenied := runCLIFails(t, "environment", "publish-verified", "env.team.pg")
+	publishDenied := runCLIFails(t, "environment", "publish-verified", envID)
 	if !strings.Contains(publishDenied, "not publishable") {
 		t.Fatalf("publish should require complete verification evidence: %q", publishDenied)
 	}
@@ -852,7 +862,7 @@ func TestEnvironmentCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		"--evidence-complete",
 		"--topology-complete",
 		"--json",
-		"env.team.pg",
+		envID,
 	)
 	var verified struct {
 		Environment struct {
@@ -867,16 +877,16 @@ func TestEnvironmentCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		t.Fatalf("decode verify json: %v\n%s", err, verifyOut)
 	}
 	if verified.Environment.Status != "verified-ready" || verified.Environment.LastVerificationRunID != runID || verified.Environment.LastVerificationStatus != "passed" || !verified.Environment.EvidenceComplete || !verified.Environment.TopologyComplete {
-		t.Fatalf("verified PostgreSQL environment = %#v", verified.Environment)
+		t.Fatalf("verified %s environment = %#v", label, verified.Environment)
 	}
 
-	missingArtifacts := runCLIFails(t, "environment", "publish-verified", "env.team.pg")
+	missingArtifacts := runCLIFails(t, "environment", "publish-verified", envID)
 	if !strings.Contains(missingArtifacts, "was not found in Store") {
-		t.Fatalf("publish should require indexed PostgreSQL verification artifacts: %q", missingArtifacts)
+		t.Fatalf("publish should require indexed %s verification artifacts: %q", label, missingArtifacts)
 	}
 	seedEnvironmentVerificationArtifacts(t, storeRef, runID)
 
-	publishOut := runCLI(t, "environment", "publish-verified", "--json", "env.team.pg")
+	publishOut := runCLI(t, "environment", "publish-verified", "--json", envID)
 	var published struct {
 		Environment struct {
 			Status   string `json:"status"`
@@ -887,7 +897,7 @@ func TestEnvironmentCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		t.Fatalf("decode publish json: %v\n%s", err, publishOut)
 	}
 	if published.Environment.Status != "verified" || !published.Environment.Verified {
-		t.Fatalf("published PostgreSQL environment = %#v", published.Environment)
+		t.Fatalf("published %s environment = %#v", label, published.Environment)
 	}
 
 	discoverVerifiedOut := runCLI(t, "environment", "discover", "--json")
@@ -901,11 +911,11 @@ func TestEnvironmentCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 	if err := json.Unmarshal([]byte(discoverVerifiedOut), &discoveredVerified); err != nil {
 		t.Fatalf("decode verified discover json: %v\n%s", err, discoverVerifiedOut)
 	}
-	if discoveredVerified.Count != 1 || discoveredVerified.Items[0].ID != "env.team.pg" || !discoveredVerified.Items[0].Verified {
-		t.Fatalf("verified PostgreSQL discovery = %#v", discoveredVerified)
+	if discoveredVerified.Count != 1 || discoveredVerified.Items[0].ID != envID || !discoveredVerified.Items[0].Verified {
+		t.Fatalf("verified %s discovery = %#v", label, discoveredVerified)
 	}
 
-	bootstrapOut := runCLI(t, "environment", "bootstrap", "--json", "env.team.pg")
+	bootstrapOut := runCLI(t, "environment", "bootstrap", "--json", envID)
 	var bootstrap struct {
 		Plan struct {
 			VerificationWorkflow string         `json:"verificationWorkflow"`
@@ -917,7 +927,7 @@ func TestEnvironmentCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		t.Fatalf("decode bootstrap json: %v\n%s", err, bootstrapOut)
 	}
 	if bootstrap.Plan.VerificationWorkflow != "workflow.core-10" || bootstrap.Plan.Repos["entry-gateway"] == nil || len(bootstrap.Plan.HealthChecks) != 1 {
-		t.Fatalf("PostgreSQL bootstrap plan = %#v", bootstrap.Plan)
+		t.Fatalf("%s bootstrap plan = %#v", label, bootstrap.Plan)
 	}
 }
 
@@ -9915,6 +9925,19 @@ func configureNamedPostgreSQLActiveStore(t *testing.T, name string) string {
 	dsn := strings.TrimSpace(os.Getenv("OTSANDBOX_TEST_PG_DSN"))
 	if dsn == "" {
 		t.Skip("set OTSANDBOX_TEST_PG_DSN to run named PostgreSQL daily path coverage")
+	}
+	t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	runCLI(t, "store", "config", "set", name, "--url", dsn)
+	runCLI(t, "store", "use", name)
+	runCLI(t, "store", "upgrade")
+	return dsn
+}
+
+func configureNamedMySQLActiveStore(t *testing.T, name string) string {
+	t.Helper()
+	dsn := strings.TrimSpace(os.Getenv("OTSANDBOX_MYSQL_TEST_DSN"))
+	if dsn == "" {
+		t.Skip("set OTSANDBOX_MYSQL_TEST_DSN to run named MySQL daily path coverage")
 	}
 	t.Setenv("OTSANDBOX_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	runCLI(t, "store", "config", "set", name, "--url", dsn)

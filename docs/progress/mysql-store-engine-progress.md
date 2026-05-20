@@ -1215,3 +1215,36 @@ Current blocker:
   `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+
+## 2026-05-21 MySQL Environment CLI Daily Path Parity Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Added env-gated MySQL named active Store coverage for the Environment Catalog
+  daily CLI path.
+- Shared the existing PostgreSQL Environment Catalog command scenario across
+  PostgreSQL and MySQL: `environment register`, default `discover`,
+  `verify`, `publish-verified`, verification artifact lookup, verified
+  discovery, and `bootstrap`.
+- Added `configureNamedMySQLActiveStore`, using `OTSANDBOX_MYSQL_TEST_DSN`, so
+  the release gate's MySQL smoke Store can exercise this daily path when a
+  MySQL Store is provided.
+
+Validated:
+
+- `go test ./cmd/otsandbox -run 'TestEnvironmentCommandsUseNamed(PostgreSQL|MySQL)ActiveStore' -count=1`
+- `node --test tools/smoke/release-check.test.mjs`
+- `git diff --check`
+- `rg -n -i 'fall''back' . --glob '!node_modules/**'`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+- More daily-path CLI parity remains valuable, especially sandbox
+  service/interface registration, profile import/verify, discover, evidence
+  import, and serve/evidence task inspection.
