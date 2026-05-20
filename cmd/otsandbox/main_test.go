@@ -32,6 +32,11 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	if !strings.Contains(out, "--store NAME_OR_DSN") {
 		t.Fatalf("top-level help should show Store-first flag, got %q", out)
 	}
+	for _, want := range []string{"--clean-docker-state", "--clean-docker-images", "--allow-destructive-docker-cleanup"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("top-level help missing restore cleanup flag %q:\n%s", want, out)
+		}
+	}
 	if strings.Contains(out, "--store-url PATH") {
 		t.Fatalf("top-level help should not promote deprecated store-url path flag:\n%s", out)
 	}
@@ -726,7 +731,7 @@ func TestEnvironmentRestorePreflightReportsMissingGitForMissingCheckout(t *testi
 		ComposeJSON:            `{"composeFile":"docker-compose.yml"}`,
 		HealthChecksJSON:       `[]`,
 		VerificationWorkflowID: "workflow.core-10",
-	}, workspace, false, false, time.Second, environmentRestoreWorkflowOptions{})
+	}, workspace, false, false, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{})
 	if err != nil {
 		t.Fatalf("build restore preflight report: %v", err)
 	}
@@ -753,7 +758,7 @@ func TestEnvironmentRestorePreflightReportsMissingDockerComposePlugin(t *testing
 		ComposeJSON:            `{"composeFile":"docker-compose.yml"}`,
 		HealthChecksJSON:       `[]`,
 		VerificationWorkflowID: "workflow.core-10",
-	}, workspace, false, false, time.Second, environmentRestoreWorkflowOptions{})
+	}, workspace, false, false, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{})
 	if err != nil {
 		t.Fatalf("build restore preflight report: %v", err)
 	}
@@ -872,6 +877,134 @@ func TestEnvironmentRestoreHonorsComposeOptionsFromStore(t *testing.T) {
 	}
 	if strings.Contains(string(dockerCalls), " pull") || strings.Contains(string(dockerCalls), " build") || !strings.Contains(string(dockerCalls), want) {
 		t.Fatalf("compose option docker calls want %q:\n%s", want, dockerCalls)
+	}
+}
+
+func TestEnvironmentRestorePlansDockerCleanupWithoutExecuting(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	writeFile(t, filepath.Join(workspace, "compose.yml"), "services: {}\n")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.cleanup.plan",
+		"--compose-file", "compose.yml",
+		"--compose-project-name", "demo",
+		"--compose-service", "web",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLI(t, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--clean-docker-state", "--clean-docker-images", "--json", "env.cleanup.plan")
+	var report struct {
+		OK     bool `json:"ok"`
+		Docker struct {
+			Cleanup struct {
+				Requested      bool       `json:"requested"`
+				Allowed        bool       `json:"allowed"`
+				IncludeImages  bool       `json:"includeImages"`
+				Action         string     `json:"action"`
+				BackupCommands [][]string `json:"backupCommands"`
+				Commands       [][]string `json:"commands"`
+				Warning        string     `json:"warning"`
+			} `json:"cleanup"`
+		} `json:"docker"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode cleanup dry-run json: %v\n%s", err, out)
+	}
+	cleanup := report.Docker.Cleanup
+	if !report.OK || !cleanup.Requested || cleanup.Allowed || !cleanup.IncludeImages || cleanup.Action != "plan-cleanup" || len(cleanup.BackupCommands) != 3 || len(cleanup.Commands) != 1 {
+		t.Fatalf("cleanup dry-run report = %#v", report.Docker.Cleanup)
+	}
+	command := strings.Join(cleanup.Commands[0], " ")
+	if !strings.Contains(command, "compose -f "+filepath.Join(workspace, "compose.yml")+" -p demo down --remove-orphans --rmi all") {
+		t.Fatalf("cleanup command = %#v", cleanup.Commands[0])
+	}
+	allCommands := strings.Join(append(cleanup.BackupCommands[0], cleanup.Commands[0]...), " ")
+	if strings.Contains(allCommands, "--volumes") || strings.Contains(allCommands, "system prune") {
+		t.Fatalf("cleanup should stay scoped to compose project: %q", allCommands)
+	}
+	if !strings.Contains(cleanup.Warning, "PostgreSQL Store") {
+		t.Fatalf("cleanup warning should mention Store boundary: %q", cleanup.Warning)
+	}
+}
+
+func TestEnvironmentRestoreBlocksDockerCleanupWithoutExplicitAllow(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	fakeDockerEnv, dockerCallsPath := fakeDockerCommand(t)
+	writeFile(t, filepath.Join(workspace, "compose.yml"), "services: {}\n")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.cleanup.block",
+		"--compose-file", "compose.yml",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIFailsWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--clean-docker-state", "--json", "env.cleanup.block")
+	if !strings.Contains(out, "cleanup-blocked") || !strings.Contains(out, "--allow-destructive-docker-cleanup") {
+		t.Fatalf("cleanup block output = %q", out)
+	}
+	if raw, err := os.ReadFile(dockerCallsPath); err == nil {
+		calls := string(raw)
+		for _, forbidden := range []string{" down ", " pull", " build", " up -d"} {
+			if strings.Contains(calls, forbidden) {
+				t.Fatalf("blocked cleanup should not run docker command %q:\n%s", forbidden, calls)
+			}
+		}
+	}
+}
+
+func TestEnvironmentRestoreRunsAllowedDockerCleanupBeforeStartup(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	fakeDockerEnv, dockerCallsPath := fakeDockerCommand(t)
+	writeFile(t, filepath.Join(workspace, "compose.yml"), "services: {}\n")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.cleanup.execute",
+		"--compose-file", "compose.yml",
+		"--compose-skip-pull",
+		"--compose-skip-build",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--clean-docker-state", "--clean-docker-images", "--allow-destructive-docker-cleanup", "--json", "env.cleanup.execute")
+	var report struct {
+		OK     bool `json:"ok"`
+		Docker struct {
+			Cleanup struct {
+				Action string `json:"action"`
+			} `json:"cleanup"`
+		} `json:"docker"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode cleanup execute json: %v\n%s", err, out)
+	}
+	if !report.OK || report.Docker.Cleanup.Action != "run-cleanup" {
+		t.Fatalf("cleanup execute report = %#v", report)
+	}
+	raw, err := os.ReadFile(dockerCallsPath)
+	if err != nil {
+		t.Fatalf("read fake docker calls: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	joined := strings.Join(lines, "\n")
+	for _, want := range []string{"compose -f " + filepath.Join(workspace, "compose.yml") + " ps", "compose -f " + filepath.Join(workspace, "compose.yml") + " images", "compose -f " + filepath.Join(workspace, "compose.yml") + " config", "compose -f " + filepath.Join(workspace, "compose.yml") + " down --remove-orphans --rmi all", "compose -f " + filepath.Join(workspace, "compose.yml") + " up -d"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("cleanup docker calls missing %q:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "--volumes") || strings.Contains(joined, "system prune") {
+		t.Fatalf("cleanup should not remove volumes or run global prune:\n%s", joined)
+	}
+	order := []string{" ps", " images", " config", " down --remove-orphans --rmi all", " up -d"}
+	last := -1
+	for _, marker := range order {
+		index := strings.Index(joined, marker)
+		if index <= last {
+			t.Fatalf("cleanup order marker %q out of order in:\n%s", marker, joined)
+		}
+		last = index
 	}
 }
 

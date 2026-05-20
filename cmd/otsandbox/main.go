@@ -249,7 +249,7 @@ Usage:
   otsandbox environment discover [--store NAME_OR_DSN] [--all] [--json]
   otsandbox environment inspect ENV_ID [--store NAME_OR_DSN] [--json]
   otsandbox environment bootstrap ENV_ID [--store NAME_OR_DSN] [--json]
-  otsandbox environment restore ENV_ID --workspace PATH [--store NAME_OR_DSN] [--execute] [--pull] [--run-workflow] [--base-url URL] [--workflow-output-dir PATH] [--health-timeout-seconds N] [--json]
+  otsandbox environment restore ENV_ID --workspace PATH [--store NAME_OR_DSN] [--execute] [--pull] [--clean-docker-state] [--clean-docker-images] [--allow-destructive-docker-cleanup] [--run-workflow] [--base-url URL] [--workflow-output-dir PATH] [--health-timeout-seconds N] [--json]
   otsandbox environment verify ENV_ID --run ID --status STATUS [--evidence-complete] [--topology-complete] [--store NAME_OR_DSN] [--json]
   otsandbox environment publish-verified ENV_ID [--store NAME_OR_DSN] [--json]
   otsandbox sandbox start [--store NAME_OR_DSN] [--service ID] [--kind KIND] [--timeout-seconds N] [--json]
@@ -649,10 +649,23 @@ type environmentRestoreDockerReport struct {
 	Action       string                                `json:"action"`
 	ComposeFile  string                                `json:"composeFile,omitempty"`
 	Workdir      string                                `json:"workdir,omitempty"`
+	Cleanup      environmentRestoreDockerCleanupReport `json:"cleanup,omitempty"`
 	Commands     [][]string                            `json:"commands,omitempty"`
 	Output       []string                              `json:"output,omitempty"`
 	Error        string                                `json:"error,omitempty"`
 	HealthChecks []environmentRestoreHealthCheckReport `json:"healthChecks,omitempty"`
+}
+
+type environmentRestoreDockerCleanupReport struct {
+	Requested      bool       `json:"requested,omitempty"`
+	Allowed        bool       `json:"allowed,omitempty"`
+	IncludeImages  bool       `json:"includeImages,omitempty"`
+	Action         string     `json:"action,omitempty"`
+	BackupCommands [][]string `json:"backupCommands,omitempty"`
+	Commands       [][]string `json:"commands,omitempty"`
+	Output         []string   `json:"output,omitempty"`
+	Error          string     `json:"error,omitempty"`
+	Warning        string     `json:"warning,omitempty"`
 }
 
 type environmentRestoreHealthCheckReport struct {
@@ -680,6 +693,12 @@ type environmentRestoreWorkflowOptions struct {
 	OutputDir string
 }
 
+type environmentRestoreDockerCleanupOptions struct {
+	Requested     bool
+	IncludeImages bool
+	Allowed       bool
+}
+
 func runEnvironmentRestore(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("environment restore", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
@@ -692,6 +711,9 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 	baseURL := flags.String("base-url", "", "Base URL for verification workflow execution")
 	workflowOutputDir := flags.String("workflow-output-dir", "", "Verification workflow report output directory")
 	healthTimeoutSeconds := flags.Int("health-timeout-seconds", 60, "Seconds to wait for recorded Docker service health checks")
+	cleanDockerState := flags.Bool("clean-docker-state", false, "Plan or run Docker Compose cleanup before startup")
+	cleanDockerImages := flags.Bool("clean-docker-images", false, "Include Docker Compose image removal in cleanup plan")
+	allowDestructiveDockerCleanup := flags.Bool("allow-destructive-docker-cleanup", false, "Allow --execute to run requested Docker cleanup commands")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -727,6 +749,10 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 		StoreURL:  resolvedStoreURL,
 		BaseURL:   *baseURL,
 		OutputDir: *workflowOutputDir,
+	}, environmentRestoreDockerCleanupOptions{
+		Requested:     *cleanDockerState || *cleanDockerImages,
+		IncludeImages: *cleanDockerImages,
+		Allowed:       *allowDestructiveDockerCleanup,
 	})
 	if err != nil {
 		return err
@@ -744,7 +770,7 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 	return nil
 }
 
-func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, workspace string, execute bool, pull bool, healthTimeout time.Duration, workflowOptions environmentRestoreWorkflowOptions) (environmentRestoreReport, error) {
+func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, workspace string, execute bool, pull bool, healthTimeout time.Duration, workflowOptions environmentRestoreWorkflowOptions, cleanupOptions environmentRestoreDockerCleanupOptions) (environmentRestoreReport, error) {
 	workflowID := strings.TrimSpace(env.VerificationWorkflowID)
 	if workflowID == "" {
 		return environmentRestoreReport{}, fmt.Errorf("environment %s has no verification workflow; restore must be anchored to a verified workflow", env.ID)
@@ -764,7 +790,7 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 		Workspace:            workspace,
 		Compose:              compose,
 		HealthChecks:         healthChecks,
-		Preflight:            environmentRestorePreflightReport(specs, compose, workspace),
+		Preflight:            environmentRestorePreflightReport(specs, compose, workspace, cleanupOptions),
 		Workflow: environmentRestoreWorkflowRun{
 			OK:         !workflowOptions.Run,
 			Action:     "not-requested",
@@ -785,7 +811,7 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 		report.Repos = append(report.Repos, item)
 	}
 	if report.OK {
-		report.Docker = environmentRestoreDocker(ctx, compose, healthChecks, workspace, execute, healthTimeout)
+		report.Docker = environmentRestoreDocker(ctx, compose, healthChecks, workspace, execute, healthTimeout, cleanupOptions)
 		if !report.Docker.OK {
 			report.OK = false
 		}
@@ -893,7 +919,7 @@ func environmentRestoreRepoSpecs(env store.Environment, workspace string) []envi
 	return out
 }
 
-func environmentRestorePreflightReport(specs []environmentRestoreRepoSpec, compose map[string]any, workspace string) environmentRestorePreflight {
+func environmentRestorePreflightReport(specs []environmentRestoreRepoSpec, compose map[string]any, workspace string, cleanupOptions environmentRestoreDockerCleanupOptions) environmentRestorePreflight {
 	report := environmentRestorePreflight{
 		OK: true,
 		Notes: []string{
@@ -923,6 +949,12 @@ func environmentRestorePreflightReport(specs []environmentRestoreRepoSpec, compo
 			report.HeavySteps = append(report.HeavySteps, "docker compose build may build images from local checkouts")
 		}
 		report.HeavySteps = append(report.HeavySteps, "docker compose up -d may create or replace containers")
+		if cleanupOptions.Requested {
+			report.HeavySteps = append(report.HeavySteps, "docker compose down may remove existing containers and orphan containers")
+			if cleanupOptions.IncludeImages {
+				report.HeavySteps = append(report.HeavySteps, "docker compose down --rmi all may remove local images")
+			}
+		}
 		if resolved := restoreWorkspacePath(workspace, composeFile); strings.TrimSpace(resolved) != "" {
 			report.Notes = append(report.Notes, "compose file must exist before Docker execution: "+resolved)
 		}
@@ -1133,7 +1165,7 @@ func environmentRestoreCheckoutDetachedAtRef(ctx context.Context, spec environme
 	return strings.TrimSpace(head) == strings.TrimSpace(target) && strings.TrimSpace(branch) == "HEAD", ""
 }
 
-func environmentRestoreDocker(ctx context.Context, compose map[string]any, healthChecks []any, workspace string, execute bool, healthTimeout time.Duration) environmentRestoreDockerReport {
+func environmentRestoreDocker(ctx context.Context, compose map[string]any, healthChecks []any, workspace string, execute bool, healthTimeout time.Duration, cleanupOptions environmentRestoreDockerCleanupOptions) environmentRestoreDockerReport {
 	report := environmentRestoreDockerReport{
 		OK:      true,
 		Workdir: workspace,
@@ -1146,6 +1178,7 @@ func environmentRestoreDocker(ctx context.Context, compose map[string]any, healt
 		report.ComposeFile = restoreWorkspacePath(workspace, composeFile)
 		baseArgs := environmentRestoreComposeBaseArgs(compose, workspace, report.ComposeFile)
 		services := stringSliceFromAny(compose["services"])
+		report.Cleanup = environmentRestoreDockerCleanupPlan(baseArgs, cleanupOptions)
 		if !boolFromReportAny(compose["skipPull"]) {
 			report.Commands = append(report.Commands, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"pull"}, services...)...))
 		}
@@ -1156,6 +1189,18 @@ func environmentRestoreDocker(ctx context.Context, compose map[string]any, healt
 	case startCommand != "":
 		report.Action = "plan-start-command"
 		report.Commands = [][]string{{"/bin/sh", "-c", startCommand}}
+		if cleanupOptions.Requested {
+			report.OK = false
+			report.Cleanup = environmentRestoreDockerCleanupReport{
+				Requested:     true,
+				Allowed:       cleanupOptions.Allowed,
+				IncludeImages: cleanupOptions.IncludeImages,
+				Action:        "unsupported-cleanup",
+				Error:         "Docker cleanup requires a recorded composeFile",
+			}
+			report.Error = report.Cleanup.Error
+			return report
+		}
 	default:
 		report.OK = false
 		report.Action = "missing-docker-plan"
@@ -1183,6 +1228,28 @@ func environmentRestoreDocker(ctx context.Context, compose map[string]any, healt
 			report.Error = fmt.Sprintf("compose file path is a directory: %s", report.ComposeFile)
 			return report
 		}
+		if report.Cleanup.Requested {
+			if !report.Cleanup.Allowed {
+				report.OK = false
+				report.Cleanup.Action = "cleanup-blocked"
+				report.Cleanup.Error = "Docker cleanup requested during --execute; rerun with --allow-destructive-docker-cleanup after reviewing cleanup commands"
+				report.Error = report.Cleanup.Error
+				return report
+			}
+			report.Cleanup.Action = "run-cleanup"
+			for _, command := range append(report.Cleanup.BackupCommands, report.Cleanup.Commands...) {
+				output, errText := runRestoreCommand(ctx, workspace, command)
+				if strings.TrimSpace(output) != "" {
+					report.Cleanup.Output = append(report.Cleanup.Output, output)
+				}
+				if errText != "" {
+					report.OK = false
+					report.Cleanup.Error = errText
+					report.Error = errText
+					return report
+				}
+			}
+		}
 	}
 	if report.Action == "plan-docker-compose" {
 		report.Action = "run-docker-compose"
@@ -1207,6 +1274,30 @@ func environmentRestoreDocker(ctx context.Context, compose map[string]any, healt
 		}
 	}
 	return report
+}
+
+func environmentRestoreDockerCleanupPlan(baseArgs []string, options environmentRestoreDockerCleanupOptions) environmentRestoreDockerCleanupReport {
+	if !options.Requested {
+		return environmentRestoreDockerCleanupReport{}
+	}
+	cleanup := environmentRestoreDockerCleanupReport{
+		Requested:     true,
+		Allowed:       options.Allowed,
+		IncludeImages: options.IncludeImages,
+		Action:        "plan-cleanup",
+		Warning:       "Review Docker cleanup commands before simulating a clean colleague machine; the sandbox PostgreSQL Store must remain outside these Docker target services.",
+	}
+	cleanup.BackupCommands = [][]string{
+		append(append([]string{"docker", "compose"}, baseArgs...), "ps"),
+		append(append([]string{"docker", "compose"}, baseArgs...), "images"),
+		append(append([]string{"docker", "compose"}, baseArgs...), "config"),
+	}
+	down := append(append([]string{"docker", "compose"}, baseArgs...), "down", "--remove-orphans")
+	if options.IncludeImages {
+		down = append(down, "--rmi", "all")
+	}
+	cleanup.Commands = [][]string{down}
+	return cleanup
 }
 
 func environmentRestoreRunWorkflow(ctx context.Context, workflowID string, workspace string, options environmentRestoreWorkflowOptions) environmentRestoreWorkflowRun {
@@ -1422,6 +1513,21 @@ func printEnvironmentRestoreReport(report environmentRestoreReport) {
 	}
 	for _, command := range report.Docker.Commands {
 		fmt.Printf("  command: %s\n", strings.Join(command, " "))
+	}
+	if report.Docker.Cleanup.Requested {
+		fmt.Printf("  cleanup: %s\n", report.Docker.Cleanup.Action)
+		if report.Docker.Cleanup.Warning != "" {
+			fmt.Printf("    warning: %s\n", report.Docker.Cleanup.Warning)
+		}
+		for _, command := range report.Docker.Cleanup.BackupCommands {
+			fmt.Printf("    backup: %s\n", strings.Join(command, " "))
+		}
+		for _, command := range report.Docker.Cleanup.Commands {
+			fmt.Printf("    cleanup-command: %s\n", strings.Join(command, " "))
+		}
+		if report.Docker.Cleanup.Error != "" {
+			fmt.Printf("    error: %s\n", report.Docker.Cleanup.Error)
+		}
 	}
 	for _, check := range report.Docker.HealthChecks {
 		state := "failed"

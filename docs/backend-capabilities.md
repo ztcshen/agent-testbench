@@ -239,6 +239,9 @@ The backend writes runtime artifacts that must not be committed:
   Store 或 `--store NAME_OR_DSN`，不为常规工作维护隐藏 Store 引擎。
 - Verified Environment Catalog discovery is an acceptance surface, not a raw
   registration list. 环境目录的 verified 发现是验收面，不是原始登记列表。
+- Docker cleanup for clean-machine simulation is scoped to recorded target
+  Compose projects only; the sandbox control-plane PostgreSQL Store must remain
+  outside the restored Docker target environment. 干净机器模拟的 Docker 清理只作用于已登记的目标 Compose 项目；沙箱控制面的 PostgreSQL Store 必须位于被恢复的目标 Docker 环境之外。
 - Import Bundle bundles are external configuration source, not core code. 配置包是外部配置源，不是核心代码。
 - HTML reports are temporary local artifacts. HTML 报告是本地临时产物。
 - Reports may contain failed cases; report generation success means the

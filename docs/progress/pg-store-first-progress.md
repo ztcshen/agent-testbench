@@ -1585,7 +1585,7 @@ Incomplete work:
 
 ## 2026-05-20 Environment Restore Goal Ledger
 
-Estimated overall new-machine environment restore progress: 94%.
+Estimated overall new-machine environment restore progress: 95%.
 
 Completed evidence:
 
@@ -1627,6 +1627,16 @@ Completed evidence:
 - Restore preflight now also reports `git` when existing checkouts require Git
   validation or ref preparation, not only when a missing checkout must be
   cloned.
+- Restore can now produce a Compose-scoped clean-machine simulation plan with
+  `--clean-docker-state` and optional `--clean-docker-images`; execution is
+  blocked unless `--allow-destructive-docker-cleanup` is explicitly supplied.
+- Cleanup planning records `docker compose ps`, `docker compose images`, and
+  `docker compose config` for human review before `docker compose down
+  --remove-orphans`; it does not use global Docker prune commands, delete
+  volumes, or treat the review commands as database/runtime backups.
+- Documentation now repeats the hard boundary that cleanup targets only the
+  recorded Compose project and must not clean or host the sandbox PostgreSQL
+  control-plane Store.
 
 Latest light validation:
 
@@ -1637,6 +1647,7 @@ Latest light validation:
 - `go test ./internal/controlplane -run 'TestServerManagesVerifiedEnvironmentCatalogFromStore' -count=1`
 - `go test ./cmd/otsandbox -run 'TestEnvironmentRestore(ChecksOutRequestedRefForExistingCheckout|ChecksOutRequestedRefAfterClone|RejectsExistingCheckoutWithDifferentOrigin|PullsExistingCheckoutWhenRequested)' -count=1`
 - `go test ./cmd/otsandbox -run 'TestEnvironmentRestore(ChecksOutRequestedRefForExistingCheckout|DetachesExistingCheckoutAlreadyAtRef|PreflightRequiresGitForExistingCheckoutRef|ChecksOutRequestedRefAfterClone|RejectsExistingCheckoutWithDifferentOrigin|PullsExistingCheckoutWhenRequested)' -count=1`
+- `go test ./cmd/otsandbox -run 'TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL|TestEnvironmentRestore(PlansDockerCleanupWithoutExecuting|BlocksDockerCleanupWithoutExplicitAllow|RunsAllowedDockerCleanupBeforeStartup|HonorsComposeOptionsFromStore|FailsBeforeDockerWhenComposeFileIsMissing)' -count=1`
 - `go test ./cmd/otsandbox -run 'TestEnvironmentRestore' -count=1`
 - `rg -n -i 'fall''back' . --glob '!node_modules/**'`
 - `git diff --check`
@@ -1648,9 +1659,9 @@ Incomplete work:
   or otherwise simulates a clean colleague machine.
 - Restore still needs richer provider hardening for GitHub/GitLab tokens,
   submodules, auth prompts, and persisted restore-run diagnostics.
-- Docker restore still needs policy guardrails for destructive cleanup,
-  container/image backup plans, and explicit approval before clean-machine
-  simulation.
+- Docker restore still needs persisted restore-run diagnostics and a real
+  operator-approved clean-machine proof; destructive cleanup policy guardrails
+  are now present at CLI level but not live-validated against real Docker state.
 - Health checks are still HTTP GET 2xx only; future work should add Compose
   service health, port probes, command probes, dependency ordering, and more
   durable restore-run records.

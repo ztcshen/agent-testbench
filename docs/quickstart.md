@@ -130,6 +130,19 @@ you want a fixed local report directory. When `composeFile` is recorded, the
 file must exist under `--workspace` after optional repository preparation;
 restore fails before invoking Docker if it is missing.
 
+For a colleague-machine simulation, add `--clean-docker-state` during dry-run
+review to include a Compose-scoped cleanup plan before startup. Add
+`--clean-docker-images` only when local images should also be removed with the
+Compose project. The cleanup plan first records review commands
+`docker compose ps`, `docker compose images`, and `docker compose config`, then
+plans `docker compose down --remove-orphans`; it never uses global Docker prune
+commands and never adds volume deletion flags. These review commands are a
+state snapshot for human inspection, not a backup of volumes, databases, or
+runtime data. During `--execute`, requested cleanup is blocked unless
+`--allow-destructive-docker-cleanup` is also present. This cleanup applies only
+to the recorded target Compose project; the sandbox PostgreSQL control-plane
+Store must stay outside that Docker environment.
+
 The control-plane API exposes the same recovery shape through
 `GET /api/environments/{environmentId}/bootstrap`: repository steps, Docker
 commands or start-command steps, health checks, and the verification workflow

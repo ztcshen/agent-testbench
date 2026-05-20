@@ -65,6 +65,9 @@ Store may describe and verify a target environment, but it must not be hosted
 by that same target environment; otherwise restore would depend on the database
 it is trying to discover. Target application databases used by tested services
 are separate Docker-managed runtime dependencies.
+Docker cleanup for colleague-machine simulation is scoped to the recorded
+target Compose project only; it must not clean, recreate, or host the sandbox
+PostgreSQL Store.
 
 Commands may also use `--store NAME_OR_DSN` for a one-off override. Daily
 CLI/API commands read and write the active Store unless that explicit override
