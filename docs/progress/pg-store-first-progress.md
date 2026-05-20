@@ -1582,3 +1582,49 @@ Incomplete work:
 - Stop point per user request. Do not start another slice until resumed.
 - Final completion still requires the external PostgreSQL release gate plus
   live SkyWalking 10-step validation against a real endpoint and real trace ids.
+
+## 2026-05-20 Environment Restore Goal Ledger
+
+Estimated overall new-machine environment restore progress: 88%.
+
+Completed evidence:
+
+- Added CLI `environment restore` for Store-backed Environment Catalog entries:
+  optional Git clone/pull or existing checkout preparation, Docker Compose
+  pull/build/up planning and execution, HTTP health checks, and optional
+  verification workflow execution via `--execute --run-workflow`.
+- Added `store ddl --backend postgres` so the sandbox control-plane PostgreSQL
+  Store can be provisioned outside restored Docker target services.
+- Documented the hard boundary that the sandbox Store/control-plane database
+  must not be hosted by the Docker environment being restored.
+- Added API/CLI bootstrap plan parity: `environment bootstrap` and
+  `GET /api/environments/{id}/bootstrap` return repository steps, Docker
+  commands, health checks, verification workflow, and a
+  `pauseBeforeHeavyValidation` marker for UI review.
+- Restore now accepts already-present checkouts without a repo URL, rejects
+  missing compose files before invoking Docker, runs the recorded verification
+  workflow when requested, and records the workflow run/status back into the
+  Environment Catalog without marking SkyWalking topology complete or publishing
+  the environment as verified.
+- Restore preflight now reports required `git`, `docker`, and Docker Compose
+  plugin capability through `docker compose version`, and labels heavy Docker
+  pull/build/up steps before execution.
+
+Latest light validation:
+
+- `go test ./cmd/otsandbox -run 'TestEnvironmentRestorePreflightReportsMissingDockerComposePlugin|TestEnvironmentRestoreClonesRemoteReposForVerifiedWorkflow' -count=1`
+
+Incomplete work:
+
+- True new-machine proof remains intentionally paused until the user approves a
+  heavy validation pass that backs up/deletes current Docker containers/images
+  or otherwise simulates a clean colleague machine.
+- Restore still needs richer provider/checkout hardening for GitHub/GitLab
+  tokens, commit/tag pinning, dirty checkout detection, submodules, and remote
+  URL mismatch diagnostics.
+- Docker restore still needs optional controls for project name, env files,
+  profiles, service selection, and a safer way to skip image pulls when a user
+  wants a lighter local start.
+- Health checks are still HTTP GET 2xx only; future work should add Compose
+  service health, port probes, command probes, dependency ordering, and more
+  durable restore-run records.

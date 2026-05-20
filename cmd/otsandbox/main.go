@@ -904,6 +904,7 @@ func environmentRestorePreflightReport(specs []environmentRestoreRepoSpec, compo
 	startCommand := strings.TrimSpace(valueString(compose["startCommand"]))
 	if composeFile != "" {
 		report.Tools = append(report.Tools, environmentRestoreTool("docker", true))
+		report.Tools = append(report.Tools, environmentRestoreCommandTool("docker compose", true, "docker", "compose", "version"))
 		report.HeavySteps = append(report.HeavySteps,
 			"docker compose pull may download images",
 			"docker compose build may build images from local checkouts",
@@ -929,6 +930,32 @@ func environmentRestoreTool(name string, required bool) environmentRestorePrefli
 	if err != nil {
 		tool.OK = false
 		tool.Error = err.Error()
+		return tool
+	}
+	tool.OK = true
+	tool.Path = path
+	return tool
+}
+
+func environmentRestoreCommandTool(name string, required bool, command string, args ...string) environmentRestorePreflightTool {
+	tool := environmentRestorePreflightTool{Name: name, Required: required}
+	path, err := exec.LookPath(command)
+	if err != nil {
+		tool.OK = false
+		tool.Error = err.Error()
+		return tool
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		tool.OK = false
+		tool.Path = path
+		tool.Error = strings.TrimSpace(string(out))
+		if tool.Error == "" {
+			tool.Error = err.Error()
+		}
 		return tool
 	}
 	tool.OK = true

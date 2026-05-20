@@ -654,7 +654,7 @@ func TestEnvironmentRestoreClonesRemoteReposForVerifiedWorkflow(t *testing.T) {
 	if !dryRun.Docker.OK || dryRun.Docker.Action != "plan-docker-compose" || len(dryRun.Docker.Commands) != 3 {
 		t.Fatalf("restore dry-run docker plan = %#v", dryRun.Docker)
 	}
-	if !dryRun.Preflight.OK || !restorePreflightHasTool(dryRun.Preflight.Tools, "git", true) || !restorePreflightHasTool(dryRun.Preflight.Tools, "docker", true) || len(dryRun.Preflight.HeavySteps) == 0 {
+	if !dryRun.Preflight.OK || !restorePreflightHasTool(dryRun.Preflight.Tools, "git", true) || !restorePreflightHasTool(dryRun.Preflight.Tools, "docker", true) || !restorePreflightHasTool(dryRun.Preflight.Tools, "docker compose", true) || len(dryRun.Preflight.HeavySteps) == 0 {
 		t.Fatalf("restore dry-run preflight = %#v", dryRun.Preflight)
 	}
 	if len(dryRun.NextActions) == 0 || !strings.Contains(strings.Join(dryRun.NextActions, "\n"), "workflow.core-10") {
@@ -728,6 +728,33 @@ func TestEnvironmentRestorePreflightReportsMissingGitForMissingCheckout(t *testi
 	}
 	if report.OK || report.Preflight.OK || !restoreTypedPreflightHasTool(report.Preflight.Tools, "git", false) || !restoreTypedPreflightHasTool(report.Preflight.Tools, "docker", true) {
 		t.Fatalf("missing git preflight report = %#v", report.Preflight)
+	}
+}
+
+func TestEnvironmentRestorePreflightReportsMissingDockerComposePlugin(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	fakeBin := t.TempDir()
+	writeFile(t, filepath.Join(fakeBin, "git"), "#!/bin/sh\nexit 0\n")
+	writeFile(t, filepath.Join(fakeBin, "docker"), "#!/bin/sh\nif [ \"$1\" = compose ] && [ \"$2\" = version ]; then exit 17; fi\nexit 0\n")
+	if err := os.Chmod(filepath.Join(fakeBin, "git"), 0o755); err != nil {
+		t.Fatalf("chmod fake git: %v", err)
+	}
+	if err := os.Chmod(filepath.Join(fakeBin, "docker"), 0o755); err != nil {
+		t.Fatalf("chmod fake docker: %v", err)
+	}
+	t.Setenv("PATH", fakeBin)
+	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+		ID:                     "env.preflight.compose",
+		ReposJSON:              `{}`,
+		ComposeJSON:            `{"composeFile":"docker-compose.yml"}`,
+		HealthChecksJSON:       `[]`,
+		VerificationWorkflowID: "workflow.core-10",
+	}, workspace, false, false, time.Second, environmentRestoreWorkflowOptions{})
+	if err != nil {
+		t.Fatalf("build restore preflight report: %v", err)
+	}
+	if report.OK || report.Preflight.OK || !restoreTypedPreflightHasTool(report.Preflight.Tools, "docker", true) || !restoreTypedPreflightHasTool(report.Preflight.Tools, "docker compose", false) {
+		t.Fatalf("missing docker compose preflight report = %#v", report.Preflight)
 	}
 }
 
