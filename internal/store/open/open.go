@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"open-test-sandbox/internal/store"
+	"open-test-sandbox/internal/store/mysql"
 	"open-test-sandbox/internal/store/postgres"
 	"open-test-sandbox/internal/store/sqlite"
 	"open-test-sandbox/internal/store/sqlstore"
@@ -67,7 +68,11 @@ func Open(ctx context.Context, reference string) (store.Store, error) {
 		}
 		return postgres.Open(ctx, cfg)
 	case BackendMySQL:
-		return nil, fmt.Errorf("%w: mysql store backend is recognized but not implemented yet", ErrBackendUnavailable)
+		cfg, err := mysql.ParseConfigFromURL(reference)
+		if err != nil {
+			return nil, err
+		}
+		return mysql.Open(ctx, cfg)
 	default:
 		return nil, fmt.Errorf("unsupported store backend %q", backend)
 	}

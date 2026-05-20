@@ -37,6 +37,7 @@ func TestCoreSchemaSQLUsesDialectColumnTypes(t *testing.T) {
 			name:    "mysql",
 			dialect: sqlstore.MySQLDialect{},
 			want: []string{
+				"id varchar(128) primary key",
 				"applied_at datetime(6) not null",
 				"summary_json json not null",
 				"started_at datetime(6)",
@@ -87,17 +88,28 @@ func TestCoreSchemaSQLKeepsSharedIndexesStable(t *testing.T) {
 	statements := sqlstore.CoreSchemaSQL(sqlstore.PostgresDialect{})
 	joined := strings.Join(statements, "\n")
 	for _, want := range []string{
-		"create index if not exists idx_api_case_runs_run_id_created_at",
-		"create index if not exists idx_evidence_records_run_id_created_at",
-		"create index if not exists idx_trace_topologies_workflow_run_id_created_at",
-		"create index if not exists idx_post_process_tasks_run_id_created_at",
-		"create index if not exists idx_config_versions_active_published",
-		"create index if not exists idx_environments_verified_status",
-		"create index if not exists idx_environments_verification",
+		"idx_api_case_runs_run_id_created_at",
+		"idx_evidence_records_run_id_created_at",
+		"idx_trace_topologies_workflow_run_id_created_at",
+		"idx_post_process_tasks_run_id_created_at",
+		"idx_config_versions_active_published",
+		"idx_environments_verified_status",
+		"idx_environments_verification",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("core schema missing index %q:\n%s", want, joined)
 		}
+	}
+}
+
+func TestCoreSchemaSQLUsesMySQLCompatibleIndexDDL(t *testing.T) {
+	statements := sqlstore.CoreSchemaSQL(sqlstore.MySQLDialect{})
+	joined := strings.Join(statements, "\n")
+	if strings.Contains(joined, "create index if not exists") {
+		t.Fatalf("mysql schema should not use index-if-not-exists syntax:\n%s", joined)
+	}
+	if !strings.Contains(joined, "create index `idx_api_case_runs_run_id_created_at`") {
+		t.Fatalf("mysql schema missing quoted index DDL:\n%s", joined)
 	}
 }
 

@@ -2,7 +2,6 @@ package open_test
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -46,12 +45,12 @@ func TestBackendFromReferenceRequiresExplicitBackendScheme(t *testing.T) {
 	}
 }
 
-func TestOpenRejectsRecognizedButUnavailableBackendWithClearError(t *testing.T) {
-	_, err := storeopen.Open(context.Background(), "mysql://user:pass@localhost:3306/otsandbox")
+func TestOpenRoutesRecognizedMySQLBackendToDriver(t *testing.T) {
+	_, err := storeopen.Open(context.Background(), "mysql://user:pass@127.0.0.1:1/otsandbox")
 	if err == nil {
-		t.Fatal("expected mysql backend to be recognized but unavailable")
+		t.Fatal("expected mysql open to fail because no test server is listening")
 	}
-	if !errors.Is(err, storeopen.ErrBackendUnavailable) || !strings.Contains(err.Error(), "mysql") {
-		t.Fatalf("mysql unavailable error = %v", err)
+	if !strings.Contains(err.Error(), "mysql") || !strings.Contains(err.Error(), "ping") {
+		t.Fatalf("mysql open error = %v", err)
 	}
 }

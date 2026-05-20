@@ -319,18 +319,20 @@ export async function prepareSmokeStoreReference(tempDir, env = process.env, run
       }
       return { storeRef: `sqlite://${path.join(tempDir, "store.sqlite")}`, serverEnv: env };
     }
-    throw new Error("set OTSANDBOX_SMOKE_STORE_DSN to a PostgreSQL Store DSN for smoke validation");
+    throw new Error("set OTSANDBOX_SMOKE_STORE_DSN to a PostgreSQL or MySQL Store DSN for smoke validation");
   }
-  if (!/^postgres(?:ql)?:\/\//i.test(smokeStoreDSN)) {
-    throw new Error("OTSANDBOX_SMOKE_STORE_DSN must be a PostgreSQL Store DSN");
+  const backend = /^postgres(?:ql)?:\/\//i.test(smokeStoreDSN) ? "postgres" : /^mysql:\/\//i.test(smokeStoreDSN) ? "mysql" : "";
+  if (!backend) {
+    throw new Error("OTSANDBOX_SMOKE_STORE_DSN must be a PostgreSQL or MySQL Store DSN");
   }
+  const storeName = backend === "mysql" ? "smoke-mysql" : "smoke-postgres";
   const configHome = path.join(tempDir, "store-config");
   await mkdir(configHome, { recursive: true });
   const serverEnv = { ...env, OTSANDBOX_CONFIG_HOME: configHome };
-  runCommand("go", ["run", "./cmd/otsandbox", "store", "config", "set", "smoke-postgres", "--url", smokeStoreDSN], { env: serverEnv });
-  runCommand("go", ["run", "./cmd/otsandbox", "store", "use", "smoke-postgres"], { env: serverEnv });
-  runCommand("go", ["run", "./cmd/otsandbox", "store", "upgrade", "--store", "smoke-postgres"], { env: serverEnv });
-  return { storeRef: "smoke-postgres", serverEnv };
+  runCommand("go", ["run", "./cmd/otsandbox", "store", "config", "set", storeName, "--url", smokeStoreDSN], { env: serverEnv });
+  runCommand("go", ["run", "./cmd/otsandbox", "store", "use", storeName], { env: serverEnv });
+  runCommand("go", ["run", "./cmd/otsandbox", "store", "upgrade", "--store", storeName], { env: serverEnv });
+  return { storeRef: storeName, serverEnv };
 }
 
 function requireValue(value, message) {

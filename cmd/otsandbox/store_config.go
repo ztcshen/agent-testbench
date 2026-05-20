@@ -35,17 +35,17 @@ var errNoActiveStoreConfigured = errors.New("no active store configured")
 const legacyStoreURLFlagHelp = "Deprecated compatibility Store URL or path; daily commands reject SQLite paths"
 
 func activeStoreRequiredError() error {
-	return fmt.Errorf("%w; run `otsandbox store config set NAME --url postgres://...` then `otsandbox store use NAME`", errNoActiveStoreConfigured)
+	return fmt.Errorf("%w; run `otsandbox store config set NAME --url postgres://...` or `mysql://...`, then `otsandbox store use NAME`", errNoActiveStoreConfigured)
 }
 
-func dailyStoreRequiresPostgresError(name string, backend string) error {
+func dailyStoreRequiresSQLStoreError(name string, backend string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		name = "active Store"
 	} else if !strings.HasPrefix(name, "--") {
 		name = fmt.Sprintf("Store config %q", name)
 	}
-	return fmt.Errorf("%s uses %s; daily commands require PostgreSQL Store. Use `otsandbox store config set NAME --url postgres://...` and `otsandbox store use NAME`, or use SQLite only through migration/compatibility commands", name, backend)
+	return fmt.Errorf("%s uses %s; daily commands require PostgreSQL or MySQL Store. Use `otsandbox store config set NAME --url postgres://...` or `mysql://...`, then `otsandbox store use NAME`; use SQLite only through migration/compatibility commands", name, backend)
 }
 
 func runStoreConfig(args []string) error {
@@ -71,7 +71,7 @@ func runStoreConfigSet(args []string) error {
 	name := strings.TrimSpace(args[0])
 	flags := flag.NewFlagSet("store config set", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	storeURL := flags.String("url", "", "PostgreSQL Store DSN")
+	storeURL := flags.String("url", "", "PostgreSQL or MySQL Store DSN")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -290,8 +290,8 @@ func resolveRequiredDailyStoreReference(storeRef string, legacyStoreURL string) 
 		if err != nil {
 			return "", err
 		}
-		if backend != "postgres" {
-			return "", dailyStoreRequiresPostgresError("--store-url", "SQLite")
+		if !isDailyStoreBackend(backend) {
+			return "", dailyStoreRequiresSQLStoreError("--store-url", "SQLite")
 		}
 		return resolved, nil
 	}
@@ -303,10 +303,19 @@ func resolveRequiredDailyStoreReference(storeRef string, legacyStoreURL string) 
 	if err != nil {
 		return "", err
 	}
-	if backend != "postgres" {
-		return "", dailyStoreRequiresPostgresError(configName, "SQLite")
+	if !isDailyStoreBackend(backend) {
+		return "", dailyStoreRequiresSQLStoreError(configName, backend)
 	}
 	return resolved, nil
+}
+
+func isDailyStoreBackend(backend string) bool {
+	switch strings.ToLower(strings.TrimSpace(backend)) {
+	case "postgres", "mysql":
+		return true
+	default:
+		return false
+	}
 }
 
 func configuredStoreName(storeRef string, legacyStoreURL string) (string, bool) {
@@ -339,8 +348,8 @@ func newStoreConfigEntry(name string, rawURL string) (storeConfigEntry, error) {
 	if err != nil {
 		return storeConfigEntry{}, err
 	}
-	if backend != "postgres" {
-		return storeConfigEntry{}, fmt.Errorf("store config %q must use postgres:// or postgresql://", name)
+	if !isDailyStoreBackend(backend) {
+		return storeConfigEntry{}, fmt.Errorf("store config %q must use postgres://, postgresql://, or mysql://", name)
 	}
 	return storeConfigEntry{Name: name, URL: rawURL, Backend: backend}, nil
 }
@@ -353,6 +362,8 @@ func storeBackendFromURL(rawURL string) (string, error) {
 	switch strings.ToLower(parsed.Scheme) {
 	case "postgres", "postgresql":
 		return "postgres", nil
+	case "mysql":
+		return "mysql", nil
 	case "sqlite", "file":
 		return "sqlite", nil
 	default:

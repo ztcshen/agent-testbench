@@ -35,6 +35,7 @@ import (
 	"open-test-sandbox/internal/redaction"
 	"open-test-sandbox/internal/requesttemplate"
 	"open-test-sandbox/internal/store"
+	"open-test-sandbox/internal/store/mysql"
 	storeopen "open-test-sandbox/internal/store/open"
 	"open-test-sandbox/internal/store/postgres"
 	"open-test-sandbox/internal/store/sqlite"
@@ -47,6 +48,8 @@ const environmentRestoreAttemptLimit = 20
 
 var postgresSchemaStatus = postgres.SchemaStatus
 var postgresUpgradeSchema = postgres.UpgradeSchema
+var mysqlSchemaStatus = mysql.SchemaStatus
+var mysqlUpgradeSchema = mysql.UpgradeSchema
 
 type profileImportReport struct {
 	ProfileID     string               `json:"profileId"`
@@ -241,13 +244,13 @@ func printHelp() {
 
 Usage:
   otsandbox version
-  otsandbox store config set NAME --url postgres://...
+  otsandbox store config set NAME --url postgres://...|mysql://...
   otsandbox store config list [--json]
   otsandbox store use NAME
   otsandbox store current [--json]
   otsandbox store status [--store NAME_OR_DSN]
   otsandbox store upgrade [--store NAME_OR_DSN]
-  otsandbox store ddl [--backend postgres]
+  otsandbox store ddl [--backend postgres|mysql]
   otsandbox environment register --id ID [--store NAME_OR_DSN] [--display-name NAME] [--service ID] [--repo SERVICE=PATH] [--branch SERVICE=BRANCH] [--checkout SERVICE=PATH] [--package-repo URL] [--package-branch BRANCH] [--package-ref REF] [--compose-file PATH]... [--compose-generated-file TARGET=SOURCE_FILE]... [--compose-env KEY=VALUE]... [--start-command TEXT] [--health-url URL] [--health-tcp HOST:PORT] [--health-command CMD] [--health-compose-service SERVICE] [--verification-workflow ID] [--json]
   otsandbox environment discover [--store NAME_OR_DSN] [--all] [--json]
   otsandbox environment inspect ENV_ID [--store NAME_OR_DSN] [--json]
@@ -367,7 +370,8 @@ func runStore(ctx context.Context, args []string) error {
 	if strings.TrimSpace(resolvedStoreURL) == "" {
 		return activeStoreRequiredError()
 	}
-	if backend, _ := storeBackendFromURL(resolvedStoreURL); backend == "postgres" {
+	backend, _ := storeBackendFromURL(resolvedStoreURL)
+	if backend == "postgres" {
 		cfg, err := postgres.ParseConfigFromURL(resolvedStoreURL)
 		if err != nil {
 			return err
@@ -381,6 +385,31 @@ func runStore(ctx context.Context, args []string) error {
 			printPostgresStoreStatus(status)
 		case "upgrade":
 			status, err := postgresUpgradeSchema(ctx, cfg)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Upgraded store schema to version %d\n", status.CurrentVersion)
+			fmt.Printf("Applied: %d\n", status.AppliedCount)
+			fmt.Printf("URL: %s\n", maskStoreURL(status.URL))
+		default:
+			return fmt.Errorf("unknown store command: %s", args[0])
+		}
+		return nil
+	}
+	if backend == "mysql" {
+		cfg, err := mysql.ParseConfigFromURL(resolvedStoreURL)
+		if err != nil {
+			return err
+		}
+		switch args[0] {
+		case "status":
+			status, err := mysqlSchemaStatus(ctx, cfg)
+			if err != nil {
+				return err
+			}
+			printMySQLStoreStatus(status)
+		case "upgrade":
+			status, err := mysqlUpgradeSchema(ctx, cfg)
 			if err != nil {
 				return err
 			}
@@ -429,8 +458,11 @@ func runStoreDDL(args []string) error {
 	case "postgres", "postgresql":
 		fmt.Println(strings.Join(sqlstore.CoreSchemaSQL(sqlstore.PostgresDialect{}), "\n\n"))
 		return nil
+	case "mysql":
+		fmt.Println(strings.Join(sqlstore.CoreSchemaSQL(sqlstore.MySQLDialect{}), "\n\n"))
+		return nil
 	default:
-		return fmt.Errorf("unsupported DDL backend %q; supported backend: postgres", *backend)
+		return fmt.Errorf("unsupported DDL backend %q; supported backends: postgres, mysql", *backend)
 	}
 }
 
@@ -1629,10 +1661,10 @@ func environmentRestoreCleanMachinePlanForReport(report environmentRestoreReport
 func environmentRestoreCleanMachinePrerequisites(report environmentRestoreReport, workflowOptions environmentRestoreWorkflowOptions) []environmentRestoreCleanMachinePrerequisite {
 	out := []environmentRestoreCleanMachinePrerequisite{
 		{
-			Name:     "postgresql-store",
+			Name:     "sql-store",
 			Required: true,
 			OK:       environmentRestoreRequiresRemoteSources(workflowOptions.StoreURL),
-			Detail:   "configure the named PostgreSQL Store or pass the PostgreSQL DSN before running restore; the Store must stay outside the target Docker environment",
+			Detail:   "configure the named PostgreSQL or MySQL Store before running restore; the Store must stay outside the target Docker environment",
 		},
 	}
 	for _, tool := range report.Preflight.Tools {
@@ -2080,7 +2112,7 @@ func environmentRestorePackage(ctx context.Context, spec environmentRestorePacka
 		return report
 	}
 	if storeGeneratedRestore {
-		report.Action = "ignored-for-postgresql-store-restore"
+		report.Action = "ignored-for-sql-store-restore"
 		return report
 	}
 	repoReport := environmentRestoreRepo(ctx, environmentRestoreRepoSpec{
@@ -2261,7 +2293,7 @@ func environmentRestoreHealthCheckSignature(item map[string]any) string {
 
 func environmentRestoreRequiresRemoteSources(storeURL string) bool {
 	storeURL = strings.TrimSpace(strings.ToLower(storeURL))
-	return strings.HasPrefix(storeURL, "postgres://") || strings.HasPrefix(storeURL, "postgresql://")
+	return strings.HasPrefix(storeURL, "postgres://") || strings.HasPrefix(storeURL, "postgresql://") || strings.HasPrefix(storeURL, "mysql://")
 }
 
 func environmentRestoreSourcePolicyReport(_ environmentRestorePackageSpec, specs []environmentRestoreRepoSpec, remoteOnly bool) environmentRestoreSourcePolicy {
@@ -2671,7 +2703,7 @@ func environmentRestoreReadinessReport(report environmentRestoreReport, packageS
 		}
 	}
 
-	addItem("store-boundary", true, true, "sandbox PostgreSQL Store must stay outside the restored Docker target environment")
+	addItem("store-boundary", true, true, "sandbox SQL Store must stay outside the restored Docker target environment")
 	addItem("verification-workflow", true, strings.TrimSpace(report.VerificationWorkflow) != "", "restore is anchored to workflow "+strings.TrimSpace(report.VerificationWorkflow))
 	if report.ComponentGraph.Configured {
 		detail := fmt.Sprintf("%d component(s), %d blocking dependency edge(s), %d runtime edge(s), %d asset(s), %d inline asset bytes, %d remote asset(s)",
@@ -3527,7 +3559,7 @@ func environmentRestoreDockerCleanupPlan(baseArgs []string, options environmentR
 		Allowed:       options.Allowed,
 		IncludeImages: options.IncludeImages,
 		Action:        "plan-cleanup",
-		Warning:       "Review Docker cleanup commands before simulating a clean colleague machine; the sandbox PostgreSQL Store must remain outside these Docker target services.",
+		Warning:       "Review Docker cleanup commands before simulating a clean colleague machine; the sandbox SQL Store must remain outside these Docker target services.",
 	}
 	cleanup.BackupCommands = [][]string{
 		append(append([]string{"docker", "compose"}, baseArgs...), "ps"),
@@ -4898,6 +4930,18 @@ func printPostgresStoreStatus(status postgres.SchemaStatusResult) {
 		pending = 0
 	}
 	fmt.Println("Store: postgres")
+	fmt.Printf("URL: %s\n", maskStoreURL(status.URL))
+	fmt.Printf("Version: %d\n", status.CurrentVersion)
+	fmt.Printf("Target: %d\n", status.TargetVersion)
+	fmt.Printf("Pending: %d\n", pending)
+}
+
+func printMySQLStoreStatus(status mysql.SchemaStatusResult) {
+	pending := status.TargetVersion - status.CurrentVersion
+	if pending < 0 {
+		pending = 0
+	}
+	fmt.Println("Store: mysql")
 	fmt.Printf("URL: %s\n", maskStoreURL(status.URL))
 	fmt.Printf("Version: %d\n", status.CurrentVersion)
 	fmt.Printf("Target: %d\n", status.TargetVersion)

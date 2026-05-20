@@ -77,7 +77,8 @@ func currentSchemaVersion(ctx context.Context, db *sql.DB, d Dialect) (int, erro
 }
 
 func CoreSchemaSQL(d Dialect) []string {
-	text := "text"
+	text := d.TextType()
+	keyText := d.KeyTextType()
 	intType := "integer"
 	timeType := d.TimeType()
 	jsonType := d.JSONType()
@@ -101,7 +102,7 @@ create table if not exists runs (
   finished_at %s,
   created_at %s not null,
   updated_at %s not null
-);`, text, text, text, text, text, jsonType, timeType, timeType, timeType, timeType),
+);`, keyText, keyText, keyText, keyText, text, jsonType, timeType, timeType, timeType, timeType),
 		fmt.Sprintf(`
 create table if not exists api_case_runs (
   id %s primary key,
@@ -113,10 +114,8 @@ create table if not exists api_case_runs (
   started_at %s,
   finished_at %s,
   created_at %s not null
-);`, text, text, text, text, jsonType, jsonType, timeType, timeType, timeType),
-		`
-create index if not exists idx_api_case_runs_run_id_created_at
-  on api_case_runs(run_id, created_at, id);`,
+);`, keyText, keyText, keyText, keyText, jsonType, jsonType, timeType, timeType, timeType),
+		d.CreateIndexSQL("idx_api_case_runs_run_id_created_at", "api_case_runs", []string{"run_id", "created_at", "id"}),
 		fmt.Sprintf(`
 create table if not exists evidence_records (
   id %s primary key,
@@ -133,10 +132,8 @@ create table if not exists evidence_records (
   visibility %s not null,
   labels_json %s not null,
   created_at %s not null
-);`, text, text, text, text, text, text, text, text, intType, text, text, text, jsonType, timeType),
-		`
-create index if not exists idx_evidence_records_run_id_created_at
-  on evidence_records(run_id, created_at, id);`,
+);`, keyText, keyText, keyText, keyText, keyText, text, text, text, intType, text, keyText, keyText, jsonType, timeType),
+		d.CreateIndexSQL("idx_evidence_records_run_id_created_at", "evidence_records", []string{"run_id", "created_at", "id"}),
 		fmt.Sprintf(`
 create table if not exists trace_topologies (
   id %s primary key,
@@ -150,10 +147,8 @@ create table if not exists trace_topologies (
   topology_json %s not null,
   text_topology %s not null,
   created_at %s not null
-);`, text, text, text, text, text, text, text, text, jsonType, text, timeType),
-		`
-create index if not exists idx_trace_topologies_workflow_run_id_created_at
-  on trace_topologies(workflow_run_id, created_at, id);`,
+);`, keyText, keyText, keyText, keyText, keyText, keyText, keyText, keyText, jsonType, text, timeType),
+		d.CreateIndexSQL("idx_trace_topologies_workflow_run_id_created_at", "trace_topologies", []string{"workflow_run_id", "created_at", "id"}),
 		fmt.Sprintf(`
 create table if not exists post_process_tasks (
   id %s primary key,
@@ -169,10 +164,8 @@ create table if not exists post_process_tasks (
   error %s not null,
   summary_json %s not null,
   created_at %s not null
-);`, text, text, text, text, text, text, text, timeType, timeType, intType, text, jsonType, timeType),
-		`
-create index if not exists idx_post_process_tasks_run_id_created_at
-  on post_process_tasks(run_id, created_at, id);`,
+);`, keyText, keyText, keyText, keyText, keyText, keyText, keyText, timeType, timeType, intType, text, jsonType, timeType),
+		d.CreateIndexSQL("idx_post_process_tasks_run_id_created_at", "post_process_tasks", []string{"run_id", "created_at", "id"}),
 		fmt.Sprintf(`
 create table if not exists baseline_gates (
   profile_id %s not null,
@@ -183,7 +176,7 @@ create table if not exists baseline_gates (
   checked_at %s,
   updated_at %s not null,
   primary key (profile_id, subject_id)
-);`, text, text, text, boolType, jsonType, timeType, timeType),
+);`, keyText, keyText, keyText, boolType, jsonType, timeType, timeType),
 		fmt.Sprintf(`
 create table if not exists profile_indexes (
   profile_id %s primary key,
@@ -192,7 +185,7 @@ create table if not exists profile_indexes (
   summary_json %s not null,
   imported_at %s,
   updated_at %s not null
-);`, text, text, text, jsonType, timeType, timeType),
+);`, keyText, text, text, jsonType, timeType, timeType),
 		fmt.Sprintf(`
 create table if not exists config_versions (
   id %s primary key,
@@ -203,10 +196,8 @@ create table if not exists config_versions (
   active %s not null,
   published_at %s not null,
   created_at %s not null
-);`, text, text, text, text, jsonType, boolType, timeType, timeType),
-		`
-create index if not exists idx_config_versions_active_published
-  on config_versions(active, published_at, id);`,
+);`, keyText, keyText, text, text, jsonType, boolType, timeType, timeType),
+		d.CreateIndexSQL("idx_config_versions_active_published", "config_versions", []string{"active", "published_at", "id"}),
 		fmt.Sprintf(`
 create table if not exists config_read_model (
   profile_id %s not null,
@@ -216,7 +207,7 @@ create table if not exists config_read_model (
   generated_at %s not null,
   updated_at %s not null,
   primary key (profile_id, model_key)
-);`, text, text, text, jsonType, timeType, timeType),
+);`, keyText, keyText, keyText, jsonType, timeType, timeType),
 		fmt.Sprintf(`
 create table if not exists profile_catalogs (
   profile_id %s primary key,
@@ -232,7 +223,7 @@ create table if not exists profile_catalogs (
   fixtures %s not null,
   templates %s not null,
   template_configs %s not null
-);`, text, timeType, jsonType, intType, intType, intType, intType, intType, intType, intType, intType, intType, intType),
+);`, keyText, timeType, jsonType, intType, intType, intType, intType, intType, intType, intType, intType, intType, intType),
 		fmt.Sprintf(`
 create table if not exists environments (
   id %s primary key,
@@ -253,13 +244,9 @@ create table if not exists environments (
   summary_json %s not null,
   created_at %s not null,
   updated_at %s not null
-);`, text, text, text, text, boolType, jsonType, jsonType, jsonType, jsonType, text, text, text, boolType, boolType, timeType, jsonType, timeType, timeType),
-		`
-create index if not exists idx_environments_verified_status
-  on environments(verified, status, updated_at, id);`,
-		`
-create index if not exists idx_environments_verification
-  on environments(verification_workflow_id, last_verification_status, updated_at, id);`,
+);`, keyText, text, text, keyText, boolType, jsonType, jsonType, jsonType, jsonType, keyText, keyText, keyText, boolType, boolType, timeType, jsonType, timeType, timeType),
+		d.CreateIndexSQL("idx_environments_verified_status", "environments", []string{"verified", "status", "updated_at", "id"}),
+		d.CreateIndexSQL("idx_environments_verification", "environments", []string{"verification_workflow_id", "last_verification_status", "updated_at", "id"}),
 		fmt.Sprintf(`
 create table if not exists environment_components (
   env_id %s not null,
@@ -277,10 +264,8 @@ create table if not exists environment_components (
   updated_at %s not null,
   primary key (env_id, component_id),
   foreign key (env_id) references environments(id) on delete cascade
-);`, text, text, text, text, text, text, text, boolType, jsonType, jsonType, jsonType, timeType, timeType),
-		`
-create index if not exists idx_environment_components_kind
-  on environment_components(env_id, kind, role, component_id);`,
+);`, keyText, keyText, text, keyText, keyText, keyText, text, boolType, jsonType, jsonType, jsonType, timeType, timeType),
+		d.CreateIndexSQL("idx_environment_components_kind", "environment_components", []string{"env_id", "kind", "role", "component_id"}),
 		fmt.Sprintf(`
 create table if not exists service_dependencies (
   env_id %s not null,
@@ -294,10 +279,8 @@ create table if not exists service_dependencies (
   primary key (env_id, service_id, dependency_component_id, dependency_kind),
   foreign key (env_id, service_id) references environment_components(env_id, component_id) on delete cascade,
   foreign key (env_id, dependency_component_id) references environment_components(env_id, component_id) on delete cascade
-);`, text, text, text, text, boolType, jsonType, timeType, timeType),
-		`
-create index if not exists idx_service_dependencies_component
-  on service_dependencies(env_id, dependency_component_id, dependency_kind, service_id);`,
+);`, keyText, keyText, keyText, keyText, boolType, jsonType, timeType, timeType),
+		d.CreateIndexSQL("idx_service_dependencies_component", "service_dependencies", []string{"env_id", "dependency_component_id", "dependency_kind", "service_id"}),
 		fmt.Sprintf(`
 create table if not exists service_config_assets (
   env_id %s not null,
@@ -318,13 +301,9 @@ create table if not exists service_config_assets (
   primary key (env_id, service_id, asset_id),
   foreign key (env_id, service_id) references environment_components(env_id, component_id) on delete cascade,
   foreign key (env_id, target_component_id) references environment_components(env_id, component_id) on delete cascade
-);`, text, text, text, text, text, text, text, jsonType, text, intType, intType, boolType, jsonType, timeType, timeType),
-		`
-create index if not exists idx_service_config_assets_target
-  on service_config_assets(env_id, target_component_id, asset_kind, apply_order, asset_id);`,
-		`
-create index if not exists idx_service_config_assets_service_order
-  on service_config_assets(env_id, service_id, apply_order, asset_id);`,
+);`, keyText, keyText, keyText, keyText, keyText, text, text, jsonType, text, intType, intType, boolType, jsonType, timeType, timeType),
+		d.CreateIndexSQL("idx_service_config_assets_target", "service_config_assets", []string{"env_id", "target_component_id", "asset_kind", "apply_order", "asset_id"}),
+		d.CreateIndexSQL("idx_service_config_assets_service_order", "service_config_assets", []string{"env_id", "service_id", "apply_order", "asset_id"}),
 		fmt.Sprintf(`
 create table if not exists component_dependencies (
   env_id %s not null,
@@ -339,13 +318,9 @@ create table if not exists component_dependencies (
   primary key (env_id, consumer_component_id, provider_component_id, phase, capability),
   foreign key (env_id, consumer_component_id) references environment_components(env_id, component_id) on delete cascade,
   foreign key (env_id, provider_component_id) references environment_components(env_id, component_id) on delete cascade
-);`, text, text, text, text, text, boolType, jsonType, timeType, timeType),
-		`
-create index if not exists idx_component_dependencies_provider
-  on component_dependencies(env_id, provider_component_id, phase, capability, consumer_component_id);`,
-		`
-create index if not exists idx_component_dependencies_phase
-  on component_dependencies(env_id, phase, capability, consumer_component_id, provider_component_id);`,
+);`, keyText, keyText, keyText, keyText, keyText, boolType, jsonType, timeType, timeType),
+		d.CreateIndexSQL("idx_component_dependencies_provider", "component_dependencies", []string{"env_id", "provider_component_id", "phase", "capability", "consumer_component_id"}),
+		d.CreateIndexSQL("idx_component_dependencies_phase", "component_dependencies", []string{"env_id", "phase", "capability", "consumer_component_id", "provider_component_id"}),
 		fmt.Sprintf(`
 create table if not exists component_config_assets (
   env_id %s not null,
@@ -366,13 +341,9 @@ create table if not exists component_config_assets (
   primary key (env_id, owner_component_id, asset_id),
   foreign key (env_id, owner_component_id) references environment_components(env_id, component_id) on delete cascade,
   foreign key (env_id, target_component_id) references environment_components(env_id, component_id) on delete cascade
-);`, text, text, text, text, text, text, text, jsonType, text, intType, intType, boolType, jsonType, timeType, timeType),
-		`
-create index if not exists idx_component_config_assets_target
-  on component_config_assets(env_id, target_component_id, asset_kind, apply_order, asset_id);`,
-		`
-create index if not exists idx_component_config_assets_owner_order
-  on component_config_assets(env_id, owner_component_id, apply_order, asset_id);`,
+);`, keyText, keyText, keyText, keyText, keyText, text, text, jsonType, text, intType, intType, boolType, jsonType, timeType, timeType),
+		d.CreateIndexSQL("idx_component_config_assets_target", "component_config_assets", []string{"env_id", "target_component_id", "asset_kind", "apply_order", "asset_id"}),
+		d.CreateIndexSQL("idx_component_config_assets_owner_order", "component_config_assets", []string{"env_id", "owner_component_id", "apply_order", "asset_id"}),
 	}
 }
 

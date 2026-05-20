@@ -40,12 +40,13 @@ func TestDialectCapturesSQLDifferences(t *testing.T) {
 		wantBind3   string
 		wantJSON    string
 		wantTime    string
+		wantKeyText string
 		wantUpsert  string
 		wantQuoteID string
 	}{
-		{name: "postgres", dialect: sqlstore.PostgresDialect{}, wantBind3: "$3", wantJSON: "jsonb", wantTime: "timestamptz", wantUpsert: "on conflict(id) do update set name = excluded.name", wantQuoteID: `"runs"`},
-		{name: "mysql", dialect: sqlstore.MySQLDialect{}, wantBind3: "?", wantJSON: "json", wantTime: "datetime(6)", wantUpsert: "on duplicate key update name = values(name)", wantQuoteID: "`runs`"},
-		{name: "sqlite", dialect: sqlstore.SQLiteDialect{}, wantBind3: "?", wantJSON: "text", wantTime: "text", wantUpsert: "on conflict(id) do update set name = excluded.name", wantQuoteID: `"runs"`},
+		{name: "postgres", dialect: sqlstore.PostgresDialect{}, wantBind3: "$3", wantJSON: "jsonb", wantTime: "timestamptz", wantKeyText: "text", wantUpsert: "on conflict(id) do update set name = excluded.name", wantQuoteID: `"runs"`},
+		{name: "mysql", dialect: sqlstore.MySQLDialect{}, wantBind3: "?", wantJSON: "json", wantTime: "datetime(6)", wantKeyText: "varchar(128)", wantUpsert: "on duplicate key update name = values(name)", wantQuoteID: "`runs`"},
+		{name: "sqlite", dialect: sqlstore.SQLiteDialect{}, wantBind3: "?", wantJSON: "text", wantTime: "text", wantKeyText: "text", wantUpsert: "on conflict(id) do update set name = excluded.name", wantQuoteID: `"runs"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -57,6 +58,9 @@ func TestDialectCapturesSQLDifferences(t *testing.T) {
 			}
 			if got := tt.dialect.TimeType(); got != tt.wantTime {
 				t.Fatalf("time type = %q want %q", got, tt.wantTime)
+			}
+			if got := tt.dialect.KeyTextType(); got != tt.wantKeyText {
+				t.Fatalf("key text type = %q want %q", got, tt.wantKeyText)
 			}
 			if got := tt.dialect.UpsertClause("id", []string{"name"}); got != tt.wantUpsert {
 				t.Fatalf("upsert = %q want %q", got, tt.wantUpsert)
@@ -83,5 +87,13 @@ func TestConfigFromReferenceCarriesDialectAndDSN(t *testing.T) {
 	}
 	if sqliteCfg.Backend != "sqlite" || sqliteCfg.DriverName != "sqlite" || sqliteCfg.DSN != "/tmp/otsandbox.sqlite" {
 		t.Fatalf("sqlite path config = %#v", sqliteCfg)
+	}
+
+	mysqlCfg, err := sqlstore.ConfigFromReference("mysql://user:pass@localhost:3306/otsandbox")
+	if err != nil {
+		t.Fatalf("mysql config from reference: %v", err)
+	}
+	if mysqlCfg.Backend != "mysql" || mysqlCfg.DriverName != "mysql" || mysqlCfg.DSN != "mysql://user:pass@localhost:3306/otsandbox" {
+		t.Fatalf("mysql config = %#v", mysqlCfg)
 	}
 }

@@ -23,6 +23,7 @@ import (
 	"open-test-sandbox/internal/profile"
 	"open-test-sandbox/internal/profilecatalog"
 	"open-test-sandbox/internal/store"
+	"open-test-sandbox/internal/store/mysql"
 	"open-test-sandbox/internal/store/postgres"
 	"open-test-sandbox/internal/store/schema"
 	"open-test-sandbox/internal/store/sqlite"
@@ -73,6 +74,22 @@ func TestStoreDDLCommandPrintsPostgreSQLSchema(t *testing.T) {
 	}
 }
 
+func TestStoreDDLCommandPrintsMySQLSchema(t *testing.T) {
+	out := runStoreCommand(t, "ddl", "--backend", "mysql")
+	if !strings.Contains(out, "create table if not exists schema_versions") {
+		t.Fatalf("mysql ddl should include schema_versions table:\n%s", out)
+	}
+	if !strings.Contains(out, "json not null") || !strings.Contains(out, "datetime(6)") {
+		t.Fatalf("mysql ddl should use MySQL json and datetime columns:\n%s", out)
+	}
+	if strings.Contains(out, "create index if not exists") {
+		t.Fatalf("mysql ddl should not emit unsupported index-if-not-exists syntax:\n%s", out)
+	}
+	if !strings.Contains(out, "id varchar(128) primary key") {
+		t.Fatalf("mysql ddl should use bounded key columns:\n%s", out)
+	}
+}
+
 func TestStoreConfigCommandsManageActivePostgresStore(t *testing.T) {
 	configHome := t.TempDir()
 	env := []string{"OTSANDBOX_CONFIG_HOME=" + configHome}
@@ -115,13 +132,50 @@ func TestStoreConfigCommandsManageActivePostgresStore(t *testing.T) {
 	}
 }
 
+func TestStoreConfigCommandsManageActiveMySQLStore(t *testing.T) {
+	configHome := t.TempDir()
+	env := []string{"OTSANDBOX_CONFIG_HOME=" + configHome}
+	dsn := "mysql://user:secret@example.com:3306/otsandbox_local?tls=false"
+
+	setOut := runCLIWithEnv(t, env, "store", "config", "set", "local-mysql", "--url", dsn)
+	if !strings.Contains(setOut, "Configured store: local-mysql") || !strings.Contains(setOut, "Backend: mysql") {
+		t.Fatalf("store config set output = %q", setOut)
+	}
+
+	listJSONOut := runCLIWithEnv(t, env, "store", "config", "list", "--json")
+	if strings.Contains(listJSONOut, "secret") || !strings.Contains(listJSONOut, "mysql://user:xxxxx@example.com:3306/otsandbox_local?tls=false") {
+		t.Fatalf("store config list json should mask mysql credentials = %q", listJSONOut)
+	}
+
+	runCLIWithEnv(t, env, "store", "use", "local-mysql")
+	currentOut := runCLIWithEnv(t, env, "store", "current", "--json")
+	var current currentStoreReport
+	if err := json.Unmarshal([]byte(currentOut), &current); err != nil {
+		t.Fatalf("decode current store: %v\n%s", err, currentOut)
+	}
+	if !current.OK || current.Name != "local-mysql" || current.Backend != "mysql" || current.URL != "mysql://user:xxxxx@example.com:3306/otsandbox_local?tls=false" {
+		t.Fatalf("current store = %#v", current)
+	}
+}
+
 func TestStoreStatusAndUpgradeRequireActiveStore(t *testing.T) {
 	env := []string{"OTSANDBOX_CONFIG_HOME=" + t.TempDir()}
 	for _, command := range []string{"status", "upgrade"} {
 		out := runCLIFailsWithEnv(t, env, "store", command)
 		if !strings.Contains(out, "no active store configured") || !strings.Contains(out, "store config set NAME --url postgres://") {
-			t.Fatalf("store %s should guide active PostgreSQL Store setup, got %q", command, out)
+			t.Fatalf("store %s should guide active SQL Store setup, got %q", command, out)
 		}
+	}
+}
+
+func TestStoreStatusSupportsMySQLURLs(t *testing.T) {
+	withMySQLSchemaStatus(t, func(_ context.Context, cfg mysql.Config) (mysql.SchemaStatusResult, error) {
+		return mysql.SchemaStatusResult{URL: cfg.URL, CurrentVersion: 0, TargetVersion: sqlstore.CurrentSchemaVersion}, nil
+	})
+
+	out := runStoreCommand(t, "status", "--store-url", "mysql://user:secret@localhost:3306/open_test_sandbox")
+	if !strings.Contains(out, "Store: mysql") || !strings.Contains(out, "open_test_sandbox") || strings.Contains(out, "secret") || !strings.Contains(out, fmt.Sprintf("Pending: %d", sqlstore.CurrentSchemaVersion)) {
+		t.Fatalf("mysql status output = %q", out)
 	}
 }
 
@@ -204,7 +258,7 @@ func TestDailyStoreReferenceRejectsLegacySQLiteStoreURL(t *testing.T) {
 		if err == nil {
 			t.Fatalf("daily Store reference should reject legacy SQLite store URL %q", legacyStoreURL)
 		}
-		for _, want := range []string{"--store-url", "daily commands require PostgreSQL Store", "SQLite", "postgres://"} {
+		for _, want := range []string{"--store-url", "daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Fatalf("daily Store reference error missing %q: %v", want, err)
 			}
@@ -227,7 +281,7 @@ func TestDailyStoreReferenceRejectsNamedSQLiteConfig(t *testing.T) {
 	if err == nil {
 		t.Fatal("daily Store reference should reject named SQLite config")
 	}
-	for _, want := range []string{`Store config "legacy-local"`, "daily commands require PostgreSQL Store", "SQLite", "postgres://"} {
+	for _, want := range []string{`Store config "legacy-local"`, "daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("daily Store reference error missing %q: %v", want, err)
 		}
@@ -298,7 +352,7 @@ func TestEnvironmentCommandsRejectActiveSQLiteStore(t *testing.T) {
 			}
 
 			out := runCLIFails(t, tt.args...)
-			for _, want := range []string{"daily commands require PostgreSQL Store", "SQLite", "postgres://"} {
+			for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://"} {
 				if !strings.Contains(out, want) {
 					t.Fatalf("%s output missing %q: %q", tt.name, want, out)
 				}
@@ -1462,7 +1516,7 @@ func TestEnvironmentRestorePostgreSQLUsesStoreGeneratedStartupFiles(t *testing.T
 	if err != nil {
 		t.Fatalf("build restore PostgreSQL generated startup report: %v", err)
 	}
-	if !report.SourcePolicy.OK || !report.SourcePolicy.RemoteOnly || report.Package.Action != "ignored-for-postgresql-store-restore" || report.Docker.Action != "plan-docker-compose" {
+	if !report.SourcePolicy.OK || !report.SourcePolicy.RemoteOnly || report.Package.Action != "ignored-for-sql-store-restore" || report.Docker.Action != "plan-docker-compose" {
 		t.Fatalf("PostgreSQL generated startup report = %#v", report)
 	}
 	if len(report.Docker.Generated) != 1 || report.Docker.Generated[0].Action != "plan-write" || !report.Docker.Generated[0].OK {
@@ -1498,7 +1552,7 @@ func TestEnvironmentRestorePostgreSQLRejectsLocalStartupFilesWithoutStoreGenerat
 	if err != nil {
 		t.Fatalf("build restore PostgreSQL local startup report: %v", err)
 	}
-	if !report.SourcePolicy.OK || report.Package.Action != "ignored-for-postgresql-store-restore" {
+	if !report.SourcePolicy.OK || report.Package.Action != "ignored-for-sql-store-restore" {
 		t.Fatalf("PostgreSQL local startup pre-readiness report = %#v", report)
 	}
 	if !restoreTypedReadinessHasItem(report.Readiness.Items, "store-startup-files", false, "missing generatedFiles") {
@@ -2818,7 +2872,7 @@ func TestEnvironmentRestorePlansDockerCleanupWithoutExecuting(t *testing.T) {
 	if strings.Contains(allCommands, "--volumes") || strings.Contains(allCommands, "system prune") {
 		t.Fatalf("cleanup should stay scoped to compose project: %q", allCommands)
 	}
-	if !strings.Contains(cleanup.Warning, "PostgreSQL Store") {
+	if !strings.Contains(cleanup.Warning, "SQL Store") {
 		t.Fatalf("cleanup warning should mention Store boundary: %q", cleanup.Warning)
 	}
 }
@@ -3572,7 +3626,7 @@ func TestSandboxStartUsesNamedPostgreSQLActiveStore(t *testing.T) {
 	ctx := context.Background()
 	s, err := openStore(ctx, storeRef)
 	if err != nil {
-		t.Fatalf("open active PostgreSQL Store: %v", err)
+		t.Fatalf("open active SQL Store: %v", err)
 	}
 	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
 		ProfileID: "sandbox-pg-" + suffix,
@@ -3591,7 +3645,7 @@ func TestSandboxStartUsesNamedPostgreSQLActiveStore(t *testing.T) {
 		t.Fatalf("replace PostgreSQL catalog: %v", err)
 	}
 	if err := s.Close(); err != nil {
-		t.Fatalf("close PostgreSQL Store: %v", err)
+		t.Fatalf("close SQL Store: %v", err)
 	}
 
 	out := runCLI(t, "sandbox", "start", "--service", serviceID, "--json")
@@ -3703,7 +3757,7 @@ func TestSandboxRegisterCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 
 	s, err := openStore(context.Background(), storeRef)
 	if err != nil {
-		t.Fatalf("open PostgreSQL Store: %v", err)
+		t.Fatalf("open SQL Store: %v", err)
 	}
 	defer s.Close()
 	catalog, err := s.GetProfileCatalog(context.Background())
@@ -4152,7 +4206,7 @@ func TestCaseReadCommandsRejectActiveSQLiteStore(t *testing.T) {
 			}
 
 			out := runCLIFails(t, tt.args...)
-			for _, want := range []string{"daily commands require PostgreSQL Store", "SQLite", "postgres://"} {
+			for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://"} {
 				if !strings.Contains(out, want) {
 					t.Fatalf("%s output missing %q: %q", tt.name, want, out)
 				}
@@ -6123,7 +6177,7 @@ func TestWorkflowRunReadCommandsRejectActiveSQLiteStore(t *testing.T) {
 			}
 
 			out := runCLIFails(t, tt.args...)
-			for _, want := range []string{"daily commands require PostgreSQL Store", "SQLite", "postgres://"} {
+			for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://"} {
 				if !strings.Contains(out, want) {
 					t.Fatalf("%s output missing %q: %q", tt.name, want, out)
 				}
@@ -6700,7 +6754,7 @@ func TestEvidenceReadCommandsRejectActiveSQLiteStore(t *testing.T) {
 			}
 
 			out := runCLIFails(t, tt.args...)
-			for _, want := range []string{"daily commands require PostgreSQL Store", "SQLite", "postgres://"} {
+			for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://"} {
 				if !strings.Contains(out, want) {
 					t.Fatalf("%s output missing %q: %q", tt.name, want, out)
 				}
@@ -6844,7 +6898,7 @@ func TestCaseRunCommandRejectsActiveSQLiteStoreBeforeFileExecution(t *testing.T)
 	}
 
 	out := runCLIFails(t, "case", "run", "--case", casePath, "--base-url", server.URL, "--run-id", "case-run-active-sqlite")
-	for _, want := range []string{"daily commands require PostgreSQL Store", "SQLite", "postgres://"} {
+	for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("case run with active SQLite store output missing %q: %q", want, out)
 		}
@@ -7229,21 +7283,21 @@ func TestCaseExecutionAndInterfaceReportUseNamedPostgreSQLActiveStore(t *testing
 		"--profile", "sample",
 	)
 	if !strings.Contains(fileOut, "Case Run: "+fileRunID) || !strings.Contains(fileOut, "Status: passed") {
-		t.Fatalf("file case run via active PostgreSQL Store = %q", fileOut)
+		t.Fatalf("file case run via active SQL Store = %q", fileOut)
 	}
 	caseRunsOut := runCLI(t, "case", "runs", "--run", fileRunID, "--json")
 	if !strings.Contains(caseRunsOut, fileRunID) || !strings.Contains(caseRunsOut, "case.alpha") {
-		t.Fatalf("case runs via active PostgreSQL Store = %s", caseRunsOut)
+		t.Fatalf("case runs via active SQL Store = %s", caseRunsOut)
 	}
 	fileEvidenceOut := runCLI(t, "case", "evidence", "--run", fileRunID, "--case-id", "case.alpha", "--json")
 	for _, want := range []string{fileRunID, "case.alpha", "request", "response"} {
 		if !strings.Contains(fileEvidenceOut, want) {
-			t.Fatalf("file case evidence via active PostgreSQL Store missing %q:\n%s", want, fileEvidenceOut)
+			t.Fatalf("file case evidence via active SQL Store missing %q:\n%s", want, fileEvidenceOut)
 		}
 	}
 	evidenceListOut := runCLI(t, "evidence", "list", "--run", fileRunID, "--json")
 	if !strings.Contains(evidenceListOut, fileRunID) || !strings.Contains(evidenceListOut, "response") {
-		t.Fatalf("evidence list via active PostgreSQL Store = %s", evidenceListOut)
+		t.Fatalf("evidence list via active SQL Store = %s", evidenceListOut)
 	}
 
 	profileDir := writeInterfaceNodeBatchReportProfile(t)
@@ -7272,7 +7326,7 @@ func TestCaseExecutionAndInterfaceReportUseNamedPostgreSQLActiveStore(t *testing
 	catalogEvidenceOut := runCLI(t, "case", "evidence", "--run", catalogRunID, "--case-id", "case.alpha.default", "--json")
 	for _, want := range []string{catalogRunID, "case.alpha.default", "request", "response"} {
 		if !strings.Contains(catalogEvidenceOut, want) {
-			t.Fatalf("catalog case evidence via active PostgreSQL Store missing %q:\n%s", want, catalogEvidenceOut)
+			t.Fatalf("catalog case evidence via active SQL Store missing %q:\n%s", want, catalogEvidenceOut)
 		}
 	}
 
@@ -7766,7 +7820,7 @@ func TestDiscoverCommandsRejectActiveSQLiteStore(t *testing.T) {
 			}
 
 			out := runCLIFails(t, tt.args...)
-			for _, want := range []string{"daily commands require PostgreSQL Store", "SQLite", "postgres://"} {
+			for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://"} {
 				if !strings.Contains(out, want) {
 					t.Fatalf("%s output missing %q: %q", tt.name, want, out)
 				}
@@ -7791,7 +7845,7 @@ func TestDiscoverCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		t.Fatalf("decode case discover json: %v\n%s", err, caseOut)
 	}
 	if len(caseReport.Items) != 1 || caseReport.Items[0].ID != "case.alpha.variant" {
-		t.Fatalf("case discover via active PostgreSQL Store = %#v", caseReport.Items)
+		t.Fatalf("case discover via active SQL Store = %#v", caseReport.Items)
 	}
 
 	nodeOut := runCLI(t, "interface-node", "discover", "--filter", "Result Lookup", "--json")
@@ -7804,7 +7858,7 @@ func TestDiscoverCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		t.Fatalf("decode interface-node discover json: %v\n%s", err, nodeOut)
 	}
 	if len(nodeReport.Items) != 1 || nodeReport.Items[0].ID != "node.alpha" {
-		t.Fatalf("interface-node discover via active PostgreSQL Store = %#v", nodeReport.Items)
+		t.Fatalf("interface-node discover via active SQL Store = %#v", nodeReport.Items)
 	}
 }
 
@@ -7850,7 +7904,7 @@ func TestDailyWorkflowCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		t.Fatalf("decode workflow discover json: %v\n%s", err, workflowOut)
 	}
 	if len(workflowList.Items) != 1 || workflowList.Items[0].ID != "workflow.alpha" {
-		t.Fatalf("workflow discover via active PostgreSQL Store = %#v", workflowList.Items)
+		t.Fatalf("workflow discover via active SQL Store = %#v", workflowList.Items)
 	}
 
 	planOut := runCLI(t, "workflow", "plan", "--workflow", "workflow.alpha", "--json")
@@ -7863,13 +7917,13 @@ func TestDailyWorkflowCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		t.Fatalf("decode workflow plan json: %v\n%s", err, planOut)
 	}
 	if plan.Counts.Steps != 2 {
-		t.Fatalf("workflow plan via active PostgreSQL Store = %#v", plan)
+		t.Fatalf("workflow plan via active SQL Store = %#v", plan)
 	}
 
 	runCLI(t, "baseline", "set", "--profile", "sample", "--subject", "workflow.alpha", "--status", "passed", "--required")
 	baselineOut := runCLI(t, "baseline", "get", "--profile", "sample", "--subject", "workflow.alpha")
 	if !strings.Contains(baselineOut, "Status: passed") || !strings.Contains(baselineOut, "Required: true") {
-		t.Fatalf("baseline get via active PostgreSQL Store = %q", baselineOut)
+		t.Fatalf("baseline get via active SQL Store = %q", baselineOut)
 	}
 
 	reportOut := runCLI(t,
@@ -7892,12 +7946,12 @@ func TestDailyWorkflowCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		t.Fatalf("decode workflow report json: %v\n%s", err, reportOut)
 	}
 	if !report.OK || report.RunID == "" || report.Counts.Total != 2 || report.Counts.Passed != 2 || report.Counts.Failed != 0 {
-		t.Fatalf("workflow report via active PostgreSQL Store = %#v", report)
+		t.Fatalf("workflow report via active SQL Store = %#v", report)
 	}
 
 	caseRunsOut := runCLI(t, "case", "runs", "--run", report.RunID, "--json")
 	if !strings.Contains(caseRunsOut, "case.first") || !strings.Contains(caseRunsOut, "case.second") {
-		t.Fatalf("case runs via active PostgreSQL Store = %s", caseRunsOut)
+		t.Fatalf("case runs via active SQL Store = %s", caseRunsOut)
 	}
 	traceOut := runCLI(t, "trace", "topology", "collect",
 		"--trace-graphql-url", provider.URL,
@@ -7909,11 +7963,11 @@ func TestDailyWorkflowCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 		"--json",
 	)
 	if !strings.Contains(traceOut, `"provider":"skywalking"`) || !strings.Contains(traceOut, `"status":"complete"`) || !strings.Contains(traceOut, "trace.pg.daily") {
-		t.Fatalf("trace topology via active PostgreSQL Store = %s", traceOut)
+		t.Fatalf("trace topology via active SQL Store = %s", traceOut)
 	}
 	evidenceOut := runCLI(t, "case", "evidence", "--run", report.RunID, "--case-id", "case.first", "--step-id", "first", "--json")
 	if !strings.Contains(evidenceOut, `"provider":"skywalking"`) || !strings.Contains(evidenceOut, "trace.pg.daily") {
-		t.Fatalf("case evidence via active PostgreSQL Store = %s", evidenceOut)
+		t.Fatalf("case evidence via active SQL Store = %s", evidenceOut)
 	}
 }
 
@@ -9583,7 +9637,7 @@ func TestServeAndEvidenceTasksUseNamedPostgreSQLActiveStore(t *testing.T) {
 
 	handler, cleanup, err := serveHandlerFromArgs(nil)
 	if err != nil {
-		t.Fatalf("build serve handler from active PostgreSQL Store: %v", err)
+		t.Fatalf("build serve handler from active SQL Store: %v", err)
 	}
 	defer cleanup()
 
@@ -9609,7 +9663,7 @@ func TestServeAndEvidenceTasksUseNamedPostgreSQLActiveStore(t *testing.T) {
 	runs := httptest.NewRecorder()
 	handler.ServeHTTP(runs, httptest.NewRequest(http.MethodGet, "/api/runs", nil))
 	if runs.Code != http.StatusOK || !strings.Contains(runs.Body.String(), runID) {
-		t.Fatalf("serve runs via active PostgreSQL Store = %d %s", runs.Code, runs.Body.String())
+		t.Fatalf("serve runs via active SQL Store = %d %s", runs.Code, runs.Body.String())
 	}
 
 	nodes := httptest.NewRecorder()
@@ -9962,6 +10016,15 @@ func withPostgresSchemaStatus(t *testing.T, fn func(context.Context, postgres.Co
 	postgresSchemaStatus = fn
 	t.Cleanup(func() {
 		postgresSchemaStatus = original
+	})
+}
+
+func withMySQLSchemaStatus(t *testing.T, fn func(context.Context, mysql.Config) (mysql.SchemaStatusResult, error)) {
+	t.Helper()
+	original := mysqlSchemaStatus
+	mysqlSchemaStatus = fn
+	t.Cleanup(func() {
+		mysqlSchemaStatus = original
 	})
 }
 

@@ -34,7 +34,28 @@ describe("control-plane smoke Store selection", () => {
     assert.equal(result.status, 0, result.stderr || result.stdout);
   });
 
-  it("requires a PostgreSQL DSN unless SQLite compatibility smoke is explicit", () => {
+  it("prepares a named MySQL Store when a smoke DSN is provided", () => {
+    const result = spawnSync(process.execPath, [
+      "--input-type=module",
+      "-e",
+      [
+        "import { prepareSmokeStoreReference } from './tools/smoke/control-plane-smoke.mjs';",
+        "const calls = [];",
+        "const ref = await prepareSmokeStoreReference('/tmp/ots-smoke', { OTSANDBOX_SMOKE_STORE_DSN: 'mysql://user:secret@example.com:3306/ots?tls=false' }, (command, args, options) => calls.push({ command, args, env: options.env }));",
+        "if (ref.storeRef !== 'smoke-mysql') throw new Error(JSON.stringify(ref));",
+        "if (calls[0].args.join(' ') !== 'run ./cmd/otsandbox store config set smoke-mysql --url mysql://user:secret@example.com:3306/ots?tls=false') throw new Error(JSON.stringify(calls));",
+        "if (calls[1].args.join(' ') !== 'run ./cmd/otsandbox store use smoke-mysql') throw new Error(JSON.stringify(calls));",
+        "if (calls[2].args.join(' ') !== 'run ./cmd/otsandbox store upgrade --store smoke-mysql') throw new Error(JSON.stringify(calls));",
+      ].join("\n"),
+    ], {
+      cwd: rootDir,
+      encoding: "utf8",
+      env: { ...process.env, OTSANDBOX_SMOKE_IMPORT_ONLY: "1" },
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  });
+
+  it("requires a SQL DSN unless SQLite compatibility smoke is explicit", () => {
     const result = spawnSync(process.execPath, [
       "--input-type=module",
       "-e",
@@ -66,7 +87,7 @@ describe("control-plane smoke Store selection", () => {
     assert.equal(result.status, 0, result.stderr || result.stdout);
   });
 
-  it("rejects non-PostgreSQL smoke Store references", () => {
+  it("rejects non-SQL smoke Store references", () => {
     const result = spawnSync(process.execPath, [
       "--input-type=module",
       "-e",
@@ -79,7 +100,7 @@ describe("control-plane smoke Store selection", () => {
       encoding: "utf8",
     });
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /PostgreSQL Store DSN/);
+    assert.match(result.stderr, /PostgreSQL or MySQL Store DSN/);
   });
 
   it("rejects contradictory SQLite smoke flags", () => {

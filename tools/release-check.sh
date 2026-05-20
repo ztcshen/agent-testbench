@@ -11,13 +11,22 @@ step() {
 step "checking whitespace"
 git diff --check
 
-step "checking PostgreSQL smoke Store"
+step "checking SQL smoke Store"
 if [[ -z "${OTSANDBOX_SMOKE_STORE_DSN:-${OTSANDBOX_SMOKE_STORE:-}}" ]]; then
   echo "OTSANDBOX_SMOKE_STORE_DSN is required for release-check." >&2
   echo "Example: OTSANDBOX_SMOKE_STORE_DSN='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run release-check" >&2
+  echo "MySQL is also supported: OTSANDBOX_SMOKE_STORE_DSN='mysql://user:pass@host:3306/otsandbox_smoke?tls=false' npm run release-check" >&2
   exit 1
 fi
-export OTSANDBOX_TEST_PG_DSN="${OTSANDBOX_TEST_PG_DSN:-${OTSANDBOX_SMOKE_STORE_DSN:-${OTSANDBOX_SMOKE_STORE:-}}}"
+smoke_store_dsn="${OTSANDBOX_SMOKE_STORE_DSN:-${OTSANDBOX_SMOKE_STORE:-}}"
+if [[ "$smoke_store_dsn" =~ ^postgres(ql)?:// ]]; then
+  export OTSANDBOX_TEST_PG_DSN="${OTSANDBOX_TEST_PG_DSN:-$smoke_store_dsn}"
+elif [[ "$smoke_store_dsn" =~ ^mysql:// ]]; then
+  export OTSANDBOX_MYSQL_TEST_DSN="${OTSANDBOX_MYSQL_TEST_DSN:-$smoke_store_dsn}"
+else
+  echo "OTSANDBOX_SMOKE_STORE_DSN must be postgres://, postgresql://, or mysql://." >&2
+  exit 1
+fi
 
 step "checking SkyWalking smoke provider mode"
 if [[ "${OTSANDBOX_REQUIRE_REAL_SKYWALKING:-}" == "1" ]]; then
@@ -101,10 +110,10 @@ npm run test:frontend
 step "running smoke harness tests"
 node --test tools/examples/*.test.mjs tools/smoke/*.test.mjs
 
-step "running PostgreSQL active Store CLI smoke tests"
+step "running active SQL Store CLI smoke tests"
 npm run smoke:cli:pg-active
 
-step "running PostgreSQL-only browser smoke tests"
+step "running active SQL Store browser smoke tests"
 npm run smoke:frontend:pg-only
 
 step "release check passed"

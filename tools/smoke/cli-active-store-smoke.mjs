@@ -20,13 +20,19 @@ const cliSmokeSteps = Array.from({ length: 10 }, (_, index) => {
   };
 });
 
-function requiredPGStoreDSN() {
+function storeBackend(dsn) {
+  if (/^postgres(?:ql)?:\/\//i.test(dsn)) return "postgres";
+  if (/^mysql:\/\//i.test(dsn)) return "mysql";
+  return "";
+}
+
+function requiredSQLStoreDSN() {
   const dsn = process.env.OTSANDBOX_CLI_STORE_DSN || process.env.OTSANDBOX_SMOKE_STORE_DSN || process.env.OTSANDBOX_SMOKE_STORE || "";
   if (!dsn.trim()) {
-    throw new Error("Set OTSANDBOX_CLI_STORE_DSN or OTSANDBOX_SMOKE_STORE_DSN to run the active PostgreSQL Store CLI smoke");
+    throw new Error("Set OTSANDBOX_CLI_STORE_DSN or OTSANDBOX_SMOKE_STORE_DSN to run the active SQL Store CLI smoke");
   }
-  if (!/^postgres(?:ql)?:\/\//i.test(dsn)) {
-    throw new Error("The active Store CLI smoke requires a PostgreSQL DSN");
+  if (!storeBackend(dsn)) {
+    throw new Error("The active Store CLI smoke requires a PostgreSQL or MySQL DSN");
   }
   return dsn;
 }
@@ -108,7 +114,9 @@ function assertCount(payload, key, expected, label) {
 }
 
 async function main() {
-  const dsn = requiredPGStoreDSN();
+  const dsn = requiredSQLStoreDSN();
+  const backend = storeBackend(dsn);
+  const storeName = backend === "mysql" ? "active-mysql" : "active-pg";
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "ots-cli-pg-smoke-"));
   const targetPort = await freePort();
   let targetServer;
@@ -124,17 +132,17 @@ async function main() {
     };
     await mkdir(env.OTSANDBOX_CONFIG_HOME, { recursive: true });
 
-    await runOTS(["store", "config", "set", "active-pg", "--url", dsn], env);
-    await runOTS(["store", "use", "active-pg"], env);
+    await runOTS(["store", "config", "set", storeName, "--url", dsn], env);
+    await runOTS(["store", "use", storeName], env);
     const current = await runJSON(["store", "current", "--json"], env);
-    if (current?.name !== "active-pg" || current?.backend !== "postgres") {
-      throw new Error(`active Store is not PostgreSQL: ${JSON.stringify(current)}`);
+    if (current?.name !== storeName || current?.backend !== backend) {
+      throw new Error(`active Store is not ${backend}: ${JSON.stringify(current)}`);
     }
 
     await runOTS(["store", "upgrade"], env);
     const status = await runOTS(["store", "status"], env);
-    if (!status.stdout.includes("Store: postgres")) {
-      throw new Error(`store status did not use PostgreSQL:\n${status.stdout}`);
+    if (!status.stdout.includes(`Store: ${backend}`)) {
+      throw new Error(`store status did not use ${backend}:\n${status.stdout}`);
     }
 
     const publish = await runJSON(["config", "publish", "--from", profileDir, "--json"], env);
