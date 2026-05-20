@@ -2264,3 +2264,17 @@ Remote source policy slice:
   component graph restore-readiness. Focused control-plane coverage verifies
   the API inspect and bootstrap response shapes with a two-component
   provider-before-consumer graph.
+- 2026-05-20T09:23Z implementation slice: CLI restore/inspect/bootstrap now
+  reuse the exported control-plane component graph readiness helper instead of
+  keeping a separate CLI copy of the dependency-order and cycle-detection
+  logic. The CLI readiness report type is now an alias of the API/control-plane
+  readiness payload, and component config asset materialization uses the same
+  blocking dependency order that API inspect/bootstrap publish.
+- Verification stayed Store-first and CLI-based. Focused Go tests passed for
+  component graph restore readiness, blocking dependency cycles, invalid
+  component health checks, invalid remote asset refs, component replace guards,
+  CLI inspect/bootstrap readiness, and API inspect readiness. The active
+  `local-pg` environment `scf-chain-core10-local-docker` still reports
+  component readiness `ok=true`, 24 components, 47 dependencies, 41 blocking
+  edges, 6 runtime edges, 27 assets, 20 required health checks, zero missing
+  health checks, four remote assets, and zero missing remote refs.

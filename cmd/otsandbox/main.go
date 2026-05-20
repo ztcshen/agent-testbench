@@ -19,10 +19,6 @@ import (
 	"strings"
 	"time"
 
-	gonumgraph "gonum.org/v1/gonum/graph"
-	"gonum.org/v1/gonum/graph/simple"
-	"gonum.org/v1/gonum/graph/topo"
-
 	"open-test-sandbox/internal/apicase"
 	"open-test-sandbox/internal/casesuite"
 	"open-test-sandbox/internal/controlplane"
@@ -892,26 +888,7 @@ type environmentRestoreSourcePolicy struct {
 	Violations []string `json:"violations,omitempty"`
 }
 
-type environmentRestoreComponentGraph struct {
-	Configured              bool       `json:"configured"`
-	OK                      bool       `json:"ok"`
-	Components              int        `json:"components"`
-	Dependencies            int        `json:"dependencies"`
-	BlockingDependencies    int        `json:"blockingDependencies"`
-	RuntimeDependencies     int        `json:"runtimeDependencies"`
-	Assets                  int        `json:"assets"`
-	InlineAssetBytes        int64      `json:"inlineAssetBytes"`
-	RemoteAssets            int        `json:"remoteAssets"`
-	RemoteAssetBytes        int64      `json:"remoteAssetBytes"`
-	MissingRemoteAssetRefs  int        `json:"missingRemoteAssetRefs"`
-	RequiredHealthChecks    int        `json:"requiredHealthChecks"`
-	MissingHealthChecks     int        `json:"missingHealthChecks"`
-	BlockingOrder           []string   `json:"blockingOrder,omitempty"`
-	BlockingCycles          [][]string `json:"blockingCycles,omitempty"`
-	LargestInlineAssetID    string     `json:"largestInlineAssetId,omitempty"`
-	LargestInlineAssetBytes int64      `json:"largestInlineAssetBytes,omitempty"`
-	Error                   string     `json:"error,omitempty"`
-}
+type environmentRestoreComponentGraph = controlplane.EnvironmentComponentGraphReadiness
 
 type environmentRestoreComponentAsset struct {
 	AssetID          string   `json:"assetId"`
@@ -1305,7 +1282,7 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 	if len(componentGraphs) > 0 {
 		componentGraph = componentGraphs[0]
 	}
-	compose = environmentRestoreComposeWithComponentAssets(compose, componentGraph)
+	compose = environmentRestoreComposeWithComponentAssets(env.ID, compose, componentGraph)
 	packageSpec := environmentRestorePackageSpecFromCompose(compose, workspace)
 	healthChecks := environmentRestoreEffectiveHealthChecks(jsonArrayString(env.HealthChecksJSON), compose, componentGraph)
 	componentGraphReport := environmentRestoreComponentGraphReport(env.ID, componentGraph)
@@ -1352,7 +1329,7 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 		}
 		report.Repos = append(report.Repos, item)
 	}
-	report.ComponentAssets = environmentRestoreRemoteComponentAssets(ctx, componentGraph, workspace, execute, pull)
+	report.ComponentAssets = environmentRestoreRemoteComponentAssets(ctx, env.ID, componentGraph, workspace, execute, pull)
 	for _, item := range report.ComponentAssets {
 		if !item.OK {
 			report.OK = false
@@ -1966,182 +1943,15 @@ func environmentRestoreSourcePolicyReport(_ environmentRestorePackageSpec, specs
 }
 
 func environmentRestoreComponentGraphReport(envID string, graph store.EnvironmentComponentGraph) environmentRestoreComponentGraph {
-	report := environmentRestoreComponentGraph{
-		Configured:   len(graph.Components) > 0 || len(graph.Dependencies) > 0 || len(graph.Assets) > 0,
-		OK:           true,
-		Components:   len(graph.Components),
-		Dependencies: len(graph.Dependencies),
-		Assets:       len(graph.Assets),
-	}
-	if !report.Configured {
-		return report
-	}
-	if err := store.ValidateEnvironmentComponentGraph(envID, graph); err != nil {
-		report.OK = false
-		report.Error = err.Error()
-		return report
-	}
-	graphErrors := []string{}
-	componentHealthErrors := []string{}
-	for _, component := range graph.Components {
-		if component.Required {
-			report.RequiredHealthChecks++
-			if _, errText := environmentRestoreNormalizeComponentHealthCheck(component); errText != "" {
-				report.MissingHealthChecks++
-				componentHealthErrors = append(componentHealthErrors, strings.TrimSpace(component.ComponentID)+": "+errText)
-			}
-		}
-	}
-	for _, dep := range graph.Dependencies {
-		if strings.EqualFold(strings.TrimSpace(dep.Phase), "runtime") {
-			report.RuntimeDependencies++
-		} else {
-			report.BlockingDependencies++
-		}
-	}
-	blockingOrder, blockingCycles, blockingErr := environmentRestoreBlockingDependencyOrder(graph)
-	report.BlockingOrder = blockingOrder
-	report.BlockingCycles = blockingCycles
-	if blockingErr != "" {
-		graphErrors = append(graphErrors, blockingErr)
-	}
-	for _, asset := range graph.Assets {
-		size := int64(len(asset.ContentInline))
-		report.InlineAssetBytes += size
-		if size > report.LargestInlineAssetBytes {
-			report.LargestInlineAssetBytes = size
-			report.LargestInlineAssetID = asset.AssetID
-		}
-		if strings.TrimSpace(asset.ContentInline) == "" && strings.TrimSpace(asset.RemoteRefJSON) != "" {
-			report.RemoteAssets++
-			report.RemoteAssetBytes += asset.SizeBytes
-			if !environmentRestoreComponentAssetRemoteRefOK(asset) {
-				report.MissingRemoteAssetRefs++
-			}
-		}
-	}
-	if report.MissingHealthChecks > 0 {
-		detail := fmt.Sprintf("%d required component(s) are missing valid Store-backed health checks", report.MissingHealthChecks)
-		if len(componentHealthErrors) > 0 {
-			detail += ": " + strings.Join(componentHealthErrors, "; ")
-		}
-		graphErrors = append(graphErrors, detail)
-	}
-	if report.MissingRemoteAssetRefs > 0 {
-		graphErrors = append(graphErrors, fmt.Sprintf("%d remote component asset(s) are missing remote Git URL/path metadata", report.MissingRemoteAssetRefs))
-	}
-	if len(graphErrors) > 0 {
-		report.OK = false
-		report.Error = strings.Join(graphErrors, "; ")
-	}
-	return report
+	return controlplane.EnvironmentComponentGraphReadinessReport(envID, graph)
 }
 
-func environmentRestoreBlockingDependencyOrder(g store.EnvironmentComponentGraph) ([]string, [][]string, string) {
-	if len(g.Components) == 0 {
-		return nil, nil, ""
-	}
-	directed := simple.NewDirectedGraph()
-	idByNode := map[int64]string{}
-	nodeByID := map[string]gonumgraph.Node{}
-	for i, component := range g.Components {
-		id := strings.TrimSpace(component.ComponentID)
-		if id == "" {
-			continue
-		}
-		node := simple.Node(i + 1)
-		directed.AddNode(node)
-		idByNode[node.ID()] = id
-		nodeByID[id] = node
-	}
-	orderNodes := func(nodes []gonumgraph.Node) {
-		sort.Slice(nodes, func(i, j int) bool {
-			return idByNode[nodes[i].ID()] < idByNode[nodes[j].ID()]
-		})
-	}
-	selfCycles := [][]string{}
-	for _, dep := range g.Dependencies {
-		if strings.EqualFold(strings.TrimSpace(dep.Phase), "runtime") {
-			continue
-		}
-		consumer := strings.TrimSpace(dep.ConsumerComponentID)
-		provider := strings.TrimSpace(dep.ProviderComponentID)
-		from := nodeByID[provider]
-		to := nodeByID[consumer]
-		if from == nil || to == nil {
-			continue
-		}
-		if from.ID() == to.ID() {
-			selfCycles = append(selfCycles, []string{provider, consumer})
-			continue
-		}
-		directed.SetEdge(directed.NewEdge(from, to))
-	}
-	sorted, err := topo.SortStabilized(directed, orderNodes)
-	order := make([]string, 0, len(sorted))
-	for _, node := range sorted {
-		if node == nil {
-			continue
-		}
-		if id := idByNode[node.ID()]; id != "" {
-			order = append(order, id)
-		}
-	}
-	cycles := selfCycles
-	if err != nil {
-		for _, cycle := range topo.DirectedCyclesIn(directed) {
-			cycles = append(cycles, environmentRestoreGonumNodeIDs(cycle, idByNode))
-		}
-		var unorderable topo.Unorderable
-		if len(cycles) == 0 && errors.As(err, &unorderable) {
-			for _, component := range unorderable {
-				cycles = append(cycles, environmentRestoreGonumNodeIDs(component, idByNode))
-			}
-		}
-	}
-	if len(cycles) > 0 {
-		return order, cycles, "blocking component dependencies contain cycle(s): " + environmentRestoreCycleText(cycles)
-	}
-	if err != nil {
-		return order, cycles, err.Error()
-	}
-	return order, nil, ""
-}
-
-func environmentRestoreGonumNodeIDs(nodes []gonumgraph.Node, idByNode map[int64]string) []string {
-	out := make([]string, 0, len(nodes))
-	for _, node := range nodes {
-		if node == nil {
-			continue
-		}
-		if id := idByNode[node.ID()]; id != "" {
-			out = append(out, id)
-		}
-	}
-	if len(out) > 1 && out[0] != out[len(out)-1] {
-		out = append(out, out[0])
-	}
-	return out
-}
-
-func environmentRestoreCycleText(cycles [][]string) string {
-	parts := make([]string, 0, len(cycles))
-	for _, cycle := range cycles {
-		if len(cycle) == 0 {
-			continue
-		}
-		parts = append(parts, strings.Join(cycle, " -> "))
-	}
-	sort.Strings(parts)
-	return strings.Join(parts, "; ")
-}
-
-func environmentRestoreOrderedComponentAssets(g store.EnvironmentComponentGraph) []store.ComponentConfigAsset {
+func environmentRestoreOrderedComponentAssets(envID string, g store.EnvironmentComponentGraph) []store.ComponentConfigAsset {
 	out := append([]store.ComponentConfigAsset{}, g.Assets...)
 	if len(out) == 0 {
 		return out
 	}
-	componentOrder, _, _ := environmentRestoreBlockingDependencyOrder(g)
+	componentOrder := controlplane.EnvironmentComponentGraphReadinessReport(envID, g).BlockingOrder
 	ownerIndex := map[string]int{}
 	for i, id := range componentOrder {
 		ownerIndex[id] = i
@@ -2191,7 +2001,7 @@ func environmentRestoreComponentAssetRemoteRefOK(asset store.ComponentConfigAsse
 	return environmentRestoreIsRemoteGitURL(rawURL)
 }
 
-func environmentRestoreComposeWithComponentAssets(compose map[string]any, graph store.EnvironmentComponentGraph) map[string]any {
+func environmentRestoreComposeWithComponentAssets(envID string, compose map[string]any, graph store.EnvironmentComponentGraph) map[string]any {
 	if len(graph.Assets) == 0 {
 		return compose
 	}
@@ -2207,7 +2017,7 @@ func environmentRestoreComposeWithComponentAssets(compose map[string]any, graph 
 		}
 		sort.Strings(generatedOrder)
 	}
-	for _, asset := range environmentRestoreOrderedComponentAssets(graph) {
+	for _, asset := range environmentRestoreOrderedComponentAssets(envID, graph) {
 		target := filepath.Clean(strings.TrimSpace(asset.TargetPath))
 		if target == "." || target == "" || strings.HasPrefix(target, ".."+string(os.PathSeparator)) || filepath.IsAbs(target) {
 			continue
@@ -2230,9 +2040,9 @@ func environmentRestoreComposeWithComponentAssets(compose map[string]any, graph 
 	return out
 }
 
-func environmentRestoreRemoteComponentAssets(ctx context.Context, graph store.EnvironmentComponentGraph, workspace string, execute bool, pull bool) []environmentRestoreComponentAsset {
+func environmentRestoreRemoteComponentAssets(ctx context.Context, envID string, graph store.EnvironmentComponentGraph, workspace string, execute bool, pull bool) []environmentRestoreComponentAsset {
 	out := []environmentRestoreComponentAsset{}
-	for _, asset := range environmentRestoreOrderedComponentAssets(graph) {
+	for _, asset := range environmentRestoreOrderedComponentAssets(envID, graph) {
 		if strings.TrimSpace(asset.ContentInline) != "" || strings.TrimSpace(asset.RemoteRefJSON) == "" {
 			continue
 		}
