@@ -9556,7 +9556,17 @@ func runCaseSuiteImpactBuildsExecutableBatchRequest(t *testing.T, storeRef strin
 }
 
 func TestCaseSuiteImpactReportRunsImpactedCases(t *testing.T) {
-	configureNamedPostgreSQLActiveStore(t, "daily-case-suite-impact-report-pg")
+	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-case-suite-impact-report-pg")
+	runCaseSuiteImpactReportRunsImpactedCases(t, storeRef, "pg", "PostgreSQL")
+}
+
+func TestCaseSuiteImpactReportUsesNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-case-suite-impact-report-mysql")
+	runCaseSuiteImpactReportRunsImpactedCases(t, storeRef, "mysql", "MySQL")
+}
+
+func runCaseSuiteImpactReportRunsImpactedCases(t *testing.T, _ string, runLabel string, label string) {
+	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/lookup" || r.URL.Query().Get("mode") != "ok" {
 			w.WriteHeader(http.StatusNotFound)
@@ -9566,18 +9576,18 @@ func TestCaseSuiteImpactReportRunsImpactedCases(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{"status":"accepted"}`)
 	}))
 	defer server.Close()
-	profileDir := writeInterfaceNodeBatchReportProfile(t)
-	runCLI(t, "config", "publish", "--from", profileDir)
+	fixture := writeUniqueInterfaceNodeBatchReportProfile(t)
+	runCLI(t, "config", "publish", "--from", fixture.profileDir)
 
 	outputDir := filepath.Join(t.TempDir(), "impact-report")
 	out := runCLI(t,
 		"case", "suite", "impact-report",
-		"--profile", profileDir,
+		"--profile", fixture.profileDir,
 		"--signal", "/lookup",
 		"--tag", "smoke",
 		"--status", "active",
 		"--action", "run",
-		"--request-id", "change-003",
+		"--request-id", runLabel+"-change-003",
 		"--base-url", server.URL,
 		"--output-dir", outputDir,
 		"--json",
@@ -9607,19 +9617,19 @@ func TestCaseSuiteImpactReportRunsImpactedCases(t *testing.T) {
 		} `json:"report"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode impact report json: %v\n%s", err, out)
+		t.Fatalf("decode %s impact report json: %v\n%s", label, err, out)
 	}
-	if !report.OK || report.Impact.BatchRequest.RequestID != "change-003" || strings.Join(report.Impact.BatchRequest.CaseIDs, ",") != "case.alpha.default" {
-		t.Fatalf("impact report selection = %#v", report)
+	if !report.OK || report.Impact.BatchRequest.RequestID != runLabel+"-change-003" || strings.Join(report.Impact.BatchRequest.CaseIDs, ",") != fixture.defaultCaseID {
+		t.Fatalf("%s impact report selection = %#v", label, report)
 	}
 	if !report.Report.OK || report.Report.Counts.Total != 1 || report.Report.Counts.Passed != 1 || report.Report.Counts.Failed != 0 || len(report.Report.Results) != 1 {
-		t.Fatalf("impact execution report = %#v", report.Report)
+		t.Fatalf("%s impact execution report = %#v", label, report.Report)
 	}
-	if report.Report.Results[0].CaseID != "case.alpha.default" || report.Report.Results[0].CaseRunID == "" || report.Report.Results[0].Status != store.StatusPassed {
-		t.Fatalf("impact execution item = %#v", report.Report.Results[0])
+	if report.Report.Results[0].CaseID != fixture.defaultCaseID || report.Report.Results[0].CaseRunID == "" || report.Report.Results[0].Status != store.StatusPassed {
+		t.Fatalf("%s impact execution item = %#v", label, report.Report.Results[0])
 	}
 	if _, err := os.Stat(filepath.Join(outputDir, "report.html")); err != nil {
-		t.Fatalf("impact report html missing: %v", err)
+		t.Fatalf("%s impact report html missing: %v", label, err)
 	}
 }
 
@@ -11001,6 +11011,56 @@ func writeInterfaceNodeBatchReportProfile(t *testing.T) string {
   ]
 }`)
 	return dir
+}
+
+type interfaceNodeBatchReportFixture struct {
+	profileDir      string
+	profileID       string
+	nodeAlphaID     string
+	defaultCaseID   string
+	variantCaseID   string
+	defaultConfigID string
+}
+
+func writeUniqueInterfaceNodeBatchReportProfile(t *testing.T) interfaceNodeBatchReportFixture {
+	t.Helper()
+	fixture := interfaceNodeBatchReportFixture{
+		profileDir:      t.TempDir(),
+		profileID:       uniqueTestID(t, "profile.interface-node-batch-report"),
+		nodeAlphaID:     uniqueTestID(t, "node.alpha"),
+		defaultCaseID:   uniqueTestID(t, "case.alpha.default"),
+		variantCaseID:   uniqueTestID(t, "case.alpha.variant"),
+		defaultConfigID: uniqueTestID(t, "cfg.case.alpha.default"),
+	}
+	writeFile(t, filepath.Join(fixture.profileDir, "profile.json"), fmt.Sprintf(`{
+  "id": %q,
+  "displayName": "Sample Profile",
+  "services": [{"id":"service.alpha","displayName":"Service Alpha"}],
+  "workflows": [],
+  "interfaceNodes": [{"id":%q,"displayName":"Result Lookup","serviceId":"service.alpha","operation":"Result Lookup","method":"GET","path":"/lookup"}],
+  "apiCases": [
+    {"id":%q,"displayName":"Case Alpha Default","nodeId":%q,"payloadTemplateJson":"{\"mode\":\"ok\"}","expectedJson":"{\"expectedHttpCodes\":[200]}","sortOrder":1,"tags":["smoke","regression"],"priority":"p0","owner":"team-a","description":"Default maintained smoke case."},
+    {"id":%q,"displayName":"Case Alpha Variant","nodeId":%q,"payloadTemplateJson":"{\"mode\":\"bad\"}","expectedJson":"{\"expectedHttpCodes\":[400]}","sortOrder":2,"tags":["negative"],"priority":"p1","owner":"team-b","description":"Negative maintained variant."}
+  ],
+  "requestTemplates": [],
+  "templateConfigs": [
+    {
+      "id": %q,
+      "templateId": "case-execution",
+      "nodeId": %q,
+      "scopeType": "case",
+      "scopeId": %q,
+      "title": "Case Alpha Default execution",
+      "status": "active",
+      "sortOrder": 1,
+      "configJson": %q
+    }
+  ],
+  "caseDependencies": [],
+  "workflowBindings": [],
+  "fixtures": []
+}`, fixture.profileID, fixture.nodeAlphaID, fixture.defaultCaseID, fixture.nodeAlphaID, fixture.variantCaseID, fixture.nodeAlphaID, fixture.defaultConfigID, fixture.nodeAlphaID, fixture.defaultCaseID, fmt.Sprintf(`{"caseId":%q,"caseExecution":{"method":"GET","nodeId":%q,"path":"/lookup","query":{"mode":"ok"},"expectedHttpCodes":[200]}}`, fixture.defaultCaseID, fixture.nodeAlphaID)))
+	return fixture
 }
 
 func writeCaseSuiteCoverageProfile(t *testing.T) string {
