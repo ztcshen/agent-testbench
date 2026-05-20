@@ -30,6 +30,14 @@ import (
 	"open-test-sandbox/internal/store/sqlstore"
 )
 
+func TestMain(m *testing.M) {
+	if os.Getenv("OTSANDBOX_TEST_CLI") == "1" {
+		main()
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
 func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	out := runCLI(t)
 	if !strings.Contains(out, "--store NAME_OR_DSN") {
@@ -314,27 +322,27 @@ func TestEnvironmentCommandsRejectActiveSQLiteStore(t *testing.T) {
 	}{
 		{
 			name: "register",
-			args: []string{"environment", "register", "--id", "env.legacy"},
+			args: []string{"register", "--id", "env.legacy", "--verification-workflow", "workflow.legacy"},
 		},
 		{
 			name: "discover",
-			args: []string{"environment", "discover", "--json"},
+			args: []string{"discover", "--json"},
 		},
 		{
 			name: "inspect",
-			args: []string{"environment", "inspect", "env.legacy"},
+			args: []string{"inspect", "env.legacy"},
 		},
 		{
 			name: "bootstrap",
-			args: []string{"environment", "bootstrap", "env.legacy"},
+			args: []string{"bootstrap", "env.legacy"},
 		},
 		{
 			name: "verify",
-			args: []string{"environment", "verify", "--run", "run.legacy", "--status", "passed", "env.legacy"},
+			args: []string{"verify", "--run", "run.legacy", "--status", "passed", "env.legacy"},
 		},
 		{
 			name: "publish verified",
-			args: []string{"environment", "publish-verified", "env.legacy"},
+			args: []string{"publish-verified", "env.legacy"},
 		},
 	}
 
@@ -351,7 +359,11 @@ func TestEnvironmentCommandsRejectActiveSQLiteStore(t *testing.T) {
 				t.Fatalf("save store config: %v", err)
 			}
 
-			out := runCLIFails(t, tt.args...)
+			err := runEnvironment(context.Background(), tt.args)
+			if err == nil {
+				t.Fatalf("%s unexpectedly succeeded", tt.name)
+			}
+			out := err.Error()
 			for _, want := range []string{"daily commands require PostgreSQL or MySQL Store", "SQLite", "postgres://"} {
 				if !strings.Contains(out, want) {
 					t.Fatalf("%s output missing %q: %q", tt.name, want, out)
@@ -1098,6 +1110,23 @@ func TestEnvironmentRestoreRequiresRemoteGitSourcesForPostgreSQLOneClickEnvironm
 	}
 }
 
+func TestEnvironmentRestoreRequiresRemoteSourcesForSQLStoreBackends(t *testing.T) {
+	for _, storeURL := range []string{
+		"postgres://tester@127.0.0.1:5432/otsandbox?sslmode=disable",
+		"postgresql://tester@127.0.0.1:5432/otsandbox?sslmode=disable",
+		"mysql://tester:secret@127.0.0.1:3306/otsandbox?tls=false",
+	} {
+		if !environmentRestoreRequiresRemoteSources(storeURL) {
+			t.Fatalf("SQL Store URL should require remote restore sources: %s", storeURL)
+		}
+	}
+	for _, storeURL := range []string{"", "sqlite:///tmp/otsandbox.sqlite", "file:///tmp/otsandbox.sqlite"} {
+		if environmentRestoreRequiresRemoteSources(storeURL) {
+			t.Fatalf("compatibility Store URL should not require SQL remote source policy: %s", storeURL)
+		}
+	}
+}
+
 func TestEnvironmentRestoreReportsComponentGraphReadiness(t *testing.T) {
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
@@ -1124,7 +1153,7 @@ func TestEnvironmentRestoreReportsComponentGraphReadiness(t *testing.T) {
 				ComposeService:  "service-alpha",
 				Required:        true,
 				RuntimeJSON:     `{}`,
-				HealthCheckJSON: `{"type":"compose-service","service":"service-alpha"}`,
+				HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18080/service-alpha/health"}`,
 				SummaryJSON:     `{}`,
 			},
 		},
@@ -1211,7 +1240,7 @@ func TestEnvironmentRestoreRejectsBlockingComponentDependencyCycle(t *testing.T)
 				ComposeService:  "app-a",
 				Required:        true,
 				RuntimeJSON:     `{}`,
-				HealthCheckJSON: `{"type":"compose-service"}`,
+				HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18080/app-a/health"}`,
 				SummaryJSON:     `{}`,
 			},
 			{
@@ -1221,7 +1250,7 @@ func TestEnvironmentRestoreRejectsBlockingComponentDependencyCycle(t *testing.T)
 				ComposeService:  "app-b",
 				Required:        true,
 				RuntimeJSON:     `{}`,
-				HealthCheckJSON: `{"type":"compose-service"}`,
+				HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18080/app-b/health"}`,
 				SummaryJSON:     `{}`,
 			},
 		},
@@ -1260,7 +1289,7 @@ func TestEnvironmentRestoreAllowsRuntimeComponentDependencyCycle(t *testing.T) {
 				ComposeService:  "app-a",
 				Required:        true,
 				RuntimeJSON:     `{}`,
-				HealthCheckJSON: `{"type":"compose-service"}`,
+				HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18080/app-a/health"}`,
 				SummaryJSON:     `{}`,
 			},
 			{
@@ -1270,7 +1299,7 @@ func TestEnvironmentRestoreAllowsRuntimeComponentDependencyCycle(t *testing.T) {
 				ComposeService:  "app-b",
 				Required:        true,
 				RuntimeJSON:     `{}`,
-				HealthCheckJSON: `{"type":"compose-service"}`,
+				HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18080/app-b/health"}`,
 				SummaryJSON:     `{}`,
 			},
 		},
@@ -1414,7 +1443,7 @@ func TestEnvironmentRestoreRejectsComponentRemoteAssetWithoutRemoteURL(t *testin
 				Role:            "business-service",
 				Required:        true,
 				RuntimeJSON:     `{}`,
-				HealthCheckJSON: `{"type":"compose-service","service":"app"}`,
+				HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18080/app/health"}`,
 				SummaryJSON:     `{}`,
 			},
 		},
@@ -1463,7 +1492,7 @@ func TestEnvironmentRestoreMaterializesRemoteComponentAsset(t *testing.T) {
 				Role:            "business-service",
 				Required:        true,
 				RuntimeJSON:     `{}`,
-				HealthCheckJSON: `{"type":"compose-service","service":"app"}`,
+				HealthCheckJSON: `{"type":"url","url":"http://127.0.0.1:18080/app/health"}`,
 				SummaryJSON:     `{}`,
 			},
 		},
@@ -2171,6 +2200,7 @@ func TestEnvironmentRestoreHonorsComposeOptionsFromStore(t *testing.T) {
 		"--compose-service", "web",
 		"--compose-skip-pull",
 		"--compose-skip-build",
+		"--health-url", "http://127.0.0.1:18080/health",
 		"--verification-workflow", "workflow.core-10",
 	)
 
@@ -2204,7 +2234,13 @@ func TestEnvironmentRestoreHonorsComposeOptionsFromStore(t *testing.T) {
 	if len(report.Docker.Commands) != 1 {
 		t.Fatalf("compose options should only run up command, got %#v", report.Docker.Commands)
 	}
-	if len(report.Docker.HealthChecks) != 1 || report.Docker.HealthChecks[0].Kind != "compose-service" || report.Docker.HealthChecks[0].Service != "web" || report.Docker.HealthChecks[0].State != "running" || !report.Docker.HealthChecks[0].OK {
+	foundComposeServiceHealth := false
+	for _, check := range report.Docker.HealthChecks {
+		if check.Kind == "compose-service" && check.Service == "web" && check.State == "running" && check.OK {
+			foundComposeServiceHealth = true
+		}
+	}
+	if !foundComposeServiceHealth {
 		t.Fatalf("compose service readiness should be generated for requested service: %#v", report.Docker.HealthChecks)
 	}
 	want := "compose -f " + filepath.Join(workspace, "compose.yml") + " -p demo --env-file " + filepath.Join(workspace, ".env.local") + " --profile api up -d web"
@@ -2645,10 +2681,10 @@ func TestEnvironmentRestoreAssumeCleanDockerIgnoresLocalContainerConflicts(t *te
 	if len(report.NextActions) == 0 || !strings.Contains(report.NextActions[0], "colleague machine") {
 		t.Fatalf("clean-machine next actions should point to colleague machine: %#v", report.NextActions)
 	}
-	if !report.CleanMachine.Ready || strings.Join(report.CleanMachine.ExecuteCommand, " ") != "otsandbox environment restore env.clean-machine --store STORE_NAME_OR_POSTGRES_DSN --workspace "+workspace+" --execute --json" {
+	if !report.CleanMachine.Ready || strings.Join(report.CleanMachine.ExecuteCommand, " ") != "otsandbox environment restore env.clean-machine --store STORE_NAME_OR_SQL_DSN --workspace "+workspace+" --execute --json" {
 		t.Fatalf("clean-machine execute command = %#v", report.CleanMachine)
 	}
-	if strings.Join(report.CleanMachine.PrepareCommand, " ") != "otsandbox environment restore env.clean-machine --store STORE_NAME_OR_POSTGRES_DSN --workspace "+workspace+" --execute --prepare-repos-only --json" {
+	if strings.Join(report.CleanMachine.PrepareCommand, " ") != "otsandbox environment restore env.clean-machine --store STORE_NAME_OR_SQL_DSN --workspace "+workspace+" --execute --prepare-repos-only --json" {
 		t.Fatalf("clean-machine prepare command = %#v", report.CleanMachine)
 	}
 	if !restoreCleanMachinePrereqOK(report.CleanMachine.Prerequisites, "tool:docker") || !restoreCleanMachinePrereqOK(report.CleanMachine.Prerequisites, "docker-start-plan") {
@@ -2947,6 +2983,7 @@ func TestEnvironmentRestoreRunsAllowedDockerCleanupBeforeStartup(t *testing.T) {
 		"--compose-file", "compose.yml",
 		"--compose-skip-pull",
 		"--compose-skip-build",
+		"--health-url", "http://127.0.0.1:18080/health",
 		"--verification-workflow", "workflow.core-10",
 	)
 
@@ -3229,6 +3266,7 @@ func TestEnvironmentRestorePullsExistingCheckoutWhenRequested(t *testing.T) {
 		"--branch", "entry-gateway=main",
 		"--checkout", "entry-gateway=entry-gateway",
 		"--compose-file", "docker-compose.yml",
+		"--health-url", "http://127.0.0.1:18080/health",
 		"--verification-workflow", "workflow.core-10",
 	)
 
@@ -3267,6 +3305,7 @@ func TestEnvironmentRestoreRejectsExistingCheckoutWithDifferentOrigin(t *testing
 		"--repo", "entry-gateway="+remoteRepo,
 		"--checkout", "entry-gateway=entry-gateway",
 		"--compose-file", "docker-compose.yml",
+		"--health-url", "http://127.0.0.1:18080/health",
 		"--verification-workflow", "workflow.core-10",
 	)
 
@@ -3327,6 +3366,7 @@ func TestEnvironmentRestoreChecksOutRequestedRefAfterClone(t *testing.T) {
 		"--repo-ref", "entry-gateway=v1",
 		"--checkout", "entry-gateway=entry-gateway",
 		"--compose-file", "docker-compose.yml",
+		"--health-url", "http://127.0.0.1:18080/health",
 		"--verification-workflow", "workflow.core-10",
 	)
 
@@ -3375,6 +3415,7 @@ func TestEnvironmentRestoreChecksOutRequestedRefForExistingCheckout(t *testing.T
 		"--repo-ref", "entry-gateway=v1",
 		"--checkout", "entry-gateway=entry-gateway",
 		"--compose-file", "docker-compose.yml",
+		"--health-url", "http://127.0.0.1:18080/health",
 		"--verification-workflow", "workflow.core-10",
 	)
 
@@ -3432,6 +3473,7 @@ func TestEnvironmentRestoreDetachesExistingCheckoutAlreadyAtRef(t *testing.T) {
 		"--repo-ref", "entry-gateway=v1",
 		"--checkout", "entry-gateway=entry-gateway",
 		"--compose-file", "docker-compose.yml",
+		"--health-url", "http://127.0.0.1:18080/health",
 		"--verification-workflow", "workflow.core-10",
 	)
 
@@ -3471,6 +3513,7 @@ func TestEnvironmentRestorePreflightRequiresGitForExistingCheckoutRef(t *testing
 		"--repo-ref", "entry-gateway=v1",
 		"--checkout", "entry-gateway=entry-gateway",
 		"--compose-file", "docker-compose.yml",
+		"--health-url", "http://127.0.0.1:18080/health",
 		"--verification-workflow", "workflow.core-10",
 	)
 
@@ -3506,6 +3549,7 @@ func TestEnvironmentRestoreAcceptsExistingCheckoutWithoutRepoURL(t *testing.T) {
 		"--service", "entry-gateway",
 		"--checkout", "entry-gateway=entry-gateway",
 		"--compose-file", "docker-compose.yml",
+		"--health-url", "http://127.0.0.1:18080/health",
 		"--verification-workflow", "workflow.core-10",
 	)
 
@@ -9646,18 +9690,18 @@ func TestServeAndEvidenceTasksUseNamedPostgreSQLActiveStore(t *testing.T) {
 	if current.Code != http.StatusOK {
 		t.Fatalf("store current status = %d body=%s", current.Code, current.Body.String())
 	}
-	var storePayload struct {
+	var storeInfo struct {
 		OK         bool   `json:"ok"`
 		Configured bool   `json:"configured"`
 		Name       string `json:"name"`
 		Backend    string `json:"backend"`
 		Source     string `json:"source"`
 	}
-	if err := json.Unmarshal(current.Body.Bytes(), &storePayload); err != nil {
+	if err := json.Unmarshal(current.Body.Bytes(), &storeInfo); err != nil {
 		t.Fatalf("decode PostgreSQL store current payload: %v\n%s", err, current.Body.String())
 	}
-	if !storePayload.OK || !storePayload.Configured || storePayload.Name != "daily-serve-pg" || storePayload.Backend != "postgres" || storePayload.Source != "active-config" {
-		t.Fatalf("PostgreSQL store current payload = %#v", storePayload)
+	if !storeInfo.OK || !storeInfo.Configured || storeInfo.Name != "daily-serve-pg" || storeInfo.Backend != "postgres" || storeInfo.Source != "active-config" {
+		t.Fatalf("PostgreSQL store current payload = %#v", storeInfo)
 	}
 
 	runs := httptest.NewRecorder()
@@ -9807,10 +9851,11 @@ func TestServeAndEvidenceTasksUseNamedPostgreSQLActiveStore(t *testing.T) {
 
 func runCLI(t *testing.T, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("go", append([]string{"run", "."}, args...)...)
+	cmd := exec.Command(os.Args[0], args...)
+	cmd.Env = append(os.Environ(), "OTSANDBOX_TEST_CLI=1")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("go run . %s failed: %v\n%s", strings.Join(args, " "), err, out)
+		t.Fatalf("otsandbox %s failed: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	return string(out)
 }
@@ -9955,7 +10000,7 @@ func fakeDockerCommand(t *testing.T) ([]string, string) {
 	dir := t.TempDir()
 	callsPath := filepath.Join(dir, "docker-calls.txt")
 	dockerPath := filepath.Join(dir, "docker")
-	writeFile(t, dockerPath, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$DOCKER_CALLS_FILE\"\nif [ \"$1\" = \"compose\" ]; then\n  prev=\"\"\n  service=\"\"\n  for arg in \"$@\"; do\n    if [ \"$prev\" = \"--format\" ] && [ \"$arg\" = \"json\" ]; then\n      service=\"__next__\"\n    elif [ \"$service\" = \"__next__\" ]; then\n      service=\"$arg\"\n    fi\n    prev=\"$arg\"\n  done\n  if [ -n \"$service\" ] && [ \"$service\" != \"__next__\" ]; then\n    printf '{\"Name\":\"%s\",\"Service\":\"%s\",\"State\":\"running\",\"Health\":\"healthy\"}\\n' \"$service\" \"$service\"\n  fi\nfi\n")
+	writeFile(t, dockerPath, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$DOCKER_CALLS_FILE\"\nif [ \"$1\" = \"compose\" ] && [ \"$2\" = \"version\" ]; then\n  printf 'Docker Compose version v2.0.0\\n'\n  exit 0\nfi\nif [ \"$1\" = \"compose\" ]; then\n  prev=\"\"\n  service=\"\"\n  for arg in \"$@\"; do\n    if [ \"$prev\" = \"--format\" ] && [ \"$arg\" = \"json\" ]; then\n      service=\"__next__\"\n    elif [ \"$service\" = \"__next__\" ]; then\n      service=\"$arg\"\n    fi\n    prev=\"$arg\"\n  done\n  if [ -n \"$service\" ] && [ \"$service\" != \"__next__\" ]; then\n    printf '{\"Name\":\"%s\",\"Service\":\"%s\",\"State\":\"running\",\"Health\":\"healthy\"}\\n' \"$service\" \"$service\"\n  fi\nfi\n")
 	if err := os.Chmod(dockerPath, 0o755); err != nil {
 		t.Fatalf("chmod fake docker: %v", err)
 	}
@@ -9967,22 +10012,22 @@ func fakeDockerCommand(t *testing.T) ([]string, string) {
 
 func runCLIWithEnv(t *testing.T, env []string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("go", append([]string{"run", "."}, args...)...)
-	cmd.Env = append(os.Environ(), env...)
+	cmd := exec.Command(os.Args[0], args...)
+	cmd.Env = append(append(os.Environ(), env...), "OTSANDBOX_TEST_CLI=1")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("go run . %s failed: %v\n%s", strings.Join(args, " "), err, out)
+		t.Fatalf("otsandbox %s failed: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	return string(out)
 }
 
 func runCLIFailsWithEnv(t *testing.T, env []string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("go", append([]string{"run", "."}, args...)...)
-	cmd.Env = append(os.Environ(), env...)
+	cmd := exec.Command(os.Args[0], args...)
+	cmd.Env = append(append(os.Environ(), env...), "OTSANDBOX_TEST_CLI=1")
 	out, err := cmd.CombinedOutput()
 	if err == nil {
-		t.Fatalf("go run . %s unexpectedly succeeded:\n%s", strings.Join(args, " "), out)
+		t.Fatalf("otsandbox %s unexpectedly succeeded:\n%s", strings.Join(args, " "), out)
 	}
 	return string(out)
 }
@@ -10051,10 +10096,11 @@ func hasProfileVerifyCheck(checks []struct {
 
 func runCLIFails(t *testing.T, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("go", append([]string{"run", "."}, args...)...)
+	cmd := exec.Command(os.Args[0], args...)
+	cmd.Env = append(os.Environ(), "OTSANDBOX_TEST_CLI=1")
 	out, err := cmd.CombinedOutput()
 	if err == nil {
-		t.Fatalf("go run . %s unexpectedly succeeded:\n%s", strings.Join(args, " "), out)
+		t.Fatalf("otsandbox %s unexpectedly succeeded:\n%s", strings.Join(args, " "), out)
 	}
 	return string(out)
 }

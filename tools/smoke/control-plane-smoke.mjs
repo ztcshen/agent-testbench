@@ -84,7 +84,7 @@ async function waitForJSON(url, timeoutMs = 30000) {
       if (response.ok) return response.json();
       lastError = new Error(`${url} returned ${response.status}`);
     } catch (error) {
-      lastError = error;
+      lastError = new Error(`fetch ${url} failed: ${error.message}`);
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
@@ -92,11 +92,16 @@ async function waitForJSON(url, timeoutMs = 30000) {
 }
 
 async function postJSON(url, body) {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json", Accept: "application/json" },
-    body: JSON.stringify(body),
-  });
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch (error) {
+    throw new Error(`post ${url} failed: ${error.message}`);
+  }
   const payload = await response.json();
   if (!response.ok) {
     throw new Error(`${url} returned ${response.status}: ${JSON.stringify(payload)}`);
@@ -717,17 +722,24 @@ async function main() {
   run("node", ["control-plane/frontend/build.mjs"]);
 
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "otsandbox-smoke-"));
+  const cliBin = path.join(tempDir, "otsandbox");
+  run("go", ["build", "-o", cliBin, "./cmd/otsandbox"]);
   const targetPort = await freePort();
   const targetServer = await startSmokeTargetServer(targetPort);
   const traceProvider = await prepareSmokeTraceProvider();
   const profileDir = await writeSmokeProfile(tempDir, targetPort);
   const profileHome = path.join(tempDir, "profile-home");
-  const { storeRef, serverEnv } = await prepareSmokeStoreReference(tempDir);
+  const runSmokeCLI = (command, args, options = {}) => {
+    if (command === "go" && args[0] === "run" && args[1] === "./cmd/otsandbox") {
+      run(cliBin, args.slice(2), options);
+      return;
+    }
+    run(command, args, options);
+  };
+  const { storeRef, serverEnv } = await prepareSmokeStoreReference(tempDir, process.env, runSmokeCLI);
   const port = await freePort();
   const baseURL = `http://127.0.0.1:${port}`;
-  const server = spawn("go", [
-    "run",
-    "./cmd/otsandbox",
+  const server = spawn(cliBin, [
     "serve",
     "--profile",
     profileDir,
@@ -808,6 +820,12 @@ async function main() {
       await browser.close();
     }
     console.log(`control-plane smoke passed on ${baseURL} with ${traceProvider.mode} SkyWalking GraphQL provider`);
+  } catch (error) {
+    const serverOutput = output.trim();
+    if (serverOutput && error instanceof Error) {
+      error.message = `${error.message}\n\ncontrol-plane output:\n${serverOutput}`;
+    }
+    throw error;
   } finally {
     await closeHTTPServer(traceProvider.server);
     await closeHTTPServer(targetServer);

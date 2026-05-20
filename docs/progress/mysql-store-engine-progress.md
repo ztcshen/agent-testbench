@@ -180,3 +180,52 @@ Remaining gaps:
   smoke stages.
 - Run the same MySQL contract, CLI active Store smoke, API Store smoke, and
   full release gate against the company's real MySQL test environment DSN.
+
+## 2026-05-20 MySQL Release Gate Pass
+
+Progress: `[###################-] 96%`
+
+Implemented:
+
+- Scoped the source-domain guardrail away from operational progress and plan
+  ledgers, keeping core source scans active while allowing private validation
+  notes to remain in docs.
+- Removed a hardcoded business-field override map from the API case batch run
+  path and replaced it with generic ASCII key normalization.
+- Reused the unified daily Store backend check in one-click restore remote-source
+  policy, so MySQL and PostgreSQL follow the same SQL Store rule.
+- Updated clean-machine restore command placeholders from PostgreSQL-only wording
+  to `STORE_NAME_OR_SQL_DSN`.
+- Updated environment metadata size errors to describe the SQL Store boundary
+  rather than a PostgreSQL-only boundary.
+- Made restore preflight command checks more tolerant under full concurrent test
+  load and made the browser smoke build one temporary `otsandbox` binary before
+  serving, instead of starting `serve` through repeated `go run`.
+- Improved browser smoke fetch errors with URL context and control-plane output
+  when the local server fails to become ready.
+
+Validated with a temporary local MySQL 8.0 container on
+`127.0.0.1:54160`:
+
+- `go test ./cmd/otsandbox -count=1 -timeout=120s`
+- `go test ./cmd/otsandbox -run '^TestEnvironmentRestoreClonesRemoteReposForVerifiedWorkflow$' -count=1 -timeout=60s`
+- `go test ./internal/controlplane -run 'TestNormalizeAPICaseBatchOverrideKey|TestReadJSONPayloadPreservesLargeNumericOverrides' -count=1`
+- `OTSANDBOX_SMOKE_STORE_DSN='mysql://root:...@127.0.0.1:54160/otsandbox_release_smoke?tls=false' npm run smoke:frontend:sql-active`
+- `OTSANDBOX_SMOKE_STORE_DSN='mysql://root:...@127.0.0.1:54160/otsandbox_release_smoke?tls=false' npm run release-check`
+
+Release-check status:
+
+- MySQL `npm run release-check` now passes end to end with the temporary MySQL
+  Store DSN. The gate reached and passed Go tests, generic API demo, frontend
+  build and model tests, smoke harness tests, active SQL Store CLI smoke, MySQL
+  API Store smoke, and active SQL Store browser smoke.
+- The SkyWalking provider in this proof is still the deterministic synthetic
+  provider because no real `OTS_TRACE_GRAPHQL_URL` and full 10-step trace id set
+  were provided in this run.
+
+Remaining gaps:
+
+- Run the same release gate against the company's real MySQL test environment
+  DSN.
+- Run final real SkyWalking validation with `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`
+  and trace ids for all 10 workflow steps.

@@ -554,56 +554,64 @@ func apiCaseBatchOverrideValueString(value any) string {
 }
 
 func apiCaseBatchOverrideKey(key string) string {
-	switch strings.TrimSpace(key) {
-	case "financing_order_id", "mer_trans_no", "outer_business_no", "outer_business_id", "payout_id", "payout_amount", "total_amount", "repay_amount", "repay_interest", "repay_penalty", "member_id":
-		return strings.TrimSpace(key)
-	case "financingOrderId":
-		return "financing_order_id"
-	case "merTransNo":
-		return "mer_trans_no"
-	case "outerBusinessNo":
-		return "outer_business_no"
-	case "outerBusinessId":
-		return "outer_business_id"
-	case "payoutId":
-		return "payout_id"
-	case "payoutAmount":
-		return "payout_amount"
-	case "totalAmount":
-		return "total_amount"
-	case "total_repay_amount":
-		return "total_amount"
-	case "totalRepayAmount":
-		return "total_amount"
-	case "total_principal":
-		return "repay_amount"
-	case "totalPrincipal":
-		return "repay_amount"
-	case "repayAmount":
-		return "repay_amount"
-	case "repay_principal":
-		return "repay_amount"
-	case "repayPrincipal":
-		return "repay_amount"
-	case "total_interest":
-		return "repay_interest"
-	case "totalInterest":
-		return "repay_interest"
-	case "repayInterest":
-		return "repay_interest"
-	case "total_penalty":
-		return "repay_penalty"
-	case "totalPenalty":
-		return "repay_penalty"
-	case "repayPenalty":
-		return "repay_penalty"
-	case "memberId":
-		return "member_id"
-	case "orderId":
-		return "financing_order_id"
-	default:
+	return normalizeAPICaseBatchOverrideKey(strings.TrimSpace(key))
+}
+
+func normalizeAPICaseBatchOverrideKey(key string) string {
+	if key == "" {
 		return ""
 	}
+	runes := []rune(key)
+	var out strings.Builder
+	var previousUnderscore bool
+	for index, char := range runes {
+		switch {
+		case isAPICaseBatchLower(char):
+			out.WriteRune(char)
+			previousUnderscore = false
+		case isAPICaseBatchUpper(char):
+			previous := rune(0)
+			if index > 0 {
+				previous = runes[index-1]
+			}
+			next := rune(0)
+			if index+1 < len(runes) {
+				next = runes[index+1]
+			}
+			if index > 0 && !previousUnderscore && (isAPICaseBatchLower(previous) || isAPICaseBatchDigit(previous) || isAPICaseBatchLower(next)) {
+				out.WriteByte('_')
+			}
+			out.WriteRune(char + ('a' - 'A'))
+			previousUnderscore = false
+		case isAPICaseBatchDigit(char):
+			out.WriteRune(char)
+			previousUnderscore = false
+		case char == '_' || char == '-' || char == ' ':
+			if out.Len() > 0 && !previousUnderscore {
+				out.WriteByte('_')
+				previousUnderscore = true
+			}
+		default:
+			return ""
+		}
+	}
+	normalized := strings.Trim(out.String(), "_")
+	if normalized == "" {
+		return ""
+	}
+	return normalized
+}
+
+func isAPICaseBatchLower(char rune) bool {
+	return char >= 'a' && char <= 'z'
+}
+
+func isAPICaseBatchUpper(char rune) bool {
+	return char >= 'A' && char <= 'Z'
+}
+
+func isAPICaseBatchDigit(char rune) bool {
+	return char >= '0' && char <= '9'
 }
 
 func collectAPICaseBatchTraceTopology(ctx context.Context, runtime store.Store, collector traceCollector, workflowID string, plan apiCaseBatchCasePlan, result apicase.RunResult) {

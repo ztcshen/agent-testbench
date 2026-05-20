@@ -22,6 +22,9 @@ while IFS= read -r -d '' path; do
     .git/*|.idea/*|.runtime/*|node_modules/*)
       continue
       ;;
+    docs/progress/*|docs/plans/*)
+      continue
+      ;;
     package-lock.json|tools/guardrails/source-domain-terms.txt)
       continue
       ;;

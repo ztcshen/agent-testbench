@@ -202,10 +202,10 @@ func ValidateEnvironmentDefinitionSize(e Environment) error {
 	total := len(e.ID) + len(e.DisplayName) + len(e.Description) + len(e.Status) +
 		len(e.ServicesJSON) + len(e.ReposJSON) + len(e.ComposeJSON) + len(e.HealthChecksJSON) + len(e.VerificationWorkflowID)
 	if total > EnvironmentDefinitionMaxBytes {
-		return fmt.Errorf("environment definition metadata is %d bytes; maximum is %d bytes. Store only compact restore metadata in PostgreSQL, not code, images, logs, evidence payloads, or large files", total, EnvironmentDefinitionMaxBytes)
+		return fmt.Errorf("environment definition metadata is %d bytes; maximum is %d bytes. Store only compact restore metadata in the SQL Store, not code, images, logs, evidence payloads, or large files", total, EnvironmentDefinitionMaxBytes)
 	}
 	if len(e.SummaryJSON) > EnvironmentSummaryMaxBytes {
-		return fmt.Errorf("environment summary metadata is %d bytes; maximum is %d bytes. Store only compact acceptance summaries and indexes in PostgreSQL, not code, images, logs, evidence payloads, or large files", len(e.SummaryJSON), EnvironmentSummaryMaxBytes)
+		return fmt.Errorf("environment summary metadata is %d bytes; maximum is %d bytes. Store only compact acceptance summaries and indexes in the SQL Store, not code, images, logs, evidence payloads, or large files", len(e.SummaryJSON), EnvironmentSummaryMaxBytes)
 	}
 	return nil
 }
@@ -312,7 +312,7 @@ func ValidateEnvironmentComponentGraph(envID string, g EnvironmentComponentGraph
 			len(asset.ContentInline) + len(asset.RemoteRefJSON) + len(asset.SHA256) + len(asset.SummaryJSON)
 	}
 	if total > ComponentGraphMaxBytes {
-		return fmt.Errorf("environment component graph metadata is %d bytes; maximum is %d bytes. Store only compact Docker restore metadata in PostgreSQL", total, ComponentGraphMaxBytes)
+		return fmt.Errorf("environment component graph metadata is %d bytes; maximum is %d bytes. Store only compact Docker restore metadata in the SQL Store", total, ComponentGraphMaxBytes)
 	}
 	return nil
 }

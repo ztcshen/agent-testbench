@@ -1599,7 +1599,7 @@ func environmentRestoreCleanMachinePlanForReport(report environmentRestoreReport
 	}
 	storeRef := strings.TrimSpace(workflowOptions.StoreRef)
 	if storeRef == "" {
-		storeRef = "STORE_NAME_OR_POSTGRES_DSN"
+		storeRef = "STORE_NAME_OR_SQL_DSN"
 	}
 	plan := environmentRestoreCleanMachinePlan{
 		Ready: report.OK,
@@ -2292,8 +2292,8 @@ func environmentRestoreHealthCheckSignature(item map[string]any) string {
 }
 
 func environmentRestoreRequiresRemoteSources(storeURL string) bool {
-	storeURL = strings.TrimSpace(strings.ToLower(storeURL))
-	return strings.HasPrefix(storeURL, "postgres://") || strings.HasPrefix(storeURL, "postgresql://") || strings.HasPrefix(storeURL, "mysql://")
+	backend, err := storeBackendFromURL(strings.TrimSpace(storeURL))
+	return err == nil && isDailyStoreBackend(backend)
 }
 
 func environmentRestoreSourcePolicyReport(_ environmentRestorePackageSpec, specs []environmentRestoreRepoSpec, remoteOnly bool) environmentRestoreSourcePolicy {
@@ -2525,7 +2525,7 @@ func environmentRestoreContainerNameConflicts(compose map[string]any, workspace 
 	if err != nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, path, "ps", "-a", "--format", "{{.Names}}").CombinedOutput()
 	if err != nil {
@@ -3135,7 +3135,7 @@ func environmentRestoreCommandTool(name string, required bool, command string, a
 		tool.Error = err.Error()
 		return tool
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, args...)
 	out, err := cmd.CombinedOutput()
