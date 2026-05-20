@@ -83,6 +83,40 @@ func TestSQLiteSchemaIncludesEvidenceStepRelation(t *testing.T) {
 	}
 }
 
+func TestSQLiteSchemaIncludesEnvironmentComponentAssets(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
+	if _, err := sqlite.UpgradeSchema(ctx, sqlite.Config{Path: dbPath}); err != nil {
+		t.Fatalf("upgrade schema: %v", err)
+	}
+
+	tables := sqliteTableNames(t, dbPath)
+	for _, table := range []string{
+		"environment_components",
+		"service_dependencies",
+		"service_config_assets",
+	} {
+		if !tables[table] {
+			t.Fatalf("missing environment component asset table %q in %#v", table, tables)
+		}
+	}
+	assetColumns := sqliteTableColumns(t, dbPath, "service_config_assets")
+	for _, column := range []string{
+		"service_id",
+		"asset_kind",
+		"target_component_id",
+		"content_inline",
+		"remote_ref_json",
+		"size_bytes",
+		"apply_order",
+		"sensitive",
+	} {
+		if !assetColumns[column] {
+			t.Fatalf("missing service_config_assets.%s in %#v", column, assetColumns)
+		}
+	}
+}
+
 func sqliteTableNames(t *testing.T, dbPath string) map[string]bool {
 	t.Helper()
 	out, err := exec.Command("sqlite3", "-json", dbPath, `select name from sqlite_master where type = 'table';`).CombinedOutput()

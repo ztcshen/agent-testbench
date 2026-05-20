@@ -38,6 +38,24 @@ Store and are not guaranteed to exist after cloning service repos:
 `environment restore --clean-docker-state --json` now reports these as
 `startup-assets` preflight failures before any Docker command can start.
 
+## Componentized Store Model
+
+The next Store shape separates runtime capability from service-owned
+configuration:
+
+- `environment_components`: one row per middleware, mock, or business service
+  in the suite.
+- `service_dependencies`: business service to component dependencies, such as
+  `scf-loan -> mysql` or `scf-loan -> apollo`.
+- `service_config_assets`: service-owned assets that target a component, such
+  as `scf-loan` DDL targeting MySQL or `scf-loan` namespace config targeting
+  Apollo.
+
+MySQL DDL and seed SQL are not owned by the MySQL component. They are owned by
+the business service that needs those schemas. Apollo follows the same rule:
+the Apollo component provides config-service capability, while each business
+service owns its appId, namespace, and key/value assets.
+
 ## Three-Layer Test Path
 
 1. Non-destructive CLI dry-run:
@@ -72,4 +90,3 @@ databases, runtime logs, Evidence payloads, or large binaries.
 
 The current 5.6 MB WireMock dependency jar is not a Store candidate. It should
 come from a remote artifact, a purpose-built image, or a remote repo build step.
-

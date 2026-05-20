@@ -6,7 +6,7 @@ type Change struct {
 	SQL     string
 }
 
-const CurrentVersion = 15
+const CurrentVersion = 16
 
 func All() []Change {
 	return []Change{
@@ -512,6 +512,75 @@ create index if not exists idx_environments_verified_status
 
 create index if not exists idx_environments_verification
   on environments(verification_workflow_id, last_verification_status, updated_at, id);`,
+		},
+		{
+			Version: 16,
+			Name:    "add environment component assets",
+			SQL: `
+create table if not exists environment_components (
+  env_id text not null,
+  component_id text not null,
+  display_name text not null default '',
+  kind text not null default '',
+  role text not null default '',
+  compose_service text not null default '',
+  image text not null default '',
+  required integer not null default 1,
+  runtime_json text not null default '{}',
+  healthcheck_json text not null default '{}',
+  summary_json text not null default '{}',
+  created_at text not null,
+  updated_at text not null,
+  primary key (env_id, component_id),
+  foreign key (env_id) references environments(id) on delete cascade
+);
+
+create index if not exists idx_environment_components_kind
+  on environment_components(env_id, kind, role, component_id);
+
+create table if not exists service_dependencies (
+  env_id text not null,
+  service_id text not null,
+  dependency_component_id text not null,
+  dependency_kind text not null default '',
+  required integer not null default 1,
+  profile_json text not null default '{}',
+  created_at text not null,
+  updated_at text not null,
+  primary key (env_id, service_id, dependency_component_id, dependency_kind),
+  foreign key (env_id, service_id) references environment_components(env_id, component_id) on delete cascade,
+  foreign key (env_id, dependency_component_id) references environment_components(env_id, component_id) on delete cascade
+);
+
+create index if not exists idx_service_dependencies_component
+  on service_dependencies(env_id, dependency_component_id, dependency_kind, service_id);
+
+create table if not exists service_config_assets (
+  env_id text not null,
+  service_id text not null,
+  asset_id text not null,
+  asset_kind text not null default '',
+  target_component_id text not null default '',
+  target_path text not null default '',
+  content_inline text not null default '',
+  remote_ref_json text not null default '{}',
+  sha256 text not null default '',
+  size_bytes integer not null default 0,
+  apply_order integer not null default 0,
+  sensitive integer not null default 0,
+  summary_json text not null default '{}',
+  created_at text not null,
+  updated_at text not null,
+  primary key (env_id, service_id, asset_id),
+  foreign key (env_id, service_id) references environment_components(env_id, component_id) on delete cascade,
+  foreign key (env_id, target_component_id) references environment_components(env_id, component_id) on delete cascade
+);
+
+create index if not exists idx_service_config_assets_target
+  on service_config_assets(env_id, target_component_id, asset_kind, apply_order, asset_id);
+
+create index if not exists idx_service_config_assets_service_order
+  on service_config_assets(env_id, service_id, apply_order, asset_id);`,
 		},
 	}
 }

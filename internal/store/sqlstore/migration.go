@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	CurrentSchemaVersion = 2
+	CurrentSchemaVersion = 3
 	CoreSchemaName       = "create shared sql store schema"
 )
 
@@ -260,6 +260,71 @@ create index if not exists idx_environments_verified_status
 		`
 create index if not exists idx_environments_verification
   on environments(verification_workflow_id, last_verification_status, updated_at, id);`,
+		fmt.Sprintf(`
+create table if not exists environment_components (
+  env_id %s not null,
+  component_id %s not null,
+  display_name %s not null,
+  kind %s not null,
+  role %s not null,
+  compose_service %s not null,
+  image %s not null,
+  required %s not null,
+  runtime_json %s not null,
+  healthcheck_json %s not null,
+  summary_json %s not null,
+  created_at %s not null,
+  updated_at %s not null,
+  primary key (env_id, component_id),
+  foreign key (env_id) references environments(id) on delete cascade
+);`, text, text, text, text, text, text, text, boolType, jsonType, jsonType, jsonType, timeType, timeType),
+		`
+create index if not exists idx_environment_components_kind
+  on environment_components(env_id, kind, role, component_id);`,
+		fmt.Sprintf(`
+create table if not exists service_dependencies (
+  env_id %s not null,
+  service_id %s not null,
+  dependency_component_id %s not null,
+  dependency_kind %s not null,
+  required %s not null,
+  profile_json %s not null,
+  created_at %s not null,
+  updated_at %s not null,
+  primary key (env_id, service_id, dependency_component_id, dependency_kind),
+  foreign key (env_id, service_id) references environment_components(env_id, component_id) on delete cascade,
+  foreign key (env_id, dependency_component_id) references environment_components(env_id, component_id) on delete cascade
+);`, text, text, text, text, boolType, jsonType, timeType, timeType),
+		`
+create index if not exists idx_service_dependencies_component
+  on service_dependencies(env_id, dependency_component_id, dependency_kind, service_id);`,
+		fmt.Sprintf(`
+create table if not exists service_config_assets (
+  env_id %s not null,
+  service_id %s not null,
+  asset_id %s not null,
+  asset_kind %s not null,
+  target_component_id %s not null,
+  target_path %s not null,
+  content_inline %s not null,
+  remote_ref_json %s not null,
+  sha256 %s not null,
+  size_bytes %s not null,
+  apply_order %s not null,
+  sensitive %s not null,
+  summary_json %s not null,
+  created_at %s not null,
+  updated_at %s not null,
+  primary key (env_id, service_id, asset_id),
+  foreign key (env_id, service_id) references environment_components(env_id, component_id) on delete cascade,
+  foreign key (env_id, target_component_id) references environment_components(env_id, component_id) on delete cascade
+);`, text, text, text, text, text, text, text, jsonType, text, intType, intType, boolType, jsonType, timeType, timeType),
+		`
+create index if not exists idx_service_config_assets_target
+  on service_config_assets(env_id, target_component_id, asset_kind, apply_order, asset_id);`,
+		`
+create index if not exists idx_service_config_assets_service_order
+  on service_config_assets(env_id, service_id, apply_order, asset_id);`,
 	}
 }
 

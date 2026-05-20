@@ -121,6 +121,35 @@ func TestCoreSchemaSQLIncludesEnvironmentCatalog(t *testing.T) {
 	}
 }
 
+func TestCoreSchemaSQLIncludesEnvironmentComponentAssets(t *testing.T) {
+	statements := sqlstore.CoreSchemaSQL(sqlstore.PostgresDialect{})
+	joined := strings.Join(statements, "\n")
+	for _, want := range []string{
+		"create table if not exists environment_components",
+		"component_id text not null",
+		"kind text not null",
+		"role text not null",
+		"runtime_json jsonb not null",
+		"healthcheck_json jsonb not null",
+		"create table if not exists service_dependencies",
+		"dependency_component_id text not null",
+		"profile_json jsonb not null",
+		"create table if not exists service_config_assets",
+		"asset_kind text not null",
+		"target_component_id text not null",
+		"content_inline text not null",
+		"remote_ref_json jsonb not null",
+		"size_bytes integer not null",
+		"sensitive boolean not null",
+		"idx_service_config_assets_target",
+		"idx_service_config_assets_service_order",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("core schema missing environment component asset DDL %q:\n%s", want, joined)
+		}
+	}
+}
+
 func TestSchemaStatusAndUpgradeSchemaUseSharedDatabaseSQLMigrations(t *testing.T) {
 	ctx := context.Background()
 	db, state := openFakeSQLDB(t)

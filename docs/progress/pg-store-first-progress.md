@@ -2032,3 +2032,21 @@ Remote source policy slice:
   sandbox Store. The current 5.6 MB WireMock dependency jar is especially not a
   Store candidate; it should come from an image, remote artifact, or remote repo
   build path.
+- 2026-05-20T11:25Z: landed the first componentized environment schema in Store
+  DDL. The shared SQL Store target is now schema version 3, and the SQLite
+  compatibility schema is version 16. New tables:
+  `environment_components`, `service_dependencies`, and
+  `service_config_assets`.
+- The schema follows the corrected ownership model: middleware components such
+  as MySQL, Apollo, Zookeeper, Redis, RabbitMQ, and SkyWalking provide runtime
+  capability and health; business services own the assets they need to consume
+  those capabilities, including MySQL DDL/seed, Apollo namespace config, launch
+  scripts, env/secret material, and mock mappings.
+- Applied the migration to `local-pg` through CLI only:
+  `store status --store local-pg` reported version 2 -> target 3, then
+  `store upgrade --store local-pg` applied one migration, and the final status
+  reported version 3, target 3, pending 0. No direct database-client SQL was
+  used for this verification.
+- This is structure-only landing. Existing environment rows are not backfilled
+  into component rows yet; the next design iteration can still refine component
+  fields and asset ownership before adding CLI/API writers and restore readers.
