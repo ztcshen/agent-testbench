@@ -1692,6 +1692,15 @@ Incomplete work:
 - Before that proof, keep the current environment running for manual basic
   verification at `http://127.0.0.1:58663/`; do not delete or rebuild the
   current Docker services until the user finishes that self-test.
+
+Manual self-test hold:
+
+- Local PostgreSQL Store `local-pg` was started through Homebrew
+  `postgresql@16`, outside Docker.
+- `otsandbox serve --store local-pg --host 127.0.0.1 --port 58663` is running
+  for manual workbench verification at `http://127.0.0.1:58663/`.
+- Existing target Docker containers are still intact: no container/image
+  deletion, cleanup, rebuild, or colleague-machine simulation has been run.
 - Restore still needs richer provider hardening for GitHub/GitLab tokens,
   submodules, and auth prompts.
 - Docker restore still needs a real operator-approved clean-machine proof;
