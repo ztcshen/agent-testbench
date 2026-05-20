@@ -975,7 +975,7 @@ func TestEnvironmentRestorePreflightReportsMissingGitForMissingCheckout(t *testi
 		ComposeJSON:            `{"composeFile":"docker-compose.yml"}`,
 		HealthChecksJSON:       `[]`,
 		VerificationWorkflowID: "workflow.core-10",
-	}, workspace, false, false, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{})
+	}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{})
 	if err != nil {
 		t.Fatalf("build restore preflight report: %v", err)
 	}
@@ -1002,7 +1002,7 @@ func TestEnvironmentRestorePreflightReportsMissingDockerComposePlugin(t *testing
 		ComposeJSON:            `{"composeFile":"docker-compose.yml"}`,
 		HealthChecksJSON:       `[]`,
 		VerificationWorkflowID: "workflow.core-10",
-	}, workspace, false, false, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{})
+	}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{})
 	if err != nil {
 		t.Fatalf("build restore preflight report: %v", err)
 	}
@@ -1234,6 +1234,112 @@ func TestEnvironmentRestoreHonorsComposeOptionsFromStore(t *testing.T) {
 	}
 }
 
+func TestEnvironmentRestoreSupportsMultipleComposeFiles(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	fakeDockerEnv, dockerCallsPath := fakeDockerCommand(t)
+	writeFile(t, filepath.Join(workspace, "compose.base.yml"), "services: {}\n")
+	writeFile(t, filepath.Join(workspace, "compose.apps.yml"), "services: {}\n")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.compose.multi",
+		"--compose-file", "compose.base.yml",
+		"--compose-file", "compose.apps.yml",
+		"--compose-env", "SANDBOX_ROOT=$OTS_WORKSPACE",
+		"--compose-skip-pull",
+		"--compose-skip-build",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--json", "env.compose.multi")
+	var report struct {
+		OK      bool `json:"ok"`
+		Compose struct {
+			ComposeFile  string   `json:"composeFile"`
+			ComposeFiles []string `json:"composeFiles"`
+		} `json:"compose"`
+		Docker struct {
+			ComposeFile string     `json:"composeFile"`
+			Commands    [][]string `json:"commands"`
+		} `json:"docker"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode multi compose restore json: %v\n%s", err, out)
+	}
+	if !report.OK || report.Compose.ComposeFile != "compose.base.yml" || len(report.Compose.ComposeFiles) != 2 || !strings.Contains(report.Docker.ComposeFile, "compose.base.yml") || !strings.Contains(report.Docker.ComposeFile, "compose.apps.yml") {
+		t.Fatalf("multi compose report = %#v", report)
+	}
+	dockerCalls, err := os.ReadFile(dockerCallsPath)
+	if err != nil {
+		t.Fatalf("read fake docker calls: %v", err)
+	}
+	want := "compose -f " + filepath.Join(workspace, "compose.base.yml") + " -f " + filepath.Join(workspace, "compose.apps.yml") + " up -d"
+	want = strings.Replace(want, " up -d", " --env-file "+filepath.Join(workspace, ".otsandbox", "restore.env")+" up -d", 1)
+	if !strings.Contains(string(dockerCalls), want) {
+		t.Fatalf("multi compose docker calls missing %q:\n%s", want, dockerCalls)
+	}
+	envFile, err := os.ReadFile(filepath.Join(workspace, ".otsandbox", "restore.env"))
+	if err != nil || !strings.Contains(string(envFile), "SANDBOX_ROOT="+workspace) {
+		t.Fatalf("generated compose env file = %q err=%v", envFile, err)
+	}
+}
+
+func TestEnvironmentRestoreCanPrepareRepositoriesBeforeDocker(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	remoteRepo := createBareGitRepo(t, "main")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	fakeDockerEnv, dockerCallsPath := fakeDockerCommand(t)
+	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer healthServer.Close()
+	writeFile(t, filepath.Join(workspace, "compose.yml"), "services: {}\n")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.prepare.repos",
+		"--service", "entry-gateway",
+		"--repo", "entry-gateway="+remoteRepo,
+		"--checkout", "entry-gateway=entry-gateway",
+		"--compose-file", "compose.yml",
+		"--health-url", healthServer.URL+"/ready",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--prepare-repos-only", "--json", "env.prepare.repos")
+	var report struct {
+		OK       bool `json:"ok"`
+		Executed bool `json:"executed"`
+		Repos    []struct {
+			ServiceID string `json:"serviceId"`
+			Action    string `json:"action"`
+			OK        bool   `json:"ok"`
+		} `json:"repos"`
+		Docker struct {
+			OK     bool   `json:"ok"`
+			Action string `json:"action"`
+		} `json:"docker"`
+		Readiness struct {
+			OK bool `json:"ok"`
+		} `json:"readiness"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode prepare repos restore json: %v\n%s", err, out)
+	}
+	if !report.OK || !report.Executed || len(report.Repos) != 1 || report.Repos[0].Action != "clone" || !report.Repos[0].OK || !report.Docker.OK || report.Docker.Action != "skipped-after-repository-preparation" || !report.Readiness.OK {
+		t.Fatalf("prepare repos report = %#v", report)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "entry-gateway", ".git")); err != nil {
+		t.Fatalf("repository was not cloned before Docker: %v", err)
+	}
+	dockerCalls, err := os.ReadFile(dockerCallsPath)
+	if err != nil {
+		t.Fatalf("read fake docker calls: %v", err)
+	}
+	if strings.Contains(string(dockerCalls), " compose ") {
+		t.Fatalf("prepare repos should not invoke Docker Compose:\n%s", dockerCalls)
+	}
+}
+
 func TestEnvironmentRestorePlansDockerCleanupWithoutExecuting(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	workspace := filepath.Join(t.TempDir(), "workspace")
@@ -1415,27 +1521,52 @@ func TestEnvironmentRestoreFailsBeforeDockerWhenComposeFileIsMissing(t *testing.
 func TestEnvironmentRestoreRunsVerificationWorkflowAfterDockerHealth(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	workspace := filepath.Join(t.TempDir(), "workspace")
-	outputDir := filepath.Join(t.TempDir(), "workflow-report")
+	outputDir := filepath.Join(t.TempDir(), "workflow-evidence")
 	fakeDockerEnv, _ := fakeDockerCommand(t)
 	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer healthServer.Close()
-	targetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/first":
-			w.WriteHeader(http.StatusOK)
-			_, _ = fmt.Fprint(w, `{"item_id":"item-001"}`)
-		case "/second":
-			w.WriteHeader(http.StatusOK)
-			_, _ = fmt.Fprint(w, `{"status":"ok"}`)
+	var acceptancePayload map[string]any
+	acceptanceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/environments/env.workflow.restore/acceptance-runs":
+			if err := json.NewDecoder(r.Body).Decode(&acceptancePayload); err != nil {
+				t.Fatalf("decode acceptance payload: %v", err)
+			}
+			writeTestJSON(t, w, http.StatusAccepted, map[string]any{
+				"ok":            true,
+				"environmentId": "env.workflow.restore",
+				"batchRunId":    "batch.env.restore.acceptance.001",
+				"requestId":     "restore.env.workflow.restore",
+				"workflowId":    "workflow.alpha",
+				"status":        "running",
+				"reportUrl":     "/api/environments/env.workflow.restore/acceptance-runs/batch.env.restore.acceptance.001",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/environments/env.workflow.restore/acceptance-runs/batch.env.restore.acceptance.001":
+			writeTestJSON(t, w, http.StatusOK, map[string]any{
+				"ok":            true,
+				"environmentId": "env.workflow.restore",
+				"batchRunId":    "batch.env.restore.acceptance.001",
+				"workflowId":    "workflow.alpha",
+				"status":        "passed",
+				"acceptance": map[string]any{
+					"ok":               true,
+					"templateId":       "environment.workflow.skywalking.v1",
+					"workflowId":       "workflow.alpha",
+					"expectedSteps":    10,
+					"completedSteps":   10,
+					"passedSteps":      10,
+					"failedSteps":      0,
+					"topologyProvider": "skywalking",
+				},
+			})
 		default:
-			w.WriteHeader(http.StatusNotFound)
+			t.Fatalf("unexpected acceptance request: %s %s", r.Method, r.URL.Path)
 		}
 	}))
-	defer targetServer.Close()
+	defer acceptanceServer.Close()
 	writeFile(t, filepath.Join(workspace, "compose.yml"), "services: {}\n")
-	runCLI(t, "config", "publish", "--from", writeWorkflowBatchReportProfile(t), "--store", "sqlite://"+storePath)
 	runCLI(t, "environment", "register",
 		"--store", "sqlite://"+storePath,
 		"--id", "env.workflow.restore",
@@ -1450,7 +1581,8 @@ func TestEnvironmentRestoreRunsVerificationWorkflowAfterDockerHealth(t *testing.
 		"--workspace", workspace,
 		"--execute",
 		"--run-workflow",
-		"--base-url", targetServer.URL,
+		"--server-url", acceptanceServer.URL,
+		"--base-url", "http://127.0.0.1:18080",
 		"--workflow-output-dir", outputDir,
 		"--json",
 		"env.workflow.restore",
@@ -1467,25 +1599,29 @@ func TestEnvironmentRestoreRunsVerificationWorkflowAfterDockerHealth(t *testing.
 			WorkflowID string `json:"workflowId"`
 			RunID      string `json:"runId"`
 			OutputDir  string `json:"outputDir"`
-			Counts     struct {
-				Total  int `json:"total"`
-				Passed int `json:"passed"`
-				Failed int `json:"failed"`
-			} `json:"counts"`
+			ReportURL  string `json:"reportUrl"`
+			Acceptance struct {
+				OK               bool   `json:"ok"`
+				TemplateID       string `json:"templateId"`
+				ExpectedSteps    int    `json:"expectedSteps"`
+				CompletedSteps   int    `json:"completedSteps"`
+				PassedSteps      int    `json:"passedSteps"`
+				FailedSteps      int    `json:"failedSteps"`
+				TopologyProvider string `json:"topologyProvider"`
+			} `json:"acceptance"`
 		} `json:"workflow"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode restore workflow json: %v\n%s", err, out)
 	}
-	if !report.OK || !report.Executed || !report.Docker.OK || !report.Workflow.OK || report.Workflow.Action != "run-verification-workflow" || report.Workflow.WorkflowID != "workflow.alpha" || report.Workflow.RunID == "" {
+	if !report.OK || !report.Executed || !report.Docker.OK || !report.Workflow.OK || report.Workflow.Action != "run-acceptance-workflow" || report.Workflow.WorkflowID != "workflow.alpha" || report.Workflow.RunID != "batch.env.restore.acceptance.001" {
 		t.Fatalf("restore workflow report = %#v", report)
 	}
-	if report.Workflow.OutputDir != outputDir || report.Workflow.Counts.Total != 2 || report.Workflow.Counts.Passed != 2 || report.Workflow.Counts.Failed != 0 {
-		t.Fatalf("restore workflow counts/output = %#v", report.Workflow)
+	if report.Workflow.OutputDir != outputDir || report.Workflow.ReportURL == "" || !report.Workflow.Acceptance.OK || report.Workflow.Acceptance.TemplateID != "environment.workflow.skywalking.v1" || report.Workflow.Acceptance.ExpectedSteps != 10 || report.Workflow.Acceptance.CompletedSteps != 10 || report.Workflow.Acceptance.PassedSteps != 10 || report.Workflow.Acceptance.FailedSteps != 0 || report.Workflow.Acceptance.TopologyProvider != "skywalking" {
+		t.Fatalf("restore workflow acceptance = %#v", report.Workflow)
 	}
-	caseRunsOut := runCLI(t, "case", "runs", "--store", "sqlite://"+storePath, "--run", report.Workflow.RunID, "--json")
-	if !strings.Contains(caseRunsOut, "case.first") || !strings.Contains(caseRunsOut, "case.second") {
-		t.Fatalf("restore workflow did not persist case runs: %s", caseRunsOut)
+	if acceptancePayload["baseUrl"] != "http://127.0.0.1:18080" || acceptancePayload["evidenceDir"] != outputDir {
+		t.Fatalf("restore acceptance payload = %#v", acceptancePayload)
 	}
 	inspectOut := runCLI(t, "environment", "inspect", "--store", "sqlite://"+storePath, "--json", "env.workflow.restore")
 	var inspected struct {
@@ -1501,7 +1637,7 @@ func TestEnvironmentRestoreRunsVerificationWorkflowAfterDockerHealth(t *testing.
 	if err := json.Unmarshal([]byte(inspectOut), &inspected); err != nil {
 		t.Fatalf("decode restored environment inspect json: %v\n%s", err, inspectOut)
 	}
-	if inspected.Environment.LastVerificationRunID != report.Workflow.RunID || inspected.Environment.LastVerificationStatus != store.StatusPassed || inspected.Environment.Status != "verification-recorded" || !inspected.Environment.EvidenceComplete || inspected.Environment.TopologyComplete || inspected.Environment.Verified {
+	if inspected.Environment.LastVerificationRunID != report.Workflow.RunID || inspected.Environment.LastVerificationStatus != store.StatusPassed || inspected.Environment.Status != "verification-recorded" || !inspected.Environment.EvidenceComplete || !inspected.Environment.TopologyComplete || inspected.Environment.Verified {
 		t.Fatalf("restored environment status = %#v", inspected.Environment)
 	}
 }
@@ -1509,28 +1645,48 @@ func TestEnvironmentRestoreRunsVerificationWorkflowAfterDockerHealth(t *testing.
 func TestEnvironmentRestoreUsesNamedPostgreSQLActiveStore(t *testing.T) {
 	configureNamedPostgreSQLActiveStore(t, "restore-active-pg")
 	workspace := filepath.Join(t.TempDir(), "workspace")
-	outputDir := filepath.Join(t.TempDir(), "workflow-report")
+	outputDir := filepath.Join(t.TempDir(), "workflow-evidence")
 	envID := uniqueTestID(t, "env.restore.pg")
 	fakeDockerEnv, _ := fakeDockerCommand(t)
 	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer healthServer.Close()
-	targetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/first":
-			w.WriteHeader(http.StatusOK)
-			_, _ = fmt.Fprint(w, `{"item_id":"item-001"}`)
-		case "/second":
-			w.WriteHeader(http.StatusOK)
-			_, _ = fmt.Fprint(w, `{"status":"ok"}`)
+	acceptanceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/environments/"+envID+"/acceptance-runs":
+			writeTestJSON(t, w, http.StatusAccepted, map[string]any{
+				"ok":            true,
+				"environmentId": envID,
+				"batchRunId":    "batch." + envID + ".acceptance.001",
+				"workflowId":    "workflow.alpha",
+				"status":        "running",
+				"reportUrl":     "/api/environments/" + envID + "/acceptance-runs/batch." + envID + ".acceptance.001",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/environments/"+envID+"/acceptance-runs/batch."+envID+".acceptance.001":
+			writeTestJSON(t, w, http.StatusOK, map[string]any{
+				"ok":            true,
+				"environmentId": envID,
+				"batchRunId":    "batch." + envID + ".acceptance.001",
+				"workflowId":    "workflow.alpha",
+				"status":        "passed",
+				"acceptance": map[string]any{
+					"ok":               true,
+					"templateId":       "environment.workflow.skywalking.v1",
+					"workflowId":       "workflow.alpha",
+					"expectedSteps":    10,
+					"completedSteps":   10,
+					"passedSteps":      10,
+					"failedSteps":      0,
+					"topologyProvider": "skywalking",
+				},
+			})
 		default:
-			w.WriteHeader(http.StatusNotFound)
+			t.Fatalf("unexpected active PG acceptance request: %s %s", r.Method, r.URL.Path)
 		}
 	}))
-	defer targetServer.Close()
+	defer acceptanceServer.Close()
 	writeFile(t, filepath.Join(workspace, "compose.yml"), "services: {}\n")
-	runCLI(t, "config", "publish", "--from", writeWorkflowBatchReportProfile(t))
 	runCLI(t, "environment", "register",
 		"--id", envID,
 		"--compose-file", "compose.yml",
@@ -1544,7 +1700,8 @@ func TestEnvironmentRestoreUsesNamedPostgreSQLActiveStore(t *testing.T) {
 		"--workspace", workspace,
 		"--execute",
 		"--run-workflow",
-		"--base-url", targetServer.URL,
+		"--server-url", acceptanceServer.URL,
+		"--base-url", "http://127.0.0.1:18080",
 		"--workflow-output-dir", outputDir,
 		"--json",
 	)
@@ -1552,19 +1709,19 @@ func TestEnvironmentRestoreUsesNamedPostgreSQLActiveStore(t *testing.T) {
 		OK       bool `json:"ok"`
 		Executed bool `json:"executed"`
 		Workflow struct {
-			OK    bool   `json:"ok"`
-			RunID string `json:"runId"`
+			OK         bool   `json:"ok"`
+			Action     string `json:"action"`
+			RunID      string `json:"runId"`
+			Acceptance struct {
+				OK bool `json:"ok"`
+			} `json:"acceptance"`
 		} `json:"workflow"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode active PostgreSQL restore json: %v\n%s", err, out)
 	}
-	if !report.OK || !report.Executed || !report.Workflow.OK || report.Workflow.RunID == "" {
+	if !report.OK || !report.Executed || !report.Workflow.OK || report.Workflow.Action != "run-acceptance-workflow" || !report.Workflow.Acceptance.OK || report.Workflow.RunID == "" {
 		t.Fatalf("active PostgreSQL restore report = %#v", report)
-	}
-	caseRunsOut := runCLI(t, "case", "runs", "--run", report.Workflow.RunID, "--json")
-	if !strings.Contains(caseRunsOut, "case.first") || !strings.Contains(caseRunsOut, "case.second") {
-		t.Fatalf("active PostgreSQL restore did not persist case runs: %s", caseRunsOut)
 	}
 }
 

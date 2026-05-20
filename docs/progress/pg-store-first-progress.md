@@ -1792,3 +1792,41 @@ Core 10-step workflow acceptance-green slice:
 - Light validation for this slice:
   `go test ./internal/controlplane -run 'TestTraceTopologyCollectPersistsProviderSpanRefs|TestServerStartsAsyncAPICaseBatchRunForWorkflow|TestServerAsyncWorkflowAcceptancePassesWithSkyWalkingTopology' -count=1`;
   `go test ./cmd/otsandbox -run 'TestEnvironmentAcceptanceCLIStartsAndReadsAsyncReport' -count=1`.
+
+Docker restore acceptance binding slice:
+
+- 2026-05-20T06:30Z: set the active goal to prove that an environment bound to
+  a successful async acceptance workflow can be restored from Store metadata
+  toward a colleague-machine Docker environment, without putting the sandbox
+  PostgreSQL Store inside the target Docker stack.
+- `environment restore --run-workflow` now requires `--server-url` and triggers
+  the environment async acceptance API (`/api/environments/{id}/acceptance-runs`)
+  instead of the older local workflow report path. The restore report records
+  `action=run-acceptance-workflow`, `reportUrl`, and the acceptance template
+  result; Evidence/topology flags are set only when `acceptance.ok=true`.
+- Added multi-file Docker Compose support for Environment Catalog entries:
+  repeated `--compose-file` is stored as `composeFiles`, and both CLI restore
+  plus API bootstrap render all `-f` arguments.
+- Added generated Compose env support through repeated
+  `--compose-env KEY=VALUE`. Restore writes `.otsandbox/restore.env` in the
+  target workspace and expands `$OTS_WORKSPACE` so Docker mounts the cloned
+  colleague-machine repositories instead of this machine's default paths.
+- Added `environment restore --execute --prepare-repos-only` as the safe
+  pre-Docker gate. It really clones/validates repositories in a workspace and
+  then stops before Docker pull/build/up, which lets us prove remote access and
+  checkout readiness without touching running containers.
+- Registered Store environment `scf-chain-core10-local-docker` in `local-pg`.
+  It is bound to `sandbox.financing_to_repay_result_query`, records the two
+  validation compose files, the tracing profile, 17 compose services, 7 service
+  repositories, generated repo path env entries, and two URL health checks.
+- Non-destructive dry-run passed against
+  `/Users/zlh/codes/open-test-sandbox-validation`: readiness was
+  `ready-for-operator-review`, no readiness items failed, and Docker actions
+  were plan-only.
+- Isolated colleague-workspace repository precheck passed in
+  `/tmp/ots-colleague-restore.g6xYt5`: all 7 repositories cloned successfully
+  and Docker was skipped with `action=skipped-after-repository-preparation`.
+- Pause point: the next real test would copy/provide the validation compose
+  package in the isolated workspace and run Docker pull/build/up. Because the
+  compose stack uses fixed container names and may download/build images, this
+  requires operator approval before proceeding.

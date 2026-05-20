@@ -477,22 +477,23 @@ func environmentBootstrapRepoPlan(env store.Environment, workspace string) []map
 
 func environmentBootstrapDockerPlan(compose map[string]any, workspace string) map[string]any {
 	composeFile := strings.TrimSpace(valueString(compose["composeFile"]))
+	composeFiles := environmentBootstrapComposeFiles(compose)
 	startCommand := strings.TrimSpace(valueString(compose["startCommand"]))
 	if composeFile != "" {
-		if !filepath.IsAbs(composeFile) && !strings.HasPrefix(composeFile, "$") {
-			composeFile = filepath.Join(workspace, composeFile)
-		}
+		resolvedComposeFiles := environmentBootstrapResolvedComposeFiles(workspace, composeFiles)
+		composeFile = resolvedComposeFiles[0]
 		return map[string]any{
-			"action":      "docker-compose",
-			"composeFile": composeFile,
-			"projectName": valueString(compose["projectName"]),
-			"envFiles":    stringSliceValue(compose["envFiles"]),
-			"profiles":    stringSliceValue(compose["profiles"]),
-			"services":    stringSliceValue(compose["services"]),
-			"skipPull":    boolValue(compose["skipPull"]),
-			"skipBuild":   boolValue(compose["skipBuild"]),
-			"commands":    environmentBootstrapComposeCommands(compose, workspace, composeFile),
-			"heavy":       true,
+			"action":       "docker-compose",
+			"composeFile":  composeFile,
+			"composeFiles": resolvedComposeFiles,
+			"projectName":  valueString(compose["projectName"]),
+			"envFiles":     stringSliceValue(compose["envFiles"]),
+			"profiles":     stringSliceValue(compose["profiles"]),
+			"services":     stringSliceValue(compose["services"]),
+			"skipPull":     boolValue(compose["skipPull"]),
+			"skipBuild":    boolValue(compose["skipBuild"]),
+			"commands":     environmentBootstrapComposeCommands(compose, workspace, resolvedComposeFiles),
+			"heavy":        true,
 		}
 	}
 	if startCommand != "" {
@@ -505,8 +506,37 @@ func environmentBootstrapDockerPlan(compose map[string]any, workspace string) ma
 	return map[string]any{"action": "missing-docker-plan", "commands": [][]string{}, "heavy": false}
 }
 
-func environmentBootstrapComposeCommands(compose map[string]any, workspace string, composeFile string) [][]string {
-	baseArgs := []string{"-f", composeFile}
+func environmentBootstrapComposeFiles(compose map[string]any) []string {
+	files := stringSliceValue(compose["composeFiles"])
+	if len(files) == 0 {
+		if file := strings.TrimSpace(valueString(compose["composeFile"])); file != "" {
+			files = []string{file}
+		}
+	}
+	return files
+}
+
+func environmentBootstrapResolvedComposeFiles(workspace string, files []string) []string {
+	out := make([]string, 0, len(files))
+	for _, file := range files {
+		if !filepath.IsAbs(file) && !strings.HasPrefix(file, "$") {
+			file = filepath.Join(workspace, file)
+		}
+		if strings.TrimSpace(file) != "" {
+			out = append(out, file)
+		}
+	}
+	return out
+}
+
+func environmentBootstrapComposeCommands(compose map[string]any, workspace string, composeFiles []string) [][]string {
+	baseArgs := []string{}
+	for _, composeFile := range composeFiles {
+		baseArgs = append(baseArgs, "-f", composeFile)
+	}
+	if len(stringMapValue(compose["env"])) > 0 {
+		baseArgs = append(baseArgs, "--env-file", filepath.Join(workspace, ".otsandbox", "restore.env"))
+	}
 	if projectName := strings.TrimSpace(valueString(compose["projectName"])); projectName != "" {
 		baseArgs = append(baseArgs, "-p", projectName)
 	}
@@ -528,6 +558,25 @@ func environmentBootstrapComposeCommands(compose map[string]any, workspace strin
 		out = append(out, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"build"}, services...)...))
 	}
 	out = append(out, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"up", "-d"}, services...)...))
+	return out
+}
+
+func stringMapValue(value any) map[string]string {
+	out := map[string]string{}
+	switch typed := value.(type) {
+	case map[string]string:
+		for key, value := range typed {
+			if strings.TrimSpace(key) != "" {
+				out[strings.TrimSpace(key)] = strings.TrimSpace(value)
+			}
+		}
+	case map[string]any:
+		for key, value := range typed {
+			if strings.TrimSpace(key) != "" {
+				out[strings.TrimSpace(key)] = strings.TrimSpace(valueString(value))
+			}
+		}
+	}
 	return out
 }
 
