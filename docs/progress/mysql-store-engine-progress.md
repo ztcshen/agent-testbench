@@ -1583,3 +1583,33 @@ Current blocker:
   `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+
+## 2026-05-21 MySQL Workflow Audit CLI Parity Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Added env-gated MySQL named active Store coverage for `workflow audit`
+  JSON output with Store-scoped latest run and binding case state.
+- Added env-gated MySQL named active Store coverage for `workflow audit` text
+  output after `config publish`.
+- Generated unique profile/workflow/node/case ids for both JSON and text
+  scenarios so shared SQL test databases do not contaminate audit catalog or
+  run-state checks.
+
+Validated:
+
+- `go test -v ./cmd/otsandbox -run 'TestWorkflowAuditCommand(EmitsJSONWithScopedStoreState|UsesNamedMySQLActiveStore|PrintsTextSummary|PrintsTextSummaryWithMySQLStore)' -count=1`
+  compiled and passed locally; the env-gated PostgreSQL/MySQL cases skipped
+  because local DSNs were not exported in this shell.
+- `git diff --check`
+- `rg -n -i 'fall''back' . --glob '!node_modules/**'`
+- `tools/guardrails/check_store_first_contracts.sh && tools/guardrails/check_no_source_domain_core.sh`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.

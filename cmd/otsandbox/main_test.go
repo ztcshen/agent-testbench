@@ -6581,32 +6581,23 @@ func TestReplayEvidenceCommandEmitsShellPayload(t *testing.T) {
 }
 
 func TestWorkflowAuditCommandEmitsJSONWithScopedStoreState(t *testing.T) {
-	ctx := context.Background()
 	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-workflow-audit-json-pg")
-	dir := t.TempDir()
-	profileDir := filepath.Join(dir, "profile")
-	writeFile(t, filepath.Join(profileDir, "profile.json"), `{
-  "id": "sample",
-  "displayName": "Sample Profile",
-  "services": [],
-  "workflows": [{"id":"workflow.alpha","displayName":"Workflow Alpha"}],
-  "interfaceNodes": [{"id":"node.alpha","displayName":"Node Alpha"}],
-  "apiCases": [
-    {"id":"case.alpha","displayName":"Case Alpha","nodeId":"node.alpha"},
-    {"id":"case.beta","displayName":"Case Beta","nodeId":"node.missing"}
-  ],
-  "requestTemplates": [{"id":"template.alpha","nodeId":"node.alpha","method":"POST","path":"/v1/items"}],
-  "caseDependencies": [{"id":"dependency.beta","caseId":"case.beta","fixtureId":"fixture.missing"}],
-	"workflowBindings": [
-    {"workflowId":"workflow.alpha","stepId":"step.one","nodeId":"node.alpha","caseId":"case.alpha","required":true},
-    {"workflowId":"workflow.alpha","stepId":"step.two","nodeId":"node.alpha","caseId":"case.beta","required":true}
-  ],
-  "fixtures": []
-}`)
-	runCLI(t, "config", "publish", "--from", profileDir)
+	runWorkflowAuditCommandEmitsJSONWithScopedStoreState(t, storeRef, "PostgreSQL")
+}
+
+func TestWorkflowAuditCommandUsesNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-workflow-audit-json-mysql")
+	runWorkflowAuditCommandEmitsJSONWithScopedStoreState(t, storeRef, "MySQL")
+}
+
+func runWorkflowAuditCommandEmitsJSONWithScopedStoreState(t *testing.T, storeRef string, label string) {
+	t.Helper()
+	ctx := context.Background()
+	fixture := writeWorkflowAuditProfile(t)
+	runCLI(t, "config", "publish", "--from", fixture.profileDir)
 	s, err := openStore(ctx, storeRef)
 	if err != nil {
-		t.Fatalf("open store: %v", err)
+		t.Fatalf("open %s store: %v", label, err)
 	}
 	firstRunID := uniqueTestID(t, "run.workflow.001")
 	secondRunID := uniqueTestID(t, "run.workflow.002")
@@ -6614,57 +6605,57 @@ func TestWorkflowAuditCommandEmitsJSONWithScopedStoreState(t *testing.T) {
 	finished := started.Add(2 * time.Second)
 	if _, err := s.CreateRun(ctx, store.Run{
 		ID:         firstRunID,
-		ProfileID:  "sample",
-		WorkflowID: "workflow.alpha",
+		ProfileID:  fixture.profileID,
+		WorkflowID: fixture.workflowID,
 		Status:     store.StatusFailed,
 		StartedAt:  started,
 		FinishedAt: finished,
 		CreatedAt:  started,
 		UpdatedAt:  finished,
 	}); err != nil {
-		t.Fatalf("create first workflow run: %v", err)
+		t.Fatalf("create first %s workflow run: %v", label, err)
 	}
 	if _, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
 		ID:         firstRunID + ".case.alpha",
 		RunID:      firstRunID,
-		CaseID:     "case.alpha",
+		CaseID:     fixture.alphaCaseID,
 		Status:     store.StatusFailed,
 		StartedAt:  started,
 		FinishedAt: finished,
 		CreatedAt:  started,
 	}); err != nil {
-		t.Fatalf("record first case run: %v", err)
+		t.Fatalf("record first %s case run: %v", label, err)
 	}
 	laterStarted := started.Add(10 * time.Second)
 	laterFinished := laterStarted.Add(3 * time.Second)
 	if _, err := s.CreateRun(ctx, store.Run{
 		ID:         secondRunID,
-		ProfileID:  "sample",
-		WorkflowID: "workflow.alpha",
+		ProfileID:  fixture.profileID,
+		WorkflowID: fixture.workflowID,
 		Status:     store.StatusPassed,
 		StartedAt:  laterStarted,
 		FinishedAt: laterFinished,
 		CreatedAt:  laterStarted,
 		UpdatedAt:  laterFinished,
 	}); err != nil {
-		t.Fatalf("create second workflow run: %v", err)
+		t.Fatalf("create second %s workflow run: %v", label, err)
 	}
 	if _, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
 		ID:         secondRunID + ".case.alpha",
 		RunID:      secondRunID,
-		CaseID:     "case.alpha",
+		CaseID:     fixture.alphaCaseID,
 		Status:     store.StatusPassed,
 		StartedAt:  laterStarted,
 		FinishedAt: laterFinished,
 		CreatedAt:  laterStarted,
 	}); err != nil {
-		t.Fatalf("record second case run: %v", err)
+		t.Fatalf("record second %s case run: %v", label, err)
 	}
 	if err := s.Close(); err != nil {
-		t.Fatalf("close store: %v", err)
+		t.Fatalf("close %s store: %v", label, err)
 	}
 
-	out := runCLI(t, "workflow", "audit", "--workflow", "workflow.alpha", "--json")
+	out := runCLI(t, "workflow", "audit", "--workflow", fixture.workflowID, "--json")
 
 	var report struct {
 		OK         bool   `json:"ok"`
@@ -6689,16 +6680,16 @@ func TestWorkflowAuditCommandEmitsJSONWithScopedStoreState(t *testing.T) {
 		} `json:"store"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode workflow audit json: %v\n%s", err, out)
+		t.Fatalf("decode %s workflow audit json: %v\n%s", label, err, out)
 	}
-	if report.OK || report.WorkflowID != "workflow.alpha" || report.IssueCount != 2 {
-		t.Fatalf("workflow audit summary = %#v", report)
+	if report.OK || report.WorkflowID != fixture.workflowID || report.IssueCount != 2 {
+		t.Fatalf("%s workflow audit summary = %#v", label, report)
 	}
 	if len(report.Issues) != 2 || report.Issues[0].Code != "api-case-node-missing" || report.Issues[1].Code != "case-dependency-fixture-missing" {
-		t.Fatalf("workflow audit issues = %#v", report.Issues)
+		t.Fatalf("%s workflow audit issues = %#v", label, report.Issues)
 	}
 	if report.Store == nil || report.Store.LatestRun == nil || report.Store.LatestRun.ID != secondRunID || report.Store.LatestRun.Status != store.StatusPassed {
-		t.Fatalf("latest workflow run = %#v", report.Store)
+		t.Fatalf("%s latest workflow run = %#v", label, report.Store)
 	}
 	caseState := map[string]struct {
 		HasPassed    bool
@@ -6712,33 +6703,114 @@ func TestWorkflowAuditCommandEmitsJSONWithScopedStoreState(t *testing.T) {
 			LatestRunID  string
 		}{HasPassed: item.HasPassed, LatestStatus: item.LatestStatus, LatestRunID: item.LatestRunID}
 	}
-	if !caseState["case.alpha"].HasPassed || caseState["case.alpha"].LatestStatus != store.StatusPassed || caseState["case.alpha"].LatestRunID != secondRunID {
-		t.Fatalf("case.alpha workflow state = %#v", caseState["case.alpha"])
+	if !caseState[fixture.alphaCaseID].HasPassed || caseState[fixture.alphaCaseID].LatestStatus != store.StatusPassed || caseState[fixture.alphaCaseID].LatestRunID != secondRunID {
+		t.Fatalf("%s alpha workflow state = %#v", label, caseState[fixture.alphaCaseID])
 	}
-	if caseState["case.beta"].HasPassed || caseState["case.beta"].LatestStatus != "" || caseState["case.beta"].LatestRunID != "" {
-		t.Fatalf("case.beta workflow state = %#v", caseState["case.beta"])
+	if caseState[fixture.betaCaseID].HasPassed || caseState[fixture.betaCaseID].LatestStatus != "" || caseState[fixture.betaCaseID].LatestRunID != "" {
+		t.Fatalf("%s beta workflow state = %#v", label, caseState[fixture.betaCaseID])
 	}
+}
+
+type workflowAuditFixture struct {
+	profileDir       string
+	profileID        string
+	workflowID       string
+	nodeID           string
+	missingNodeID    string
+	alphaCaseID      string
+	betaCaseID       string
+	templateID       string
+	dependencyID     string
+	missingFixtureID string
+}
+
+func writeWorkflowAuditProfile(t *testing.T) workflowAuditFixture {
+	t.Helper()
+	fixture := workflowAuditFixture{
+		profileDir:       filepath.Join(t.TempDir(), "profile"),
+		profileID:        uniqueTestID(t, "profile.workflow-audit"),
+		workflowID:       uniqueTestID(t, "workflow.audit"),
+		nodeID:           uniqueTestID(t, "node.audit"),
+		missingNodeID:    uniqueTestID(t, "node.missing"),
+		alphaCaseID:      uniqueTestID(t, "case.audit.alpha"),
+		betaCaseID:       uniqueTestID(t, "case.audit.beta"),
+		templateID:       uniqueTestID(t, "template.audit"),
+		dependencyID:     uniqueTestID(t, "dependency.audit"),
+		missingFixtureID: uniqueTestID(t, "fixture.missing"),
+	}
+	writeFile(t, filepath.Join(fixture.profileDir, "profile.json"), fmt.Sprintf(`{
+  "id": %q,
+  "displayName": "Sample Profile",
+  "services": [],
+  "workflows": [{"id":%q,"displayName":"Workflow Alpha"}],
+  "interfaceNodes": [{"id":%q,"displayName":"Node Alpha"}],
+  "apiCases": [
+    {"id":%q,"displayName":"Case Alpha","nodeId":%q},
+    {"id":%q,"displayName":"Case Beta","nodeId":%q}
+  ],
+  "requestTemplates": [{"id":%q,"nodeId":%q,"method":"POST","path":"/v1/items"}],
+  "caseDependencies": [{"id":%q,"caseId":%q,"fixtureId":%q}],
+	"workflowBindings": [
+    {"workflowId":%q,"stepId":"step.one","nodeId":%q,"caseId":%q,"required":true},
+    {"workflowId":%q,"stepId":"step.two","nodeId":%q,"caseId":%q,"required":true}
+  ],
+  "fixtures": []
+}`, fixture.profileID, fixture.workflowID, fixture.nodeID, fixture.alphaCaseID, fixture.nodeID, fixture.betaCaseID, fixture.missingNodeID, fixture.templateID, fixture.nodeID, fixture.dependencyID, fixture.betaCaseID, fixture.missingFixtureID, fixture.workflowID, fixture.nodeID, fixture.alphaCaseID, fixture.workflowID, fixture.nodeID, fixture.betaCaseID))
+	return fixture
 }
 
 func TestWorkflowAuditCommandPrintsTextSummary(t *testing.T) {
 	configureNamedPostgreSQLActiveStore(t, "daily-workflow-audit-text-pg")
-	dir := t.TempDir()
-	writeWorkflowProfile(t, dir)
-	runCLI(t, "config", "publish", "--from", dir)
+	runWorkflowAuditCommandPrintsTextSummary(t, "PostgreSQL")
+}
 
-	out := runCLI(t, "workflow", "audit", "--workflow", "workflow.alpha")
+func TestWorkflowAuditCommandPrintsTextSummaryWithMySQLStore(t *testing.T) {
+	configureNamedMySQLActiveStore(t, "daily-workflow-audit-text-mysql")
+	runWorkflowAuditCommandPrintsTextSummary(t, "MySQL")
+}
+
+func runWorkflowAuditCommandPrintsTextSummary(t *testing.T, label string) {
+	t.Helper()
+	fixture := writeWorkflowAuditTextProfile(t)
+	runCLI(t, "config", "publish", "--from", fixture.profileDir)
+
+	out := runCLI(t, "workflow", "audit", "--workflow", fixture.workflowID)
 
 	for _, want := range []string{
-		"Workflow Audit: workflow.alpha",
+		"Workflow Audit: " + fixture.workflowID,
 		"OK: true",
 		"Issues: 0",
 		"Bindings: 1",
-		"Binding: step.one Node: node.alpha Case: case.alpha Required: true",
+		"Binding: step.one Node: " + fixture.nodeID + " Case: " + fixture.alphaCaseID + " Required: true",
 	} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("workflow audit output missing %q: %q", want, out)
+			t.Fatalf("%s workflow audit output missing %q: %q", label, want, out)
 		}
 	}
+}
+
+func writeWorkflowAuditTextProfile(t *testing.T) workflowAuditFixture {
+	t.Helper()
+	fixture := workflowAuditFixture{
+		profileDir:  filepath.Join(t.TempDir(), "profile"),
+		profileID:   uniqueTestID(t, "profile.workflow-audit-text"),
+		workflowID:  uniqueTestID(t, "workflow.audit-text"),
+		nodeID:      uniqueTestID(t, "node.audit-text"),
+		alphaCaseID: uniqueTestID(t, "case.audit-text"),
+	}
+	writeFile(t, filepath.Join(fixture.profileDir, "profile.json"), fmt.Sprintf(`{
+  "id": %q,
+  "displayName": "Sample Profile",
+  "services": [],
+  "workflows": [{"id":%q,"displayName":"Workflow Alpha"}],
+  "interfaceNodes": [{"id":%q,"displayName":"Node Alpha"}],
+  "apiCases": [{"id":%q,"displayName":"Case Alpha","nodeId":%q}],
+  "requestTemplates": [],
+  "caseDependencies": [],
+  "workflowBindings": [{"workflowId":%q,"stepId":"step.one","nodeId":%q,"caseId":%q,"required":true}],
+  "fixtures": []
+}`, fixture.profileID, fixture.workflowID, fixture.nodeID, fixture.alphaCaseID, fixture.nodeID, fixture.workflowID, fixture.nodeID, fixture.alphaCaseID))
+	return fixture
 }
 
 func TestWorkflowAuditAllowsExplicitOfflineTemplatePackage(t *testing.T) {
