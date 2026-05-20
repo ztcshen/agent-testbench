@@ -463,10 +463,11 @@ func runEnvironmentRegister(ctx context.Context, args []string) error {
 	composeSkipBuild := flags.Bool("compose-skip-build", false, "Skip Docker Compose build during restore")
 	startCommand := flags.String("start-command", "", "Local startup command")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	var services, repos, branches, checkouts, healthURLs, composeEnvFiles, composeProfiles, composeServices stringListFlag
+	var services, repos, branches, repoRefs, checkouts, healthURLs, composeEnvFiles, composeProfiles, composeServices stringListFlag
 	flags.Var(&services, "service", "Service id; repeat for multiple services")
 	flags.Var(&repos, "repo", "Service repo as SERVICE=PATH_OR_URL; repeat for multiple services")
 	flags.Var(&branches, "branch", "Service branch as SERVICE=BRANCH; repeat for multiple services")
+	flags.Var(&repoRefs, "repo-ref", "Service Git ref as SERVICE=REF; repeat for multiple services")
 	flags.Var(&checkouts, "checkout", "Service checkout path as SERVICE=PATH; repeat for multiple services")
 	flags.Var(&composeEnvFiles, "compose-env-file", "Docker Compose env file path; repeat for multiple files")
 	flags.Var(&composeProfiles, "compose-profile", "Docker Compose profile; repeat for multiple profiles")
@@ -488,8 +489,8 @@ func runEnvironmentRegister(ctx context.Context, args []string) error {
 		DisplayName:            strings.TrimSpace(*displayName),
 		Description:            strings.TrimSpace(*description),
 		Status:                 stringDefault(strings.TrimSpace(*status), "draft"),
-		ServicesJSON:           mustCompactJSON(environmentServices(services, repos, branches, checkouts)),
-		ReposJSON:              mustCompactJSON(environmentRepoMap(repos, branches, checkouts)),
+		ServicesJSON:           mustCompactJSON(environmentServices(services, repos, branches, repoRefs, checkouts)),
+		ReposJSON:              mustCompactJSON(environmentRepoMap(repos, branches, repoRefs, checkouts)),
 		ComposeJSON:            mustCompactJSON(environmentComposeConfig(*composeFile, *startCommand, *composeProjectName, composeEnvFiles, composeProfiles, composeServices, *composeSkipPull, *composeSkipBuild)),
 		HealthChecksJSON:       mustCompactJSON(environmentHealthChecks(healthURLs)),
 		VerificationWorkflowID: strings.TrimSpace(*verificationWorkflowID),
@@ -610,6 +611,7 @@ type environmentRestoreRepoReport struct {
 	ServiceID string   `json:"serviceId"`
 	URL       string   `json:"url,omitempty"`
 	Branch    string   `json:"branch,omitempty"`
+	Ref       string   `json:"ref,omitempty"`
 	Checkout  string   `json:"checkout"`
 	Exists    bool     `json:"exists"`
 	Action    string   `json:"action"`
@@ -623,6 +625,7 @@ type environmentRestoreRepoSpec struct {
 	ServiceID string
 	URL       string
 	Branch    string
+	Ref       string
 	Checkout  string
 }
 
@@ -840,6 +843,7 @@ func environmentRestoreRepoSpecs(env store.Environment, workspace string) []envi
 		if item, ok := raw.(map[string]any); ok {
 			spec.URL = strings.TrimSpace(valueString(item["url"]))
 			spec.Branch = strings.TrimSpace(valueString(item["branch"]))
+			spec.Ref = strings.TrimSpace(valueString(item["ref"]))
 			spec.Checkout = strings.TrimSpace(valueString(item["checkout"]))
 		}
 		if spec.ServiceID != "" {
@@ -862,6 +866,9 @@ func environmentRestoreRepoSpecs(env store.Environment, workspace string) []envi
 		}
 		if value := strings.TrimSpace(valueString(item["branch"])); value != "" {
 			spec.Branch = value
+		}
+		if value := strings.TrimSpace(valueString(item["ref"])); value != "" {
+			spec.Ref = value
 		}
 		if value := strings.TrimSpace(valueString(item["checkout"])); value != "" {
 			spec.Checkout = value
@@ -976,11 +983,20 @@ func environmentRestoreRepo(ctx context.Context, spec environmentRestoreRepoSpec
 		ServiceID: spec.ServiceID,
 		URL:       spec.URL,
 		Branch:    spec.Branch,
+		Ref:       spec.Ref,
 		Checkout:  spec.Checkout,
 		OK:        true,
 	}
 	if stat, err := os.Stat(spec.Checkout); err == nil && stat.IsDir() {
 		report.Exists = true
+		if strings.TrimSpace(spec.URL) != "" {
+			if ok, errText := environmentRestoreValidateCheckout(ctx, spec); !ok {
+				report.OK = false
+				report.Action = "invalid-existing-checkout"
+				report.Error = errText
+				return report
+			}
+		}
 		if strings.TrimSpace(spec.URL) == "" || !execute || !pull {
 			report.Action = "use-existing-checkout"
 			return report
@@ -1015,7 +1031,36 @@ func environmentRestoreRepo(ctx context.Context, spec environmentRestoreRepoSpec
 	report.Command = append([]string{"git"}, args...)
 	report.Output, report.Error = runRestoreGitCommand(ctx, args...)
 	report.OK = report.Error == ""
+	if report.OK && strings.TrimSpace(spec.Ref) != "" {
+		checkoutArgs := []string{"-C", spec.Checkout, "checkout", "--detach", strings.TrimSpace(spec.Ref)}
+		report.Command = append(report.Command, append([]string{"&&", "git"}, checkoutArgs...)...)
+		output, errText := runRestoreGitCommand(ctx, checkoutArgs...)
+		if strings.TrimSpace(output) != "" {
+			report.Output = strings.TrimSpace(report.Output + "\n" + output)
+		}
+		report.Error = errText
+		report.OK = report.Error == ""
+	}
 	return report
+}
+
+func environmentRestoreValidateCheckout(ctx context.Context, spec environmentRestoreRepoSpec) (bool, string) {
+	if _, errText := runRestoreGitCommand(ctx, "-C", spec.Checkout, "rev-parse", "--is-inside-work-tree"); errText != "" {
+		return false, "existing checkout is not a Git repository: " + spec.Checkout
+	}
+	remote, errText := runRestoreGitCommand(ctx, "-C", spec.Checkout, "remote", "get-url", "origin")
+	if errText != "" {
+		return false, errText
+	}
+	if strings.TrimSpace(remote) != strings.TrimSpace(spec.URL) {
+		return false, fmt.Sprintf("existing checkout origin mismatch: got %s want %s", strings.TrimSpace(remote), strings.TrimSpace(spec.URL))
+	}
+	if dirty, errText := runRestoreGitCommand(ctx, "-C", spec.Checkout, "status", "--porcelain"); errText != "" {
+		return false, errText
+	} else if strings.TrimSpace(dirty) != "" {
+		return false, "existing checkout has uncommitted changes"
+	}
+	return true, ""
 }
 
 func environmentRestoreDocker(ctx context.Context, compose map[string]any, healthChecks []any, workspace string, execute bool, healthTimeout time.Duration) environmentRestoreDockerReport {
@@ -1493,9 +1538,10 @@ func environmentPayload(env store.Environment) map[string]any {
 	return payload
 }
 
-func environmentServices(services stringListFlag, repos stringListFlag, branches stringListFlag, checkouts stringListFlag) []map[string]any {
+func environmentServices(services stringListFlag, repos stringListFlag, branches stringListFlag, repoRefs stringListFlag, checkouts stringListFlag) []map[string]any {
 	repoByService := environmentKeyValueMap(repos)
 	branchByService := environmentKeyValueMap(branches)
+	refByService := environmentKeyValueMap(repoRefs)
 	checkoutByService := environmentKeyValueMap(checkouts)
 	ids := map[string]bool{}
 	for _, id := range services.Values() {
@@ -1505,6 +1551,9 @@ func environmentServices(services stringListFlag, repos stringListFlag, branches
 		ids[id] = true
 	}
 	for id := range branchByService {
+		ids[id] = true
+	}
+	for id := range refByService {
 		ids[id] = true
 	}
 	for id := range checkoutByService {
@@ -1524,6 +1573,9 @@ func environmentServices(services stringListFlag, repos stringListFlag, branches
 		if branch := branchByService[id]; branch != "" {
 			item["branch"] = branch
 		}
+		if ref := refByService[id]; ref != "" {
+			item["ref"] = ref
+		}
 		if checkout := checkoutByService[id]; checkout != "" {
 			item["checkout"] = checkout
 		}
@@ -1532,15 +1584,19 @@ func environmentServices(services stringListFlag, repos stringListFlag, branches
 	return out
 }
 
-func environmentRepoMap(repos stringListFlag, branches stringListFlag, checkouts stringListFlag) map[string]any {
+func environmentRepoMap(repos stringListFlag, branches stringListFlag, repoRefs stringListFlag, checkouts stringListFlag) map[string]any {
 	repoByService := environmentKeyValueMap(repos)
 	branchByService := environmentKeyValueMap(branches)
+	refByService := environmentKeyValueMap(repoRefs)
 	checkoutByService := environmentKeyValueMap(checkouts)
 	ids := map[string]bool{}
 	for id := range repoByService {
 		ids[id] = true
 	}
 	for id := range branchByService {
+		ids[id] = true
+	}
+	for id := range refByService {
 		ids[id] = true
 	}
 	for id := range checkoutByService {
@@ -1554,6 +1610,9 @@ func environmentRepoMap(repos stringListFlag, branches stringListFlag, checkouts
 		}
 		if branch := branchByService[id]; branch != "" {
 			item["branch"] = branch
+		}
+		if ref := refByService[id]; ref != "" {
+			item["ref"] = ref
 		}
 		if checkout := checkoutByService[id]; checkout != "" {
 			item["checkout"] = checkout

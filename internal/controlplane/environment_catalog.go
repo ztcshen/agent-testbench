@@ -253,6 +253,7 @@ func environmentBootstrapRepoPlan(env store.Environment, workspace string) []map
 			"id":       strings.TrimSpace(id),
 			"url":      strings.TrimSpace(valueString(item["url"])),
 			"branch":   strings.TrimSpace(valueString(item["branch"])),
+			"ref":      strings.TrimSpace(valueString(item["ref"])),
 			"checkout": strings.TrimSpace(valueString(item["checkout"])),
 		}
 	}
@@ -271,6 +272,9 @@ func environmentBootstrapRepoPlan(env store.Environment, workspace string) []map
 		}
 		if value := strings.TrimSpace(valueString(item["branch"])); value != "" {
 			spec["branch"] = value
+		}
+		if value := strings.TrimSpace(valueString(item["ref"])); value != "" {
+			spec["ref"] = value
 		}
 		if value := strings.TrimSpace(valueString(item["checkout"])); value != "" {
 			spec["checkout"] = value
@@ -302,11 +306,15 @@ func environmentBootstrapRepoPlan(env store.Environment, workspace string) []map
 				command = append(command, "--branch", strings.TrimSpace(spec["branch"]))
 			}
 			command = append(command, strings.TrimSpace(spec["url"]), checkout)
+			if strings.TrimSpace(spec["ref"]) != "" {
+				command = append(command, "&&", "git", "-C", checkout, "checkout", "--detach", strings.TrimSpace(spec["ref"]))
+			}
 		}
 		out = append(out, map[string]any{
 			"serviceId": id,
 			"url":       strings.TrimSpace(spec["url"]),
 			"branch":    strings.TrimSpace(spec["branch"]),
+			"ref":       strings.TrimSpace(spec["ref"]),
 			"checkout":  checkout,
 			"action":    action,
 			"command":   command,

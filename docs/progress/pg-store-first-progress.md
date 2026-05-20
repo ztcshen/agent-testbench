@@ -1585,7 +1585,7 @@ Incomplete work:
 
 ## 2026-05-20 Environment Restore Goal Ledger
 
-Estimated overall new-machine environment restore progress: 91%.
+Estimated overall new-machine environment restore progress: 93%.
 
 Completed evidence:
 
@@ -1612,20 +1612,36 @@ Completed evidence:
 - Environment Catalog compose facts now support project name, env files,
   profiles, service selection, and `skipPull`/`skipBuild`; CLI restore and API
   bootstrap both reflect those options in generated Docker Compose commands.
+- Restore continues to support the non-compose `startCommand` path for
+  environments that record an explicit local start command instead of a compose
+  file.
+- Environment Catalog repository facts now support `--repo-ref SERVICE=REF` for
+  tag/commit/ref pinning; CLI restore detaches cloned repos at the requested ref
+  and API bootstrap exposes the same command plan.
+- Existing checkouts with a recorded repo URL are now validated as Git work
+  trees with matching `origin` and no uncommitted changes before restore uses or
+  pulls them.
 
 Latest light validation:
 
 - `go test ./cmd/otsandbox -run 'TestEnvironmentRestore(HonorsComposeOptionsFromStore|ClonesRemoteReposForVerifiedWorkflow)' -count=1`
 - `go test ./internal/controlplane -run 'TestServerManagesVerifiedEnvironmentCatalogFromStore' -count=1`
+- `go test ./cmd/otsandbox -run 'TestEnvironmentCommandsGateVerifiedDiscovery|TestEnvironmentRestore(RejectsExistingCheckoutWithDifferentOrigin|ChecksOutRequestedRefAfterClone|PullsExistingCheckoutWhenRequested|AcceptsExistingCheckoutWithoutRepoURL)' -count=1`
+- `go test ./cmd/otsandbox -run 'Test(StoreDDLCommandPrintsPostgreSQLSchema|EnvironmentCommandsUseNamedPostgreSQLActiveStore|EnvironmentRestore)' -count=1`
+- `go test ./internal/controlplane -run 'TestServerManagesVerifiedEnvironmentCatalogFromStore' -count=1`
+- `rg -n -i 'fall''back' . --glob '!node_modules/**'`
+- `git diff --check`
 
 Incomplete work:
 
 - True new-machine proof remains intentionally paused until the user approves a
   heavy validation pass that backs up/deletes current Docker containers/images
   or otherwise simulates a clean colleague machine.
-- Restore still needs richer provider/checkout hardening for GitHub/GitLab
-  tokens, commit/tag pinning, dirty checkout detection, submodules, and remote
-  URL mismatch diagnostics.
+- Restore still needs richer provider hardening for GitHub/GitLab tokens,
+  submodules, auth prompts, and persisted restore-run diagnostics.
+- Existing checkout ref enforcement is still limited: new clones detach at the
+  requested `--repo-ref`, but already-present checkouts are not yet proven to be
+  at the requested ref.
 - Docker restore still needs policy guardrails for destructive cleanup,
   container/image backup plans, and explicit approval before clean-machine
   simulation.

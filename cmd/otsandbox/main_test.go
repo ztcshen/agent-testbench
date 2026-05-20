@@ -312,6 +312,7 @@ func TestEnvironmentCommandsGateVerifiedDiscovery(t *testing.T) {
 		"--service", "entry-gateway",
 		"--repo", "entry-gateway=../entry-gateway",
 		"--branch", "entry-gateway=main",
+		"--repo-ref", "entry-gateway=v1.2.3",
 		"--checkout", "entry-gateway=/tmp/entry-gateway",
 		"--compose-file", "docker-compose.yml",
 		"--start-command", "docker compose up -d",
@@ -453,6 +454,9 @@ func TestEnvironmentCommandsGateVerifiedDiscovery(t *testing.T) {
 	}
 	if bootstrap.Plan.VerificationWorkflow != "workflow.core-10" || bootstrap.Plan.Repos["entry-gateway"] == nil || len(bootstrap.Plan.HealthChecks) != 1 {
 		t.Fatalf("bootstrap plan = %#v", bootstrap.Plan)
+	}
+	if repo, ok := bootstrap.Plan.Repos["entry-gateway"].(map[string]any); !ok || repo["ref"] != "v1.2.3" {
+		t.Fatalf("bootstrap repo ref = %#v", bootstrap.Plan.Repos["entry-gateway"])
 	}
 	if !bootstrap.Plan.Restore.PauseBeforeHeavyValidation || bootstrap.Plan.Restore.Docker.Action != "docker-compose" || len(bootstrap.Plan.Restore.Docker.Commands) != 3 {
 		t.Fatalf("bootstrap restore plan = %#v", bootstrap.Plan.Restore)
@@ -1092,6 +1096,71 @@ func TestEnvironmentRestorePullsExistingCheckoutWhenRequested(t *testing.T) {
 	}
 	if strings.Join(report.Repos[0].Command, " ") != "git -C "+checkout+" pull --ff-only" {
 		t.Fatalf("restore pull command = %#v", report.Repos[0].Command)
+	}
+}
+
+func TestEnvironmentRestoreRejectsExistingCheckoutWithDifferentOrigin(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	remoteRepo := createBareGitRepo(t, "main")
+	otherRepo := createBareGitRepo(t, "main")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	checkout := filepath.Join(workspace, "entry-gateway")
+	runGit(t, "", "clone", "--branch", "main", otherRepo, checkout)
+	writeFile(t, filepath.Join(workspace, "docker-compose.yml"), "services: {}\n")
+
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.restore.origin",
+		"--repo", "entry-gateway="+remoteRepo,
+		"--checkout", "entry-gateway=entry-gateway",
+		"--compose-file", "docker-compose.yml",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIFails(t, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--json", "env.restore.origin")
+	if !strings.Contains(out, "invalid-existing-checkout") || !strings.Contains(out, "origin mismatch") {
+		t.Fatalf("origin mismatch restore output = %q", out)
+	}
+}
+
+func TestEnvironmentRestoreChecksOutRequestedRefAfterClone(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	remoteRepo := createBareGitRepo(t, "main")
+	work := filepath.Join(filepath.Dir(remoteRepo), "work")
+	runGit(t, work, "tag", "v1")
+	runGit(t, work, "push", "origin", "v1")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	fakeDockerEnv, _ := fakeDockerCommand(t)
+	writeFile(t, filepath.Join(workspace, "docker-compose.yml"), "services: {}\n")
+
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.restore.ref",
+		"--repo", "entry-gateway="+remoteRepo,
+		"--branch", "entry-gateway=main",
+		"--repo-ref", "entry-gateway=v1",
+		"--checkout", "entry-gateway=entry-gateway",
+		"--compose-file", "docker-compose.yml",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--json", "env.restore.ref")
+	var report struct {
+		OK    bool `json:"ok"`
+		Repos []struct {
+			Ref string `json:"ref"`
+			OK  bool   `json:"ok"`
+		} `json:"repos"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode ref restore json: %v\n%s", err, out)
+	}
+	if !report.OK || len(report.Repos) != 1 || report.Repos[0].Ref != "v1" || !report.Repos[0].OK {
+		t.Fatalf("ref restore report = %#v", report)
+	}
+	head := strings.TrimSpace(runGit(t, filepath.Join(workspace, "entry-gateway"), "rev-parse", "--abbrev-ref", "HEAD"))
+	if head != "HEAD" {
+		t.Fatalf("expected detached checkout at ref, got %q", head)
 	}
 }
 

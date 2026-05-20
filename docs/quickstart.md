@@ -105,10 +105,16 @@ cloned, then checks both `docker` and `docker compose version` when a compose
 plan is recorded; it also labels heavy Docker steps so an operator can review
 them before destructive local validation. Add
 `--execute` to clone missing remote repositories, run Docker Compose, and wait
-for recorded health checks. Store-backed compose facts may include a project
-name, env files, profiles, a service allow-list, and `skipPull`/`skipBuild`
-when an environment should start from existing local images. Add `--pull` with
-`--execute` to update existing checkouts using `git pull --ff-only`. Add
+for recorded health checks. If the environment records `startCommand` without a
+compose file, restore reports and can execute that command as the local start
+plan. Store-backed compose facts may include a project name, env files,
+profiles, a service allow-list, and `skipPull`/`skipBuild` when an environment
+should start from existing local images. Add `--pull` with `--execute` to update
+existing checkouts using `git pull --ff-only`. Repository
+facts may also record `--repo-ref SERVICE=REF`; restore checks out that tag,
+commit, or ref after cloning with detached HEAD semantics. Existing checkouts
+with a recorded repo URL must be Git work trees, must match the recorded
+`origin`, and must have no uncommitted changes before restore will use them. Add
 `--run-workflow` with `--execute` to run the recorded verification workflow
 after Docker health checks pass; the run, case runs, Evidence indexes, and
 Environment Catalog verification run status are written to the selected Store.
@@ -122,8 +128,8 @@ restore fails before invoking Docker if it is missing.
 
 The control-plane API exposes the same recovery shape through
 `GET /api/environments/{environmentId}/bootstrap`: repository steps, Docker
-commands, health checks, and the verification workflow are returned as a plan
-for UI review. The API does not execute local Docker; execution stays in the
+commands or start-command steps, health checks, and the verification workflow
+are returned as a plan for UI review. The API does not execute local Docker; execution stays in the
 CLI restore path.
 
 ## Create and Install a Import Bundle
