@@ -3704,23 +3704,33 @@ func TestSandboxStartCommandRunsStartupCommandsFromStore(t *testing.T) {
 
 func TestSandboxStartUsesNamedPostgreSQLActiveStore(t *testing.T) {
 	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-sandbox-start-pg")
+	runSandboxStartUsesNamedActiveStore(t, storeRef, "pg", "PostgreSQL")
+}
+
+func TestSandboxStartUsesNamedMySQLActiveStore(t *testing.T) {
+	storeRef := configureNamedMySQLActiveStore(t, "daily-sandbox-start-mysql")
+	runSandboxStartUsesNamedActiveStore(t, storeRef, "mysql", "MySQL")
+}
+
+func runSandboxStartUsesNamedActiveStore(t *testing.T, storeRef string, suffixLabel string, label string) {
+	t.Helper()
 	dir := t.TempDir()
-	startedPath := filepath.Join(dir, "started-pg.txt")
+	startedPath := filepath.Join(dir, "started-"+suffixLabel+".txt")
 	suffix := time.Now().UTC().Format("20060102150405.000000000")
-	serviceID := "entry-service-pg-" + suffix
+	serviceID := "entry-service-" + suffixLabel + "-" + suffix
 
 	ctx := context.Background()
 	s, err := openStore(ctx, storeRef)
 	if err != nil {
-		t.Fatalf("open active SQL Store: %v", err)
+		t.Fatalf("open %s active SQL Store: %v", label, err)
 	}
 	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
-		ProfileID: "sandbox-pg-" + suffix,
+		ProfileID: "sandbox-" + suffixLabel + "-" + suffix,
 		IndexedAt: time.Now().UTC(),
 		Services: []store.CatalogService{
 			{
 				ID:             serviceID,
-				DisplayName:    "Entry Service PG",
+				DisplayName:    "Entry Service " + label,
 				Kind:           "app",
 				StartupCommand: fmt.Sprintf("printf %s > %q", serviceID, startedPath),
 				Status:         "active",
@@ -3728,10 +3738,10 @@ func TestSandboxStartUsesNamedPostgreSQLActiveStore(t *testing.T) {
 		},
 	}); err != nil {
 		_ = s.Close()
-		t.Fatalf("replace PostgreSQL catalog: %v", err)
+		t.Fatalf("replace %s catalog: %v", label, err)
 	}
 	if err := s.Close(); err != nil {
-		t.Fatalf("close SQL Store: %v", err)
+		t.Fatalf("close %s SQL Store: %v", label, err)
 	}
 
 	out := runCLI(t, "sandbox", "start", "--service", serviceID, "--json")
@@ -3744,17 +3754,17 @@ func TestSandboxStartUsesNamedPostgreSQLActiveStore(t *testing.T) {
 		} `json:"services"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode PostgreSQL sandbox start report: %v\n%s", err, out)
+		t.Fatalf("decode %s sandbox start report: %v\n%s", label, err, out)
 	}
 	if !report.OK || len(report.Services) != 1 || report.Services[0].ID != serviceID || report.Services[0].ExitCode != 0 || report.Services[0].Skipped {
-		t.Fatalf("PostgreSQL sandbox start report = %#v", report)
+		t.Fatalf("%s sandbox start report = %#v", label, report)
 	}
 	started, err := os.ReadFile(startedPath)
 	if err != nil {
-		t.Fatalf("read PostgreSQL startup side effect: %v", err)
+		t.Fatalf("read %s startup side effect: %v", label, err)
 	}
 	if string(started) != serviceID {
-		t.Fatalf("PostgreSQL startup command wrote %q want %q", started, serviceID)
+		t.Fatalf("%s startup command wrote %q want %q", label, started, serviceID)
 	}
 }
 
