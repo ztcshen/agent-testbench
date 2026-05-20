@@ -883,7 +883,14 @@ type environmentRestoreReport struct {
 	Readiness            environmentRestoreReadiness                  `json:"readiness"`
 	Docker               environmentRestoreDockerReport               `json:"docker"`
 	Workflow             environmentRestoreWorkflowRun                `json:"workflow"`
+	CleanMachine         environmentRestoreCleanMachinePlan           `json:"cleanMachine,omitempty"`
 	NextActions          []string                                     `json:"nextActions"`
+}
+
+type environmentRestoreCleanMachinePlan struct {
+	Ready          bool     `json:"ready"`
+	ExecuteCommand []string `json:"executeCommand,omitempty"`
+	Notes          []string `json:"notes,omitempty"`
 }
 
 type environmentRestoreSourcePolicy struct {
@@ -1077,6 +1084,7 @@ type environmentRestoreWorkflowAcceptance struct {
 type environmentRestoreWorkflowOptions struct {
 	Run            bool
 	EnvironmentID  string
+	StoreRef       string
 	StoreURL       string
 	ServerURL      string
 	BaseURL        string
@@ -1170,6 +1178,7 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 	report, err := buildEnvironmentRestoreReport(ctx, env, *workspace, *execute, *pull, *prepareReposOnly, time.Duration(*healthTimeoutSeconds)*time.Second, environmentRestoreWorkflowOptions{
 		Run:            *runWorkflow,
 		EnvironmentID:  env.ID,
+		StoreRef:       *storeRef,
 		StoreURL:       resolvedStoreURL,
 		ServerURL:      *serverURL,
 		BaseURL:        *baseURL,
@@ -1427,6 +1436,7 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 			report.Error = "restore readiness did not pass"
 		}
 	}
+	report.CleanMachine = environmentRestoreCleanMachinePlanForReport(report, workflowOptions, cleanupOptions)
 	if strings.TrimSpace(workflowOptions.StoreURL) != "" {
 		persisted, err := environmentRestorePersistEnvironment(ctx, workflowOptions.StoreURL, env, report, attemptedAt)
 		if err != nil {
@@ -1442,6 +1452,40 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 		}
 	}
 	return report, nil
+}
+
+func environmentRestoreCleanMachinePlanForReport(report environmentRestoreReport, workflowOptions environmentRestoreWorkflowOptions, cleanupOptions environmentRestoreDockerCleanupOptions) environmentRestoreCleanMachinePlan {
+	if !cleanupOptions.AssumeCleanDocker {
+		return environmentRestoreCleanMachinePlan{}
+	}
+	storeRef := strings.TrimSpace(workflowOptions.StoreRef)
+	if storeRef == "" {
+		storeRef = "STORE_NAME_OR_POSTGRES_DSN"
+	}
+	plan := environmentRestoreCleanMachinePlan{
+		Ready: report.OK,
+		ExecuteCommand: []string{
+			"otsandbox",
+			"environment",
+			"restore",
+			report.EnvironmentID,
+			"--store",
+			storeRef,
+			"--workspace",
+			report.Workspace,
+			"--execute",
+			"--json",
+		},
+		Notes: []string{
+			"Run this command on the colleague/new machine after the PostgreSQL Store is configured and reachable outside the target Docker environment.",
+			"The dry-run assumption is not included in the execute command; Docker will be checked on the target machine before startup.",
+			"Add --run-workflow --server-url URL after Docker health passes when the control plane is running for acceptance verification.",
+		},
+	}
+	if !report.Readiness.OK {
+		plan.Ready = false
+	}
+	return plan
 }
 
 func environmentRestorePersistEnvironment(ctx context.Context, storeURL string, env store.Environment, report environmentRestoreReport, attemptedAt time.Time) (store.Environment, error) {

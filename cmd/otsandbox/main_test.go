@@ -2456,6 +2456,9 @@ func TestEnvironmentRestoreAssumeCleanDockerIgnoresLocalContainerConflicts(t *te
 	if len(report.NextActions) == 0 || !strings.Contains(report.NextActions[0], "colleague machine") {
 		t.Fatalf("clean-machine next actions should point to colleague machine: %#v", report.NextActions)
 	}
+	if !report.CleanMachine.Ready || strings.Join(report.CleanMachine.ExecuteCommand, " ") != "otsandbox environment restore env.clean-machine --store STORE_NAME_OR_POSTGRES_DSN --workspace "+workspace+" --execute --json" {
+		t.Fatalf("clean-machine execute command = %#v", report.CleanMachine)
+	}
 }
 
 func TestEnvironmentRestoreCanAdoptExistingContainers(t *testing.T) {

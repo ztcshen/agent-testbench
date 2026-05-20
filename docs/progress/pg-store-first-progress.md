@@ -2343,3 +2343,16 @@ Remote source policy slice:
   returned `ok=true`, readiness `ok=true`, action
   `ready-for-clean-machine-execute`, zero failed readiness items, three Docker
   Compose plan commands, and seven repository preparations.
+- 2026-05-20T09:50Z implementation slice: clean-machine dry-run JSON now
+  includes a structured `cleanMachine` block. When readiness is green, it
+  reports `ready=true` and an `executeCommand` argument array for the colleague
+  machine, for example `otsandbox environment restore
+  scf-chain-core10-local-docker --store local-pg --workspace
+  /tmp/ots-new-machine-audit --execute --json`. The generated execute command
+  intentionally omits `--assume-clean-docker`; Docker is checked on the target
+  machine before startup.
+- Verification: focused CLI coverage passed for the generated clean-machine
+  execute command, and a real `local-pg` dry-run returned `ok=true`,
+  readiness action `ready-for-clean-machine-execute`, no failed readiness
+  items, and the structured execute command using the named PostgreSQL Store
+  `local-pg`.
