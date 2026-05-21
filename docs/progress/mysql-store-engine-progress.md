@@ -2567,3 +2567,35 @@ Current blocker:
   `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+
+## 2026-05-21 Release Check SQL Store Guidance Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Updated the release-check missing-Store guidance so PostgreSQL and MySQL
+  examples are presented as peer SQL Store choices, not with MySQL as a
+  secondary wording path.
+- Strengthened the release-check regression test so the error output must show
+  `SQL Store examples:`, a PostgreSQL example, a MySQL example, and must not
+  use secondary-path wording for MySQL.
+- Kept release-check execution behavior unchanged: PostgreSQL still exports
+  `OTSANDBOX_TEST_PG_DSN`; MySQL still validates a dedicated smoke/test/CI
+  database name and exports `OTSANDBOX_MYSQL_TEST_DSN` in existing-database
+  mode.
+
+Validated:
+
+- `node --test tools/smoke/release-check.test.mjs --test-name-pattern 'release-check missing Store guidance lists every supported smoke Store env'`
+- `bash -n tools/release-check.sh tools/smoke/mysql-real-store-release-check.sh`
+- `git diff --check`
+- `rg -n -i 'fall''back' . --glob '!node_modules/**'`
+- `tools/guardrails/check_store_first_contracts.sh && tools/guardrails/check_no_source_domain_core.sh`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.

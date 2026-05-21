@@ -44,7 +44,11 @@ test("release-check missing Store guidance lists every supported smoke Store env
 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /OTSANDBOX_SMOKE_STORE_DSN or OTSANDBOX_SMOKE_STORE is required/);
+  assert.match(result.stderr, /SQL Store examples:/);
+  assert.match(result.stderr, /PostgreSQL: OTSANDBOX_SMOKE_STORE_DSN='postgres:\/\/user:pass@host:5432\/otsandbox_smoke\?sslmode=disable'/);
+  assert.match(result.stderr, /MySQL: OTSANDBOX_SMOKE_STORE='mysql:\/\/user:pass@host:3306\/otsandbox_smoke\?tls=false'/);
   assert.match(result.stderr, /OTSANDBOX_SMOKE_STORE='mysql:\/\/user:pass@host:3306\/otsandbox_smoke\?tls=false'/);
+  assert.doesNotMatch(result.stderr, /also supported/i);
   assert.doesNotMatch(result.stdout, /checking SkyWalking smoke provider mode/);
 });
 
