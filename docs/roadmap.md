@@ -11,10 +11,11 @@ Open Test Sandbox 目前仍是 pre-1.0。路线图重点是降低试用门槛、
 - Keep the core repository generic and free of bundled team import bundles.
 - Maintain a green `npm run release-check` gate.
 - Treat the product as a CLI-first, SQL Store-first testing workbench.
-  PostgreSQL is the default product Store, and MySQL is supported for teams
-  whose test environments require it. Each isolation boundary uses its own
-  Store database, for example a private `local-personal` database and a shared
-  `team-verified` database. Docker runtime management stays local for now.
+  PostgreSQL and MySQL are supported product Store engines; teams should choose
+  the engine that matches their operational environment. Each isolation
+  boundary uses its own Store database, for example a private `local-personal`
+  database and a shared `team-verified` database. Docker runtime management
+  stays local for now.
 - Make the daily core flow work from CLI and the local workbench: configure
   Store, register and discover Environment Catalog entries, inspect and
   bootstrap an environment, verify it, publish it to verified discovery, register

@@ -60,9 +60,12 @@ CLI、Control plane API、React 工作台、报告和验证工具读取同一份
 ```sh
 npm ci
 ./bin/otsandbox.sh version
+# SQL Store 示例：
+# PostgreSQL：
 OTSANDBOX_DEMO_STORE='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run demo:api-case
 OTSANDBOX_SMOKE_STORE_DSN='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run release-check
-# 也支持 MySQL：
+# MySQL：
+OTSANDBOX_DEMO_STORE='mysql://user:pass@host:3306/otsandbox_smoke?tls=false' npm run demo:api-case
 OTSANDBOX_SMOKE_STORE_DSN='mysql://user:pass@host:3306/otsandbox_smoke?tls=false' npm run release-check
 ```
 

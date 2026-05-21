@@ -6,10 +6,29 @@ outside a trusted team.
 ## Required Gate
 
 ```sh
+# SQL Store examples:
+# PostgreSQL:
 OTSANDBOX_SMOKE_STORE_DSN="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run release-check
-# or, for teams whose control-plane Store is MySQL:
+# MySQL:
 OTSANDBOX_SMOKE_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" npm run release-check
 ```
+
+## Current MySQL Final Sign-Off Status
+
+Generic MySQL release-check wiring is available, but company-environment final
+sign-off is still pending until a real run records the following evidence:
+
+- `OTSANDBOX_REAL_MYSQL_STORE_DSN` points at a dedicated sandbox/smoke/test/CI
+  MySQL Store database, not a business schema.
+- `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` are provided for every workflow step from `step-01`
+  through `step-10`.
+- `npm run release-check:mysql-real` or the manual `mysql-real-signoff` CI job
+  passes with the company MySQL Store and real SkyWalking endpoint.
+
+After that run passes, paste the exact command or CI run URL plus the Store
+database name, masked DSN, SkyWalking endpoint, and 10-step workflow report
+summary into `docs/progress/mysql-store-engine-progress.md`.
 
 The public GitHub Actions CI runs this same gate against a temporary MySQL 8.0
 service container and the `otsandbox_ci_smoke` Store database. That proves the

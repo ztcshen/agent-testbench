@@ -2599,3 +2599,35 @@ Current blocker:
   `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+
+## 2026-05-21 SQL Store Dual-Engine Wording Guard Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Updated AGENTS, README, roadmap, Store backend docs, CLI/API contracts, quick
+  start, and release checklist wording so PostgreSQL and MySQL are presented as
+  peer product SQL Store engines rather than PostgreSQL as the default product
+  path and MySQL as a secondary path.
+- Added a release checklist section that makes the current company MySQL final
+  sign-off status explicit: generic MySQL wiring exists, but completion still
+  needs real company Store DSN, real SkyWalking URL, 10-step trace ids, and a
+  passed `release-check:mysql-real` or `mysql-real-signoff` run.
+- Extended the Store-first guardrail to block current docs from reintroducing
+  PostgreSQL-only active-source/default-product wording while excluding
+  historical progress and plan ledgers.
+
+Validated:
+
+- `tools/guardrails/check_store_first_contracts.sh`
+- `rg -n 'PostgreSQL Store is the active source of truth|sandbox''s own PostgreSQL Store/control-plane database|PostgreSQL is the default product Store|PostgreSQL remains the default|PostgreSQL remains the default upstream|default product Store backend' AGENTS.md README.md README.zh-CN.md docs --glob '!docs/progress/**' --glob '!docs/plans/**'`
+- `git diff --check`
+- `rg -n -i 'fall''back' . --glob '!node_modules/**'`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.

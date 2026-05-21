@@ -11,10 +11,11 @@ API-operated, Store-first, and local-first.
 - Treat test engineers as sandbox users, not external configuration maintainers.
   Day-to-day testing should be possible through sandbox APIs and UI discovery,
   with minimal one-time registration when a runtime or service must be known.
-- PostgreSQL Store is the active source of truth for current sandbox configuration,
+- SQL Store is the active source of truth for current sandbox configuration,
   runtime facts, workflow catalog, execution state, Evidence indexes, and
-  verification results.
-- The sandbox's own PostgreSQL Store/control-plane database must be provisioned
+  verification results. PostgreSQL and MySQL are supported product Store
+  engines; SQLite is compatibility-only.
+- The sandbox's own SQL Store/control-plane database must be provisioned
   outside any Docker environment restored for a tested target, and must remain
   separate from target application databases. Environment restore may start
   tested services and their business databases, but it must not start or host
@@ -31,7 +32,9 @@ API-operated, Store-first, and local-first.
   flows for normal testing.
 - Prefer Store-first APIs and UI paths for new behavior. Add file-package
   adapters only as compatibility or import/export bridges.
-- PostgreSQL is the default product Store for personal and team workflows.
+- PostgreSQL and MySQL are both product Store engines for personal and team
+  workflows; teams should pick the engine that matches their operational
+  environment.
 - SQLite is retained only for legacy migration, compatibility, and tests.
 - Runtime Evidence, logs, and local databases must not be committed.
 - Prefer small, verifiable slices with tests and a commit per slice.

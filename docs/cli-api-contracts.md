@@ -15,8 +15,8 @@ Verification baseline: this page was checked against `cmd/otsandbox/main.go`,
 - Static HTML pages under `control-plane/static/` are UI entrypoints, not API
   contracts, so they are not counted as API parity targets here.
 - SQL Store is the active source of truth for new daily testing workflows.
-  PostgreSQL remains the default upstream Store, and MySQL is supported for
-  teams whose test environments standardize on MySQL. Profile packages are
+  PostgreSQL and MySQL are supported product Store engines; teams should choose
+  the engine that matches their operational environment. Profile packages are
   import/export and review artifacts, not the daily maintenance surface.
 - SQLite is retained only for legacy compatibility and old local runtime import
   paths during the SQL Store rollout.

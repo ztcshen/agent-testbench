@@ -18,9 +18,9 @@ The current product direction is Store-first:
   separate sandbox project or repeatedly edit external configuration.
 - SQL Store is the active Store for current sandbox state, runtime facts,
   workflow catalog, execution state, Evidence indexes, and verification
-  results. PostgreSQL remains the default, and MySQL is supported for teams
-  whose test environments require it. Local and remote SQL Stores use the same
-  daily commands; users switch the active database through named Store config.
+  results. PostgreSQL and MySQL are supported product Store engines. Local and
+  remote SQL Stores use the same daily commands; users switch the active
+  database through named Store config.
 - SQLite is retained for old local data import, compatibility checks, and tests.
   It is not the product path for new daily workflows.
 - Optional template packages may exist only for import, export, sharing, review,
@@ -71,9 +71,12 @@ Install dependencies and verify the checkout:
 ```sh
 npm ci
 ./bin/otsandbox.sh version
+# SQL Store examples:
+# PostgreSQL:
 OTSANDBOX_DEMO_STORE='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run demo:api-case
 OTSANDBOX_SMOKE_STORE_DSN='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run release-check
-# MySQL is also supported:
+# MySQL:
+OTSANDBOX_DEMO_STORE='mysql://user:pass@host:3306/otsandbox_smoke?tls=false' npm run demo:api-case
 OTSANDBOX_SMOKE_STORE_DSN='mysql://user:pass@host:3306/otsandbox_smoke?tls=false' npm run release-check
 ```
 
@@ -115,7 +118,7 @@ Core packages stay generic:
 
 - `cmd/otsandbox/`: CLI entrypoint and command orchestration.
 - `internal/store/`: Store contract and runtime records.
-- `internal/store/postgres/`: default product Store backend.
+- `internal/store/postgres/`: PostgreSQL product Store backend.
 - `internal/store/mysql/`: MySQL product Store backend.
 - `internal/store/sqlite/`: legacy compatibility and migration backend.
 - `internal/controlplane/`: HTTP APIs, workbench data, reports, and Evidence views.

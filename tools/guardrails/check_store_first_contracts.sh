@@ -33,6 +33,18 @@ check_pattern() {
   fi
 }
 
+check_current_docs_pattern() {
+  local pattern=$1
+  local message=$2
+  local matches
+  matches=$(rg -n -i "$pattern" "${paths[@]}" --glob '!docs/progress/**' --glob '!docs/plans/**' || true)
+  if [[ -n "$matches" ]]; then
+    echo "$message" >&2
+    echo "$matches" >&2
+    violations=1
+  fi
+}
+
 check_pattern 'default sqlite|sqlite by default|默认 SQLite|SQLite is the default|保持 SQLite 默认' \
   "Store-first docs must not describe SQLite as the default active Store."
 
@@ -44,6 +56,9 @@ check_pattern '^[[:space:]]*npm run release-check[[:space:]]*$' \
 
 check_pattern 'release gate:[[:space:]]*`npm run release-check`|发布门禁：`npm run release-check`' \
   "Release gate shorthand must mention OTSANDBOX_SMOKE_STORE_DSN."
+
+check_current_docs_pattern 'PostgreSQL Store is the active source of truth|sandbox'\''s own PostgreSQL Store/control-plane database|PostgreSQL is the default product Store|PostgreSQL remains the default|PostgreSQL remains the default upstream|default product Store backend' \
+  "SQL Store docs must not describe PostgreSQL as the only active source or default product Store."
 
 check_pattern '^[[:space:]]*npm run demo:api-case[[:space:]]*$' \
   "API case demo examples must show OTSANDBOX_DEMO_STORE or active Store setup."

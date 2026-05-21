@@ -3,9 +3,9 @@
 Open Test Sandbox treats the Store as a pluggable database backend. Users pick
 one backend for a workspace or team, and daily CLI/API/UI commands operate
 against the selected Store without changing command shape. The active product
-path is SQL Store-first: PostgreSQL remains the default upstream path, and
-MySQL is supported for teams whose test environments standardize on MySQL. The
-Store holds environment catalogs, service and interface
+path is SQL Store-first: PostgreSQL and MySQL are supported product Store
+engines, and teams should choose the engine that matches their operational
+environment. The Store holds environment catalogs, service and interface
 registrations, workflows, maintained API cases, run records, Evidence indexes,
 trace topology indexes, baseline gates, timing data, and post-process task
 state. Evidence files and local logs may still live on disk, but their indexes
@@ -22,7 +22,7 @@ into daily workflow commands.
 
 Supported backend families:
 
-- PostgreSQL: default active product path for personal and team Stores.
+- PostgreSQL: active product Store engine for personal and team Stores.
 - MySQL: active product path for organizations that require MySQL Stores.
 - SQLite: compatibility backend for migration, old local runs, and tests.
 

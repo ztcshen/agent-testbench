@@ -19,9 +19,11 @@ npm ci
 
 ```sh
 ./bin/otsandbox.sh version
+# SQL Store examples:
+# PostgreSQL:
 OTSANDBOX_DEMO_STORE="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run demo:api-case
 OTSANDBOX_SMOKE_STORE_DSN="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run release-check
-# MySQL Store is also supported:
+# MySQL:
 OTSANDBOX_DEMO_STORE="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" npm run demo:api-case
 OTSANDBOX_SMOKE_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" npm run release-check
 ```
@@ -59,7 +61,7 @@ automatically.
 ./bin/otsandbox.sh store use company-mysql
 ./bin/otsandbox.sh store status --store company-mysql
 ./bin/otsandbox.sh store upgrade --store company-mysql
-./bin/otsandbox.sh store ddl --backend mysql > otsandbox-mysql-schema.sql
+./bin/otsandbox.sh store ddl --store company-mysql > otsandbox-mysql-schema.sql
 ```
 
 Use a private PostgreSQL or MySQL database for unverified local work and a
