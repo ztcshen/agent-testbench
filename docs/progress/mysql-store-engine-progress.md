@@ -2291,3 +2291,30 @@ Current blocker:
   `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+
+## 2026-05-21 MySQL Config Read Model SQL Store Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Added MySQL dialect coverage for SQL Store profile index persistence and
+  lookup.
+- Added MySQL dialect coverage for active config version reset, config version
+  upsert, and active config lookup.
+- Added MySQL dialect coverage for config read model upsert and lookup, using
+  MySQL `?` bind placeholders and `on duplicate key update`.
+
+Validated:
+
+- `go test -v ./internal/store/sqlstore -run 'TestStoreUpsertsConfigIndexAndReadModels(ThroughDatabaseSQL|UseMySQLDialect)$' -count=1`
+- `git diff --check`
+- `rg -n -i 'fall''back' . --glob '!node_modules/**'`
+- `tools/guardrails/check_store_first_contracts.sh && tools/guardrails/check_no_source_domain_core.sh`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
