@@ -2692,3 +2692,29 @@ Current blocker:
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then first
   `npm run release-check:mysql-real:preflight`, followed by either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+
+## 2026-05-21 MySQL Real Sign-Off CI Preflight Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Updated the manual `mysql-real-signoff` GitHub Actions job so it runs
+  `npm run release-check:mysql-real:preflight` before the full
+  `npm run release-check:mysql-real` gate.
+- Added a smoke regression test for `.github/workflows/ci.yml` proving the
+  manual company MySQL sign-off job keeps preflight before the full gate and
+  passes the required real SkyWalking plus MySQL Store secrets to that job.
+- Updated the release checklist to state that CI and local operators use the
+  same two-stage sign-off path.
+
+Validated:
+
+- `node --test tools/smoke/ci-workflow.test.mjs`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.

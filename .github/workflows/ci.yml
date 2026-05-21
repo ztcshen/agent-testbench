@@ -83,6 +83,14 @@ jobs:
       - name: Install browser
         run: npx playwright install chromium
 
+      - name: Run guarded company MySQL real sign-off preflight
+        run: npm run release-check:mysql-real:preflight
+        env:
+          OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1"
+          OTSANDBOX_REAL_MYSQL_STORE_DSN: ${{ secrets.OTSANDBOX_REAL_MYSQL_STORE_DSN }}
+          OTS_TRACE_GRAPHQL_URL: ${{ secrets.OTS_TRACE_GRAPHQL_URL }}
+          OTS_SMOKE_TRACE_IDS: ${{ secrets.OTS_SMOKE_TRACE_IDS }}
+
       - name: Run guarded company MySQL real sign-off
         run: npm run release-check:mysql-real
         env:

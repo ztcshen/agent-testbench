@@ -74,7 +74,9 @@ CI also exposes a manual `workflow_dispatch` path named
 `mysql-real-signoff`. It is intentionally separate from pull requests and only
 runs when the operator selects `mysql_real_signoff=true`; it expects repository
 secrets for `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-`OTS_SMOKE_TRACE_IDS`.
+`OTS_SMOKE_TRACE_IDS`. The manual job runs the same two-stage path as local
+operators: `release-check:mysql-real:preflight` first, then
+`release-check:mysql-real`.
 
 The gate verifies:
 

@@ -1,0 +1,26 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { dirname, join, resolve } from "node:path";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const rootDir = resolve(__dirname, "..", "..");
+
+test("manual MySQL real sign-off runs preflight before full release gate", () => {
+  const workflow = readFileSync(join(rootDir, ".github", "workflows", "ci.yml"), "utf8");
+  const jobIndex = workflow.indexOf("mysql-real-signoff:");
+  assert.notEqual(jobIndex, -1);
+
+  const job = workflow.slice(jobIndex);
+  const preflightIndex = job.indexOf("run: npm run release-check:mysql-real:preflight");
+  const fullIndex = job.indexOf("run: npm run release-check:mysql-real\n");
+
+  assert.notEqual(preflightIndex, -1);
+  assert.notEqual(fullIndex, -1);
+  assert.ok(preflightIndex < fullIndex);
+  assert.match(job, /OTSANDBOX_REQUIRE_REAL_SKYWALKING:\s*"1"/);
+  assert.match(job, /OTSANDBOX_REAL_MYSQL_STORE_DSN:\s*\$\{\{\s*secrets\.OTSANDBOX_REAL_MYSQL_STORE_DSN\s*\}\}/);
+  assert.match(job, /OTS_TRACE_GRAPHQL_URL:\s*\$\{\{\s*secrets\.OTS_TRACE_GRAPHQL_URL\s*\}\}/);
+  assert.match(job, /OTS_SMOKE_TRACE_IDS:\s*\$\{\{\s*secrets\.OTS_SMOKE_TRACE_IDS\s*\}\}/);
+});
