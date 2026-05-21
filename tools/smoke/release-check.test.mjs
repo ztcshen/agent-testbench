@@ -36,6 +36,15 @@ function runRealMySQLWrapper(env) {
   });
 }
 
+function runNPM(args, env) {
+  return spawnSync("npm", args, {
+    cwd: rootDir,
+    env: { ...process.env, ...env },
+    encoding: "utf8",
+    stdio: "pipe",
+  });
+}
+
 test("release-check missing Store guidance lists every supported smoke Store env", () => {
   const result = runReleaseCheck(releaseCheckEnv({
     OTSANDBOX_SMOKE_STORE_DSN: "",
@@ -250,6 +259,23 @@ test("real MySQL release wrapper dry-run masks credentials and accepts smoke dat
   assert.doesNotMatch(result.stderr, /secret/);
   assert.match(result.stderr, /MySQL Store contract mode: existing/);
   assert.match(result.stderr, /Real SkyWalking release mode: required/);
+  assert.match(result.stderr, /Would run: npm run release-check/);
+});
+
+test("real MySQL release preflight npm script runs the guarded dry-run", () => {
+  const result = runNPM(["run", "release-check:mysql-real:preflight"], {
+    OTSANDBOX_REAL_MYSQL_STORE_DSN: "mysql://user:secret@example.com:3306/otsandbox_smoke?tls=false",
+    OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
+    OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
+    OTS_SMOKE_TRACE_IDS: JSON.stringify(Object.fromEntries(Array.from({ length: 10 }, (_, index) => {
+      const step = `step-${String(index + 1).padStart(2, "0")}`;
+      return [step, `trace-${step}`];
+    }))),
+  });
+
+  assert.equal(result.status, 0);
+  assert.match(result.stderr, /mysql:\/\/user:xxxxx@example.com:3306\/otsandbox_smoke/);
+  assert.doesNotMatch(result.stderr, /secret/);
   assert.match(result.stderr, /Would run: npm run release-check/);
 });
 

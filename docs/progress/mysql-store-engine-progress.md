@@ -2662,3 +2662,33 @@ Current blocker:
   `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+
+## 2026-05-21 Real MySQL Sign-Off Preflight Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Added `npm run release-check:mysql-real:preflight` as a light, explicit
+  dry-run entrypoint for the guarded company MySQL release wrapper.
+- The preflight uses the same MySQL DSN, dedicated database-name guard,
+  existing-database mode, real SkyWalking requirement, 10-step trace-id mapping,
+  and credential masking as `npm run release-check:mysql-real`, but stops before
+  invoking the heavy release gate.
+- Added a regression test that calls the npm script and verifies it runs the
+  guarded dry-run, masks the password, and reports the release-check command it
+  would execute.
+- Updated README, Chinese README, quickstart, Store backend docs, and release
+  checklist so operators run preflight before the real company MySQL sign-off.
+
+Validated:
+
+- `node --test tools/smoke/release-check.test.mjs --test-name-pattern 'real MySQL release preflight npm script runs the guarded dry-run'`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then first
+  `npm run release-check:mysql-real:preflight`, followed by either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.

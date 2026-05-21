@@ -167,7 +167,8 @@ Current working areas:
 - workbench: local React pages backed by Control plane APIs;
 - release gate: `OTSANDBOX_SMOKE_STORE_DSN=postgres://... npm run release-check`
   or `OTSANDBOX_SMOKE_STORE_DSN=mysql://... npm run release-check`; for a
-  company MySQL Store sign-off, use `npm run release-check:mysql-real` with
+  company MySQL Store sign-off, run `npm run release-check:mysql-real:preflight`
+  first, then `npm run release-check:mysql-real` with
   `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps.
 

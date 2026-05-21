@@ -23,6 +23,8 @@ sign-off is still pending until a real run records the following evidence:
 - `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` are provided for every workflow step from `step-01`
   through `step-10`.
+- `npm run release-check:mysql-real:preflight` passes with the same environment
+  and shows the masked MySQL DSN plus the release-check command it would run.
 - `npm run release-check:mysql-real` or the manual `mysql-real-signoff` CI job
   passes with the company MySQL Store and real SkyWalking endpoint.
 
@@ -52,10 +54,13 @@ To make release-check fail unless it is using live topology evidence, set
 step from `step-01` through `step-10` and rejects synthetic or partial smoke
 before the expensive gate starts.
 
-For company MySQL final sign-off, use `npm run release-check:mysql-real` with a
-dedicated `mysql://` Store DSN. That wrapper requires the same real SkyWalking
-mode, an `http` or `https` GraphQL URL, and complete 10-step trace id mapping
-even in dry-run mode.
+For company MySQL final sign-off, run
+`npm run release-check:mysql-real:preflight` first, then
+`npm run release-check:mysql-real` with a dedicated `mysql://` Store DSN. Both
+entrypoints require the same real SkyWalking mode, an `http` or `https`
+GraphQL URL, and complete 10-step trace id mapping. The preflight stops before
+the heavy gate after proving the guarded wrapper would run release-check with a
+masked DSN and existing-database mode.
 The generic MySQL `npm run release-check` path also refuses MySQL database
 names that do not look dedicated to sandbox/smoke/test/CI validation before it
 runs Store migrations, tests, CLI smoke, API smoke, or frontend smoke writes.

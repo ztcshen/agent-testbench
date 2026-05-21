@@ -158,12 +158,21 @@ OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 \
 OTS_TRACE_GRAPHQL_URL="http://skywalking.example/graphql" \
 OTS_SMOKE_TRACE_IDS='{"step-01":"trace-01","step-02":"trace-02","step-03":"trace-03","step-04":"trace-04","step-05":"trace-05","step-06":"trace-06","step-07":"trace-07","step-08":"trace-08","step-09":"trace-09","step-10":"trace-10"}' \
 OTSANDBOX_REAL_MYSQL_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" \
+npm run release-check:mysql-real:preflight
+
+OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 \
+OTS_TRACE_GRAPHQL_URL="http://skywalking.example/graphql" \
+OTS_SMOKE_TRACE_IDS='{"step-01":"trace-01","step-02":"trace-02","step-03":"trace-03","step-04":"trace-04","step-05":"trace-05","step-06":"trace-06","step-07":"trace-07","step-08":"trace-08","step-09":"trace-09","step-10":"trace-10"}' \
+OTSANDBOX_REAL_MYSQL_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" \
 npm run release-check:mysql-real
 ```
 
-The wrapper accepts only `mysql://` and refuses database names that do not look
-like a sandbox, smoke, test, or CI database. This keeps the sandbox control-plane
-Store separate from business schemas used by the services under test.
+The preflight should run first with the same environment; it validates the
+guarded wrapper inputs and masks credentials without running the full release
+gate. The wrapper accepts only `mysql://` and refuses database names that do not
+look like a sandbox, smoke, test, or CI database. This keeps the sandbox
+control-plane Store separate from business schemas used by the services under
+test.
 The generic MySQL release-check, CLI smoke, frontend smoke, and standalone
 MySQL API smoke use the same database-name guard before Store upgrades or smoke
 writes begin.

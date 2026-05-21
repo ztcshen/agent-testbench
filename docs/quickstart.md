@@ -80,17 +80,27 @@ OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 \
 OTS_TRACE_GRAPHQL_URL="http://skywalking.example/graphql" \
 OTS_SMOKE_TRACE_IDS='{"step-01":"trace-01","step-02":"trace-02","step-03":"trace-03","step-04":"trace-04","step-05":"trace-05","step-06":"trace-06","step-07":"trace-07","step-08":"trace-08","step-09":"trace-09","step-10":"trace-10"}' \
 OTSANDBOX_REAL_MYSQL_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" \
+npm run release-check:mysql-real:preflight
+
+OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 \
+OTS_TRACE_GRAPHQL_URL="http://skywalking.example/graphql" \
+OTS_SMOKE_TRACE_IDS='{"step-01":"trace-01","step-02":"trace-02","step-03":"trace-03","step-04":"trace-04","step-05":"trace-05","step-06":"trace-06","step-07":"trace-07","step-08":"trace-08","step-09":"trace-09","step-10":"trace-10"}' \
+OTSANDBOX_REAL_MYSQL_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" \
 npm run release-check:mysql-real
 ```
 
-The wrapper rejects non-MySQL DSNs and database names that do not look dedicated
-to sandbox/smoke/test/CI validation. It uses existing-database contract mode, so
-the company account needs normal DDL/DML permissions on that dedicated Store
-database but does not need permission to create or drop databases. It also
-requires the real SkyWalking release mode and trace ids for all 10 workflow
-steps; `OTS_TRACE_GRAPHQL_URL` must be an `http` or `https` URL. Synthetic
-topology smoke is not accepted by this wrapper, and
-`OTSANDBOX_MYSQL_TEST_DSN_MODE=create-drop` overrides are rejected.
+Run `release-check:mysql-real:preflight` first with the same environment. It
+checks the MySQL DSN, dedicated database-name guard, existing-database mode,
+real SkyWalking settings, full 10-step trace-id mapping, and credential masking
+without running the heavy release gate. The full wrapper rejects non-MySQL DSNs
+and database names that do not look dedicated to sandbox/smoke/test/CI
+validation. It uses existing-database contract mode, so the company account
+needs normal DDL/DML permissions on that dedicated Store database but does not
+need permission to create or drop databases. It also requires the real
+SkyWalking release mode and trace ids for all 10 workflow steps;
+`OTS_TRACE_GRAPHQL_URL` must be an `http` or `https` URL. Synthetic topology
+smoke is not accepted by this wrapper, and `OTSANDBOX_MYSQL_TEST_DSN_MODE=create-drop`
+overrides are rejected.
 Direct Go MySQL contract tests also require an explicit
 `OTSANDBOX_MYSQL_TEST_DSN_MODE`; use `existing` for company smoke databases and
 reserve `create-drop` for local admin-only tests.
