@@ -188,7 +188,7 @@ func TestOpenUsesConfiguredSQLDriverAndDelegatesRuntimeStoreMethods(t *testing.T
 		t.Fatalf("create run through mysql store: %v", err)
 	}
 	exec := state.lastExec(t)
-	if !strings.Contains(exec.query, "insert into runs") || !strings.Contains(exec.query, "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)") {
+	if !strings.Contains(exec.query, "insert into runs") || !strings.Contains(exec.query, "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)") {
 		t.Fatalf("delegated create run did not use mysql sqlstore dialect:\n%s", exec.query)
 	}
 

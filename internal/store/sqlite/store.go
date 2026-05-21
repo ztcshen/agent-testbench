@@ -240,9 +240,9 @@ func (s *Store) CreateRun(ctx context.Context, r store.Run) (store.Run, error) {
 		r.UpdatedAt = r.CreatedAt
 	}
 	if err := s.exec(ctx, fmt.Sprintf(`
-insert into runs (id, profile_id, workflow_id, status, evidence_root, summary_json, started_at, finished_at, created_at, updated_at)
-values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);`,
-		sqlString(r.ID), sqlString(r.ProfileID), sqlString(r.WorkflowID), sqlString(r.Status), sqlString(r.EvidenceRoot),
+insert into runs (id, profile_id, environment_id, workflow_id, status, evidence_root, summary_json, started_at, finished_at, created_at, updated_at)
+values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);`,
+		sqlString(r.ID), sqlString(r.ProfileID), sqlString(r.EnvironmentID), sqlString(r.WorkflowID), sqlString(r.Status), sqlString(r.EvidenceRoot),
 		sqlString(r.SummaryJSON), sqlString(encodeTime(r.StartedAt)), sqlString(encodeTime(r.FinishedAt)),
 		sqlString(encodeTime(r.CreatedAt)), sqlString(encodeTime(r.UpdatedAt)))); err != nil {
 		return store.Run{}, fmt.Errorf("create run %q: %w", r.ID, err)
@@ -253,7 +253,7 @@ values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);`,
 func (s *Store) GetRun(ctx context.Context, id string) (store.Run, error) {
 	var rows []runRow
 	if err := s.query(ctx, fmt.Sprintf(`
-select id, profile_id, workflow_id, status, evidence_root, summary_json, started_at, finished_at, created_at, updated_at
+select id, profile_id, environment_id, workflow_id, status, evidence_root, summary_json, started_at, finished_at, created_at, updated_at
 from runs where id = %s;`, sqlString(id)), &rows); err != nil {
 		return store.Run{}, err
 	}
@@ -266,7 +266,7 @@ from runs where id = %s;`, sqlString(id)), &rows); err != nil {
 func (s *Store) ListRuns(ctx context.Context) ([]store.Run, error) {
 	var rows []runRow
 	if err := s.query(ctx, `
-select id, profile_id, workflow_id, status, evidence_root, summary_json, started_at, finished_at, created_at, updated_at
+select id, profile_id, environment_id, workflow_id, status, evidence_root, summary_json, started_at, finished_at, created_at, updated_at
 from runs order by created_at, id;`, &rows); err != nil {
 		return nil, err
 	}
@@ -280,7 +280,7 @@ from runs order by created_at, id;`, &rows); err != nil {
 func (s *Store) WorkflowStepRun(ctx context.Context, runID string, stepID string) (store.Run, error) {
 	var rows []runRow
 	if err := s.query(ctx, fmt.Sprintf(`
-select r.id, r.profile_id, r.workflow_id, r.status, r.evidence_root,
+select r.id, r.profile_id, r.environment_id, r.workflow_id, r.status, r.evidence_root,
   json_object(
     'summary', coalesce(json_extract(r.summary_json, '$.summary'), json('{}')),
     'steps', json_array(json(step.value))
@@ -310,7 +310,7 @@ func (s *Store) LatestWorkflowStepRun(ctx context.Context, workflowID string, st
 	}
 	var rows []runRow
 	if err := s.query(ctx, fmt.Sprintf(`
-select r.id, r.profile_id, r.workflow_id, r.status, r.evidence_root,
+select r.id, r.profile_id, r.environment_id, r.workflow_id, r.status, r.evidence_root,
   json_object(
     'summary', coalesce(json_extract(r.summary_json, '$.summary'), json('{}')),
     'steps', json_array(json(step.value))
@@ -345,7 +345,7 @@ limit 1;`, sqlString(workflowID), sqlString(stepID), httpFilter), &rows); err !=
 func (s *Store) ListRunHeaders(ctx context.Context) ([]store.Run, error) {
 	var rows []runRow
 	if err := s.query(ctx, `
-select id, profile_id, workflow_id, status, evidence_root,
+select id, profile_id, environment_id, workflow_id, status, evidence_root,
   case
     when json_valid(summary_json) then json_object(
       'kind', json_extract(summary_json, '$.kind'),
@@ -1341,16 +1341,17 @@ func sqliteCommand(ctx context.Context, jsonOutput bool, path string, statement 
 }
 
 type runRow struct {
-	ID           string `json:"id"`
-	ProfileID    string `json:"profile_id"`
-	WorkflowID   string `json:"workflow_id"`
-	Status       string `json:"status"`
-	EvidenceRoot string `json:"evidence_root"`
-	SummaryJSON  string `json:"summary_json"`
-	StartedAt    string `json:"started_at"`
-	FinishedAt   string `json:"finished_at"`
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
+	ID            string `json:"id"`
+	ProfileID     string `json:"profile_id"`
+	EnvironmentID string `json:"environment_id"`
+	WorkflowID    string `json:"workflow_id"`
+	Status        string `json:"status"`
+	EvidenceRoot  string `json:"evidence_root"`
+	SummaryJSON   string `json:"summary_json"`
+	StartedAt     string `json:"started_at"`
+	FinishedAt    string `json:"finished_at"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
 }
 
 type catalogServiceRow struct {
@@ -1501,16 +1502,17 @@ type catalogTemplateConfigRow struct {
 
 func (r runRow) toStore() store.Run {
 	return store.Run{
-		ID:           r.ID,
-		ProfileID:    r.ProfileID,
-		WorkflowID:   r.WorkflowID,
-		Status:       r.Status,
-		EvidenceRoot: r.EvidenceRoot,
-		SummaryJSON:  r.SummaryJSON,
-		StartedAt:    decodeTime(r.StartedAt),
-		FinishedAt:   decodeTime(r.FinishedAt),
-		CreatedAt:    decodeTime(r.CreatedAt),
-		UpdatedAt:    decodeTime(r.UpdatedAt),
+		ID:            r.ID,
+		ProfileID:     r.ProfileID,
+		EnvironmentID: r.EnvironmentID,
+		WorkflowID:    r.WorkflowID,
+		Status:        r.Status,
+		EvidenceRoot:  r.EvidenceRoot,
+		SummaryJSON:   r.SummaryJSON,
+		StartedAt:     decodeTime(r.StartedAt),
+		FinishedAt:    decodeTime(r.FinishedAt),
+		CreatedAt:     decodeTime(r.CreatedAt),
+		UpdatedAt:     decodeTime(r.UpdatedAt),
 	}
 }
 

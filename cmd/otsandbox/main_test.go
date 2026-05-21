@@ -216,8 +216,11 @@ func TestStoreDDLCommandPrintsMySQLSchema(t *testing.T) {
 	if strings.Contains(out, "create index if not exists") {
 		t.Fatalf("mysql ddl should not emit unsupported index-if-not-exists syntax:\n%s", out)
 	}
-	if !strings.Contains(out, "id varchar(255) primary key") || !strings.Contains(out, "profile_id varchar(128) not null") {
+	if !strings.Contains(out, "id varchar(255) primary key") || !strings.Contains(out, "profile_id varchar(128) not null") || !strings.Contains(out, "environment_id varchar(128) not null") {
 		t.Fatalf("mysql ddl should use long runtime IDs and bounded graph keys:\n%s", out)
+	}
+	if strings.Contains(out, "service_dependencies") || strings.Contains(out, "service_config_assets") {
+		t.Fatalf("mysql ddl should not include legacy service-only graph tables:\n%s", out)
 	}
 }
 

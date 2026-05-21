@@ -55,16 +55,17 @@ type Store interface {
 }
 
 type Run struct {
-	ID           string
-	ProfileID    string
-	WorkflowID   string
-	Status       string
-	EvidenceRoot string
-	SummaryJSON  string
-	StartedAt    time.Time
-	FinishedAt   time.Time
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID            string
+	ProfileID     string
+	EnvironmentID string
+	WorkflowID    string
+	Status        string
+	EvidenceRoot  string
+	SummaryJSON   string
+	StartedAt     time.Time
+	FinishedAt    time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type APICaseRun struct {

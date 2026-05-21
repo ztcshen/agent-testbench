@@ -13,6 +13,7 @@ import (
 
 	"open-test-sandbox/internal/store"
 	"open-test-sandbox/internal/store/postgres"
+	"open-test-sandbox/internal/store/sqlstore"
 )
 
 func TestParseConfigFromURLAcceptsPostgresDSN(t *testing.T) {
@@ -35,6 +36,14 @@ func TestParseConfigFromURLRejectsNonPostgresDSN(t *testing.T) {
 func TestOpenUsesConfiguredSQLDriverAndDelegatesRuntimeStoreMethods(t *testing.T) {
 	ctx := context.Background()
 	state := openFakePostgresDriver(t)
+	state.queueRows(fakePostgresRows{
+		columns: []string{"exists"},
+		values:  [][]driver.Value{{int64(1)}},
+	})
+	state.queueRows(fakePostgresRows{
+		columns: []string{"version"},
+		values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
+	})
 	s, err := postgres.Open(ctx, postgres.Config{
 		URL:        state.name,
 		DriverName: fakePostgresDriverName,
@@ -60,7 +69,7 @@ func TestOpenUsesConfiguredSQLDriverAndDelegatesRuntimeStoreMethods(t *testing.T
 		t.Fatalf("create run through postgres store: %v", err)
 	}
 	exec := state.lastExec(t)
-	if !strings.Contains(exec.query, "insert into runs") || !strings.Contains(exec.query, "values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)") {
+	if !strings.Contains(exec.query, "insert into runs") || !strings.Contains(exec.query, "values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)") {
 		t.Fatalf("delegated create run did not use postgres sqlstore dialect:\n%s", exec.query)
 	}
 

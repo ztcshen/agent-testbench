@@ -8824,6 +8824,13 @@ func TestServerStartsEnvironmentAcceptanceRunWithHealthSummary(t *testing.T) {
 	if env.Status != "verified-ready" || env.LastVerificationRunID != report.BatchRunID || env.LastVerificationStatus != store.StatusPassed || !env.EvidenceComplete || !env.TopologyComplete {
 		t.Fatalf("environment after acceptance = %#v", env)
 	}
+	batchRun, err := s.GetRun(ctx, report.BatchRunID)
+	if err != nil {
+		t.Fatalf("get batch run after acceptance: %v", err)
+	}
+	if batchRun.EnvironmentID != "env.acceptance" {
+		t.Fatalf("batch run environment id = %#v", batchRun)
+	}
 	topologies, err := s.ListTraceTopologies(ctx, report.BatchRunID)
 	if err != nil {
 		t.Fatalf("list batch topology: %v", err)

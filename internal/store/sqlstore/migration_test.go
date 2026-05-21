@@ -40,6 +40,7 @@ func TestCoreSchemaSQLUsesDialectColumnTypes(t *testing.T) {
 			want: []string{
 				"id varchar(255) primary key",
 				"profile_id varchar(128) not null",
+				"environment_id varchar(128) not null",
 				"applied_at datetime(6) not null",
 				"summary_json json not null",
 				"started_at datetime(6)",
@@ -148,31 +149,36 @@ func TestCoreSchemaSQLIncludesEnvironmentComponentAssets(t *testing.T) {
 		"role text not null",
 		"runtime_json jsonb not null",
 		"healthcheck_json jsonb not null",
-		"create table if not exists service_dependencies",
-		"dependency_component_id text not null",
+		"create table if not exists component_dependencies",
+		"consumer_component_id text not null",
+		"provider_component_id text not null",
+		"phase text not null",
+		"capability text not null",
 		"profile_json jsonb not null",
-		"create table if not exists service_config_assets",
+		"idx_component_dependencies_provider",
+		"create table if not exists component_config_assets",
+		"owner_component_id text not null",
 		"asset_kind text not null",
 		"target_component_id text not null",
 		"content_inline text not null",
 		"remote_ref_json jsonb not null",
 		"size_bytes integer not null",
 		`"sensitive" boolean not null`,
-		"idx_service_config_assets_target",
-		"idx_service_config_assets_service_order",
-		"create table if not exists component_dependencies",
-		"consumer_component_id text not null",
-		"provider_component_id text not null",
-		"phase text not null",
-		"capability text not null",
-		"idx_component_dependencies_provider",
-		"create table if not exists component_config_assets",
-		"owner_component_id text not null",
 		"idx_component_config_assets_target",
 		"idx_component_config_assets_owner_order",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("core schema missing environment component asset DDL %q:\n%s", want, joined)
+		}
+	}
+	for _, unwanted := range []string{
+		"create table if not exists service_dependencies",
+		"create table if not exists service_config_assets",
+		"idx_service_config_assets_target",
+		"idx_service_config_assets_service_order",
+	} {
+		if strings.Contains(joined, unwanted) {
+			t.Fatalf("core schema should not contain legacy service asset DDL %q:\n%s", unwanted, joined)
 		}
 	}
 }
@@ -382,10 +388,82 @@ func TestUpgradeSchemaWidensMySQLRuntimeIdentifiersFromVersionFour(t *testing.T)
 		"alter table `evidence_records` modify column `id` varchar(255) not null",
 		"modify column `workflow_run_id` varchar(255) not null",
 		"alter table `environments` modify column `last_verification_run_id` varchar(255) not null",
+		"alter table `runs` add column `environment_id` varchar(128) not null default ''",
+		"drop table if exists `service_config_assets`",
+		"drop table if exists `service_dependencies`",
 	} {
 		if !strings.Contains(joinedExecs.String(), want) {
 			t.Fatalf("mysql v4 upgrade missing %q:\n%s", want, joinedExecs.String())
 		}
+	}
+}
+
+func TestUpgradeSchemaAddsRunEnvironmentAndDropsLegacyServiceGraphTables(t *testing.T) {
+	tests := []struct {
+		name    string
+		dialect sqlstore.Dialect
+		want    []string
+	}{
+		{
+			name:    "postgres",
+			dialect: sqlstore.PostgresDialect{},
+			want: []string{
+				`alter table "runs" add column "environment_id" text not null default ''`,
+				`drop table if exists "service_config_assets"`,
+				`drop table if exists "service_dependencies"`,
+			},
+		},
+		{
+			name:    "mysql",
+			dialect: sqlstore.MySQLDialect{},
+			want: []string{
+				"alter table `runs` add column `environment_id` varchar(128) not null default ''",
+				"drop table if exists `service_config_assets`",
+				"drop table if exists `service_dependencies`",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			db, state := openFakeSQLDB(t)
+			defer db.Close()
+
+			state.queueRows(fakeRows{
+				columns: []string{"exists"},
+				values:  [][]driver.Value{{int64(1)}},
+			})
+			state.queueRows(fakeRows{
+				columns: []string{"version"},
+				values:  [][]driver.Value{{int64(5)}},
+			})
+			state.queueRows(fakeRows{
+				columns: []string{"exists"},
+				values:  [][]driver.Value{{int64(1)}},
+			})
+			state.queueRows(fakeRows{
+				columns: []string{"version"},
+				values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
+			})
+
+			status, err := sqlstore.UpgradeSchema(ctx, db, tt.dialect)
+			if err != nil {
+				t.Fatalf("upgrade v5 schema: %v", err)
+			}
+			if status.CurrentVersion != sqlstore.CurrentSchemaVersion || status.AppliedCount != 1 || status.HasPending() {
+				t.Fatalf("upgraded v5 schema status = %#v", status)
+			}
+			joinedExecs := strings.Builder{}
+			for _, exec := range state.execsSnapshot() {
+				joinedExecs.WriteString(exec.query)
+				joinedExecs.WriteByte('\n')
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(joinedExecs.String(), want) {
+					t.Fatalf("%s v5 upgrade missing %q:\n%s", tt.name, want, joinedExecs.String())
+				}
+			}
+		})
 	}
 }
 

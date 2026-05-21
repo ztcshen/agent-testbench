@@ -6,7 +6,7 @@ type Change struct {
 	SQL     string
 }
 
-const CurrentVersion = 17
+const CurrentVersion = 18
 
 func All() []Change {
 	return []Change{
@@ -633,6 +633,12 @@ create index if not exists idx_component_config_assets_target
 
 create index if not exists idx_component_config_assets_owner_order
   on component_config_assets(env_id, owner_component_id, apply_order, asset_id);`,
+		},
+		{
+			Version: 18,
+			Name:    "link workflow runs to environments",
+			SQL: `
+alter table runs add column environment_id text not null default '';`,
 		},
 	}
 }

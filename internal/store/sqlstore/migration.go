@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	CurrentSchemaVersion = 5
+	CurrentSchemaVersion = 6
 	CoreSchemaName       = "create shared sql store schema"
 )
 
@@ -103,6 +103,7 @@ create table if not exists schema_versions (
 create table if not exists runs (
   id %s primary key,
   profile_id %s not null,
+  environment_id %s not null,
   workflow_id %s not null,
   status %s not null,
   evidence_root %s not null,
@@ -111,7 +112,7 @@ create table if not exists runs (
   finished_at %s,
   created_at %s not null,
   updated_at %s not null
-);`, runIDText, keyText, keyText, keyText, text, jsonType, timeType, timeType, timeType, timeType),
+);`, runIDText, keyText, keyText, keyText, keyText, text, jsonType, timeType, timeType, timeType, timeType),
 		fmt.Sprintf(`
 create table if not exists api_case_runs (
   id %s primary key,
@@ -276,44 +277,6 @@ create table if not exists environment_components (
 );`, keyText, keyText, text, keyText, keyText, keyText, text, boolType, jsonType, jsonType, jsonType, timeType, timeType),
 		d.CreateIndexSQL("idx_environment_components_kind", "environment_components", []string{"env_id", "kind", "role", "component_id"}),
 		fmt.Sprintf(`
-create table if not exists service_dependencies (
-  env_id %s not null,
-  service_id %s not null,
-  dependency_component_id %s not null,
-  dependency_kind %s not null,
-  required %s not null,
-  profile_json %s not null,
-  created_at %s not null,
-  updated_at %s not null,
-  primary key (env_id, service_id, dependency_component_id, dependency_kind),
-  foreign key (env_id, service_id) references environment_components(env_id, component_id) on delete cascade,
-  foreign key (env_id, dependency_component_id) references environment_components(env_id, component_id) on delete cascade
-);`, keyText, keyText, keyText, keyText, boolType, jsonType, timeType, timeType),
-		d.CreateIndexSQL("idx_service_dependencies_component", "service_dependencies", []string{"env_id", "dependency_component_id", "dependency_kind", "service_id"}),
-		fmt.Sprintf(`
-create table if not exists service_config_assets (
-  env_id %s not null,
-  service_id %s not null,
-  asset_id %s not null,
-  asset_kind %s not null,
-  target_component_id %s not null,
-  target_path %s not null,
-  content_inline %s not null,
-  remote_ref_json %s not null,
-  sha256 %s not null,
-  size_bytes %s not null,
-  apply_order %s not null,
-  %s %s not null,
-  summary_json %s not null,
-  created_at %s not null,
-  updated_at %s not null,
-  primary key (env_id, service_id, asset_id),
-  foreign key (env_id, service_id) references environment_components(env_id, component_id) on delete cascade,
-  foreign key (env_id, target_component_id) references environment_components(env_id, component_id) on delete cascade
-);`, keyText, keyText, keyText, keyText, keyText, text, text, jsonType, text, intType, intType, d.QuoteIdent("sensitive"), boolType, jsonType, timeType, timeType),
-		d.CreateIndexSQL("idx_service_config_assets_target", "service_config_assets", []string{"env_id", "target_component_id", "asset_kind", "apply_order", "asset_id"}),
-		d.CreateIndexSQL("idx_service_config_assets_service_order", "service_config_assets", []string{"env_id", "service_id", "apply_order", "asset_id"}),
-		fmt.Sprintf(`
 create table if not exists component_dependencies (
   env_id %s not null,
   consumer_component_id %s not null,
@@ -364,17 +327,28 @@ func runIdentifierTextType(d Dialect) string {
 }
 
 func incrementalSchemaSQL(d Dialect, current int) []string {
-	if d.Name() != "mysql" || current == 0 || current >= 5 {
+	if current == 0 || current >= CurrentSchemaVersion {
 		return nil
 	}
-	return []string{
-		"alter table `runs` modify column `id` varchar(255) not null;",
-		"alter table `api_case_runs` modify column `id` varchar(255) not null, modify column `run_id` varchar(255) not null;",
-		"alter table `evidence_records` modify column `id` varchar(255) not null, modify column `run_id` varchar(255) not null, modify column `case_run_id` varchar(255) not null;",
-		"alter table `trace_topologies` modify column `id` varchar(255) not null, modify column `workflow_run_id` varchar(255) not null, modify column `request_id` varchar(255) not null, modify column `trace_id` varchar(255) not null;",
-		"alter table `post_process_tasks` modify column `id` varchar(255) not null, modify column `run_id` varchar(255) not null;",
-		"alter table `environments` modify column `last_verification_run_id` varchar(255) not null;",
+	var statements []string
+	if d.Name() == "mysql" && current < 5 {
+		statements = append(statements,
+			"alter table `runs` modify column `id` varchar(255) not null;",
+			"alter table `api_case_runs` modify column `id` varchar(255) not null, modify column `run_id` varchar(255) not null;",
+			"alter table `evidence_records` modify column `id` varchar(255) not null, modify column `run_id` varchar(255) not null, modify column `case_run_id` varchar(255) not null;",
+			"alter table `trace_topologies` modify column `id` varchar(255) not null, modify column `workflow_run_id` varchar(255) not null, modify column `request_id` varchar(255) not null, modify column `trace_id` varchar(255) not null;",
+			"alter table `post_process_tasks` modify column `id` varchar(255) not null, modify column `run_id` varchar(255) not null;",
+			"alter table `environments` modify column `last_verification_run_id` varchar(255) not null;",
+		)
 	}
+	if current < 6 && (d.Name() == "postgres" || d.Name() == "mysql") {
+		statements = append(statements,
+			fmt.Sprintf("alter table %s add column %s %s not null default '';", d.QuoteIdent("runs"), d.QuoteIdent("environment_id"), d.KeyTextType()),
+			fmt.Sprintf("drop table if exists %s;", d.QuoteIdent("service_config_assets")),
+			fmt.Sprintf("drop table if exists %s;", d.QuoteIdent("service_dependencies")),
+		)
+	}
+	return statements
 }
 
 func isIdempotentSchemaReplayError(d Dialect, statement string, err error) bool {

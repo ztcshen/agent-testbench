@@ -47,9 +47,10 @@ func handleAPICaseRun(w http.ResponseWriter, r *http.Request, bundle profile.Bun
 	}
 	if runtime != nil {
 		if err := recordAPICaseRunWithContext(r.Context(), runtime, recordAPICaseRunContext{
-			ProfileID:  bundle.ID,
-			WorkflowID: valueString(payload["workflowId"]),
-			StepID:     valueString(payload["stepId"]),
+			ProfileID:     bundle.ID,
+			EnvironmentID: valueString(payload["environmentId"]),
+			WorkflowID:    valueString(payload["workflowId"]),
+			StepID:        valueString(payload["stepId"]),
 		}, result); err != nil {
 			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 			return
@@ -65,9 +66,10 @@ func handleAPICaseRun(w http.ResponseWriter, r *http.Request, bundle profile.Bun
 }
 
 type recordAPICaseRunContext struct {
-	ProfileID  string
-	WorkflowID string
-	StepID     string
+	ProfileID     string
+	EnvironmentID string
+	WorkflowID    string
+	StepID        string
 }
 
 func recordAPICaseRun(ctx context.Context, runtime store.Store, profileID string, result apicase.RunResult) error {
@@ -100,16 +102,17 @@ func recordAPICaseRunWithContext(ctx context.Context, runtime store.Store, runCo
 		runSummary["stepId"] = stepID
 	}
 	if _, err := runtime.CreateRun(ctx, store.Run{
-		ID:           result.RunID,
-		ProfileID:    runContext.ProfileID,
-		WorkflowID:   workflowID,
-		Status:       result.Status,
-		EvidenceRoot: result.EvidencePath,
-		SummaryJSON:  compactJSON(runSummary),
-		StartedAt:    startedAt,
-		FinishedAt:   finishedAt,
-		CreatedAt:    startedAt,
-		UpdatedAt:    finishedAt,
+		ID:            result.RunID,
+		ProfileID:     runContext.ProfileID,
+		EnvironmentID: strings.TrimSpace(runContext.EnvironmentID),
+		WorkflowID:    workflowID,
+		Status:        result.Status,
+		EvidenceRoot:  result.EvidencePath,
+		SummaryJSON:   compactJSON(runSummary),
+		StartedAt:     startedAt,
+		FinishedAt:    finishedAt,
+		CreatedAt:     startedAt,
+		UpdatedAt:     finishedAt,
 	}); err != nil {
 		return err
 	}

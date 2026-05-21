@@ -23,13 +23,14 @@ func TestStoreRecordsAndReadsRunsThroughDatabaseSQL(t *testing.T) {
 	started := time.Date(2026, 5, 19, 9, 30, 0, 0, time.UTC)
 
 	created, err := s.CreateRun(ctx, store.Run{
-		ID:           "run-001",
-		ProfileID:    "profile.alpha",
-		WorkflowID:   "workflow.alpha",
-		Status:       store.StatusRunning,
-		EvidenceRoot: ".runtime/evidence/run-001",
-		SummaryJSON:  `{"stepCount":1}`,
-		StartedAt:    started,
+		ID:            "run-001",
+		ProfileID:     "profile.alpha",
+		EnvironmentID: "env.alpha",
+		WorkflowID:    "workflow.alpha",
+		Status:        store.StatusRunning,
+		EvidenceRoot:  ".runtime/evidence/run-001",
+		SummaryJSON:   `{"stepCount":1}`,
+		StartedAt:     started,
 	})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
@@ -38,17 +39,17 @@ func TestStoreRecordsAndReadsRunsThroughDatabaseSQL(t *testing.T) {
 		t.Fatalf("created run timestamps = %#v", created)
 	}
 	exec := state.lastExec(t)
-	if !strings.Contains(exec.query, "insert into runs") || !strings.Contains(exec.query, "values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)") {
+	if !strings.Contains(exec.query, "insert into runs") || !strings.Contains(exec.query, "values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)") {
 		t.Fatalf("create run query did not use postgres bind vars:\n%s", exec.query)
 	}
-	if exec.args[0] != "run-001" || exec.args[5] != `{"stepCount":1}` {
+	if exec.args[0] != "run-001" || exec.args[6] != `{"stepCount":1}` {
 		t.Fatalf("create run args = %#v", exec.args)
 	}
 
 	state.queueRows(fakeRows{
-		columns: []string{"id", "profile_id", "workflow_id", "status", "evidence_root", "summary_json", "started_at", "finished_at", "created_at", "updated_at"},
+		columns: []string{"id", "profile_id", "environment_id", "workflow_id", "status", "evidence_root", "summary_json", "started_at", "finished_at", "created_at", "updated_at"},
 		values: [][]driver.Value{{
-			"run-001", "profile.alpha", "workflow.alpha", store.StatusPassed, ".runtime/evidence/run-001", `{"stepCount": 1}`,
+			"run-001", "profile.alpha", "env.alpha", "workflow.alpha", store.StatusPassed, ".runtime/evidence/run-001", `{"stepCount": 1}`,
 			started.Format(time.RFC3339Nano), "", created.CreatedAt.Format(time.RFC3339Nano), created.UpdatedAt.Format(time.RFC3339Nano),
 		}},
 	})
@@ -56,7 +57,7 @@ func TestStoreRecordsAndReadsRunsThroughDatabaseSQL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	if loaded.ID != "run-001" || loaded.Status != store.StatusPassed || loaded.SummaryJSON != `{"stepCount":1}` || !loaded.StartedAt.Equal(started) {
+	if loaded.ID != "run-001" || loaded.EnvironmentID != "env.alpha" || loaded.Status != store.StatusPassed || loaded.SummaryJSON != `{"stepCount":1}` || !loaded.StartedAt.Equal(started) {
 		t.Fatalf("loaded run = %#v", loaded)
 	}
 	query := state.lastQuery(t)
@@ -65,9 +66,9 @@ func TestStoreRecordsAndReadsRunsThroughDatabaseSQL(t *testing.T) {
 	}
 
 	state.queueRows(fakeRows{
-		columns: []string{"id", "profile_id", "workflow_id", "status", "evidence_root", "summary_json", "started_at", "finished_at", "created_at", "updated_at"},
+		columns: []string{"id", "profile_id", "environment_id", "workflow_id", "status", "evidence_root", "summary_json", "started_at", "finished_at", "created_at", "updated_at"},
 		values: [][]driver.Value{{
-			"run-001", "profile.alpha", "workflow.alpha", store.StatusPassed, ".runtime/evidence/run-001", `{"stepCount":1}`,
+			"run-001", "profile.alpha", "env.alpha", "workflow.alpha", store.StatusPassed, ".runtime/evidence/run-001", `{"stepCount":1}`,
 			started.Format(time.RFC3339Nano), "", created.CreatedAt.Format(time.RFC3339Nano), created.UpdatedAt.Format(time.RFC3339Nano),
 		}},
 	})
@@ -88,13 +89,14 @@ func TestStoreRecordsAndReadsRunsUseMySQLDialect(t *testing.T) {
 	started := time.Date(2026, 5, 19, 9, 30, 0, 0, time.UTC)
 
 	created, err := s.CreateRun(ctx, store.Run{
-		ID:           "run-001",
-		ProfileID:    "profile.alpha",
-		WorkflowID:   "workflow.alpha",
-		Status:       store.StatusRunning,
-		EvidenceRoot: ".runtime/evidence/run-001",
-		SummaryJSON:  `{"stepCount":1}`,
-		StartedAt:    started,
+		ID:            "run-001",
+		ProfileID:     "profile.alpha",
+		EnvironmentID: "env.alpha",
+		WorkflowID:    "workflow.alpha",
+		Status:        store.StatusRunning,
+		EvidenceRoot:  ".runtime/evidence/run-001",
+		SummaryJSON:   `{"stepCount":1}`,
+		StartedAt:     started,
 	})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
@@ -103,17 +105,17 @@ func TestStoreRecordsAndReadsRunsUseMySQLDialect(t *testing.T) {
 		t.Fatalf("created run timestamps = %#v", created)
 	}
 	exec := state.lastExec(t)
-	if !strings.Contains(exec.query, "insert into runs") || !strings.Contains(exec.query, "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)") || strings.Contains(exec.query, "$1") {
+	if !strings.Contains(exec.query, "insert into runs") || !strings.Contains(exec.query, "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)") || strings.Contains(exec.query, "$1") {
 		t.Fatalf("create run query did not use mysql bind vars:\n%s", exec.query)
 	}
-	if exec.args[0] != "run-001" || exec.args[5] != `{"stepCount":1}` {
+	if exec.args[0] != "run-001" || exec.args[6] != `{"stepCount":1}` {
 		t.Fatalf("create run args = %#v", exec.args)
 	}
 
 	state.queueRows(fakeRows{
-		columns: []string{"id", "profile_id", "workflow_id", "status", "evidence_root", "summary_json", "started_at", "finished_at", "created_at", "updated_at"},
+		columns: []string{"id", "profile_id", "environment_id", "workflow_id", "status", "evidence_root", "summary_json", "started_at", "finished_at", "created_at", "updated_at"},
 		values: [][]driver.Value{{
-			"run-001", "profile.alpha", "workflow.alpha", store.StatusPassed, ".runtime/evidence/run-001", `{"stepCount": 1}`,
+			"run-001", "profile.alpha", "env.alpha", "workflow.alpha", store.StatusPassed, ".runtime/evidence/run-001", `{"stepCount": 1}`,
 			started.Format(time.RFC3339Nano), "", created.CreatedAt.Format(time.RFC3339Nano), created.UpdatedAt.Format(time.RFC3339Nano),
 		}},
 	})
@@ -121,7 +123,7 @@ func TestStoreRecordsAndReadsRunsUseMySQLDialect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	if loaded.ID != "run-001" || loaded.Status != store.StatusPassed || loaded.SummaryJSON != `{"stepCount":1}` || !loaded.StartedAt.Equal(started) {
+	if loaded.ID != "run-001" || loaded.EnvironmentID != "env.alpha" || loaded.Status != store.StatusPassed || loaded.SummaryJSON != `{"stepCount":1}` || !loaded.StartedAt.Equal(started) {
 		t.Fatalf("loaded run = %#v", loaded)
 	}
 	query := state.lastQuery(t)
@@ -130,9 +132,9 @@ func TestStoreRecordsAndReadsRunsUseMySQLDialect(t *testing.T) {
 	}
 
 	state.queueRows(fakeRows{
-		columns: []string{"id", "profile_id", "workflow_id", "status", "evidence_root", "summary_json", "started_at", "finished_at", "created_at", "updated_at"},
+		columns: []string{"id", "profile_id", "environment_id", "workflow_id", "status", "evidence_root", "summary_json", "started_at", "finished_at", "created_at", "updated_at"},
 		values: [][]driver.Value{{
-			"run-001", "profile.alpha", "workflow.alpha", store.StatusPassed, ".runtime/evidence/run-001", `{"stepCount":1}`,
+			"run-001", "profile.alpha", "env.alpha", "workflow.alpha", store.StatusPassed, ".runtime/evidence/run-001", `{"stepCount":1}`,
 			started.Format(time.RFC3339Nano), "", created.CreatedAt.Format(time.RFC3339Nano), created.UpdatedAt.Format(time.RFC3339Nano),
 		}},
 	})
@@ -153,23 +155,24 @@ func TestPostgresStoreUsesNullForZeroTimestampArgs(t *testing.T) {
 	started := time.Date(2026, 5, 19, 9, 30, 0, 0, time.UTC)
 
 	_, err := s.CreateRun(ctx, store.Run{
-		ID:           "run-001",
-		ProfileID:    "profile.alpha",
-		WorkflowID:   "workflow.alpha",
-		Status:       store.StatusRunning,
-		EvidenceRoot: ".runtime/evidence/run-001",
-		SummaryJSON:  `{"stepCount":1}`,
-		StartedAt:    started,
+		ID:            "run-001",
+		ProfileID:     "profile.alpha",
+		EnvironmentID: "env.alpha",
+		WorkflowID:    "workflow.alpha",
+		Status:        store.StatusRunning,
+		EvidenceRoot:  ".runtime/evidence/run-001",
+		SummaryJSON:   `{"stepCount":1}`,
+		StartedAt:     started,
 	})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 	exec := state.lastExec(t)
-	if exec.args[6] != started {
-		t.Fatalf("started_at arg = %#v, want time.Time", exec.args[6])
+	if exec.args[7] != started {
+		t.Fatalf("started_at arg = %#v, want time.Time", exec.args[7])
 	}
-	if exec.args[7] != nil {
-		t.Fatalf("finished_at arg = %#v, want nil for zero time", exec.args[7])
+	if exec.args[8] != nil {
+		t.Fatalf("finished_at arg = %#v, want nil for zero time", exec.args[8])
 	}
 }
 

@@ -45,6 +45,10 @@ func Open(ctx context.Context, cfg Config) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	if _, err := sqlstore.UpgradeSchema(ctx, db, sqlstore.PostgresDialect{}); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("upgrade postgres store schema: %w", err)
+	}
 	return &Store{core: sqlstore.New(db, sqlstore.PostgresDialect{})}, nil
 }
 

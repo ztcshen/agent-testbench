@@ -779,16 +779,17 @@ func recordTestKitRunWithContext(ctx context.Context, bundle profile.Bundle, run
 		return "", err
 	}
 	_, err = runtime.CreateRun(ctx, store.Run{
-		ID:           runID,
-		ProfileID:    bundle.ID,
-		WorkflowID:   workflowID,
-		Status:       status,
-		EvidenceRoot: evidenceRoot,
-		SummaryJSON:  string(raw),
-		StartedAt:    startedAt,
-		FinishedAt:   finishedAt,
-		CreatedAt:    startedAt,
-		UpdatedAt:    finishedAt,
+		ID:            runID,
+		ProfileID:     bundle.ID,
+		EnvironmentID: valueString(payload["environmentId"]),
+		WorkflowID:    workflowID,
+		Status:        status,
+		EvidenceRoot:  evidenceRoot,
+		SummaryJSON:   string(raw),
+		StartedAt:     startedAt,
+		FinishedAt:    finishedAt,
+		CreatedAt:     startedAt,
+		UpdatedAt:     finishedAt,
 	})
 	if err != nil {
 		return "", err

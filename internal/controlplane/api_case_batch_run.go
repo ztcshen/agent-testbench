@@ -276,7 +276,7 @@ func startAPICaseBatchRun(ctx context.Context, bundle profile.Bundle, runtime st
 	}
 	runner.save(report)
 
-	go runner.run(context.Background(), batchRunID, bundle, request.WorkflowID, plans, runtime, bundle.FailureCategories, collector)
+	go runner.run(context.Background(), batchRunID, bundle, request.EnvironmentID, request.WorkflowID, plans, runtime, bundle.FailureCategories, collector)
 	return report, http.StatusAccepted, nil
 }
 
@@ -327,7 +327,7 @@ func handleAPICaseBatchRunReport(w http.ResponseWriter, r *http.Request, runner 
 	writeJSON(w, report)
 }
 
-func (r *apiCaseBatchRunner) run(ctx context.Context, batchRunID string, bundle profile.Bundle, workflowID string, plans []apiCaseBatchCasePlan, runtime store.Store, rules []profile.FailureCategoryRule, collector traceCollector) {
+func (r *apiCaseBatchRunner) run(ctx context.Context, batchRunID string, bundle profile.Bundle, environmentID string, workflowID string, plans []apiCaseBatchCasePlan, runtime store.Store, rules []profile.FailureCategoryRule, collector traceCollector) {
 	workflowOverrides := map[string]any{}
 	for index, plan := range plans {
 		caseCtx := ctx
@@ -405,9 +405,10 @@ func (r *apiCaseBatchRunner) run(ctx context.Context, batchRunID string, bundle 
 			item.FailureCategory = apiCaseBatchApplyFailureCategoryRules(rules, item.Status, apiCaseBatchFailureCategory(result), item.Error)
 			if runtime != nil {
 				if err := recordAPICaseRunWithContext(ctx, runtime, recordAPICaseRunContext{
-					ProfileID:  bundle.ID,
-					WorkflowID: workflowID,
-					StepID:     plan.StepID,
+					ProfileID:     bundle.ID,
+					EnvironmentID: environmentID,
+					WorkflowID:    workflowID,
+					StepID:        plan.StepID,
 				}, result); err != nil {
 					item.Status = store.StatusFailed
 					item.Error = err.Error()
@@ -830,16 +831,17 @@ func recordAPICaseBatchReportArtifacts(ctx context.Context, runtime store.Store,
 		evidenceRoot = ""
 	}
 	if _, err := runtime.CreateRun(ctx, store.Run{
-		ID:           report.BatchRunID,
-		ProfileID:    strings.TrimSpace(profileID),
-		WorkflowID:   strings.TrimSpace(workflowID),
-		Status:       report.Status,
-		EvidenceRoot: evidenceRoot,
-		SummaryJSON:  compactJSON(report),
-		StartedAt:    startedAt,
-		FinishedAt:   finishedAt,
-		CreatedAt:    startedAt,
-		UpdatedAt:    finishedAt,
+		ID:            report.BatchRunID,
+		ProfileID:     strings.TrimSpace(profileID),
+		EnvironmentID: strings.TrimSpace(report.EnvironmentID),
+		WorkflowID:    strings.TrimSpace(workflowID),
+		Status:        report.Status,
+		EvidenceRoot:  evidenceRoot,
+		SummaryJSON:   compactJSON(report),
+		StartedAt:     startedAt,
+		FinishedAt:    finishedAt,
+		CreatedAt:     startedAt,
+		UpdatedAt:     finishedAt,
 	}); err != nil {
 		return
 	}

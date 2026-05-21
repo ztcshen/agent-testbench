@@ -219,14 +219,15 @@ func handleSaveWorkflowRun(w http.ResponseWriter, r *http.Request, bundle profil
 		return
 	}
 	run, err := runtime.CreateRun(r.Context(), store.Run{
-		ID:           id,
-		ProfileID:    bundle.ID,
-		WorkflowID:   workflowID,
-		Status:       status,
-		EvidenceRoot: valueString(payload["evidenceRoot"]),
-		SummaryJSON:  string(raw),
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:            id,
+		ProfileID:     bundle.ID,
+		EnvironmentID: valueString(payload["environmentId"]),
+		WorkflowID:    workflowID,
+		Status:        status,
+		EvidenceRoot:  valueString(payload["evidenceRoot"]),
+		SummaryJSON:   string(raw),
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	})
 	if err != nil {
 		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
