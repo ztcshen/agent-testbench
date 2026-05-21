@@ -8,3 +8,7 @@ test("Store-first guardrail release-check guidance is SQL Store neutral", () => 
   assert.doesNotMatch(script, /PostgreSQL gate/);
   assert.match(script, /SQL Store gate/);
 });
+
+test("Store-first guardrail blocks Chinese PostgreSQL default-backend wording", () => {
+  assert.match(script, /PostgreSQL 仍是默认后端/);
+});

@@ -2718,3 +2718,27 @@ Current blocker:
   `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+
+## 2026-05-21 Chinese SQL Store Wording Guard Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Fixed the Chinese README product direction so PostgreSQL and MySQL are
+  described as peer product SQL Store engines rather than PostgreSQL as the
+  default backend.
+- Extended the Store-first guardrail phrase scan to catch the Chinese
+  `PostgreSQL 仍是默认后端` wording variant in current docs.
+- Added a guardrail regression test proving that variant remains blocked.
+
+Validated:
+
+- `node --test tools/guardrails/check_store_first_contracts.test.mjs --test-name-pattern 'Chinese PostgreSQL default-backend wording'`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
