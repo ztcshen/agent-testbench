@@ -2451,3 +2451,31 @@ Current blocker:
   `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+
+## 2026-05-21 MySQL Environment Catalog SQL Store Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Added MySQL dialect coverage for Store-backed Environment Catalog upserts and
+  lookups, including verified acceptance metadata.
+- Added MySQL coverage for replacing and reading component graph metadata used
+  by one-click Docker restore: components, startup dependencies, and
+  service-owned DDL assets.
+- Extended the fake SQL driver with minimal transaction support so SQL Store
+  component graph writes can be verified without a live database.
+
+Validated:
+
+- `go test -v ./internal/store/sqlstore -run '^TestStoreEnvironmentCatalogUsesMySQLDialect$' -count=1`
+- `git diff --check`
+- `rg -n -i 'fall''back' . --glob '!node_modules/**'`
+- `tools/guardrails/check_store_first_contracts.sh && tools/guardrails/check_no_source_domain_core.sh`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
