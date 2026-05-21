@@ -156,13 +156,15 @@ run the guarded MySQL release wrapper:
 ```sh
 OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 \
 OTS_TRACE_GRAPHQL_URL="http://skywalking.example/graphql" \
-OTS_SMOKE_TRACE_IDS='{"step-01":"trace-01","step-02":"trace-02","step-03":"trace-03","step-04":"trace-04","step-05":"trace-05","step-06":"trace-06","step-07":"trace-07","step-08":"trace-08","step-09":"trace-09","step-10":"trace-10"}' \
+OTS_SMOKE_EXPECTED_STEPS=2 \
+OTS_SMOKE_TRACE_IDS='{"step-01":"trace-01","step-02":"trace-02"}' \
 OTSANDBOX_REAL_MYSQL_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" \
 npm run release-check:mysql-real:preflight
 
 OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 \
 OTS_TRACE_GRAPHQL_URL="http://skywalking.example/graphql" \
-OTS_SMOKE_TRACE_IDS='{"step-01":"trace-01","step-02":"trace-02","step-03":"trace-03","step-04":"trace-04","step-05":"trace-05","step-06":"trace-06","step-07":"trace-07","step-08":"trace-08","step-09":"trace-09","step-10":"trace-10"}' \
+OTS_SMOKE_EXPECTED_STEPS=2 \
+OTS_SMOKE_TRACE_IDS='{"step-01":"trace-01","step-02":"trace-02"}' \
 OTSANDBOX_REAL_MYSQL_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" \
 npm run release-check:mysql-real
 ```
@@ -180,9 +182,9 @@ It also runs the MySQL Store contract in existing-database mode, so the company
 account needs normal DDL/DML permissions on that dedicated database but does not
 need permission to create or drop databases. This wrapper is final-signoff
 oriented: it also requires `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`,
-an `http` or `https` `OTS_TRACE_GRAPHQL_URL`, and `OTS_SMOKE_TRACE_IDS` for all
-10 workflow steps. It rejects `OTSANDBOX_MYSQL_TEST_DSN_MODE=create-drop`
-overrides.
+an `http` or `https` `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+`OTS_SMOKE_TRACE_IDS` for all configured workflow steps. It rejects
+`OTSANDBOX_MYSQL_TEST_DSN_MODE=create-drop` overrides.
 Direct Go contract tests require an explicit `OTSANDBOX_MYSQL_TEST_DSN_MODE`.
 Use `existing` for company smoke databases. Use `create-drop` only for local
 admin-only contract tests where the account is allowed to create and drop
@@ -199,13 +201,13 @@ Smoke topology collection uses a deterministic synthetic SkyWalking GraphQL
 provider unless `OTS_TRACE_GRAPHQL_URL` is set. That provider is only a local
 wiring check: it proves SQL Store writes, Evidence lookup, and topology
 rendering semantics, but it is not release evidence for a real SkyWalking
-deployment. Set `OTS_TRACE_GRAPHQL_URL` and `OTS_SMOKE_TRACE_IDS`
-step-to-trace mappings when pointing smoke at an external SkyWalking endpoint.
-For final live topology sign-off, set `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1` and
-provide `OTS_SMOKE_TRACE_IDS` mappings for every workflow step from `step-01`
-through `step-10`. When no SkyWalking endpoint is configured, product paths
-must report topology as unavailable, failed, or skipped rather than generating
-an invented topology.
+deployment. Set `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+`OTS_SMOKE_TRACE_IDS` step-to-trace mappings when pointing smoke at an external
+SkyWalking endpoint. For final live topology sign-off, set
+`OTSANDBOX_REQUIRE_REAL_SKYWALKING=1` and provide `OTS_SMOKE_TRACE_IDS`
+mappings for every configured workflow step. When no SkyWalking endpoint is
+configured, product paths must report topology as unavailable, failed, or
+skipped rather than generating an invented topology.
 
 SQLite smoke or demo execution is available only for explicit compatibility
 checks with `OTSANDBOX_ALLOW_SQLITE_COMPAT_SMOKE=1` or

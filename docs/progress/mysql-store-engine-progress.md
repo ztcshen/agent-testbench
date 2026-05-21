@@ -105,7 +105,7 @@ Implemented:
   - `/api/store/current` reports the named MySQL Store and masks the password;
   - `/api/template-packages/catalog-index` and `/api/catalog` read the published
     smoke profile from Store;
-  - `/api/workflows?filter=workflow.alpha` returns the 10-step workflow from
+  - `/api/workflows?filter=workflow.alpha` returns the configured workflow from
     Store;
   - `/api/sandbox/services` writes a new service and `/api/catalog` reads it
     back from the Store-backed catalog.
@@ -220,7 +220,7 @@ Release-check status:
   build and model tests, smoke harness tests, active SQL Store CLI smoke, MySQL
   API Store smoke, and active SQL Store browser smoke.
 - The SkyWalking provider in this proof is still the deterministic synthetic
-  provider because no real `OTS_TRACE_GRAPHQL_URL` and full 10-step trace id set
+  provider because no real `OTS_TRACE_GRAPHQL_URL` and full configured-step trace id set
   were provided in this run.
 
 Remaining gaps:
@@ -228,7 +228,7 @@ Remaining gaps:
 - Run the same release gate against the company's real MySQL test environment
   DSN.
 - Run final real SkyWalking validation with `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`
-  and trace ids for all 10 workflow steps.
+  and trace ids for all configured workflow steps.
 
 ## 2026-05-21 Company MySQL Release Entry Slice
 
@@ -752,8 +752,8 @@ Implemented:
 - Extended the MySQL Store API smoke so a real MySQL DSN run now starts a local
   target HTTP service and triggers `/api/cases/batch-runs` for
   `workflow.alpha`.
-- The smoke now waits for the asynchronous 10-step workflow batch report,
-  requires all 10 steps to pass, and verifies that the report is persisted as a
+- The smoke now waits for the asynchronous configured workflow batch report,
+  requires all configured steps to pass, and verifies that the report is persisted as a
   Store-backed workflow run.
 - The smoke now reads every case Evidence payload by `caseRunId` and checks the
   stored request, response, assertion, run, case, and step fields.
@@ -771,7 +771,7 @@ Current blocker:
   `npm run release-check:mysql-real`.
 - Real SkyWalking release proof still requires
   `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and trace ids
-  for all 10 workflow steps.
+  for all configured workflow steps.
 - MySQL daily parity still has deeper DSN-gated coverage to add for environment
   lifecycle and interface registration APIs.
 
@@ -799,7 +799,7 @@ Current blocker:
   `npm run release-check:mysql-real`.
 - Real SkyWalking release proof still requires
   `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and trace ids
-  for all 10 workflow steps.
+  for all configured workflow steps.
 - MySQL daily parity still has deeper DSN-gated coverage to add for environment
   lifecycle APIs and final live release proof.
 
@@ -828,7 +828,7 @@ Current blocker:
   `npm run release-check:mysql-real`.
 - Real SkyWalking release proof still requires
   `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and trace ids
-  for all 10 workflow steps.
+  for all configured workflow steps.
 - Remaining MySQL daily parity work is now concentrated around final live
   release proof and any deeper DSN-gated environment publish/acceptance checks.
 
@@ -842,7 +842,7 @@ Implemented:
   entry through `/api/environments/{id}/acceptance-runs`.
 - The smoke now starts a local target health endpoint and a SkyWalking smoke
   GraphQL provider, waits for the environment acceptance report, and verifies
-  the SkyWalking acceptance template passes for all 10 workflow steps.
+  the SkyWalking acceptance template passes for all configured workflow steps.
 - The smoke now re-inspects the environment and verifies that the acceptance run
   wrote back `verified-ready`, last verification run/status, Evidence complete,
   and topology complete flags to the MySQL-backed Environment Catalog entry.
@@ -861,7 +861,7 @@ Current blocker:
   `npm run release-check:mysql-real`.
 - Final release proof still requires real SkyWalking:
   `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and trace ids
-  for all 10 workflow steps.
+  for all configured workflow steps.
 - Remaining MySQL daily parity work is now mostly final live release proof and
   optional deeper publish-verified DSN smoke coverage.
 
@@ -891,7 +891,7 @@ Current blocker:
   `npm run release-check:mysql-real`.
 - Final release proof still requires real SkyWalking:
   `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and trace ids
-  for all 10 workflow steps.
+  for all configured workflow steps.
 - MySQL daily API smoke now covers Store current, catalog/workflow discovery,
   async workflow report, Evidence readback, service/interface registration,
   Environment Catalog register/inspect/bootstrap/acceptance, and
@@ -904,8 +904,8 @@ Progress: `[###################-] 98%`
 Implemented:
 
 - Tightened `npm run release-check:mysql-real` so it now requires
-  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps before dry-run or full release
+  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps before dry-run or full release
   execution can pass.
 - Kept the existing dedicated MySQL Store protections: `mysql://` only,
   sandbox/smoke/test/CI-looking database names only, masked credentials, and
@@ -923,8 +923,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then
   `npm run release-check:mysql-real`.
 
 ## 2026-05-21 Explicit MySQL Contract Mode Slice
@@ -951,8 +951,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then
   `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL API Demo DSN Guard Slice
@@ -978,8 +978,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then
   `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL CLI and Frontend Smoke DSN Guard Slice
@@ -1008,8 +1008,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then
   `npm run release-check:mysql-real`.
 
 ## 2026-05-21 Shared SkyWalking Release Guard Slice
@@ -1020,13 +1020,13 @@ Implemented:
 
 - Added a shared SkyWalking release guard for release tooling so real
   SkyWalking GraphQL URL validation, JSON or comma-separated trace-id parsing,
-  and complete 10-step trace-id checks use one rule.
+  and complete configured-step trace-id checks use one rule.
 - Rewired generic `npm run release-check` and guarded
   `npm run release-check:mysql-real` to call the shared guard instead of
   carrying separate inline URL and trace-id parsers.
 - Added focused unit coverage for `http`/`https` GraphQL URLs, non-HTTP
   rejection, JSON and shell trace-id parsing, missing workflow step detection,
-  and complete 10-step acceptance.
+  and complete configured-step acceptance.
 
 Validated:
 
@@ -1038,8 +1038,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then
   `npm run release-check:mysql-real`.
 
 ## 2026-05-21 Generic Release Real SkyWalking URL Guard Slice
@@ -1066,8 +1066,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then
   `npm run release-check:mysql-real`.
 
 ## 2026-05-21 Shared MySQL Smoke DSN Guard Slice
@@ -1095,8 +1095,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then
   `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Smoke Store Safe Database Guard Slice
@@ -1125,8 +1125,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then
   `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Real Release GraphQL URL Validation Slice
@@ -1143,7 +1143,7 @@ Implemented:
   is advertised.
 - Updated public MySQL sign-off docs to state the GraphQL URL must use
   `http` or `https`.
-- Kept the existing dedicated MySQL Store and 10-step trace-id checks
+- Kept the existing dedicated MySQL Store and configured-step trace-id checks
   unchanged.
 
 Validated:
@@ -1154,8 +1154,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then
   `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Real Wrapper Existing Contract Mode Slice
@@ -1184,8 +1184,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then
   `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL CI Release Gate Wiring Slice
@@ -1212,8 +1212,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Environment CLI Daily Path Parity Slice
@@ -1242,8 +1242,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 - More daily-path CLI parity remains valuable, especially sandbox
   service/interface registration, profile import/verify, discover, evidence
@@ -1270,8 +1270,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 - More daily-path CLI parity remains valuable, especially profile
   import/verify, discover, evidence import, and serve/evidence task inspection.
@@ -1298,8 +1298,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 - More daily-path CLI parity remains valuable, especially discover, evidence
   import, and serve/evidence task inspection.
@@ -1325,8 +1325,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 - More daily-path CLI parity remains valuable, especially evidence import and
   serve/evidence task inspection.
@@ -1353,8 +1353,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 - More daily-path CLI parity remains valuable, especially serve/evidence task
   inspection.
@@ -1381,8 +1381,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Workflow Daily Path Parity Slice
@@ -1407,8 +1407,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Case Execution Daily Path Parity Slice
@@ -1434,8 +1434,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Interface Coverage Daily Path Parity Slice
@@ -1467,8 +1467,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Case Report Read Path Parity Slice
@@ -1500,8 +1500,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Baseline and Workflow Plan Parity Slice
@@ -1527,8 +1527,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Executor and Template CLI Parity Slice
@@ -1553,8 +1553,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Workflow Run Read CLI Parity Slice
@@ -1580,8 +1580,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Workflow Audit CLI Parity Slice
@@ -1610,8 +1610,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Case Suite Command Parity Slice
@@ -1640,8 +1640,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Case Suite Coverage Parity Slice
@@ -1671,8 +1671,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Case Suite Inspect Parity Slice
@@ -1701,8 +1701,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Case Suite Plan Parity Slice
@@ -1731,8 +1731,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Case Suite Priority Parity Slice
@@ -1761,8 +1761,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Case Suite Brief Parity Slice
@@ -1791,8 +1791,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Case Suite Stability Parity Slice
@@ -1823,8 +1823,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Case Suite Quality Parity Slice
@@ -1856,8 +1856,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Case Suite Impact Parity Slice
@@ -1886,8 +1886,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Case Suite Impact Report Parity Slice
@@ -1916,8 +1916,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Workflow Failure Report Parity Slice
@@ -1946,8 +1946,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Incomplete Batches Parity Slice
@@ -1976,8 +1976,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Case Discover Parity Slice
@@ -2006,8 +2006,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Case Suite Report Parity Slice
@@ -2037,8 +2037,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Evidence List Parity Slice
@@ -2066,8 +2066,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Sandbox Start Parity Slice
@@ -2095,8 +2095,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Environment Restore Active Store Slice
@@ -2125,8 +2125,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Control Plane Store API Slice
@@ -2151,8 +2151,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL One-Click Restore Policy Slice
@@ -2178,8 +2178,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL One-Click Startup File Policy Slice
@@ -2205,8 +2205,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL One-Click Compose Startup Asset Slice
@@ -2232,8 +2232,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Component Startup Asset Projection Slice
@@ -2260,8 +2260,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Evidence Topology SQL Store Slice
@@ -2288,8 +2288,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Config Read Model SQL Store Slice
@@ -2315,8 +2315,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Profile Catalog SQL Store Slice
@@ -2342,8 +2342,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Migration Execution Slice
@@ -2370,8 +2370,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Run Records SQL Store Slice
@@ -2395,8 +2395,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Latest Case Run SQL Store Slice
@@ -2422,8 +2422,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Environment Catalog Migration Slice
@@ -2448,8 +2448,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Environment Catalog SQL Store Slice
@@ -2476,8 +2476,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 MySQL Wrapper Delegation Slice
@@ -2506,8 +2506,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 - A non-blocking sidecar audit found the next useful polish slice: replace the
   workbench Environment Catalog PostgreSQL-only wording with SQL Store wording
@@ -2536,8 +2536,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 Store DDL Backend Inference Slice
@@ -2564,8 +2564,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 Release Check SQL Store Guidance Slice
@@ -2596,8 +2596,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 SQL Store Dual-Engine Wording Guard Slice
@@ -2612,7 +2612,7 @@ Implemented:
   path and MySQL as a secondary path.
 - Added a release checklist section that makes the current company MySQL final
   sign-off status explicit: generic MySQL wiring exists, but completion still
-  needs real company Store DSN, real SkyWalking URL, 10-step trace ids, and a
+  needs real company Store DSN, real SkyWalking URL, configured workflow step count, configured-step trace ids, and a
   passed `release-check:mysql-real` or `mysql-real-signoff` run.
 - Extended the Store-first guardrail to block current docs from reintroducing
   PostgreSQL-only active-source/default-product wording while excluding
@@ -2628,8 +2628,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 Current Docs SQL Store Wording Sweep
@@ -2659,8 +2659,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 Real MySQL Sign-Off Preflight Slice
@@ -2672,7 +2672,7 @@ Implemented:
 - Added `npm run release-check:mysql-real:preflight` as a light, explicit
   dry-run entrypoint for the guarded company MySQL release wrapper.
 - The preflight uses the same MySQL DSN, dedicated database-name guard,
-  existing-database mode, real SkyWalking requirement, 10-step trace-id mapping,
+  existing-database mode, real SkyWalking requirement, configured workflow step count, configured-step trace-id mapping,
   and credential masking as `npm run release-check:mysql-real`, but stops before
   invoking the heavy release gate.
 - Added a regression test that calls the npm script and verifies it runs the
@@ -2688,8 +2688,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then first
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then first
   `npm run release-check:mysql-real:preflight`, followed by either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
@@ -2715,8 +2715,8 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
 
 ## 2026-05-21 Chinese SQL Store Wording Guard Slice
@@ -2739,6 +2739,49 @@ Validated:
 Current blocker:
 
 - Final completion still requires the actual company values:
-  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+
+## 2026-05-21 Core README Capability Refresh Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Refreshed the English and Chinese root README files to reflect the current
+  system shape: PostgreSQL/MySQL peer product SQL Store engines, SQLite
+  compatibility boundary, Environment Catalog restore, target Docker
+  orchestration, acceptance workflow proof, Evidence, real SkyWalking topology,
+  and the strict company MySQL sign-off gate.
+- Updated `docs/index.md` so new users, environment operators, and agent/CI
+  integrators can find the Store, restore, topology, and release sign-off
+  surfaces quickly.
+- Expanded `examples/api-cases/README.md` from a one-line format pointer into a
+  small example README that explains PostgreSQL/MySQL demo Store usage,
+  dedicated MySQL smoke database naming, SQLite compatibility, and links to the
+  broader docs.
+- Aligned backend capability docs, quickstart, docs index, and roadmap with the
+  current Store-first surface: template package APIs under
+  `/api/template-packages/*`, Environment Catalog restore and acceptance CLI
+  commands, optional template package artifacts, and company MySQL real
+  sign-off evidence as the remaining release proof.
+- Removed fixed internal step-count wording from the public docs and smoke
+  harness language. Real SkyWalking release checks now require
+  `OTS_SMOKE_EXPECTED_STEPS`, so the strict topology gate validates the
+  configured workflow length instead of assuming a business-specific length.
+
+Validated:
+
+- `tools/guardrails/check_store_first_contracts.sh && tools/guardrails/check_no_source_domain_core.sh`
+- `node --test tools/smoke/skywalking-release-guard.test.mjs tools/smoke/control-plane-smoke.test.mjs tools/smoke/mysql-store-api-smoke.test.mjs tools/smoke/release-check.test.mjs`
+- `git diff --check`
+- `rg -n -i 'fall''back' . --glob '!node_modules/**'`
+- `rg -n "10-step|10 steps|10 workflow|10 步|10个|10 个|all 10|step-10|core 10|核心 10" README.md README.zh-CN.md docs examples tools/smoke --glob '!docs/progress/**' --glob '!docs/plans/**'`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+  `OTS_SMOKE_TRACE_IDS` for all configured workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.

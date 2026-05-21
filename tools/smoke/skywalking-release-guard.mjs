@@ -1,4 +1,15 @@
-const defaultExpectedSteps = 10;
+function expectedStepCount(env = process.env, configured) {
+  const raw = String(env.OTS_SMOKE_EXPECTED_STEPS || "").trim();
+  if (!raw) {
+    if (configured) return configured;
+    throw new Error("OTS_SMOKE_EXPECTED_STEPS must be set to the configured workflow step count.");
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error("OTS_SMOKE_EXPECTED_STEPS must be a positive integer.");
+  }
+  return parsed;
+}
 
 export function parseTraceIDs(value) {
   const raw = String(value || "").trim();
@@ -25,7 +36,7 @@ export function isHTTPGraphQLURL(value) {
 
 export function requireSkyWalkingReleaseInputs(env = process.env, {
   label = "release-check",
-  expectedSteps = defaultExpectedSteps,
+  expectedSteps,
 } = {}) {
   if (!String(env.OTS_TRACE_GRAPHQL_URL || "").trim()) {
     throw new Error(`${label} requires OTS_TRACE_GRAPHQL_URL.`);
@@ -33,14 +44,15 @@ export function requireSkyWalkingReleaseInputs(env = process.env, {
   if (!isHTTPGraphQLURL(env.OTS_TRACE_GRAPHQL_URL)) {
     throw new Error(`${label} requires OTS_TRACE_GRAPHQL_URL to be an http/https URL.`);
   }
+  expectedSteps = expectedStepCount(env, expectedSteps);
   if (!String(env.OTS_SMOKE_TRACE_IDS || "").trim()) {
-    throw new Error(`${label} requires OTS_SMOKE_TRACE_IDS for the ${expectedSteps}-step workflow.`);
+    throw new Error(`${label} requires OTS_SMOKE_TRACE_IDS for every configured workflow step.`);
   }
   const traceIDs = parseTraceIDs(env.OTS_SMOKE_TRACE_IDS);
   const missing = Array.from({ length: expectedSteps }, (_, index) => `step-${String(index + 1).padStart(2, "0")}`)
     .filter((stepID) => !traceIDs[stepID]);
   if (missing.length > 0) {
-    throw new Error(`${label} requires OTS_SMOKE_TRACE_IDS for all ${expectedSteps} workflow steps; missing: ${missing.join(" ")}.`);
+    throw new Error(`${label} requires OTS_SMOKE_TRACE_IDS for every configured workflow step; missing: ${missing.join(" ")}.`);
   }
   return { traceIDs, expectedSteps };
 }

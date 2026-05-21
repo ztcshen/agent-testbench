@@ -1,7 +1,8 @@
 # Quick Start
 
-This guide starts from an empty checkout and runs a neutral local import bundle. It
-does not require a hosted service or a team-owned import bundle bundle.
+This guide starts from an empty checkout, configures a SQL Store, and runs a
+neutral local smoke flow. It does not require a hosted service or a team-owned
+template package.
 
 ## Prerequisites
 
@@ -32,9 +33,9 @@ The release check requires a PostgreSQL or MySQL smoke Store DSN. It runs Go
 tests, the source-domain guardrail, the React build, active SQL Store CLI
 smoke, and a SQL Store headless browser smoke test against a generated generic import
 bundle. For final live topology sign-off, add
-`OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and
-`OTS_SMOKE_TRACE_IDS` with trace id mappings for every workflow step from
-`step-01` through `step-10` so release-check fails instead of using the
+`OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`,
+`OTS_SMOKE_EXPECTED_STEPS`, and `OTS_SMOKE_TRACE_IDS` with trace id mappings
+for every configured workflow step so release-check fails instead of using the
 synthetic SkyWalking provider or a partial trace-id set.
 The demo command starts a temporary local HTTP endpoint, runs the generic
 `examples/api-cases/create-item.json` case against the active SQL Store, or
@@ -78,26 +79,28 @@ For the company MySQL path, validate against a dedicated sandbox Store database:
 ```sh
 OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 \
 OTS_TRACE_GRAPHQL_URL="http://skywalking.example/graphql" \
-OTS_SMOKE_TRACE_IDS='{"step-01":"trace-01","step-02":"trace-02","step-03":"trace-03","step-04":"trace-04","step-05":"trace-05","step-06":"trace-06","step-07":"trace-07","step-08":"trace-08","step-09":"trace-09","step-10":"trace-10"}' \
+OTS_SMOKE_EXPECTED_STEPS=2 \
+OTS_SMOKE_TRACE_IDS='{"step-01":"trace-01","step-02":"trace-02"}' \
 OTSANDBOX_REAL_MYSQL_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" \
 npm run release-check:mysql-real:preflight
 
 OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 \
 OTS_TRACE_GRAPHQL_URL="http://skywalking.example/graphql" \
-OTS_SMOKE_TRACE_IDS='{"step-01":"trace-01","step-02":"trace-02","step-03":"trace-03","step-04":"trace-04","step-05":"trace-05","step-06":"trace-06","step-07":"trace-07","step-08":"trace-08","step-09":"trace-09","step-10":"trace-10"}' \
+OTS_SMOKE_EXPECTED_STEPS=2 \
+OTS_SMOKE_TRACE_IDS='{"step-01":"trace-01","step-02":"trace-02"}' \
 OTSANDBOX_REAL_MYSQL_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" \
 npm run release-check:mysql-real
 ```
 
 Run `release-check:mysql-real:preflight` first with the same environment. It
 checks the MySQL DSN, dedicated database-name guard, existing-database mode,
-real SkyWalking settings, full 10-step trace-id mapping, and credential masking
+real SkyWalking settings, configured workflow trace-id mapping, and credential masking
 without running the heavy release gate. The full wrapper rejects non-MySQL DSNs
 and database names that do not look dedicated to sandbox/smoke/test/CI
 validation. It uses existing-database contract mode, so the company account
 needs normal DDL/DML permissions on that dedicated Store database but does not
 need permission to create or drop databases. It also requires the real
-SkyWalking release mode and trace ids for all 10 workflow steps;
+SkyWalking release mode and trace ids for every configured workflow step;
 `OTS_TRACE_GRAPHQL_URL` must be an `http` or `https` URL. Synthetic topology
 smoke is not accepted by this wrapper, and `OTSANDBOX_MYSQL_TEST_DSN_MODE=create-drop`
 overrides are rejected.
@@ -146,7 +149,7 @@ signal; collect real topology separately through a configured SkyWalking
 endpoint before publishing a verified environment.
 
 `environment restore` is anchored to the environment's verification workflow,
-for example the team core 10-step workflow. It prepares the local machine from
+for example the team core configured workflow. It prepares the local machine from
 the Store-backed environment facts instead of acting as a generic Docker
 launcher. The SQL Store stores compact source pointers and restore rules, not
 source archives, Docker images, logs, or Evidence payloads. For
@@ -254,28 +257,28 @@ commands or start-command steps, health checks, and the verification workflow
 are returned as a plan for UI review. The API does not execute local Docker; execution stays in the
 CLI restore path.
 
-## Create and Install a Import Bundle
+## Optional: Create a Template Package Artifact
 
 ```sh
-import bundle_dir="$(mktemp -d)/import bundle"
-./bin/otsandbox.sh import bundle init \
-  --output "$import bundle_dir" \
+template_dir="$(mktemp -d)/template-package"
+./bin/otsandbox.sh template-package init \
+  --output "$template_dir" \
   --id sample \
-  --display-name "Sample Import Bundle"
-
-./bin/otsandbox.sh import bundle install --from "$import bundle_dir"
-./bin/otsandbox.sh import bundle verify --import bundle sample --store local-personal
+  --display-name "Sample Template Package"
+./bin/otsandbox.sh template-package install --from "$template_dir" --force
+./bin/otsandbox.sh template-package verify --template-package "$template_dir" --store local-personal --force
 ```
 
-The core repository intentionally ships without bundled import bundles. A import bundle is
-the source-owned configuration bundle for services, workflows, interface nodes,
-API cases, templates, fixtures, and bindings.
+The core repository intentionally ships without bundled team template packages.
+Template packages are optional import/export/review/migration artifacts for
+services, workflows, interface nodes, API cases, templates, fixtures, and
+bindings. They are not the normal daily maintenance surface; daily testing uses
+the active SQL Store, Environment Catalog, CLI/API discovery, and the workbench.
 
 ## Start the Workbench
 
 ```sh
 ./bin/otsandbox.sh serve \
-  --import bundle sample \
   --store local-personal \
   --host 127.0.0.1 \
   --port 18191
@@ -290,7 +293,8 @@ command with `--store NAME_OR_DSN`.
 
 ## Next Steps
 
-- Read [import bundle-authoring.md](import bundle-authoring.md) to build a real bundle.
+- Read [profile-authoring.md](profile-authoring.md) to build an optional
+  template package artifact for import, export, review, or migration.
 - Read [cli-api-contracts.md](cli-api-contracts.md) before wiring an agent or
   CI job to the sandbox.
 - Read [api-case-format.md](api-case-format.md) for runnable case files and

@@ -50,16 +50,17 @@ test("MySQL API smoke refuses likely business databases", () => {
   );
 });
 
-test("MySQL API smoke validates the async 10-step workflow batch report", () => {
+test("MySQL API smoke validates the async configured workflow batch report", () => {
+  const expectedSteps = 3;
   assertWorkflowBatchReport({
     ok: true,
     status: "passed",
     workflowId: "workflow.alpha",
-    total: 10,
-    completed: 10,
-    passed: 10,
+    total: expectedSteps,
+    completed: expectedSteps,
+    passed: expectedSteps,
     failed: 0,
-    cases: Array.from({ length: 10 }, (_, index) => ({
+    cases: Array.from({ length: expectedSteps }, (_, index) => ({
       caseId: `case.step-${String(index + 1).padStart(2, "0")}`,
       stepId: `step-${String(index + 1).padStart(2, "0")}`,
       status: "passed",
@@ -150,6 +151,7 @@ test("MySQL API smoke validates Environment Catalog registration payloads", () =
 });
 
 test("MySQL API smoke validates Environment acceptance report payloads", () => {
+  const expectedSteps = 3;
   assertEnvironmentAcceptancePayload({
     report: {
       ok: true,
@@ -157,20 +159,20 @@ test("MySQL API smoke validates Environment acceptance report payloads", () => {
       batchRunId: "batch.mysql-api-smoke",
       workflowId: "workflow.alpha",
       status: "passed",
-      total: 10,
-      completed: 10,
-      passed: 10,
+      total: expectedSteps,
+      completed: expectedSteps,
+      passed: expectedSteps,
       failed: 0,
       acceptance: {
         ok: true,
         workflowId: "workflow.alpha",
-        expectedSteps: 10,
-        completedSteps: 10,
-        passedSteps: 10,
+        expectedSteps,
+        completedSteps: expectedSteps,
+        passedSteps: expectedSteps,
         failedSteps: 0,
         topologyProvider: "skywalking",
         healthSummary: { total: 1, passed: 1, failed: 0 },
-        steps: Array.from({ length: 10 }, (_, index) => ({
+        steps: Array.from({ length: expectedSteps }, (_, index) => ({
           stepId: `step-${String(index + 1).padStart(2, "0")}`,
           evidenceComplete: true,
           topologyComplete: true,

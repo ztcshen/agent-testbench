@@ -6,6 +6,13 @@ import path from "node:path";
 
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
+function configuredTraceIDs(expectedSteps = 3) {
+  return JSON.stringify(Object.fromEntries(Array.from({ length: expectedSteps }, (_, index) => {
+    const step = `step-${String(index + 1).padStart(2, "0")}`;
+    return [step, `trace-${step}`];
+  })));
+}
+
 function releaseCheckEnv(overrides = {}) {
   const env = { ...process.env };
   delete env.OTS_TRACE_GRAPHQL_URL;
@@ -87,10 +94,8 @@ test("release-check real SkyWalking mode rejects invalid GraphQL URLs before exp
     const result = runReleaseCheck(releaseCheckEnv({
       OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
       OTS_TRACE_GRAPHQL_URL: graphQLURL,
-      OTS_SMOKE_TRACE_IDS: JSON.stringify(Object.fromEntries(Array.from({ length: 10 }, (_, index) => {
-        const step = `step-${String(index + 1).padStart(2, "0")}`;
-        return [step, `trace-${step}`];
-      }))),
+      OTS_SMOKE_EXPECTED_STEPS: "3",
+      OTS_SMOKE_TRACE_IDS: configuredTraceIDs(),
     }));
 
     assert.equal(result.status, 1, graphQLURL);
@@ -119,10 +124,11 @@ test("release-check accepts uppercase SQL Store schemes before expensive gates",
   assert.doesNotMatch(postgres.stdout, /running Go tests/);
 });
 
-test("release-check real SkyWalking mode requires 10-step trace ids before expensive gates", () => {
+test("release-check real SkyWalking mode requires configured workflow trace ids before expensive gates", () => {
   const result = runReleaseCheck(releaseCheckEnv({
     OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
     OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
+    OTS_SMOKE_EXPECTED_STEPS: "3",
   }));
 
   assert.equal(result.status, 1);
@@ -130,15 +136,16 @@ test("release-check real SkyWalking mode requires 10-step trace ids before expen
   assert.doesNotMatch(result.stdout, /running Go tests/);
 });
 
-test("release-check real SkyWalking mode requires trace ids for every workflow step", () => {
+test("release-check real SkyWalking mode requires trace ids for every configured workflow step", () => {
   const result = runReleaseCheck(releaseCheckEnv({
     OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
     OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
+    OTS_SMOKE_EXPECTED_STEPS: "3",
     OTS_SMOKE_TRACE_IDS: "step-01=trace.real.01",
   }));
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /all 10 workflow steps/);
+  assert.match(result.stderr, /every configured workflow step/);
   assert.match(result.stderr, /step-02/);
   assert.doesNotMatch(result.stdout, /running Go tests/);
 });
@@ -147,22 +154,16 @@ test("release-check real SkyWalking mode rejects empty workflow step trace ids",
   const result = runReleaseCheck(releaseCheckEnv({
     OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
     OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
+    OTS_SMOKE_EXPECTED_STEPS: "3",
     OTS_SMOKE_TRACE_IDS: [
       "step-01=trace.real.01",
       "step-02=",
       "step-03=trace.real.03",
-      "step-04=trace.real.04",
-      "step-05=trace.real.05",
-      "step-06=trace.real.06",
-      "step-07=trace.real.07",
-      "step-08=trace.real.08",
-      "step-09=trace.real.09",
-      "step-10=trace.real.10",
     ].join(","),
   }));
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /all 10 workflow steps/);
+  assert.match(result.stderr, /every configured workflow step/);
   assert.match(result.stderr, /step-02/);
   assert.doesNotMatch(result.stdout, /running Go tests/);
 });
@@ -209,10 +210,8 @@ test("real MySQL release wrapper rejects invalid or non-http SkyWalking GraphQL 
       OTSANDBOX_REAL_MYSQL_STORE_DSN: "mysql://user:secret@example.com:3306/otsandbox_smoke?tls=false",
       OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
       OTS_TRACE_GRAPHQL_URL: graphQLURL,
-      OTS_SMOKE_TRACE_IDS: JSON.stringify(Object.fromEntries(Array.from({ length: 10 }, (_, index) => {
-        const step = `step-${String(index + 1).padStart(2, "0")}`;
-        return [step, `trace-${step}`];
-      }))),
+      OTS_SMOKE_EXPECTED_STEPS: "3",
+      OTS_SMOKE_TRACE_IDS: configuredTraceIDs(),
       OTSANDBOX_REAL_MYSQL_RELEASE_DRY_RUN: "1",
     });
 
@@ -228,10 +227,8 @@ test("real MySQL release wrapper requires existing-database contract mode", () =
     OTSANDBOX_REAL_MYSQL_STORE_DSN: "mysql://user:secret@example.com:3306/otsandbox_smoke?tls=false",
     OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
     OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
-    OTS_SMOKE_TRACE_IDS: JSON.stringify(Object.fromEntries(Array.from({ length: 10 }, (_, index) => {
-      const step = `step-${String(index + 1).padStart(2, "0")}`;
-      return [step, `trace-${step}`];
-    }))),
+    OTS_SMOKE_EXPECTED_STEPS: "3",
+    OTS_SMOKE_TRACE_IDS: configuredTraceIDs(),
     OTSANDBOX_MYSQL_TEST_DSN_MODE: "create-drop",
     OTSANDBOX_REAL_MYSQL_RELEASE_DRY_RUN: "1",
   });
@@ -247,10 +244,8 @@ test("real MySQL release wrapper dry-run masks credentials and accepts smoke dat
     OTSANDBOX_REAL_MYSQL_STORE_DSN: "MYSQL://user:secret@example.com:3306/otsandbox_smoke?tls=false",
     OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
     OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
-    OTS_SMOKE_TRACE_IDS: JSON.stringify(Object.fromEntries(Array.from({ length: 10 }, (_, index) => {
-      const step = `step-${String(index + 1).padStart(2, "0")}`;
-      return [step, `trace-${step}`];
-    }))),
+    OTS_SMOKE_EXPECTED_STEPS: "3",
+    OTS_SMOKE_TRACE_IDS: configuredTraceIDs(),
     OTSANDBOX_REAL_MYSQL_RELEASE_DRY_RUN: "1",
   });
 
@@ -267,10 +262,8 @@ test("real MySQL release preflight npm script runs the guarded dry-run", () => {
     OTSANDBOX_REAL_MYSQL_STORE_DSN: "mysql://user:secret@example.com:3306/otsandbox_smoke?tls=false",
     OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
     OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
-    OTS_SMOKE_TRACE_IDS: JSON.stringify(Object.fromEntries(Array.from({ length: 10 }, (_, index) => {
-      const step = `step-${String(index + 1).padStart(2, "0")}`;
-      return [step, `trace-${step}`];
-    }))),
+    OTS_SMOKE_EXPECTED_STEPS: "3",
+    OTS_SMOKE_TRACE_IDS: configuredTraceIDs(),
   });
 
   assert.equal(result.status, 0);
@@ -286,10 +279,8 @@ test("real MySQL release wrapper accepts shared smoke Store env", () => {
     OTSANDBOX_SMOKE_STORE: "mysql://user:secret@example.com:3306/otsandbox_smoke?tls=false",
     OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
     OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
-    OTS_SMOKE_TRACE_IDS: JSON.stringify(Object.fromEntries(Array.from({ length: 10 }, (_, index) => {
-      const step = `step-${String(index + 1).padStart(2, "0")}`;
-      return [step, `trace-${step}`];
-    }))),
+    OTS_SMOKE_EXPECTED_STEPS: "3",
+    OTS_SMOKE_TRACE_IDS: configuredTraceIDs(),
     OTSANDBOX_REAL_MYSQL_RELEASE_DRY_RUN: "1",
   });
 

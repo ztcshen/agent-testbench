@@ -41,6 +41,21 @@ Open Test Sandbox turns those pieces into one local control plane. The Store is
 the live source of truth; CLI, Control plane APIs, the React workbench, reports,
 and validation tools all read the same facts.
 
+## Current Shape
+
+- **Store engines**: PostgreSQL and MySQL are the product SQL Store engines;
+  SQLite remains only for legacy migration, compatibility checks, and tests.
+- **Daily workflow**: configure or switch a named Store once, then use the same
+  CLI/API/UI commands for local and remote SQL Stores.
+- **Environment Catalog**: register environments, inspect bootstrap plans,
+  restore target Docker stacks from remote service repositories, record
+  acceptance workflow results, and publish only verified environments.
+- **Acceptance proof**: verified environments require a passed workflow run,
+  indexed Evidence, and real SkyWalking topology stored in the selected Store.
+- **Release gates**: generic PostgreSQL/MySQL `release-check` is wired; company
+  MySQL final sign-off uses the stricter two-stage real SkyWalking gate and is
+  still pending real company secrets and trace ids.
+
 ## What You Get
 
 | Capability | What it means |
@@ -50,7 +65,9 @@ and validation tools all read the same facts.
 | Agent-friendly discovery | Agents call discovery APIs first, then run reports with exact returned ids instead of hidden prompt knowledge. |
 | API case execution | Run one HTTP case, a maintained case suite, or only the failed/not-run part of a suite; render requests, assert responses, write Evidence, and index results into Store. |
 | Workflow execution | Run ordered workflow steps and keep per-step Evidence, timing, status, logs, and topology. |
+| Environment restore | Store-backed Environment Catalog entries can plan or execute remote repository preparation, compact startup-file generation, Docker Compose pull/build/up, health checks, and the bound verification workflow. |
 | Evidence detail APIs | Query request, response, assertions, precondition context, stored topology, persisted logs, artifact manifests, failure summaries, status, and elapsed time by run or case run id. |
+| Real topology gate | Synthetic SkyWalking smoke is useful for wiring, but final verified-environment and company MySQL sign-off require a live SkyWalking endpoint and trace ids for every configured workflow step. |
 | Control plane workbench | A React workbench reads the same Store/read-models as CLI and API users. |
 | Open-source guardrails | Release checks prevent generated state and source-domain terms from entering the generic core. |
 
@@ -94,11 +111,12 @@ headless browser smoke tests.
 By default, smoke tests use a deterministic synthetic SkyWalking GraphQL
 provider so local wiring checks are repeatable. This is not release evidence
 for a real SkyWalking deployment. To validate the real topology path, set
-`OTS_TRACE_GRAPHQL_URL` and `OTS_SMOKE_TRACE_IDS` so the 10-step smoke uses real
-trace ids. For final sign-off that must fail instead of using synthetic
-topology evidence, also set `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`; in that mode
-`OTS_SMOKE_TRACE_IDS` must map every workflow step from `step-01` through
-`step-10`. When no SkyWalking endpoint is configured, topology collection must
+`OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
+`OTS_SMOKE_TRACE_IDS` so the configured workflow smoke uses real trace ids. For
+final sign-off that must fail instead of using synthetic topology evidence,
+also set `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`; in that mode
+`OTS_SMOKE_TRACE_IDS` must map every configured workflow step.
+When no SkyWalking endpoint is configured, topology collection must
 report unavailable, failed, or skipped status instead of inventing a topology.
 
 ## Architecture
@@ -107,6 +125,8 @@ report unavailable, failed, or skipped status instead of inventing a topology.
 Sandbox APIs and UI
   -> active SQL Store (PostgreSQL or MySQL)
   -> catalog read-models
+  -> Environment Catalog and component graph
+  -> remote service repos plus target Docker runtime
   -> CLI discovery, Control plane APIs, React workbench
   -> case and workflow execution
   -> Evidence files plus Store indexes
@@ -131,12 +151,13 @@ Core packages stay generic:
 | Page | What it covers |
 | --- | --- |
 | [Quick Start](docs/quickstart.md) | First local run, Store setup, and workbench launch direction. |
-| [Backend Capabilities](docs/backend-capabilities.md) | Store, discovery, execution, reports, Evidence, APIs, and release guardrails. |
+| [Backend Capabilities](docs/backend-capabilities.md) | Store, Environment Catalog, clean-machine restore, discovery, execution, reports, Evidence, APIs, and release guardrails. |
 | [Share Kit](docs/share-kit.md) | Project tagline, short descriptions, demo script, and announcement snippets for sharing the project. |
 | [Roadmap](docs/roadmap.md) | Public development themes and contribution-friendly milestones. |
 | [API Case Format](docs/api-case-format.md) | Runnable HTTP case JSON and Evidence output contract. |
-| [CLI and API Contracts](docs/cli-api-contracts.md) | Agent/CI discovery, reports, asynchronous batches, and failed-case Evidence lookup. |
-| [Release Checklist](docs/release-checklist.md) | Local and CI gates before publishing. |
+| [Store Backends](docs/store-backends.md) | PostgreSQL/MySQL Store setup, MySQL safety guards, and SQLite compatibility boundary. |
+| [CLI and API Contracts](docs/cli-api-contracts.md) | Agent/CI discovery, Environment Catalog lifecycle, reports, asynchronous batches, topology collection, and failed-case Evidence lookup. |
+| [Release Checklist](docs/release-checklist.md) | Local gates, CI gates, real SkyWalking requirements, and company MySQL final sign-off. |
 | [Visual Overview](docs/core-capabilities-skills-goals.html) | Bilingual capability map, API surface, data flow, and goals. |
 
 ## Project Principles
@@ -159,22 +180,32 @@ target product model.
 
 Current working areas:
 
-- Store lifecycle: status, upgrade, runtime indexes, contract tests;
-- maintenance: API case metadata, searchable case catalog, and suite coverage;
-- execution: single API case, maintained case suites, interface-node reports,
-  workflow reports;
-- Evidence: request, response, assertions, summaries, logs, topology, timing;
-- workbench: local React pages backed by Control plane APIs;
-- release gate: `OTSANDBOX_SMOKE_STORE_DSN=postgres://... npm run release-check`
+- Store lifecycle: named PostgreSQL/MySQL config, active Store switching,
+  backend-specific DDL, schema status/upgrade, and contract tests.
+- Catalog maintenance: API case metadata, searchable case catalog, request
+  templates, fixtures, dependencies, workflow bindings, and suite coverage.
+- Execution: single API case, maintained case suites, async batch surfaces,
+  interface-node reports, workflow reports, and persisted workflow run lookup.
+- Evidence: request, response, assertions, summaries, logs, topology, timing,
+  artifact manifests, failure summaries, and redaction for sensitive fields.
+- Environment Catalog: Store-backed environment register/discover/inspect,
+  bootstrap plan, restore diagnostics, component graph readiness, remote service
+  repository preparation, Docker Compose/start orchestration, health gates,
+  acceptance workflow recording, and verified publishing gates.
+- Workbench: local React pages backed by Control plane APIs for catalog,
+  workflow, environment, run, Evidence, and topology review.
+- Release gate: `OTSANDBOX_SMOKE_STORE_DSN=postgres://... npm run release-check`
   or `OTSANDBOX_SMOKE_STORE_DSN=mysql://... npm run release-check`; for a
   company MySQL Store sign-off, run `npm run release-check:mysql-real:preflight`
   first, then `npm run release-check:mysql-real` with
-  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`, and
-  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps.
+  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`,
+  `OTS_SMOKE_EXPECTED_STEPS`, and `OTS_SMOKE_TRACE_IDS` for every configured
+  workflow step.
 
-Next areas are Store-first registration APIs, a cleaner current-state workbench,
-stronger post-process scheduling, verified environment bootstrap, and richer
-public examples.
+Remaining release proof is operational rather than architectural: the company
+MySQL final sign-off still needs the real MySQL Store DSN, real SkyWalking
+GraphQL endpoint, configured workflow step count, and complete trace-id mapping
+for that workflow to run the strict gate.
 
 ## Contributing
 

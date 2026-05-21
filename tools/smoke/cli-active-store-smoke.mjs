@@ -10,7 +10,8 @@ import { assertSkyWalkingTopologyEvidence, assertWorkflowCaseEvidence, prepareSm
 import { requireSafeMySQLStoreDSN } from "./mysql-store-dsn-guard.mjs";
 
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
-const cliSmokeSteps = Array.from({ length: 10 }, (_, index) => {
+const cliSmokeStepCount = 3;
+const cliSmokeSteps = Array.from({ length: cliSmokeStepCount }, (_, index) => {
   const number = String(index + 1).padStart(2, "0");
   const id = `step-${number}`;
   return {
@@ -187,7 +188,7 @@ async function main() {
     const plan = await runJSON(["workflow", "plan", "--workflow", "workflow.alpha", "--json"], env);
     const planSteps = Array.isArray(plan?.steps) ? plan.steps : [];
     if (planSteps.length !== cliSmokeSteps.length) {
-      throw new Error(`workflow plan did not read 10 active Store steps: ${JSON.stringify(plan)}`);
+      throw new Error(`workflow plan did not read all active Store steps: ${JSON.stringify(plan)}`);
     }
 
     const report = await runJSON([
@@ -235,7 +236,7 @@ async function main() {
     }
     const tasks = await runJSON(["evidence", "tasks", "--run", report.runId, "--kind", "trace_topology_collect", "--json"], env);
     if (tasks?.counts?.passed !== cliSmokeSteps.length || tasks?.counts?.failed !== 0) {
-      throw new Error(`post-process tasks did not show 10 passed topology collections: ${JSON.stringify(tasks)}`);
+      throw new Error(`post-process tasks did not show all passed topology collections: ${JSON.stringify(tasks)}`);
     }
   } finally {
     await closeServer(targetServer);

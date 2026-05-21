@@ -8,7 +8,7 @@ Open Test Sandbox 目前仍是 pre-1.0。路线图重点是降低试用门槛、
 
 ## Now / 当前
 
-- Keep the core repository generic and free of bundled team import bundles.
+- Keep the core repository generic and free of bundled team template packages.
 - Maintain a green `npm run release-check` gate.
 - Treat the product as a CLI-first, SQL Store-first testing workbench.
   PostgreSQL and MySQL are supported product Store engines; teams should choose
@@ -34,7 +34,7 @@ Open Test Sandbox 目前仍是 pre-1.0。路线图重点是降低试用门槛、
 - Improve README, bilingual docs, and first-run experience.
 - Keep CLI and API contracts documented as they change.
 
-- 保持核心仓库通用，不内置团队 import bundle。
+- 保持核心仓库通用，不内置团队 template package。
 - 保持 `npm run release-check` 门禁稳定通过。
 - 将产品定位为 CLI-first、SQL Store-first 的测试工作台。PostgreSQL 与 MySQL
   都是产品 Store 引擎；团队按自己的运维环境选择。每个隔离边界使用独立 Store
@@ -56,8 +56,8 @@ Open Test Sandbox 目前仍是 pre-1.0。路线图重点是降低试用门槛、
 
 ## Next / 下一阶段
 
-- Add richer generic example import bundles that remain safe for open-source use.
-- Improve import bundle authoring ergonomics and validation messages.
+- Add richer generic example template packages that remain safe for open-source use.
+- Improve template package authoring ergonomics and validation messages.
 - Continue improving post-process task inspection for topology, logs, and
   reports. API and CLI task payloads now include clear passed, skipped, and
   failed Evidence collection reasons through `outcome`, `reason`, and
@@ -65,8 +65,8 @@ Open Test Sandbox 目前仍是 pre-1.0。路线图重点是降低试用门槛、
 - Expand report templates while keeping them compact and table-first.
 - Add more focused smoke checks for CLI report generation.
 
-- 增加更丰富但仍然通用的公开示例 import bundle。
-- 改善 import bundle 作者体验和校验错误信息。
+- 增加更丰富但仍然通用的公开示例 template package。
+- 改善 template package 作者体验和校验错误信息。
 - 让拓扑、日志、报告等后处理任务更容易查看，并清晰展示 Evidence 采集的
   成功、跳过和失败原因。
 - 扩展报告模板，同时保持紧凑、表格优先。
@@ -74,21 +74,23 @@ Open Test Sandbox 目前仍是 pre-1.0。路线图重点是降低试用门槛、
 
 ## Later / 后续
 
-- Complete the SQL Store rollout across PostgreSQL and MySQL, and keep SQLite
-  only for legacy compatibility/import paths.
-- Harden verified Environment Catalog promotion so only passed verification
-  workflows with complete Evidence and real SkyWalking topology can be published.
+- Collect company-environment MySQL sign-off evidence with a real MySQL Store
+  DSN, live SkyWalking GraphQL endpoint, and trace ids for every configured
+  workflow step.
+- Deepen clean-machine restore evidence across more Docker Compose stacks and
+  middleware combinations.
 - Publish versioned releases and binary artifacts.
-- Provide a plugin-style import bundle bundle workflow for teams.
+- Provide a plugin-style template package workflow for optional
+  import/export/review artifacts.
 - Continue broadening redaction guidance and raw-artifact opt-in controls for
   Evidence and reports.
 - Build a small public demo site or recorded walkthrough.
 
-- 完成覆盖 PostgreSQL 与 MySQL 的 SQL Store rollout，并仅把 SQLite 保留为旧兼容/导入路径。
-- 强化环境目录 verified 发布门槛，只有工作流验收通过且 Evidence 与真实
-  SkyWalking 拓扑完整的环境才能发布。
+- 使用真实 MySQL Store DSN、live SkyWalking GraphQL endpoint 和覆盖配置工作流的
+  trace id 收集公司环境 MySQL 最终验收证据。
+- 在更多 Docker Compose 栈和中间件组合上深化干净机器恢复证据。
 - 发布版本化 release 和二进制产物。
-- 提供面向团队的 import bundle bundle 插件式工作流。
+- 为可选导入、导出、审阅资产提供插件式模板包工作流。
 - 继续完善 Evidence/报告脱敏指南和 raw artifact 显式查看控制。
 - 建立小型公开 demo 站点或录屏 walkthrough。
 

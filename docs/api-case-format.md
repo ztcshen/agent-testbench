@@ -2,7 +2,7 @@
 
 API Cases are reviewable JSON files that describe one HTTP interaction, the
 assertions to check, and the Evidence files a run should produce. They are
-import bundle-neutral: domain language belongs in external import bundle bundles and
+template package-neutral: domain language belongs in external template packages and
 example data, not in the core runner.
 
 ## Case File
@@ -105,7 +105,7 @@ records:
 
 The profile id comes from `--profile` and defaults to `default`. Store indexing
 does not replace the Evidence bundle; it makes local runs searchable and
-connects them to the active SQL Store, import bundle, or workflow records.
+connects them to the active SQL Store, template package, or workflow records.
 
 The deprecated compatibility flag `--store-url` is reserved for migration and
 legacy compatibility paths. Daily SQL Store-first usage should use an active
@@ -133,7 +133,7 @@ Content-Type: application/json
 }
 ```
 
-Use `nodeIds` to run all import bundle API cases attached to one or more interface
+Use `nodeIds` to run all template package API cases attached to one or more interface
 nodes. To run a workflow-shaped regression, send `workflowId` instead:
 
 ```json
@@ -145,7 +145,7 @@ nodes. To run a workflow-shaped regression, send `workflowId` instead:
 
 The response is `202 Accepted` and contains a `batchRunId`, JSON `reportUrl`,
 and temporary HTML `htmlReportUrl`. The batch runner selects every matching
-import bundle API case, returns immediately, and executes the selected cases in the
+template package API case, returns immediately, and executes the selected cases in the
 background. Workflow selection follows `workflowBindings` sorted by
 `sortOrder` and `stepId`. Each finished case is still recorded as a normal API
 case run with Evidence and Store rows.

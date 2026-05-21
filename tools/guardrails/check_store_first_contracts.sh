@@ -95,12 +95,12 @@ if ! rg -q 'OTSANDBOX_REQUIRE_REAL_SKYWALKING=1' tools/release-check.sh || ! rg 
 fi
 
 if ! rg -q 'OTSANDBOX_REQUIRE_REAL_SKYWALKING=1' tools/release-check.sh || ! rg -q 'requires OTS_SMOKE_TRACE_IDS' tools/smoke/skywalking-release-guard.mjs; then
-  echo "release-check real SkyWalking mode must require OTS_SMOKE_TRACE_IDS for the 10-step workflow." >&2
+  echo "release-check real SkyWalking mode must require OTS_SMOKE_TRACE_IDS for the configured workflow." >&2
   violations=1
 fi
 
-if ! rg -q 'all 10 workflow steps' tools/release-check.sh tools/smoke/skywalking-release-guard.mjs docs/release-checklist.md; then
-  echo "release-check real SkyWalking mode must require trace ids for all 10 workflow steps." >&2
+if ! rg -q 'every configured workflow step' tools/smoke/skywalking-release-guard.mjs docs/release-checklist.md; then
+  echo "release-check real SkyWalking mode must require trace ids for every configured workflow step." >&2
   violations=1
 fi
 
@@ -109,8 +109,8 @@ if ! rg -q 'OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 requires OTS_TRACE_GRAPHQL_URL' 
   violations=1
 fi
 
-if ! rg -q 'all 10 workflow steps' tools/smoke/control-plane-smoke.mjs tools/smoke/control-plane-smoke.test.mjs; then
-  echo "control-plane smoke harness must require trace ids for all 10 workflow steps in real SkyWalking mode." >&2
+if ! rg -q 'every configured workflow step' tools/smoke/control-plane-smoke.mjs tools/smoke/control-plane-smoke.test.mjs; then
+  echo "control-plane smoke harness must require trace ids for every configured workflow step in real SkyWalking mode." >&2
   violations=1
 fi
 

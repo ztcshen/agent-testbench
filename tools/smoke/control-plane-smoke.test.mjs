@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { prepareSmokeTraceProvider, requireCompleteSmokeTraceIDs, smokeTraceID, writeSmokeProfile } from "./control-plane-smoke.mjs";
+import { prepareSmokeTraceProvider, requireCompleteSmokeTraceIDs, smokeStepIDs, smokeTraceID, smokeWorkflowStepCount, writeSmokeProfile } from "./control-plane-smoke.mjs";
 
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
@@ -160,12 +160,12 @@ describe("control-plane smoke Store selection", () => {
         OTS_TRACE_GRAPHQL_URL: "http://skywalking.example/graphql",
         OTS_SMOKE_TRACE_IDS: "step-01=trace.real.01",
       }),
-      /all 10 workflow steps.*step-02/,
+      /every configured workflow step.*step-02/,
     );
   });
 
-  it("accepts required real SkyWalking mode with all 10 trace ids", async () => {
-    const traceIDs = Array.from({ length: 10 }, (_, index) => `step-${String(index + 1).padStart(2, "0")}=trace.real.${String(index + 1).padStart(2, "0")}`).join(",");
+  it("accepts required real SkyWalking mode with all configured trace ids", async () => {
+    const traceIDs = smokeStepIDs.map((stepID) => `${stepID}=trace.real.${stepID.replace("step-", "")}`).join(",");
     requireCompleteSmokeTraceIDs({ OTS_SMOKE_TRACE_IDS: traceIDs });
     const provider = await prepareSmokeTraceProvider({
       OTSANDBOX_REQUIRE_REAL_SKYWALKING: "1",
@@ -217,30 +217,19 @@ describe("control-plane smoke Evidence assertions", () => {
 });
 
 describe("control-plane smoke workflow shape", () => {
-  it("models the core button workflow as ten Store-backed steps", async () => {
+  it("models the core button workflow as configured Store-backed steps", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "ots-smoke-profile-"));
     try {
       const profileDir = await writeSmokeProfile(tempDir, 18080);
       const raw = await readFile(path.join(profileDir, "profile.json"), "utf8");
       const profile = JSON.parse(raw);
       assert.equal(profile.workflows.length, 1);
-      assert.equal(profile.services.length, 10);
-      assert.equal(new Set(profile.services.map((item) => item.id)).size, 10);
-      assert.equal(profile.workflowBindings.length, 10);
-      assert.equal(profile.apiCases.length, 10);
-      assert.equal(profile.templateConfigs.filter((item) => item.templateId === "case-execution").length, 10);
-      assert.deepEqual(profile.workflowBindings.map((item) => item.stepId), [
-        "step-01",
-        "step-02",
-        "step-03",
-        "step-04",
-        "step-05",
-        "step-06",
-        "step-07",
-        "step-08",
-        "step-09",
-        "step-10",
-      ]);
+      assert.equal(profile.services.length, smokeWorkflowStepCount);
+      assert.equal(new Set(profile.services.map((item) => item.id)).size, smokeWorkflowStepCount);
+      assert.equal(profile.workflowBindings.length, smokeWorkflowStepCount);
+      assert.equal(profile.apiCases.length, smokeWorkflowStepCount);
+      assert.equal(profile.templateConfigs.filter((item) => item.templateId === "case-execution").length, smokeWorkflowStepCount);
+      assert.deepEqual(profile.workflowBindings.map((item) => item.stepId), smokeStepIDs);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

@@ -6,11 +6,11 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { prepareSmokeTraceProvider, writeSmokeProfile } from "./control-plane-smoke.mjs";
+import { prepareSmokeTraceProvider, smokeWorkflowStepCount, writeSmokeProfile } from "./control-plane-smoke.mjs";
 import { requireSafeMySQLStoreDSN } from "./mysql-store-dsn-guard.mjs";
 
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
-const workflowStepCount = 10;
+const workflowStepCount = smokeWorkflowStepCount;
 
 export function requiredMySQLDSN(env = process.env) {
   const dsn = env.OTSANDBOX_MYSQL_API_SMOKE_DSN || env.OTSANDBOX_SMOKE_STORE_DSN || env.OTSANDBOX_SMOKE_STORE || "";
@@ -408,17 +408,17 @@ async function main() {
     assertNoRawSecret(currentHTTP, dsn);
 
     const index = await waitForJSON(`${baseURL}/api/template-packages/catalog-index`);
-    if (index.profileId !== "smoke" || index.counts?.workflows !== 1 || index.counts?.apiCases !== 10) {
+    if (index.profileId !== "smoke" || index.counts?.workflows !== 1 || index.counts?.apiCases !== workflowStepCount) {
       throw new Error(`unexpected MySQL catalog index: ${JSON.stringify(index)}`);
     }
 
     const catalog = await waitForJSON(`${baseURL}/api/catalog`);
-    if (catalog.source?.kind !== "store" || catalog.source?.id !== "smoke" || catalog.workflows?.length !== 1 || catalog.services?.length !== 10) {
+    if (catalog.source?.kind !== "store" || catalog.source?.id !== "smoke" || catalog.workflows?.length !== 1 || catalog.services?.length !== workflowStepCount) {
       throw new Error(`unexpected MySQL catalog payload: ${JSON.stringify(catalog.source || catalog)}`);
     }
 
     const workflows = await waitForJSON(`${baseURL}/api/workflows?filter=workflow.alpha`);
-    if (!workflows.ok || workflows.source?.kind !== "store" || workflows.count !== 1 || workflows.items?.[0]?.stepCount !== 10) {
+    if (!workflows.ok || workflows.source?.kind !== "store" || workflows.count !== 1 || workflows.items?.[0]?.stepCount !== workflowStepCount) {
       throw new Error(`unexpected MySQL workflow discovery payload: ${JSON.stringify(workflows)}`);
     }
 
@@ -455,7 +455,7 @@ async function main() {
       healthUrl: "http://127.0.0.1:19090/health",
       status: "active",
     });
-    if (!registration.ok || registration.counts?.services !== 11) {
+    if (!registration.ok || registration.counts?.services !== workflowStepCount + 1) {
       throw new Error(`unexpected MySQL service registration payload: ${JSON.stringify(registration)}`);
     }
     const interfaceRegistration = await postJSON(`${baseURL}/api/sandbox/interfaces`, {

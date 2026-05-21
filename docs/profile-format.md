@@ -1,14 +1,15 @@
-# Import Bundle Bundle Format
+# Template Package Artifact Format
 
-A import bundle bundle is a reviewable directory of configuration assets kept outside
-the Open Test Sandbox core repository. The minimum bundle contains a
-`import bundle.json` manifest.
+A template package is a reviewable import/export artifact kept outside the Open
+Test Sandbox core repository. It is useful for sharing, migration, and review,
+but daily testing should use the active PostgreSQL/MySQL SQL Store. The minimum
+package contains a `profile.json` manifest during the legacy schema transition.
 
 ```json
 {
   "id": "empty",
-  "displayName": "Empty Import Bundle",
-  "description": "A neutral import bundle with no services, workflows, cases, or fixtures.",
+  "displayName": "Empty Template Package",
+  "description": "A neutral template package with no services, workflows, cases, or fixtures.",
   "services": [],
   "workflows": [],
   "interfaceNodes": [],
@@ -24,10 +25,10 @@ the Open Test Sandbox core repository. The minimum bundle contains a
 
 ## Manifest Fields
 
-- `id`: stable import bundle identifier.
-- `displayName`: human-readable import bundle name.
-- `description`: optional import bundle summary.
-- `services`: systems or dependencies involved in the import bundle.
+- `id`: stable template package identifier.
+- `displayName`: human-readable template package name.
+- `description`: optional template package summary.
+- `services`: systems or dependencies involved in the template package.
 - `workflows`: template-driven sequences of testable steps.
 - `interfaceNodes`: observable interfaces that cases can target.
 - `apiCases`: runnable interface tests.
@@ -39,30 +40,30 @@ the Open Test Sandbox core repository. The minimum bundle contains a
 - `caseDependencies`: fixture requirements and mappings for cases.
 - `workflowBindings`: links from workflow steps to interface nodes and cases.
 - `fixtures`: input or precondition data for cases and workflows. Fixtures can
-  include `dataJson` when a import bundle owns small JSON data needed for request
+  include `dataJson` when a template package owns small JSON data needed for request
   template rendering.
 - `templateConfigs`: optional presentation and execution configuration for
-  generic Control plane templates. Keep import bundle-specific workflow targets here
+  generic Control plane templates. Keep template package-specific workflow targets here
   instead of hardcoding them into core UI templates.
 
 Configuration remains file-first outside core. Store records are generated
 runtime indexes and read-models used by the Control plane; they are not the
-source of truth for import bundle assets.
+source of truth for template package assets.
 
 Publish a bundle before serving it through the workbench:
 
 ```sh
-otsandbox import bundle init --output /path/to/import bundle-bundle --id sample
-otsandbox import bundle install --from /path/to/import bundle-bundle
-otsandbox import bundle verify --import bundle sample --store local-personal
-otsandbox serve --import bundle sample --store local-personal
+otsandbox template-package init --output /path/to/template-package --id sample
+otsandbox template-package install --from /path/to/template-package
+otsandbox template-package verify --template-package sample --store local-personal
+otsandbox serve --profile sample --store local-personal
 ```
 
-For local bootstrapping, `otsandbox serve --import bundle /path/to/import bundle-bundle`
+For local bootstrapping, `otsandbox serve --profile /path/to/template-package`
 first publishes the external bundle into the Store/read-model, then serves that
 indexed view.
 
-The init command refuses output paths under the core repository's `import bundles/`
+The init command refuses output paths under the core repository's `template-packages/`
 directory. This keeps generated bundles external even during local experiments.
 It also writes a bundle-local `.gitignore` for generated runtime state such as
 `.runtime/`, local compatibility database files, database sidecar files, and
@@ -70,88 +71,89 @@ local logs.
 
 ## Standard Local Placement
 
-Installed import bundle bundles live outside the core repository. By default the CLI
-uses `$HOME/.otsandbox/import bundles`; set `OTSANDBOX_IMPORT_BUNDLE_HOME` or pass
-`--import bundle-home PATH` to use a team checkout, mounted volume, or temporary test
-directory.
+Installed template packages live outside the core repository. By default the CLI
+uses `$HOME/.otsandbox/profiles`; pass `--profile-home PATH` to use a team
+checkout, mounted volume, or temporary test directory.
 
 ```sh
-otsandbox import bundle install --from /path/to/import bundle-bundle
-otsandbox import bundle list
-otsandbox import bundle pack --import bundle sample --output sample-import bundle.tar.gz
-otsandbox import bundle inspect --import bundle sample
-otsandbox import bundle verify --import bundle sample --store local-personal
+otsandbox template-package install --from /path/to/template-package
+otsandbox template-package list
+otsandbox template-package pack --template-package sample --output sample-template-package.tar.gz
+otsandbox template-package inspect --template-package sample
+otsandbox template-package verify --template-package sample --store local-personal
 ```
 
-`import bundle install` copies the external bundle into the import bundle home under the
-bundle's `id`. It accepts either a import bundle directory or a `.tar.gz` / `.tgz`
-archive created by `import bundle pack`. The copy is intentionally source-focused:
-generated runtime state, local compatibility database files, logs, and VCS directories
-are skipped. Use `--force` to replace an already installed bundle. Commands
-that accept import bundle bundles (`inspect`, `audit`, `verify`, `import`, and
-`config publish`) accept either a filesystem path or an installed import bundle id.
-`serve --import bundle ID --import bundle-home PATH` follows the same resolution rule.
+`template-package install` copies the external package into the template package
+home under the package `id`. It accepts either a package directory or a
+`.tar.gz` / `.tgz` archive created by `template-package pack`. The copy is
+source-focused: generated runtime state, local compatibility database files,
+logs, and VCS directories are skipped. Use `--force` to replace an already
+installed package. Commands that accept template packages (`inspect`, `audit`,
+`verify`, `import`, and `config publish`) accept either a filesystem path or an
+installed package id.
 
-`import bundle list` and `GET /api/import bundle/installed` are tolerant of a mixed import bundle
-home. If one installed directory has a malformed manifest, the list still
-returns the other import bundles and includes an item with `valid: false` plus an
-`error` message for the broken directory. The workbench disables invalid
-installed import bundles in the selector instead of hiding the problem.
+`template-package list` and `GET /api/template-packages/installed` are tolerant
+of a mixed package home. If one installed directory has a malformed manifest,
+the list still returns the other packages and includes an item with
+`valid: false` plus an `error` message for the broken directory. The workbench
+disables invalid installed packages in the selector instead of hiding the
+problem.
 
-Use `import bundle pack --import bundle PATH_OR_ID --output bundle.tar.gz` to create a
-clean distributable archive for review or handoff. The command accepts either a
-filesystem path or an installed import bundle id, uses the same runtime/VCS filtering
-as `import bundle install`, and writes import bundle files under an archive root named after
-the import bundle id. Archive installation is path-safe: entries that would escape the
-archive root are rejected. `import bundle audit`, `import bundle import`, `import bundle verify`,
-and `config publish` can also accept a packed archive directly; they install
-the archive into the configured import bundle home before auditing or writing
-Store/read-model data. Pass `--force` when a matching installed import bundle should
-be replaced.
+Use `template-package pack --profile PATH_OR_ID --output package.tar.gz` to
+create a clean distributable archive for review or handoff. The command accepts
+either a filesystem path or an installed package id, uses the same runtime/VCS
+filtering as `template-package install`, and writes files under an archive root
+named after the package id. Archive installation is path-safe: entries that
+would escape the archive root are rejected. `template-package audit`,
+`template-package import`, `template-package verify`, and `config publish` can
+also accept a packed archive directly; they install the archive into the
+configured package home before auditing or writing Store/read-model data. Pass
+`--force` when a matching installed package should be replaced.
 
 The Control plane exposes the same local placement surface:
 
-- `GET /api/import bundle/installed`: list installed import bundle bundles.
-- `POST /api/import bundle/install`: install a bundle from a local path or packed
-  archive into the configured import bundle home.
-- `POST /api/import bundle/import` and `POST /api/import bundle/verify`: accept either a
-  local path, packed archive, or installed import bundle id in the `path` field.
-  Archive paths are installed into the configured import bundle home first, then the
-  installed bundle is published or verified. Pass `force: true` when a matching
-  installed import bundle should be replaced.
+- `GET /api/template-packages/installed`: list installed template packages.
+- `POST /api/template-packages/install`: install a package from a local path or
+  packed archive into the configured template package home.
+- `POST /api/template-packages/import` and
+  `POST /api/template-packages/verify`: accept either a local path, packed
+  archive, or installed package id in the `path` field. Archive paths are
+  installed into the configured template package home first, then the installed
+  package is published or verified. Pass `force: true` when a matching installed
+  package should be replaced.
 
-The workbench Import Bundle panel lists installed import bundles, can install a bundle from
-a local path, and can publish or verify the selected import bundle id.
+The workbench template package panel lists installed packages, can install a
+package from a local path, and can publish or verify the selected package id.
 
 ## Audit
 
-Use `otsandbox import bundle audit --import bundle PATH` to check a bundle before or after
-import. The audit verifies basic reference integrity across workflows, API
+Use `otsandbox template-package audit --profile PATH --offline-template-package`
+to check a package before or after import. The audit verifies basic reference integrity across workflows, API
 Cases, request templates, fixtures, case dependencies, and workflow bindings.
 For example, it reports a workflow binding that points to a missing workflow,
 an API Case that points to a missing interface node, or a case dependency that
 points to a missing fixture.
 
-Add `--store NAME_OR_DSN` to include the selected Store import bundle index and
+Add `--store NAME_OR_DSN` to include the selected Store template package index and
 API Case run status in the report. Add `--json` when another tool needs a stable
 machine-readable report.
 
-Use `--require-audit-ok` with `import bundle import` or `config publish` when the
+Use `--require-audit-ok` with `template-package import` or `config publish` when the
 publish step must fail before Store/read-model writes if reference integrity
 issues are found. The Control plane import API exposes the same behavior with
 `requireAuditOk: true`.
 
-Use `otsandbox import bundle verify --import bundle PATH --store NAME_OR_DSN` as the standard
-acceptance command for an external bundle. It audits the bundle, publishes
-it only if the audit is clean, then checks that the import bundle index, active config
+Use `otsandbox template-package verify --template-package PATH --store NAME_OR_DSN`
+as the standard acceptance command for an external package. It audits the
+package, publishes it only if the audit is clean, then checks that the package index, active config
 version, catalog index, and base Control plane read-models were written for the
 same published config version. The Control plane exposes the same flow through
-`POST /api/import bundle/verify`, and the workbench Import Bundle panel provides a matching
+`POST /api/template-packages/verify`, and the workbench template package panel provides a matching
 `验收并发布` action.
 
 Add `--require-case-runs` when acceptance should also prove runtime coverage.
-With that gate enabled, `import bundle verify` checks every API Case declared by the
-import bundle against the Store's latest API Case run records and fails unless each
+With that gate enabled, `template-package verify` checks every API Case declared by the
+package against the Store's latest API Case run records and fails unless each
 case has a latest passed run. The Control plane accepts `requireCaseRuns: true`,
 and the workbench exposes the same gate as `要求用例已通过`.
 
@@ -168,7 +170,7 @@ same failed report inline.
 ## Split Assets
 
 Large bundles can keep assets in deterministic JSON directories next to
-`import bundle.json`:
+`profile.json`:
 
 - `services/*.json`
 - `workflows/*.json`
@@ -185,7 +187,7 @@ declared directly in the manifest.
 
 ## Template Configs
 
-Use `templateConfigs` to tune generic Control plane templates from import bundle
+Use `templateConfigs` to tune generic Control plane templates from template package
 configuration. A workflow directory target can be declared with a default
 `workflow-directory` scoped config:
 
@@ -202,37 +204,37 @@ configuration. A workflow directory target can be declared with a default
 
 The Control plane exposes this as `GET /api/catalog` under
 `presentation.workflowFinder`. UI code should read these values from the
-import bundle/catalog payload; concrete workflow targets belong in import bundle
+template package/catalog payload; concrete workflow targets belong in template package
 configuration, not in core templates.
 
 ## Import Planning
 
-Open Test Sandbox can derive reviewable import bundle asset plans from external API
+Open Test Sandbox can derive reviewable template package asset plans from external API
 descriptions or captured HTTP traffic without writing those assets directly
 into a bundle. The first planners are small JSON planners inspired by the
 reference backlog: Microcks and Schemathesis motivate schema/API asset import,
 while Keploy motivates record/replay import from captured traffic.
 
 Use the CLI to inspect the plan before copying any generated assets into a
-import bundle bundle:
+template package:
 
 ```sh
-otsandbox import bundle import-plan openapi --from /path/to/openapi.json --service-id service.catalog --evidence-dir .runtime/openapi --json
-otsandbox import bundle import-plan http-capture --from /path/to/traffic.json --service-id service.catalog --evidence-dir .runtime/replay --json
-otsandbox import bundle generation-plan openapi --from /path/to/openapi.json --service-id service.catalog --evidence-dir .runtime/generated --json
+otsandbox template-package import-plan openapi --from /path/to/openapi.json --service-id service.catalog --evidence-dir .runtime/openapi --json
+otsandbox template-package import-plan http-capture --from /path/to/traffic.json --service-id service.catalog --evidence-dir .runtime/replay --json
+otsandbox template-package generation-plan openapi --from /path/to/openapi.json --service-id service.catalog --evidence-dir .runtime/generated --json
 ```
 
 Add `--output-dir PATH` to write the same plan as reviewable files:
 
 - `import-plan.json`: full source, generated asset, and written-file summary.
 - `services/*.json`, `interface-nodes/*.json`, `request-templates/*.json`,
-  and `cases/*.json`: import bundle split assets ready for review.
+  and `cases/*.json`: template package split assets ready for review.
 - `api-cases/*.json`: runnable API case files referenced by the generated
   `apiCases[].casePath` values.
 
-The planner deliberately produces `draft` assets. Import Bundle authors or agents must
+The planner deliberately produces `draft` assets. Template Package authors or agents must
 review and apply the generated assets before they become part of a maintained
-suite. This keeps the core import bundle source reviewable and avoids silently
+suite. This keeps the core template package source reviewable and avoids silently
 activating generated tests.
 
 Current planner scope:
@@ -255,7 +257,7 @@ case metadata, and generated API case file bodies. The output directory is a
 review surface, not an automatic publish step. YAML, schema expansion, negative
 cases beyond missing required fields, stateful workflow generation, eBPF
 capture, database/queue virtualization, time freezing, and direct writes into
-an existing import bundle bundle are intentionally left for later slices.
+an existing template package are intentionally left for later slices.
 
 ## API Case Run Fields
 
@@ -296,22 +298,22 @@ review, and assign case suites without editing the core repository:
 - `casePath`: path to the runnable API Case JSON file.
 - `sourceKind`, `sourcePath`, `executorId`: optional external executable source
   reference for cases owned by tools such as Karate, Playwright, pytest, or
-  custom import bundle executors. This is a compatibility hook, not a new core DSL.
+  custom template package executors. This is a compatibility hook, not a new core DSL.
   Suite quality treats an external source as runnable only when it references an
-  active import bundle executor.
+  active template package executor.
 - `baseUrl`: default target URL for live runs.
 - `evidenceDir`: optional runtime Evidence output directory.
 - `timeoutSeconds`: optional request timeout for the control plane run API.
-- `defaultOverrides`: optional import bundle-owned defaults passed to the page.
+- `defaultOverrides`: optional template package-owned defaults passed to the page.
 
 Use `otsandbox case discover` to query this metadata after publishing the
-import bundle into a Store.
+template package into a Store.
 
 ## Executor Descriptors
 
-Import Bundles can describe external test tools without making Open Test Sandbox own
+Template packages can describe external test tools without making Open Test Sandbox own
 those tools. This follows the reference-backed executor model: define existing
-test tools or scripts as reviewable import bundle assets, then let a caller inspect
+test tools or scripts as reviewable template package assets, then let a caller inspect
 readiness before deciding whether to run them.
 
 ```json
@@ -331,7 +333,7 @@ Supported descriptor kinds are `http-case`, `playwright`, `postman`, `k6`,
 surface is a dry-run plan:
 
 ```sh
-otsandbox executor plan --import bundle /path/to/import bundle --json
+otsandbox executor plan --profile /path/to/template-package --json
 ```
 
 The plan validates ids, supported kinds, active status, required source paths or
@@ -358,7 +360,7 @@ tool descriptor.
 
 ## Failure Categories
 
-Import Bundles can define local failure category rules for batch reports. This follows
+Template packages can define local failure category rules for batch reports. This follows
 the reference-backed Allure category model: rules are evaluated in order and the
 first matching rule wins. The rule only changes the report-facing
 `failureCategory`; it does not change case execution status.

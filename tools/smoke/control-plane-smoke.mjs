@@ -10,7 +10,9 @@ import { chromium } from "playwright";
 import { requireSafeMySQLStoreDSN } from "./mysql-store-dsn-guard.mjs";
 
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
-const smokeStepIDs = Array.from({ length: 10 }, (_, index) => `step-${String(index + 1).padStart(2, "0")}`);
+export const smokeWorkflowStepCount = 3;
+export const smokeStepIDs = Array.from({ length: smokeWorkflowStepCount }, (_, index) => `step-${String(index + 1).padStart(2, "0")}`);
+const smokeCatalogTemplateCount = (smokeWorkflowStepCount * 2) + 2;
 
 function smokeTraceOverrides(env = process.env) {
   const raw = String(env.OTS_SMOKE_TRACE_IDS || "").trim();
@@ -38,7 +40,7 @@ export function missingSmokeTraceIDSteps(env = process.env) {
 export function requireCompleteSmokeTraceIDs(env = process.env) {
   const missing = missingSmokeTraceIDSteps(env);
   if (missing.length > 0) {
-    throw new Error(`OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 requires OTS_SMOKE_TRACE_IDS for all 10 workflow steps; missing: ${missing.join(" ")}`);
+    throw new Error(`OTSANDBOX_REQUIRE_REAL_SKYWALKING=1 requires OTS_SMOKE_TRACE_IDS for every configured workflow step; missing: ${missing.join(" ")}`);
   }
 }
 
@@ -287,8 +289,8 @@ export async function writeSmokeProfile(baseDir, targetPort) {
         scopeId: "_default",
         configJson: JSON.stringify({
           workflowFinder: {
-            targetStepCount: 10,
-            targetInterfaceCount: 10,
+            targetStepCount: smokeWorkflowStepCount,
+            targetInterfaceCount: smokeWorkflowStepCount,
             targetLabel: "Configured workflow target",
           },
         }),
@@ -781,12 +783,12 @@ async function main() {
     if (imported.profileId !== "smoke") throw new Error(`unexpected import payload: ${JSON.stringify(imported)}`);
 
     const index = await waitForJSON(`${baseURL}/api/template-packages/catalog-index`);
-    if (index.profileId !== "smoke" || index.counts.workflows !== 1 || index.counts.templates !== 22 || index.counts.templateConfigs !== 22) {
+    if (index.profileId !== "smoke" || index.counts.workflows !== 1 || index.counts.templates !== smokeCatalogTemplateCount || index.counts.templateConfigs !== smokeCatalogTemplateCount) {
       throw new Error(`unexpected catalog index: ${JSON.stringify(index)}`);
     }
     const catalog = await waitForJSON(`${baseURL}/api/catalog`);
     const finder = catalog.presentation?.workflowFinder;
-    if (finder?.targetStepCount !== 10 || finder?.targetInterfaceCount !== 10 || finder?.targetLabel !== "Configured workflow target") {
+    if (finder?.targetStepCount !== smokeWorkflowStepCount || finder?.targetInterfaceCount !== smokeWorkflowStepCount || finder?.targetLabel !== "Configured workflow target") {
       throw new Error(`unexpected workflow finder config: ${JSON.stringify(catalog.presentation)}`);
     }
 
@@ -800,7 +802,7 @@ async function main() {
         { path: "/workflow-blueprint-demo.html?workflow=workflow.alpha", root: "#react-workflow-blueprint-demo-root" },
         { path: "/workflow-blueprint-new.html", root: "#react-workflow-blueprint-demo-root" },
         { path: "/api-cases.html", root: "#react-api-cases-root", presentText: ["API Case 工作台", "Coverage matrix", "Case Management Search", "Readiness groups"] },
-        { path: "/api-cases.html?workflow=workflow.alpha", root: "#react-api-cases-root", presentText: ["WORKFLOW CASE SET", "Workflow Alpha", "10 steps", "10 interfaces", "10 cases", "Workflow case sequence", "Case 1", "service.step-01", "Runs"], presentHrefs: ["/interface-nodes.html?serviceId=service.step-01&workflow=workflow.alpha&case=case.step-01", "/case-runs.html?case=case.step-01&workflow=workflow.alpha"] },
+        { path: "/api-cases.html?workflow=workflow.alpha", root: "#react-api-cases-root", presentText: ["WORKFLOW CASE SET", "Workflow Alpha", `${smokeWorkflowStepCount} steps`, `${smokeWorkflowStepCount} interfaces`, `${smokeWorkflowStepCount} cases`, "Workflow case sequence", "Case 1", "service.step-01", "Runs"], presentHrefs: ["/interface-nodes.html?serviceId=service.step-01&workflow=workflow.alpha&case=case.step-01", "/case-runs.html?case=case.step-01&workflow=workflow.alpha"] },
         { path: "/interface-nodes.html?serviceId=service.step-01&workflow=workflow.alpha&case=case.step-01", root: "#react-interface-nodes-root", presentText: ["Workflow case set", "Node 1", "service.step-01"], presentHrefs: ["/interface-node.html?id=node.step-01&workflow=workflow.alpha&case=case.step-01", "/api-cases.html?workflow=workflow.alpha&case=case.step-01"] },
         { path: "/interface-node.html?id=node.step-01&workflow=workflow.alpha&case=case.step-01", root: "#react-interface-node-root", presentText: ["Workflow case set"], presentHrefs: ["/api-cases.html?workflow=workflow.alpha&case=case.step-01"] },
         { path: "/case-runs.html", root: "#react-case-runs-root", presentText: ["Run Analysis Center", "Case run report workbench", "Failure triage", "Report Grid"] },
