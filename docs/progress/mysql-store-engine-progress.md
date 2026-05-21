@@ -2398,3 +2398,30 @@ Current blocker:
   `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+
+## 2026-05-21 MySQL Latest Case Run SQL Store Slice
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Extended latest API case run SQL Store coverage from PostgreSQL-only to
+  PostgreSQL and MySQL dialect parity.
+- Verified the MySQL path uses the same latest-per-case window query that
+  backs case suite coverage and workflow/report state.
+- Kept the existing PostgreSQL latest case run assertion intact while adding
+  the MySQL branch.
+
+Validated:
+
+- `go test -v ./internal/store/sqlstore -run '^TestStoreListsLatestAPICaseRunsThroughDatabaseSQL$' -count=1`
+- `git diff --check`
+- `rg -n -i 'fall''back' . --glob '!node_modules/**'`
+- `tools/guardrails/check_store_first_contracts.sh && tools/guardrails/check_no_source_domain_core.sh`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.

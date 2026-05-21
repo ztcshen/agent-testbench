@@ -226,30 +226,41 @@ func TestStoreRecordsAndReadsAPICaseRunsThroughDatabaseSQL(t *testing.T) {
 }
 
 func TestStoreListsLatestAPICaseRunsThroughDatabaseSQL(t *testing.T) {
-	ctx := context.Background()
-	db, state := openFakeSQLDB(t)
-	defer db.Close()
-	s := sqlstore.New(db, sqlstore.PostgresDialect{})
-	createdAt := time.Date(2026, 5, 19, 9, 30, 0, 0, time.UTC)
-
-	state.queueRows(fakeRows{
-		columns: []string{"id", "run_id", "case_id", "status", "request_summary_json", "assertion_summary_json", "started_at", "finished_at", "created_at"},
-		values: [][]driver.Value{{
-			"case-run-latest", "run-001", "case.alpha", store.StatusPassed, `{"method":"GET"}`, `{"passed":true}`,
-			createdAt.Add(-time.Second), createdAt, createdAt,
-		}},
-	})
-
-	caseRuns, err := s.ListLatestAPICaseRuns(ctx)
-	if err != nil {
-		t.Fatalf("list latest api case runs: %v", err)
+	tests := []struct {
+		name    string
+		dialect sqlstore.Dialect
+	}{
+		{name: "postgres", dialect: sqlstore.PostgresDialect{}},
+		{name: "mysql", dialect: sqlstore.MySQLDialect{}},
 	}
-	if len(caseRuns) != 1 || caseRuns[0].ID != "case-run-latest" || caseRuns[0].CaseID != "case.alpha" {
-		t.Fatalf("latest case runs = %#v", caseRuns)
-	}
-	query := state.lastQuery(t)
-	if !strings.Contains(query.query, "row_number() over (partition by case_id order by created_at desc, id desc)") || !strings.Contains(query.query, "where rn = 1") {
-		t.Fatalf("latest case run query = %s", query.query)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			db, state := openFakeSQLDB(t)
+			defer db.Close()
+			s := sqlstore.New(db, tt.dialect)
+			createdAt := time.Date(2026, 5, 19, 9, 30, 0, 0, time.UTC)
+
+			state.queueRows(fakeRows{
+				columns: []string{"id", "run_id", "case_id", "status", "request_summary_json", "assertion_summary_json", "started_at", "finished_at", "created_at"},
+				values: [][]driver.Value{{
+					"case-run-latest", "run-001", "case.alpha", store.StatusPassed, `{"method":"GET"}`, `{"passed":true}`,
+					createdAt.Add(-time.Second), createdAt, createdAt,
+				}},
+			})
+
+			caseRuns, err := s.ListLatestAPICaseRuns(ctx)
+			if err != nil {
+				t.Fatalf("list latest api case runs: %v", err)
+			}
+			if len(caseRuns) != 1 || caseRuns[0].ID != "case-run-latest" || caseRuns[0].CaseID != "case.alpha" {
+				t.Fatalf("latest case runs = %#v", caseRuns)
+			}
+			query := state.lastQuery(t)
+			if !strings.Contains(query.query, "row_number() over (partition by case_id order by created_at desc, id desc)") || !strings.Contains(query.query, "where rn = 1") {
+				t.Fatalf("latest case run query = %s", query.query)
+			}
+		})
 	}
 }
 
