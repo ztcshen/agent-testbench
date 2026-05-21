@@ -36,10 +36,10 @@ Open Test Sandbox 目前仍是 pre-1.0。路线图重点是降低试用门槛、
 
 - 保持核心仓库通用，不内置团队 import bundle。
 - 保持 `npm run release-check` 门禁稳定通过。
-- 将产品定位为 CLI-first、SQL Store-first 的测试工作台。PostgreSQL 是默认产品
-  Store，当团队测试环境需要 MySQL 时也支持 MySQL Store。每个隔离边界使用独立
-  Store database，例如个人 `local-personal` 和团队共享 `team-verified`；
-  Docker runtime 暂时只在本地管理。
+- 将产品定位为 CLI-first、SQL Store-first 的测试工作台。PostgreSQL 与 MySQL
+  都是产品 Store 引擎；团队按自己的运维环境选择。每个隔离边界使用独立 Store
+  database，例如个人 `local-personal` 和团队共享 `team-verified`；Docker runtime
+  暂时只在本地管理。
 - 让日常核心流程能通过 CLI 和本地工作台完成：配置 Store，按本地仓库路径和
   分支注册代码服务，登记和发现环境目录，查看、初始化、验收环境并发布到
   verified 发现列表，登记接口，登记工作流，新增或修改 API 用例，执行用例或

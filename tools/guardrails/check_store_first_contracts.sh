@@ -57,7 +57,7 @@ check_pattern '^[[:space:]]*npm run release-check[[:space:]]*$' \
 check_pattern 'release gate:[[:space:]]*`npm run release-check`|发布门禁：`npm run release-check`' \
   "Release gate shorthand must mention OTSANDBOX_SMOKE_STORE_DSN."
 
-check_current_docs_pattern 'PostgreSQL Store is the active source of truth|sandbox'\''s own PostgreSQL Store/control-plane database|PostgreSQL is the default product Store|PostgreSQL remains the default|PostgreSQL remains the default upstream|default product Store backend' \
+check_current_docs_pattern 'PostgreSQL Store is the active source of truth|sandbox'\''s own PostgreSQL Store/control-plane database|PostgreSQL is the default product Store|PostgreSQL remains the default|PostgreSQL remains the default upstream|default product Store backend|PostgreSQL by default|PostgreSQL is default|PostgreSQL is the default Store backend|MySQL is supported for teams|MySQL Store can be used for the same smoke shape|PostgreSQL 是默认|默认产品 Store|默认 Store 后端|MySQL 支持团队测试环境|也支持 MySQL Store|也支持以[[:space:]]*MySQL' \
   "SQL Store docs must not describe PostgreSQL as the only active source or default product Store."
 
 check_pattern '^[[:space:]]*npm run demo:api-case[[:space:]]*$' \

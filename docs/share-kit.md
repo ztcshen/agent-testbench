@@ -20,15 +20,16 @@ HTML/JSON reports.**
 
 Open Test Sandbox lets teams keep test assets in external import bundle bundles,
 publish them into a selected SQL Store, run API cases or workflows, and inspect
-failed cases through Evidence-rich reports. PostgreSQL is the default Store
-backend, and MySQL is supported for teams whose test environments require it.
+failed cases through Evidence-rich reports. PostgreSQL and MySQL are supported
+product SQL Store engines, and teams choose the engine that matches their
+operational environment.
 Agents can discover runnable targets before executing reports, so prompts do
 not need hardcoded ids.
 
 Open Test Sandbox 让团队把测试资产维护在外部 import bundle bundle 中，发布到本地
 或团队选择的 SQL Store 后执行 API 用例或工作流，并通过包含 Evidence 的报告
-审阅失败用例。PostgreSQL 是默认 Store 后端；当团队测试环境需要 MySQL 时，也支持
-MySQL Store。agent 可以先发现可测目标，再执行报告，因此提示词不需要写死 ID。
+审阅失败用例。PostgreSQL 与 MySQL 都是产品 SQL Store 引擎，团队按自己的运维环境
+选择。agent 可以先发现可测目标，再执行报告，因此提示词不需要写死 ID。
 
 ## Longer Pitch / 较完整介绍
 
@@ -54,7 +55,7 @@ cd open-test-sandbox
 npm ci
 OTSANDBOX_DEMO_STORE="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run demo:api-case
 OTSANDBOX_SMOKE_STORE_DSN="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run release-check
-# MySQL Store can be used for the same smoke shape:
+# MySQL:
 OTSANDBOX_DEMO_STORE="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" npm run demo:api-case
 OTSANDBOX_SMOKE_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" npm run release-check
 ```

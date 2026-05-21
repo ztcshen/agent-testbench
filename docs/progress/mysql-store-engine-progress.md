@@ -2631,3 +2631,34 @@ Current blocker:
   `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
   `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
   `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.
+
+## 2026-05-21 Current Docs SQL Store Wording Sweep
+
+Progress: `[###################-] 98%`
+
+Implemented:
+
+- Swept the remaining current docs and HTML overview surfaces that still
+  described PostgreSQL as the default Store backend with MySQL as a secondary
+  option: backend capabilities, share kit, roadmap Chinese copy, README.zh-CN,
+  and `docs/core-capabilities-skills-goals.html`.
+- Updated those surfaces to say PostgreSQL and MySQL are peer product SQL Store
+  engines, with teams choosing the engine that matches their operational
+  environment.
+- Expanded the Store-first guardrail phrase scan to cover the remaining English
+  and Chinese default/secondary-path wording variants while still excluding
+  historical progress and plan ledgers.
+
+Validated:
+
+- `tools/guardrails/check_store_first_contracts.sh`
+- `rg -n 'PostgreSQL Store is the active source of truth|sandbox''s own PostgreSQL Store/control-plane database|PostgreSQL is the default product Store|PostgreSQL remains the default|PostgreSQL remains the default upstream|default product Store backend|PostgreSQL by default|PostgreSQL is default|PostgreSQL is the default Store backend|MySQL is supported for teams|MySQL Store can be used for the same smoke shape|PostgreSQL 是默认|默认产品 Store|默认 Store 后端|MySQL 支持团队测试环境|也支持 MySQL Store|也支持以\s*MySQL' AGENTS.md README.md README.zh-CN.md docs --glob '!docs/progress/**' --glob '!docs/plans/**'`
+- `git diff --check`
+- `rg -n -i 'fall''back' . --glob '!node_modules/**'`
+
+Current blocker:
+
+- Final completion still requires the actual company values:
+  `OTSANDBOX_REAL_MYSQL_STORE_DSN`, `OTS_TRACE_GRAPHQL_URL`, and
+  `OTS_SMOKE_TRACE_IDS` for all 10 workflow steps, then either the manual
+  `mysql-real-signoff` CI job or local `npm run release-check:mysql-real`.

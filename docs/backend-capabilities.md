@@ -234,9 +234,9 @@ The backend writes runtime artifacts that must not be committed:
 ## Current Boundaries / 当前边界
 
 - SQL Store is the active product Store for personal and team workflows:
-  PostgreSQL by default, and MySQL for teams whose test environments require it.
-  SQL Store 是个人与团队工作流的当前产品主路径 Store：默认 PostgreSQL，也支持以
-  MySQL 作为公司测试环境主库。
+  PostgreSQL and MySQL are peer product Store engines.
+  SQL Store 是个人与团队工作流的当前产品主路径 Store：PostgreSQL 与 MySQL
+  是并列的产品 Store 引擎。
 - SQLite is retained for legacy migration, compatibility, and tests, not new daily workflows. SQLite 仅保留给旧数据迁移、兼容和测试，不作为新的日常工作流主路径。
 - Daily CLI/API operations use the active Store or `--store NAME_OR_DSN`; they
   do not maintain hidden Store engines for routine work. 日常 CLI/API 操作使用 active
