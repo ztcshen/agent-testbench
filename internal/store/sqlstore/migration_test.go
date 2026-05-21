@@ -336,41 +336,52 @@ func TestSchemaStatusAndUpgradeSchemaUseMySQLMigrations(t *testing.T) {
 }
 
 func TestUpgradeSchemaAppliesEnvironmentCatalogToVersionOneDatabase(t *testing.T) {
-	ctx := context.Background()
-	db, state := openFakeSQLDB(t)
-	defer db.Close()
-	dialect := sqlstore.PostgresDialect{}
+	tests := []struct {
+		name       string
+		dialect    sqlstore.Dialect
+		wantColumn string
+	}{
+		{name: "postgres", dialect: sqlstore.PostgresDialect{}, wantColumn: "services_json jsonb not null"},
+		{name: "mysql", dialect: sqlstore.MySQLDialect{}, wantColumn: "services_json json not null"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			db, state := openFakeSQLDB(t)
+			defer db.Close()
 
-	state.queueRows(fakeRows{
-		columns: []string{"exists"},
-		values:  [][]driver.Value{{int64(1)}},
-	})
-	state.queueRows(fakeRows{
-		columns: []string{"version"},
-		values:  [][]driver.Value{{int64(1)}},
-	})
-	state.queueRows(fakeRows{
-		columns: []string{"exists"},
-		values:  [][]driver.Value{{int64(1)}},
-	})
-	state.queueRows(fakeRows{
-		columns: []string{"version"},
-		values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
-	})
+			state.queueRows(fakeRows{
+				columns: []string{"exists"},
+				values:  [][]driver.Value{{int64(1)}},
+			})
+			state.queueRows(fakeRows{
+				columns: []string{"version"},
+				values:  [][]driver.Value{{int64(1)}},
+			})
+			state.queueRows(fakeRows{
+				columns: []string{"exists"},
+				values:  [][]driver.Value{{int64(1)}},
+			})
+			state.queueRows(fakeRows{
+				columns: []string{"version"},
+				values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
+			})
 
-	status, err := sqlstore.UpgradeSchema(ctx, db, dialect)
-	if err != nil {
-		t.Fatalf("upgrade v1 schema: %v", err)
-	}
-	if status.CurrentVersion != sqlstore.CurrentSchemaVersion || status.AppliedCount != 1 || status.HasPending() {
-		t.Fatalf("upgraded v1 schema status = %#v", status)
-	}
-	joinedExecs := strings.Builder{}
-	for _, exec := range state.execsSnapshot() {
-		joinedExecs.WriteString(exec.query)
-		joinedExecs.WriteByte('\n')
-	}
-	if !strings.Contains(joinedExecs.String(), "create table if not exists environments") {
-		t.Fatalf("v1 upgrade did not apply environment catalog DDL:\n%s", joinedExecs.String())
+			status, err := sqlstore.UpgradeSchema(ctx, db, tt.dialect)
+			if err != nil {
+				t.Fatalf("upgrade v1 schema: %v", err)
+			}
+			if status.CurrentVersion != sqlstore.CurrentSchemaVersion || status.AppliedCount != 1 || status.HasPending() {
+				t.Fatalf("upgraded v1 schema status = %#v", status)
+			}
+			joinedExecs := strings.Builder{}
+			for _, exec := range state.execsSnapshot() {
+				joinedExecs.WriteString(exec.query)
+				joinedExecs.WriteByte('\n')
+			}
+			if !strings.Contains(joinedExecs.String(), "create table if not exists environments") || !strings.Contains(joinedExecs.String(), tt.wantColumn) {
+				t.Fatalf("%s v1 upgrade did not apply environment catalog DDL:\n%s", tt.name, joinedExecs.String())
+			}
+		})
 	}
 }
