@@ -11,9 +11,9 @@ import (
 	"sort"
 	"strings"
 
-	"open-test-sandbox/internal/store/mysql"
-	"open-test-sandbox/internal/store/postgres"
-	"open-test-sandbox/internal/store/sqlite"
+	"agent-testbench/internal/store/mysql"
+	"agent-testbench/internal/store/postgres"
+	"agent-testbench/internal/store/sqlite"
 )
 
 type storeConfigFile struct {
@@ -433,7 +433,7 @@ func storeConfigPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "open-test-sandbox", "store-config.json"), nil
+	return filepath.Join(dir, "agent-testbench", "store-config.json"), nil
 }
 
 func maskStoreURL(rawURL string) string {

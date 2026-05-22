@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"open-test-sandbox/internal/store/postgres"
+	"agent-testbench/internal/store/postgres"
 )
 
 func TestPostgresStoreContractWithExternalDatabase(t *testing.T) {

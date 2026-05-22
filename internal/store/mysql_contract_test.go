@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"open-test-sandbox/internal/store/mysql"
+	"agent-testbench/internal/store/mysql"
 )
 
 func TestMySQLStoreContractWithExternalDatabase(t *testing.T) {

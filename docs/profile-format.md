@@ -209,7 +209,7 @@ configuration, not in core templates.
 
 ## Import Planning
 
-Open Test Sandbox can derive reviewable template package asset plans from external API
+AgentTestBench can derive reviewable template package asset plans from external API
 descriptions or captured HTTP traffic without writing those assets directly
 into a bundle. The first planners are small JSON planners inspired by the
 reference backlog: Microcks and Schemathesis motivate schema/API asset import,
@@ -311,7 +311,7 @@ template package into a Store.
 
 ## Executor Descriptors
 
-Template packages can describe external test tools without making Open Test Sandbox own
+Template packages can describe external test tools without making AgentTestBench own
 those tools. This follows the reference-backed executor model: define existing
 test tools or scripts as reviewable template package assets, then let a caller inspect
 readiness before deciding whether to run them.
@@ -340,7 +340,7 @@ The plan validates ids, supported kinds, active status, required source paths or
 commands, and declared artifact paths. It does not execute external commands.
 
 API cases can reference an executor-owned external source when the runnable
-case is not a native Open Test Sandbox JSON case:
+case is not a native AgentTestBench JSON case:
 
 ```json
 {
@@ -355,7 +355,7 @@ case is not a native Open Test Sandbox JSON case:
 ```
 
 This preserves discovery, Store indexing, quality checks, and Evidence/report
-surfaces in Open Test Sandbox while leaving execution semantics to the external
+surfaces in AgentTestBench while leaving execution semantics to the external
 tool descriptor.
 
 ## Failure Categories
@@ -381,6 +381,6 @@ first matching rule wins. The rule only changes the report-facing
 ```
 
 Supported matchers are `statuses`, `failureCategories`, and
-`messageContains`. When no rule matches, Open Test Sandbox keeps the built-in
+`messageContains`. When no rule matches, AgentTestBench keeps the built-in
 local category such as `assertion-mismatch`, `transport-error`, `timeout`, or
 `case-failure`.

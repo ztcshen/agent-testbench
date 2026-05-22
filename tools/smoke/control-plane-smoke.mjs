@@ -588,7 +588,7 @@ async function checkEvidenceViewerTimeline(browser, baseURL) {
   page.on("pageerror", (error) => errors.push(error.message));
 
   try {
-    const storageKey = "open-test-sandbox-evidence:smoke-timeline";
+    const storageKey = "agent-testbench-evidence:smoke-timeline";
     const payload = {
       step: {
         title: "Case Alpha Evidence",

@@ -1,6 +1,6 @@
 # Store Backends
 
-Open Test Sandbox treats the Store as a pluggable database backend. Users pick
+AgentTestBench treats the Store as a pluggable database backend. Users pick
 one backend for a workspace or team, and daily CLI/API/UI commands operate
 against the selected Store without changing command shape. The active product
 path is SQL Store-first: SQLite, PostgreSQL, and MySQL are supported Store

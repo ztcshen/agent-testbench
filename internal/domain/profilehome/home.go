@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"open-test-sandbox/internal/domain/profile"
+	"agent-testbench/internal/domain/profile"
 )
 
 type InstallReport struct {

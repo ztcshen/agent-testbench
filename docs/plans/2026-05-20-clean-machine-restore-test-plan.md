@@ -129,7 +129,7 @@ sort algorithms. Implement a small domain adapter over
 - Use `topo.TarjanSCC` only when the report needs grouped strongly connected
   components, not as a project-owned algorithm.
 
-Open Test Sandbox-owned code should do only domain translation:
+AgentTestBench-owned code should do only domain translation:
 
 - read components and dependencies through Store APIs,
 - split edges by phase,

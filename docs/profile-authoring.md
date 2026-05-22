@@ -1,6 +1,6 @@
 # Template Package Authoring Guide
 
-Template packages make Open Test Sandbox useful without turning the core repository into
+Template packages make AgentTestBench useful without turning the core repository into
 a business-specific codebase. A template package is a reviewable configuration bundle
 owned outside this repository and published into the local Store when a user or
 agent needs to run it.

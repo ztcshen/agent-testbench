@@ -1,8 +1,8 @@
 {
-  "name": "open-test-sandbox",
+  "name": "agent-testbench",
   "version": "0.1.0",
   "private": true,
-  "description": "Local-first integration test sandbox for template-driven workflows, API cases, fixtures, and evidence.",
+  "description": "Agent-native test environment for API workflows, auditable evidence, and quality gates.",
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {

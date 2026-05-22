@@ -160,7 +160,7 @@ next operator or colleague command to run.
 
 Use a private SQLite, PostgreSQL, or MySQL Store for unverified local work and a
 separate shared PostgreSQL or MySQL database for verified team environments.
-The Open Test Sandbox Store is the control-plane database and should already
+The AgentTestBench Store is the control-plane database and should already
 exist outside any Docker environment restored for a tested target. Do not point
 the Store DSN at a Docker database that `environment restore` is responsible
 for starting; application databases used by the tested services belong to the
@@ -286,7 +286,7 @@ Environment Catalog verification run status are written to the selected Store.
 Restore records Evidence completeness from the workflow result but does not
 mark SkyWalking topology complete or publish the environment as verified; real
 topology collection and `publish-verified` remain separate gates. Use
-`--server-url` points at the Open Test Sandbox control plane that will run the
+`--server-url` points at the AgentTestBench control plane that will run the
 acceptance workflow; `--base-url` is optional target-service context for the
 workflow. Use `--workflow-output-dir` when you want a fixed local report
 directory. When `composeFile` is recorded, the

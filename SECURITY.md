@@ -1,6 +1,6 @@
 # Security Policy
 
-Open Test Sandbox is a local-first workbench that can store requests,
+AgentTestBench is a local-first workbench that can store requests,
 responses, logs, and runtime Evidence. Treat those files as sensitive unless a
 synthetic fixture explicitly proves otherwise.
 

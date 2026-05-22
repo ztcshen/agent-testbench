@@ -18,11 +18,11 @@ import (
 	"testing"
 	"time"
 
-	"open-test-sandbox/internal/domain/profile"
-	"open-test-sandbox/internal/domain/profilehome"
-	"open-test-sandbox/internal/server/controlplane"
-	"open-test-sandbox/internal/store"
-	"open-test-sandbox/internal/store/sqlite"
+	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/domain/profilehome"
+	"agent-testbench/internal/server/controlplane"
+	"agent-testbench/internal/store"
+	"agent-testbench/internal/store/sqlite"
 )
 
 func TestServerExposesProfileAPI(t *testing.T) {
@@ -1885,7 +1885,7 @@ func TestServerRendersDashboardForEmptyProfile(t *testing.T) {
 		t.Fatalf("read dashboard: %v", err)
 	}
 	body := string(raw)
-	for _, want := range []string{"Open Test Sandbox", "react-dashboard-root", "/assets/react/dashboard.js"} {
+	for _, want := range []string{"AgentTestBench", "react-dashboard-root", "/assets/react/dashboard.js"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("dashboard missing %q: %s", want, body)
 		}

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"open-test-sandbox/internal/store"
-	"open-test-sandbox/internal/store/mysql"
+	"agent-testbench/internal/store"
+	"agent-testbench/internal/store/mysql"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
 )

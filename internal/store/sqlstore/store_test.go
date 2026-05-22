@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"open-test-sandbox/internal/store"
-	"open-test-sandbox/internal/store/sqlstore"
+	"agent-testbench/internal/store"
+	"agent-testbench/internal/store/sqlstore"
 )
 
 func TestStoreRecordsAndReadsRunsThroughDatabaseSQL(t *testing.T) {

@@ -1,8 +1,9 @@
 # Contributing
 
-Thanks for helping improve Open Test Sandbox. The project is local-first and
-API-operated: the core should stay generic, while team-specific test assets are
-stored through sandbox APIs or kept in private validation data.
+Thanks for helping improve AgentTestBench. The project is local-first and
+agent-native and API-operated: the core should stay generic, while team-specific
+test assets are stored through AgentTestBench APIs or kept in private
+validation data.
 
 ## Ground Rules
 

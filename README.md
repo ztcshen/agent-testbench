@@ -1,21 +1,22 @@
-# Open Test Sandbox
+# AgentTestBench
 
-[![CI](https://github.com/ztcshen/open-test-sandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/ztcshen/open-test-sandbox/actions/workflows/ci.yml)
+[![CI](https://github.com/ztcshen/agent-testbench/actions/workflows/ci.yml/badge.svg)](https://github.com/ztcshen/agent-testbench/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
 **English** | [简体中文](README.zh-CN.md)
 
-Open Test Sandbox is a local-first, API-operated testing workbench. It helps
-test engineers and automation agents discover runnable targets, run API cases
-and workflows, record reproducible Evidence, and inspect compact HTML/JSON
-reports without hardcoding one business domain into the open-source core.
+AgentTestBench is an agent-native test environment for API workflows,
+auditable Evidence, and quality gates. It helps test engineers and automation
+agents discover runnable targets, run API cases and workflows, record
+reproducible Evidence, and inspect compact HTML/JSON reports without
+hardcoding one business domain into the open-source core.
 
 ## Product Direction
 
-The current product direction is Store-first:
+The current product direction is agent-native and Store-first:
 
-- Test engineers use the sandbox through APIs and UI. They do not maintain a
-  separate sandbox project or repeatedly edit external configuration.
+- Test engineers and agents use the workbench through APIs and UI. They do not
+  maintain a separate sandbox project or repeatedly edit external configuration.
 - SQL Store is the active Store for current sandbox state, runtime facts,
   workflow catalog, execution state, Evidence indexes, and verification
   results. SQLite, PostgreSQL, and MySQL are supported SQL Store engines. Local
@@ -38,9 +39,10 @@ Modern integration testing often has three painful gaps:
 - failing cases rarely come with enough request, response, log, timing, and
   topology Evidence to review quickly.
 
-Open Test Sandbox turns those pieces into one local control plane. The Store is
+AgentTestBench turns those pieces into one local control plane. The Store is
 the live source of truth; CLI, Control plane APIs, the React workbench, reports,
-and validation tools all read the same facts.
+and validation tools all read the same facts. Agents get a discover-then-run
+contract instead of guessing target ids from prompts or private notes.
 
 ## Current Shape
 
@@ -63,7 +65,7 @@ and validation tools all read the same facts.
 | Capability | What it means |
 | --- | --- |
 | SQL Store-first | Named SQLite, PostgreSQL, or MySQL Stores with schema upgrades, run indexes, case run records, Evidence indexes, timing, logs, topology, and post-process task records. |
-| API-operated catalog | Services, workflows, interface nodes, cases, request templates, fixtures, dependencies, and bindings are exposed through sandbox APIs and UI discovery. |
+| API-operated catalog | Services, workflows, interface nodes, cases, request templates, fixtures, dependencies, and bindings are exposed through AgentTestBench APIs and UI discovery. |
 | Agent-friendly discovery | Agents call discovery APIs first, then run reports with exact returned ids instead of hidden prompt knowledge. |
 | API case execution | Run one HTTP case, a maintained case suite, or only the failed/not-run part of a suite; render requests, assert responses, write Evidence, and index results into Store. |
 | Workflow execution | Run ordered workflow steps and keep per-step Evidence, timing, status, logs, and topology. |
@@ -75,7 +77,7 @@ and validation tools all read the same facts.
 
 ## Who It Helps
 
-- **Test engineers** who need to consume a sandbox through stable APIs and UI,
+- **Test engineers** who need to consume a test environment through stable APIs and UI,
   not maintain another local project.
 - **QA and platform teams** that need a repeatable local workbench for
   integration cases, workflow regressions, and runtime Evidence.
@@ -101,6 +103,10 @@ OTSANDBOX_SMOKE_STORE_DSN='mysql://user:pass@host:3306/otsandbox_smoke?tls=false
 OTSANDBOX_DEMO_STORE="sqlite://$PWD/.runtime/otsandbox-smoke.sqlite" npm run demo:api-case
 OTSANDBOX_SMOKE_STORE_DSN="sqlite://$PWD/.runtime/otsandbox-smoke.sqlite" npm run release-check
 ```
+
+The CLI and environment-variable namespace still use the legacy `otsandbox` /
+`OTSANDBOX_*` names for compatibility while the public project name moves to
+AgentTestBench.
 
 The demo command starts a temporary local HTTP endpoint, runs the generic
 `examples/api-cases/create-item.json` case against the active SQL Store or
@@ -128,7 +134,7 @@ report unavailable, failed, or skipped status instead of inventing a topology.
 ## Architecture
 
 ```text
-Sandbox APIs and UI
+AgentTestBench APIs and UI
   -> active SQL Store (SQLite, PostgreSQL, or MySQL)
   -> catalog read-models
   -> Environment Catalog and component graph
@@ -226,5 +232,5 @@ OTSANDBOX_SMOKE_STORE_DSN='mysql://user:pass@host:3306/otsandbox_smoke?tls=false
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and
-[docs/release-checklist.md](docs/release-checklist.md). Open Test Sandbox is
+[docs/release-checklist.md](docs/release-checklist.md). AgentTestBench is
 licensed under the [Apache License 2.0](LICENSE).

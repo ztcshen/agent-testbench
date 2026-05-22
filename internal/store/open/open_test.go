@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	storeopen "open-test-sandbox/internal/store/open"
+	storeopen "agent-testbench/internal/store/open"
 )
 
 func TestBackendFromReferenceRecognizesSupportedDatabaseFamilies(t *testing.T) {

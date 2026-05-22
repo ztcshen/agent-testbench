@@ -20,15 +20,15 @@ import (
 	"testing"
 	"time"
 
-	"open-test-sandbox/internal/domain/profile"
-	"open-test-sandbox/internal/domain/profilecatalog"
-	"open-test-sandbox/internal/runner/apicase"
-	"open-test-sandbox/internal/store"
-	"open-test-sandbox/internal/store/mysql"
-	"open-test-sandbox/internal/store/postgres"
-	"open-test-sandbox/internal/store/schema"
-	"open-test-sandbox/internal/store/sqlite"
-	"open-test-sandbox/internal/store/sqlstore"
+	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/domain/profilecatalog"
+	"agent-testbench/internal/runner/apicase"
+	"agent-testbench/internal/store"
+	"agent-testbench/internal/store/mysql"
+	"agent-testbench/internal/store/postgres"
+	"agent-testbench/internal/store/schema"
+	"agent-testbench/internal/store/sqlite"
+	"agent-testbench/internal/store/sqlstore"
 )
 
 func TestMain(m *testing.M) {
@@ -1602,8 +1602,8 @@ func TestEnvironmentRestoreRequiresRemoteGitSourcesForSQLOneClickEnvironment(t *
 			workspace := filepath.Join(t.TempDir(), "workspace")
 			report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
 				ID:                     "env.remote.sources." + tt.name,
-				ReposJSON:              `{"llt":{"url":"/Users/zlh/codes/open-test-sandbox-llt-simulator","checkout":"llt"}}`,
-				ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","package":{"url":"/Users/zlh/codes/open-test-sandbox-validation","checkout":"."}}`,
+				ReposJSON:              `{"llt":{"url":"/Users/zlh/codes/agent-testbench-llt-simulator","checkout":"llt"}}`,
+				ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","package":{"url":"/Users/zlh/codes/agent-testbench-validation","checkout":"."}}`,
 				HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:28080/health"}]`,
 				VerificationWorkflowID: "workflow.core-10",
 			}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
@@ -2070,8 +2070,8 @@ func TestEnvironmentRestoreSQLStoreUsesStoreGeneratedStartupFiles(t *testing.T) 
 
 			report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
 				ID:                     "env." + tt.name + ".generated",
-				ReposJSON:              `{"llt":{"url":"git@github.com:ztcshen/open-test-sandbox-llt-simulator.git","checkout":"llt"}}`,
-				ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  llt:\n    image: alpine:3.20\n"},"package":{"url":"/Users/zlh/codes/open-test-sandbox-validation","checkout":"."}}`,
+				ReposJSON:              `{"llt":{"url":"git@github.com:ztcshen/agent-testbench-llt-simulator.git","checkout":"llt"}}`,
+				ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  llt:\n    image: alpine:3.20\n"},"package":{"url":"/Users/zlh/codes/agent-testbench-validation","checkout":"."}}`,
 				HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:28080/health"}]`,
 				VerificationWorkflowID: "workflow.core-10",
 			}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
@@ -2117,8 +2117,8 @@ func TestEnvironmentRestoreSQLStoreRejectsLocalStartupFilesWithoutStoreGenerated
 
 			report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
 				ID:                     "env." + tt.name + ".local.compose",
-				ReposJSON:              `{"llt":{"url":"git@github.com:ztcshen/open-test-sandbox-llt-simulator.git","checkout":"llt"}}`,
-				ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"package":{"url":"/Users/zlh/codes/open-test-sandbox-validation","checkout":"."}}`,
+				ReposJSON:              `{"llt":{"url":"git@github.com:ztcshen/agent-testbench-llt-simulator.git","checkout":"llt"}}`,
+				ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"package":{"url":"/Users/zlh/codes/agent-testbench-validation","checkout":"."}}`,
 				HealthChecksJSON:       `[{"kind":"url","url":"http://127.0.0.1:28080/health"}]`,
 				VerificationWorkflowID: "workflow.core-10",
 			}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{
@@ -3081,14 +3081,14 @@ func TestEnvironmentRestoreDoesNotPullComposeBuildServices(t *testing.T) {
   llt:
     build:
       context: ${DOCKER_LLT_SIMULATOR_REPO}
-    image: open-test-sandbox/llt-simulator:local
+    image: agent-testbench/llt-simulator:local
 `)
 	runCLI(t, "environment", "register",
 		"--store", "sqlite://"+storePath,
 		"--id", "env.compose.build-filter",
 		"--compose-file", "compose/docker-compose.yml",
 		"--compose-generated-file", "compose/docker-compose.yml="+composeSource,
-		"--compose-env", "DOCKER_LLT_SIMULATOR_REPO=$OTS_WORKSPACE/open-test-sandbox-llt-simulator",
+		"--compose-env", "DOCKER_LLT_SIMULATOR_REPO=$OTS_WORKSPACE/agent-testbench-llt-simulator",
 		"--compose-service", "web",
 		"--compose-service", "llt",
 		"--verification-workflow", "workflow.core-10",

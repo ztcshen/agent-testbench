@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"open-test-sandbox/internal/store"
-	"open-test-sandbox/internal/store/sqlite"
+	"agent-testbench/internal/store"
+	"agent-testbench/internal/store/sqlite"
 )
 
 func TestSQLiteStoreContract(t *testing.T) {

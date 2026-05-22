@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"open-test-sandbox/internal/store"
-	"open-test-sandbox/internal/store/schema"
+	"agent-testbench/internal/store"
+	"agent-testbench/internal/store/schema"
 )
 
 type Config struct {

@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 
 raw_dsn="${OTSANDBOX_REAL_MYSQL_STORE_DSN:-${OTSANDBOX_SMOKE_STORE_DSN:-${OTSANDBOX_SMOKE_STORE:-}}}"
 if [[ -z "$raw_dsn" ]]; then
-  echo "Set OTSANDBOX_REAL_MYSQL_STORE_DSN, OTSANDBOX_SMOKE_STORE_DSN, or OTSANDBOX_SMOKE_STORE to a dedicated mysql:// Open Test Sandbox smoke Store DSN." >&2
+  echo "Set OTSANDBOX_REAL_MYSQL_STORE_DSN, OTSANDBOX_SMOKE_STORE_DSN, or OTSANDBOX_SMOKE_STORE to a dedicated mysql:// AgentTestBench smoke Store DSN." >&2
   echo "Also set OTSANDBOX_REQUIRE_REAL_SKYWALKING=1, OTS_TRACE_GRAPHQL_URL, OTS_SMOKE_EXPECTED_STEPS, and OTS_SMOKE_TRACE_IDS for every configured workflow step." >&2
   echo "Example: OTSANDBOX_REAL_MYSQL_STORE_DSN='mysql://user:pass@host:3306/otsandbox_smoke?tls=false' npm run release-check:mysql-real" >&2
   exit 1

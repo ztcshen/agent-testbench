@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"open-test-sandbox/internal/store"
-	"open-test-sandbox/internal/store/postgres"
-	"open-test-sandbox/internal/store/sqlstore"
+	"agent-testbench/internal/store"
+	"agent-testbench/internal/store/postgres"
+	"agent-testbench/internal/store/sqlstore"
 )
 
 func TestParseConfigFromURLAcceptsPostgresDSN(t *testing.T) {

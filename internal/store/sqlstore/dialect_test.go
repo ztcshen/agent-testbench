@@ -3,7 +3,7 @@ package sqlstore_test
 import (
 	"testing"
 
-	"open-test-sandbox/internal/store/sqlstore"
+	"agent-testbench/internal/store/sqlstore"
 )
 
 func TestDialectRegistryRecognizesOpenSourceDatabaseFamilies(t *testing.T) {
