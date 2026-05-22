@@ -132,6 +132,14 @@ func TestParseMySQLTestDSNModeRejectsUnknownModes(t *testing.T) {
 	}
 }
 
+func TestIsDedicatedMySQLTestDatabaseAcceptsRenamedProductToken(t *testing.T) {
+	for _, name := range []string{"agent_testbench", "agent_testbench_local", "agent-testbench-local"} {
+		if !isDedicatedMySQLTestDatabase(name) {
+			t.Fatalf("expected %q to be treated as a dedicated AgentTestBench database", name)
+		}
+	}
+}
+
 func mysqlTestDSNWithDatabase(t *testing.T, dsn string, databaseName string) string {
 	t.Helper()
 	parsed, err := url.Parse(dsn)
@@ -157,7 +165,7 @@ func isDedicatedMySQLTestDatabase(databaseName string) bool {
 		value = strings.TrimSpace(databaseName)
 	}
 	value = strings.ToLower(value)
-	return strings.Contains(value, "agent-testbench") ||
+	return strings.Contains(value, "agent-testbench") || strings.Contains(value, "agent_testbench") ||
 		strings.Contains(value, "_smoke") || strings.Contains(value, "smoke_") ||
 		strings.Contains(value, "_test") || strings.Contains(value, "test_") ||
 		strings.Contains(value, "_ci") || strings.Contains(value, "ci_")

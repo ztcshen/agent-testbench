@@ -12,6 +12,13 @@ test("MySQL Store DSN guard accepts dedicated smoke database names", () => {
   assert.equal(info.masked, "mysql://user:xxxxx@example.com:3306/agent_testbench_smoke?tls=false");
 });
 
+test("MySQL Store DSN guard accepts the renamed product token with underscores", () => {
+  const info = requireSafeMySQLStoreDSN("mysql://user:secret@example.com:3306/agent_testbench_local?tls=false");
+
+  assert.equal(info.database, "agent_testbench_local");
+  assert.equal(info.safeName, true);
+});
+
 test("MySQL Store DSN guard requires a database path", () => {
   assert.throws(
     () => requireSafeMySQLStoreDSN("mysql://user:secret@example.com:3306?tls=false"),
