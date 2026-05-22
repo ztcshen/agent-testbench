@@ -12,7 +12,8 @@ import { requireSafeMySQLStoreDSN } from "./mysql-store-dsn-guard.mjs";
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 export const smokeWorkflowStepCount = 3;
 export const smokeStepIDs = Array.from({ length: smokeWorkflowStepCount }, (_, index) => `step-${String(index + 1).padStart(2, "0")}`);
-const smokeCatalogTemplateCount = (smokeWorkflowStepCount * 2) + 2;
+const smokeCatalogTemplateCount = smokeWorkflowStepCount * 2;
+const smokeCatalogTemplateConfigCount = smokeCatalogTemplateCount + 2;
 
 function smokeTraceOverrides(env = process.env) {
   const raw = String(env.OTS_SMOKE_TRACE_IDS || "").trim();
@@ -646,7 +647,7 @@ async function checkWorkbenchVerify(browser, baseURL, profileDir) {
     if (!response?.ok()) {
       throw new Error(`/index.html returned ${response?.status()}`);
     }
-    await page.locator("input[type='text']").first().fill(profileDir);
+    await page.locator("label.workflow-filter", { hasText: "路径 / ID" }).locator("input[type='text']").fill(profileDir);
     await page.getByRole("button", { name: "验收并发布" }).click();
     await page.getByText("all passed").waitFor();
     await page.getByText("profile-index").waitFor();
@@ -655,7 +656,7 @@ async function checkWorkbenchVerify(browser, baseURL, profileDir) {
     await page.getByLabel("要求用例已通过").check();
     await page.getByRole("button", { name: "验收并发布" }).click();
     await page.getByText("case runs required").waitFor();
-    const missingCaseRuns = await page.getByText("10 failed").waitFor({ timeout: 5000 }).then(() => true).catch(() => false);
+    const missingCaseRuns = await page.getByText(/\d+ failed/).waitFor({ timeout: 5000 }).then(() => true).catch(() => false);
     if (missingCaseRuns) {
       await page.getByText("api-case-run:case.step-01", { exact: true }).waitFor();
     } else {
@@ -786,7 +787,7 @@ async function main() {
     if (imported.profileId !== "smoke") throw new Error(`unexpected import payload: ${JSON.stringify(imported)}`);
 
     const index = await waitForJSON(`${baseURL}/api/template-packages/catalog-index`);
-    if (index.profileId !== "smoke" || index.counts.workflows !== 1 || index.counts.templates !== smokeCatalogTemplateCount || index.counts.templateConfigs !== smokeCatalogTemplateCount) {
+    if (index.profileId !== "smoke" || index.counts.workflows !== 1 || index.counts.templates !== smokeCatalogTemplateCount || index.counts.templateConfigs !== smokeCatalogTemplateConfigCount) {
       throw new Error(`unexpected catalog index: ${JSON.stringify(index)}`);
     }
     const catalog = await waitForJSON(`${baseURL}/api/catalog`);

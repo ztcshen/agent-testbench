@@ -35,9 +35,13 @@ function runReleaseCheck(env) {
 }
 
 function runRealMySQLWrapper(env) {
+  const wrapperEnv = { ...process.env };
+  delete wrapperEnv.OTSANDBOX_REAL_MYSQL_STORE_DSN;
+  delete wrapperEnv.OTSANDBOX_SMOKE_STORE_DSN;
+  delete wrapperEnv.OTSANDBOX_SMOKE_STORE;
   return spawnSync("bash", ["tools/smoke/mysql-real-store-release-check.sh"], {
     cwd: rootDir,
-    env: { ...process.env, ...env },
+    env: { ...wrapperEnv, ...env },
     encoding: "utf8",
     stdio: "pipe",
   });
