@@ -816,7 +816,7 @@ func TestEnvironmentCommandsGateVerifiedDiscovery(t *testing.T) {
 		"--checkout", "entry-gateway=/tmp/entry-gateway",
 		"--compose-file", "docker-compose.yml",
 		"--start-command", "docker compose up -d",
-		"--health-url", "http://127.0.0.1:18080/health",
+		"--health-url", newHealthyTestURL(t),
 		"--verification-workflow", "workflow.core-10",
 		"--json",
 	)
@@ -1262,7 +1262,7 @@ func runEnvironmentCommandsUseNamedActiveStore(t *testing.T, storeRef string, en
 		"--checkout", "entry-gateway=/tmp/entry-gateway",
 		"--compose-file", "docker-compose.yml",
 		"--start-command", "docker compose up -d",
-		"--health-url", "http://127.0.0.1:18080/health",
+		"--health-url", newHealthyTestURL(t),
 		"--verification-workflow", "workflow.core-10",
 		"--json",
 	)
@@ -2962,7 +2962,7 @@ func TestEnvironmentRestoreHonorsComposeOptionsFromStore(t *testing.T) {
 		"--compose-service", "web",
 		"--compose-skip-pull",
 		"--compose-skip-build",
-		"--health-url", "http://127.0.0.1:18080/health",
+		"--health-url", newHealthyTestURL(t),
 		"--verification-workflow", "workflow.core-10",
 	)
 
@@ -3580,7 +3580,7 @@ func TestEnvironmentStartupFilePutMergesGeneratedFilesWithoutReRegistering(t *te
 		"--repo", "entry-gateway=https://example.com/team/entry-gateway.git",
 		"--checkout", "entry-gateway=services/entry-gateway",
 		"--compose-file", "compose/docker-compose.yml",
-		"--health-url", "http://127.0.0.1:18080/health",
+		"--health-url", newHealthyTestURL(t),
 		"--verification-workflow", "workflow.core-10",
 	)
 
@@ -3745,7 +3745,7 @@ func TestEnvironmentRestoreRunsAllowedDockerCleanupBeforeStartup(t *testing.T) {
 		"--compose-file", "compose.yml",
 		"--compose-skip-pull",
 		"--compose-skip-build",
-		"--health-url", "http://127.0.0.1:18080/health",
+		"--health-url", newHealthyTestURL(t),
 		"--verification-workflow", "workflow.core-10",
 	)
 
@@ -4038,7 +4038,7 @@ func TestEnvironmentRestorePullsExistingCheckoutWhenRequested(t *testing.T) {
 		"--branch", "entry-gateway=main",
 		"--checkout", "entry-gateway=entry-gateway",
 		"--compose-file", "docker-compose.yml",
-		"--health-url", "http://127.0.0.1:18080/health",
+		"--health-url", newHealthyTestURL(t),
 		"--verification-workflow", "workflow.core-10",
 	)
 
@@ -4077,7 +4077,7 @@ func TestEnvironmentRestoreRejectsExistingCheckoutWithDifferentOrigin(t *testing
 		"--repo", "entry-gateway="+remoteRepo,
 		"--checkout", "entry-gateway=entry-gateway",
 		"--compose-file", "docker-compose.yml",
-		"--health-url", "http://127.0.0.1:18080/health",
+		"--health-url", newHealthyTestURL(t),
 		"--verification-workflow", "workflow.core-10",
 	)
 
@@ -4138,7 +4138,7 @@ func TestEnvironmentRestoreChecksOutRequestedRefAfterClone(t *testing.T) {
 		"--repo-ref", "entry-gateway=v1",
 		"--checkout", "entry-gateway=entry-gateway",
 		"--compose-file", "docker-compose.yml",
-		"--health-url", "http://127.0.0.1:18080/health",
+		"--health-url", newHealthyTestURL(t),
 		"--verification-workflow", "workflow.core-10",
 	)
 
@@ -4187,7 +4187,7 @@ func TestEnvironmentRestoreChecksOutRequestedRefForExistingCheckout(t *testing.T
 		"--repo-ref", "entry-gateway=v1",
 		"--checkout", "entry-gateway=entry-gateway",
 		"--compose-file", "docker-compose.yml",
-		"--health-url", "http://127.0.0.1:18080/health",
+		"--health-url", newHealthyTestURL(t),
 		"--verification-workflow", "workflow.core-10",
 	)
 
@@ -4245,7 +4245,7 @@ func TestEnvironmentRestoreDetachesExistingCheckoutAlreadyAtRef(t *testing.T) {
 		"--repo-ref", "entry-gateway=v1",
 		"--checkout", "entry-gateway=entry-gateway",
 		"--compose-file", "docker-compose.yml",
-		"--health-url", "http://127.0.0.1:18080/health",
+		"--health-url", newHealthyTestURL(t),
 		"--verification-workflow", "workflow.core-10",
 	)
 
@@ -4285,7 +4285,7 @@ func TestEnvironmentRestorePreflightRequiresGitForExistingCheckoutRef(t *testing
 		"--repo-ref", "entry-gateway=v1",
 		"--checkout", "entry-gateway=entry-gateway",
 		"--compose-file", "docker-compose.yml",
-		"--health-url", "http://127.0.0.1:18080/health",
+		"--health-url", newHealthyTestURL(t),
 		"--verification-workflow", "workflow.core-10",
 	)
 
@@ -4511,7 +4511,7 @@ func TestSandboxRegisterCommandsWriteStoreCatalog(t *testing.T) {
 		"--display-name", "Gateway",
 		"--kind", "http",
 		"--service-port", "18080",
-		"--health-url", "http://127.0.0.1:18080/health",
+		"--health-url", newHealthyTestURL(t),
 	)
 	if !strings.Contains(serviceOut, "Registered service: service.gateway") {
 		t.Fatalf("service register output = %q", serviceOut)
@@ -4576,7 +4576,7 @@ func runSandboxRegisterCommandsUseNamedActiveStore(t *testing.T, storeRef string
 		"--display-name", "Gateway "+label,
 		"--kind", "http",
 		"--service-port", "18080",
-		"--health-url", "http://127.0.0.1:18080/health",
+		"--health-url", newHealthyTestURL(t),
 	)
 	if !strings.Contains(serviceOut, "Registered service: "+serviceID) {
 		t.Fatalf("%s service register output = %q", label, serviceOut)
@@ -11364,6 +11364,15 @@ func fakeDockerCommand(t *testing.T) ([]string, string) {
 		"PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"DOCKER_CALLS_FILE=" + callsPath,
 	}, callsPath
+}
+
+func newHealthyTestURL(t *testing.T) string {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	return server.URL + "/health"
 }
 
 func fakeMySQLApplyCommandWithFirstFailure(t *testing.T) ([]string, string) {
