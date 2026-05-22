@@ -23,6 +23,14 @@ is_sqlite_store_dsn() {
 step "checking whitespace"
 git diff --check
 
+step "checking release gate tools"
+for tool in rg sqlite3; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "$tool is required for release-check. Install it before running the release gate." >&2
+    exit 1
+  fi
+done
+
 step "checking SQL smoke Store"
 if [[ -z "${AGENT_TESTBENCH_SMOKE_STORE_DSN:-${AGENT_TESTBENCH_SMOKE_STORE:-}}" ]]; then
   echo "AGENT_TESTBENCH_SMOKE_STORE_DSN or AGENT_TESTBENCH_SMOKE_STORE is required for release-check." >&2
