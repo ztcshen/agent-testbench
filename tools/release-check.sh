@@ -83,6 +83,7 @@ tracked_generated=$(git ls-files \
   'internal/server/controlplane/.runtime' \
   'node_modules' \
   'team-configs' \
+  'test-private' \
   'test-results' \
   'coverage' \
   '*.db' \
