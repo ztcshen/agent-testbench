@@ -475,6 +475,102 @@ func TestStoreConfigCommandsManageActiveMySQLStore(t *testing.T) {
 	}
 }
 
+func TestStoreConfigLoadsLegacyDefaultConfigPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg-config"))
+	t.Setenv("OTSANDBOX_CONFIG_HOME", "")
+
+	legacyPath, err := legacyStoreConfigPath()
+	if err != nil {
+		t.Fatalf("legacy config path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o700); err != nil {
+		t.Fatalf("create legacy config dir: %v", err)
+	}
+	legacyEntry, err := newStoreConfigEntry("legacy-postgres", "postgres://user:secret@example.com:5432/otsandbox_legacy?sslmode=disable")
+	if err != nil {
+		t.Fatalf("legacy config entry: %v", err)
+	}
+	legacyConfig := storeConfigFile{
+		Active: legacyEntry.Name,
+		Stores: map[string]storeConfigEntry{
+			legacyEntry.Name: legacyEntry,
+		},
+	}
+	raw, err := json.Marshal(legacyConfig)
+	if err != nil {
+		t.Fatalf("marshal legacy config: %v", err)
+	}
+	if err := os.WriteFile(legacyPath, raw, 0o600); err != nil {
+		t.Fatalf("write legacy config: %v", err)
+	}
+
+	currentOut := runStoreCommand(t, "current", "--json")
+	var current currentStoreReport
+	if err := json.Unmarshal([]byte(currentOut), &current); err != nil {
+		t.Fatalf("decode current store: %v\n%s", err, currentOut)
+	}
+	if !current.OK || current.Name != "legacy-postgres" || current.Backend != "postgres" || current.URL != "postgres://user:xxxxx@example.com:5432/otsandbox_legacy?sslmode=disable" {
+		t.Fatalf("legacy current store = %#v", current)
+	}
+	if strings.Contains(currentOut, "secret") {
+		t.Fatalf("legacy current store should mask credentials = %q", currentOut)
+	}
+}
+
+func TestStoreConfigMigratesLegacyDefaultConfigOnWrite(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg-config"))
+	t.Setenv("OTSANDBOX_CONFIG_HOME", "")
+
+	legacyPath, err := legacyStoreConfigPath()
+	if err != nil {
+		t.Fatalf("legacy config path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o700); err != nil {
+		t.Fatalf("create legacy config dir: %v", err)
+	}
+	legacyEntry, err := newStoreConfigEntry("legacy-postgres", "postgres://user:secret@example.com:5432/otsandbox_legacy?sslmode=disable")
+	if err != nil {
+		t.Fatalf("legacy config entry: %v", err)
+	}
+	legacyConfig := storeConfigFile{
+		Active: legacyEntry.Name,
+		Stores: map[string]storeConfigEntry{
+			legacyEntry.Name: legacyEntry,
+		},
+	}
+	raw, err := json.Marshal(legacyConfig)
+	if err != nil {
+		t.Fatalf("marshal legacy config: %v", err)
+	}
+	if err := os.WriteFile(legacyPath, raw, 0o600); err != nil {
+		t.Fatalf("write legacy config: %v", err)
+	}
+
+	runStoreCommand(t, "config", "set", "new-mysql", "--url", "mysql://user:secret@example.com:3306/otsandbox_new?tls=false")
+	newPath, err := storeConfigPath()
+	if err != nil {
+		t.Fatalf("new config path: %v", err)
+	}
+	newRaw, err := os.ReadFile(newPath)
+	if err != nil {
+		t.Fatalf("read migrated config: %v", err)
+	}
+	var migrated storeConfigFile
+	if err := json.Unmarshal(newRaw, &migrated); err != nil {
+		t.Fatalf("decode migrated config: %v\n%s", err, newRaw)
+	}
+	if _, ok := migrated.Stores["legacy-postgres"]; !ok {
+		t.Fatalf("migrated config lost legacy store: %#v", migrated.Stores)
+	}
+	if _, ok := migrated.Stores["new-mysql"]; !ok {
+		t.Fatalf("migrated config missing new store: %#v", migrated.Stores)
+	}
+}
+
 func TestStoreConfigSetRejectsInvalidMySQLDSNBeforePersisting(t *testing.T) {
 	configHome := t.TempDir()
 	env := []string{"OTSANDBOX_CONFIG_HOME=" + configHome}

@@ -395,9 +395,18 @@ func loadStoreConfig() (storeConfigFile, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return storeConfigFile{Stores: map[string]storeConfigEntry{}}, nil
+			if legacyPath, legacyErr := legacyStoreConfigPath(); legacyErr == nil && legacyPath != "" && legacyPath != path {
+				raw, err = os.ReadFile(legacyPath)
+			}
+			if errors.Is(err, os.ErrNotExist) {
+				return storeConfigFile{Stores: map[string]storeConfigEntry{}}, nil
+			}
+			if err != nil {
+				return storeConfigFile{}, err
+			}
+		} else {
+			return storeConfigFile{}, err
 		}
-		return storeConfigFile{}, err
 	}
 	var cfg storeConfigFile
 	if err := json.Unmarshal(raw, &cfg); err != nil {
@@ -429,11 +438,22 @@ func storeConfigPath() (string, error) {
 	if home := strings.TrimSpace(os.Getenv("OTSANDBOX_CONFIG_HOME")); home != "" {
 		return filepath.Join(home, "store-config.json"), nil
 	}
+	return defaultStoreConfigPath("agent-testbench")
+}
+
+func legacyStoreConfigPath() (string, error) {
+	if strings.TrimSpace(os.Getenv("OTSANDBOX_CONFIG_HOME")) != "" {
+		return "", nil
+	}
+	return defaultStoreConfigPath("open-test-sandbox")
+}
+
+func defaultStoreConfigPath(appName string) (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "agent-testbench", "store-config.json"), nil
+	return filepath.Join(dir, appName, "store-config.json"), nil
 }
 
 func maskStoreURL(rawURL string) string {
