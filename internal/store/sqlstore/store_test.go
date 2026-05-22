@@ -1109,7 +1109,7 @@ func TestStoreEnvironmentCatalogUsesMySQLDialect(t *testing.T) {
 	}
 }
 
-const fakeDriverName = "otsandbox_sqlstore_fake"
+const fakeDriverName = "agent_testbench_sqlstore_fake"
 
 var registerFakeDriverOnce sync.Once
 

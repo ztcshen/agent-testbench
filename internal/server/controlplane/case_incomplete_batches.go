@@ -80,7 +80,7 @@ func apiCaseSuggestedCommand(item profile.APICase) string {
 	if casePath == "" {
 		return ""
 	}
-	parts := []string{"otsandbox case run --case " + strconv.Quote(casePath)}
+	parts := []string{"agent-testbench case run --case " + strconv.Quote(casePath)}
 	if strings.TrimSpace(item.BaseURL) != "" {
 		parts = append(parts, "--base-url "+strconv.Quote(item.BaseURL))
 	}

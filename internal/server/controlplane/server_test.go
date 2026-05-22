@@ -146,10 +146,10 @@ func TestServerExposesCurrentStoreAPIWithMaskedURL(t *testing.T) {
 				Configured: true,
 				Name:       "team-mysql",
 				Backend:    "mysql",
-				URL:        "mysql://tester:xxxxx@example.com:3306/otsandbox_team?tls=false",
+				URL:        "mysql://tester:xxxxx@example.com:3306/agent_testbench_team?tls=false",
 				Source:     "active-config",
 			},
-			wantURL: "mysql://tester:xxxxx@example.com:3306/otsandbox_team?tls=false",
+			wantURL: "mysql://tester:xxxxx@example.com:3306/agent_testbench_team?tls=false",
 		},
 	}
 	for _, tt := range tests {

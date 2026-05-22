@@ -45,7 +45,7 @@ which makes review and generated diffs predictable.
 1. Create a bundle outside the core repository:
 
    ```sh
-   otsandbox template-package init --output /path/to/team-template-package --id team-alpha
+   agent-testbench template-package init --output /path/to/team-template-package --id team-alpha
    ```
 
 2. Add services, workflows, interface nodes, cases, fixtures, and bindings.
@@ -53,13 +53,13 @@ which makes review and generated diffs predictable.
 3. Audit locally:
 
    ```sh
-   otsandbox template-package audit --profile /path/to/team-template-package --offline-template-package --json
+   agent-testbench template-package audit --profile /path/to/team-template-package --offline-template-package --json
    ```
 
 4. Publish and verify against a local Store:
 
    ```sh
-   otsandbox template-package verify \
+   agent-testbench template-package verify \
      --template-package /path/to/team-template-package \
      --store local-personal \
      --require-case-runs \
@@ -69,7 +69,7 @@ which makes review and generated diffs predictable.
 5. Pack the reviewed bundle for handoff:
 
    ```sh
-   otsandbox template-package pack \
+   agent-testbench template-package pack \
      --template-package /path/to/team-template-package \
      --output team-alpha-template-package.tar.gz
    ```

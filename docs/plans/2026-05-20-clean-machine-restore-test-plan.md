@@ -15,7 +15,7 @@ that starts, stops, or removes target application containers.
 ## Current Proven State
 
 - Store inspection, restore planning, and verification are done through
-  `otsandbox environment ...` CLI/API surfaces, not direct database SQL.
+  `agent-testbench environment ...` CLI/API surfaces, not direct database SQL.
 - The SQL Store schema now has `environment_components`,
   `component_dependencies`, and `component_config_assets` as the component graph
   model. Workflow run records can link back to an environment through

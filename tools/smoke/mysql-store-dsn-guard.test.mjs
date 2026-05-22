@@ -4,12 +4,12 @@ import { test } from "node:test";
 import { inspectMySQLStoreDSN, requireSafeMySQLStoreDSN } from "./mysql-store-dsn-guard.mjs";
 
 test("MySQL Store DSN guard accepts dedicated smoke database names", () => {
-  const info = requireSafeMySQLStoreDSN("MYSQL://user:secret@example.com:3306/otsandbox_smoke?tls=false");
+  const info = requireSafeMySQLStoreDSN("MYSQL://user:secret@example.com:3306/agent_testbench_smoke?tls=false");
 
   assert.equal(info.scheme, "mysql");
-  assert.equal(info.database, "otsandbox_smoke");
+  assert.equal(info.database, "agent_testbench_smoke");
   assert.equal(info.safeName, true);
-  assert.equal(info.masked, "mysql://user:xxxxx@example.com:3306/otsandbox_smoke?tls=false");
+  assert.equal(info.masked, "mysql://user:xxxxx@example.com:3306/agent_testbench_smoke?tls=false");
 });
 
 test("MySQL Store DSN guard requires a database path", () => {
@@ -21,7 +21,7 @@ test("MySQL Store DSN guard requires a database path", () => {
 
 test("MySQL Store DSN guard rejects non-MySQL DSNs", () => {
   assert.throws(
-    () => requireSafeMySQLStoreDSN("postgres://user:secret@example.com:5432/otsandbox_smoke"),
+    () => requireSafeMySQLStoreDSN("postgres://user:secret@example.com:5432/agent_testbench_smoke"),
     /requires a mysql:\/\/ Store DSN/,
   );
 });

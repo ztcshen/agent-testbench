@@ -1315,7 +1315,7 @@ func writeTestKitEvidenceFiles(result map[string]any, status string, evidenceDir
 			return "", fmt.Errorf("create test-kit evidence directory: %w", err)
 		}
 	} else {
-		root, err = os.MkdirTemp("", "otsandbox-test-kit-evidence-*")
+		root, err = os.MkdirTemp("", "agent-testbench-test-kit-evidence-*")
 		if err != nil {
 			return "", fmt.Errorf("create test-kit evidence dir: %w", err)
 		}

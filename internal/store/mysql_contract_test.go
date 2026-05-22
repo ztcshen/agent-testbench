@@ -15,11 +15,11 @@ import (
 )
 
 func TestMySQLStoreContractWithExternalDatabase(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("OTSANDBOX_MYSQL_TEST_DSN"))
+	dsn := strings.TrimSpace(os.Getenv("AGENT_TESTBENCH_MYSQL_TEST_DSN"))
 	if dsn == "" {
-		t.Skip("set OTSANDBOX_MYSQL_TEST_DSN to run the MySQL Store contract")
+		t.Skip("set AGENT_TESTBENCH_MYSQL_TEST_DSN to run the MySQL Store contract")
 	}
-	mode, err := parseMySQLTestDSNMode(os.Getenv("OTSANDBOX_MYSQL_TEST_DSN_MODE"))
+	mode, err := parseMySQLTestDSNMode(os.Getenv("AGENT_TESTBENCH_MYSQL_TEST_DSN_MODE"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestMySQLStoreContractWithExternalDatabase(t *testing.T) {
 		}
 		resetExistingMySQLTestDatabase(t, ctx, admin)
 	} else if mode == "create-drop" {
-		databaseName := fmt.Sprintf("otsandbox_contract_%d", time.Now().UnixNano())
+		databaseName := fmt.Sprintf("agent_testbench_contract_%d", time.Now().UnixNano())
 		if _, err := admin.ExecContext(ctx, `create database `+quoteMySQLIdent(databaseName)+` character set utf8mb4 collate utf8mb4_unicode_ci`); err != nil {
 			t.Fatalf("create mysql test database: %v", err)
 		}
@@ -94,9 +94,9 @@ func parseMySQLTestDSNMode(raw string) (string, error) {
 	case "existing", "create-drop":
 		return mode, nil
 	case "":
-		return "", errors.New("set OTSANDBOX_MYSQL_TEST_DSN_MODE=existing for a dedicated existing MySQL Store database, or OTSANDBOX_MYSQL_TEST_DSN_MODE=create-drop for local admin-only contract tests")
+		return "", errors.New("set AGENT_TESTBENCH_MYSQL_TEST_DSN_MODE=existing for a dedicated existing MySQL Store database, or AGENT_TESTBENCH_MYSQL_TEST_DSN_MODE=create-drop for local admin-only contract tests")
 	default:
-		return "", fmt.Errorf("unsupported OTSANDBOX_MYSQL_TEST_DSN_MODE %q; use existing or create-drop", mode)
+		return "", fmt.Errorf("unsupported AGENT_TESTBENCH_MYSQL_TEST_DSN_MODE %q; use existing or create-drop", mode)
 	}
 }
 
@@ -105,7 +105,7 @@ func TestParseMySQLTestDSNModeRequiresExplicitMode(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected empty MySQL contract mode to be rejected")
 	}
-	if !strings.Contains(err.Error(), "OTSANDBOX_MYSQL_TEST_DSN_MODE=existing") || !strings.Contains(err.Error(), "create-drop") {
+	if !strings.Contains(err.Error(), "AGENT_TESTBENCH_MYSQL_TEST_DSN_MODE=existing") || !strings.Contains(err.Error(), "create-drop") {
 		t.Fatalf("unexpected empty mode error: %v", err)
 	}
 }
@@ -157,7 +157,7 @@ func isDedicatedMySQLTestDatabase(databaseName string) bool {
 		value = strings.TrimSpace(databaseName)
 	}
 	value = strings.ToLower(value)
-	return strings.Contains(value, "otsandbox") ||
+	return strings.Contains(value, "agent-testbench") ||
 		strings.Contains(value, "_smoke") || strings.Contains(value, "smoke_") ||
 		strings.Contains(value, "_test") || strings.Contains(value, "test_") ||
 		strings.Contains(value, "_ci") || strings.Contains(value, "ci_")

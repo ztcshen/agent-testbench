@@ -91,28 +91,27 @@ Install dependencies and verify the checkout:
 
 ```sh
 npm ci
-./bin/otsandbox.sh version
+./bin/agent-testbench.sh version
 # SQL Store examples:
 # PostgreSQL:
-OTSANDBOX_DEMO_STORE='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run demo:api-case
-OTSANDBOX_SMOKE_STORE_DSN='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run release-check
+AGENT_TESTBENCH_DEMO_STORE='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run demo:api-case
+AGENT_TESTBENCH_SMOKE_STORE_DSN='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run release-check
 # MySQL:
-OTSANDBOX_DEMO_STORE='mysql://user:pass@host:3306/otsandbox_smoke?tls=false' npm run demo:api-case
-OTSANDBOX_SMOKE_STORE_DSN='mysql://user:pass@host:3306/otsandbox_smoke?tls=false' npm run release-check
+AGENT_TESTBENCH_DEMO_STORE='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run demo:api-case
+AGENT_TESTBENCH_SMOKE_STORE_DSN='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run release-check
 # SQLite:
-OTSANDBOX_DEMO_STORE="sqlite://$PWD/.runtime/otsandbox-smoke.sqlite" npm run demo:api-case
-OTSANDBOX_SMOKE_STORE_DSN="sqlite://$PWD/.runtime/otsandbox-smoke.sqlite" npm run release-check
+AGENT_TESTBENCH_DEMO_STORE="sqlite://$PWD/.runtime/agent-testbench-smoke.sqlite" npm run demo:api-case
+AGENT_TESTBENCH_SMOKE_STORE_DSN="sqlite://$PWD/.runtime/agent-testbench-smoke.sqlite" npm run release-check
 ```
 
-The CLI and environment-variable namespace still use the legacy `otsandbox` /
-`OTSANDBOX_*` names for compatibility while the public project name moves to
-AgentTestBench.
+The primary CLI is `agent-testbench`; public configuration and smoke-test
+environment variables use the `AGENT_TESTBENCH_*` namespace.
 
 The demo command starts a temporary local HTTP endpoint, runs the generic
 `examples/api-cases/create-item.json` case against the active SQL Store or
-`OTSANDBOX_DEMO_STORE=postgres://...` /
-`OTSANDBOX_DEMO_STORE=mysql://...` /
-`OTSANDBOX_DEMO_STORE=sqlite://...`, and prints the Evidence bundle path. The
+`AGENT_TESTBENCH_DEMO_STORE=postgres://...` /
+`AGENT_TESTBENCH_DEMO_STORE=mysql://...` /
+`AGENT_TESTBENCH_DEMO_STORE=sqlite://...`, and prints the Evidence bundle path. The
 demo and release gate require dedicated MySQL Store database names that look
 like sandbox/smoke/test/CI targets; do not point them at an application schema. The
 release gate requires a SQLite, PostgreSQL, or MySQL smoke Store DSN.
@@ -123,11 +122,11 @@ headless browser smoke tests.
 By default, smoke tests use a deterministic synthetic SkyWalking GraphQL
 provider so local wiring checks are repeatable. This is not release evidence
 for a real SkyWalking deployment. To validate the real topology path, set
-`OTS_TRACE_GRAPHQL_URL`, `OTS_SMOKE_EXPECTED_STEPS`, and
-`OTS_SMOKE_TRACE_IDS` so the configured workflow smoke uses real trace ids. For
+`AGENT_TESTBENCH_TRACE_GRAPHQL_URL`, `AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS`, and
+`AGENT_TESTBENCH_SMOKE_TRACE_IDS` so the configured workflow smoke uses real trace ids. For
 final sign-off that must fail instead of using synthetic topology evidence,
-also set `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`; in that mode
-`OTS_SMOKE_TRACE_IDS` must map every configured workflow step.
+also set `AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1`; in that mode
+`AGENT_TESTBENCH_SMOKE_TRACE_IDS` must map every configured workflow step.
 When no SkyWalking endpoint is configured, topology collection must
 report unavailable, failed, or skipped status instead of inventing a topology.
 
@@ -148,7 +147,7 @@ AgentTestBench APIs and UI
 
 Core packages stay generic:
 
-- `cmd/otsandbox/`: CLI entrypoint and command orchestration.
+- `cmd/agent-testbench/`: CLI entrypoint and command orchestration.
 - `internal/server/controlplane/`: HTTP APIs, workbench data, reports, and Evidence views.
 - `internal/runner/`: runnable automation helpers such as API cases, request templates, JUnit output, executor planning, and Evidence import.
 - `internal/domain/`: generic profile, case-suite, redaction, and audit domain logic.
@@ -157,7 +156,7 @@ Core packages stay generic:
 - `internal/store/mysql/`: MySQL product Store backend.
 - `internal/store/sqlite/`: SQLite product Store backend for local and personal Stores.
 - `control-plane/frontend/`: React workbench source.
-- `control-plane/static/`: built static workbench assets served by `otsandbox serve`.
+- `control-plane/static/`: built static workbench assets served by `agent-testbench serve`.
 
 ## Documentation
 
@@ -207,13 +206,13 @@ Current working areas:
   acceptance workflow recording, and verified publishing gates.
 - Workbench: local React pages backed by Control plane APIs for catalog,
   workflow, environment, run, Evidence, and topology review.
-- Release gate: `OTSANDBOX_SMOKE_STORE_DSN=postgres://... npm run release-check`
-  or `OTSANDBOX_SMOKE_STORE_DSN=mysql://... npm run release-check`; for an
+- Release gate: `AGENT_TESTBENCH_SMOKE_STORE_DSN=postgres://... npm run release-check`
+  or `AGENT_TESTBENCH_SMOKE_STORE_DSN=mysql://... npm run release-check`; for an
   optional organization-owned MySQL Store sign-off, run
   `npm run release-check:mysql-real:preflight` first, then
   `npm run release-check:mysql-real` with
-  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`,
-  `OTS_SMOKE_EXPECTED_STEPS`, and `OTS_SMOKE_TRACE_IDS` for every configured
+  `AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1`, `AGENT_TESTBENCH_TRACE_GRAPHQL_URL`,
+  `AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS`, and `AGENT_TESTBENCH_SMOKE_TRACE_IDS` for every configured
   workflow step.
 
 Remaining optional real-environment proof is operational rather than
@@ -226,9 +225,9 @@ for that workflow before running the strict gate.
 Run the full local gate before publishing a change:
 
 ```sh
-OTSANDBOX_SMOKE_STORE_DSN='postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable' npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run release-check
 # or
-OTSANDBOX_SMOKE_STORE_DSN='mysql://user:pass@host:3306/otsandbox_smoke?tls=false' npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run release-check
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and

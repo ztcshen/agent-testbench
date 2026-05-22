@@ -26,7 +26,7 @@ npm run build:frontend
 Run the full release gate before opening a pull request:
 
 ```sh
-OTSANDBOX_SMOKE_STORE_DSN="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run release-check
 ```
 
 The gate runs formatting hygiene, generated-state checks, source-domain

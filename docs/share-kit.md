@@ -51,27 +51,27 @@ AgentTestBench 是一套通用的 agent-native 集成测试控制平面。它让
 git clone https://github.com/ztcshen/agent-testbench.git
 cd agent-testbench
 npm ci
-OTSANDBOX_DEMO_STORE="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run demo:api-case
-OTSANDBOX_SMOKE_STORE_DSN="postgres://user:pass@host:5432/otsandbox_smoke?sslmode=disable" npm run release-check
+AGENT_TESTBENCH_DEMO_STORE="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run demo:api-case
+AGENT_TESTBENCH_SMOKE_STORE_DSN="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run release-check
 # MySQL:
-OTSANDBOX_DEMO_STORE="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" npm run demo:api-case
-OTSANDBOX_SMOKE_STORE_DSN="mysql://user:pass@host:3306/otsandbox_smoke?tls=false" npm run release-check
+AGENT_TESTBENCH_DEMO_STORE="mysql://user:pass@host:3306/agent_testbench_smoke?tls=false" npm run demo:api-case
+AGENT_TESTBENCH_SMOKE_STORE_DSN="mysql://user:pass@host:3306/agent_testbench_smoke?tls=false" npm run release-check
 ```
 
 What to point out:
 
 - `demo:api-case` starts a temporary local HTTP service and writes Evidence
   indexes to the active SQLite/PostgreSQL/MySQL Store or an explicit
-  `OTSANDBOX_DEMO_STORE=postgres://...` /
-  `OTSANDBOX_DEMO_STORE=mysql://...` /
-  `OTSANDBOX_DEMO_STORE=sqlite://...`. MySQL demo Stores must use dedicated
+  `AGENT_TESTBENCH_DEMO_STORE=postgres://...` /
+  `AGENT_TESTBENCH_DEMO_STORE=mysql://...` /
+  `AGENT_TESTBENCH_DEMO_STORE=sqlite://...`. MySQL demo Stores must use dedicated
   sandbox/smoke/test/CI-looking database names, not application schemas.
 - `release-check` requires a SQLite, PostgreSQL, or MySQL smoke Store DSN, then runs
   guardrails, Go tests, the demo, the React build, active SQL Store CLI smoke,
   and SQL Store headless browser smoke tests.
 - Live SkyWalking validation is a stricter sign-off mode: set
-  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`, `OTS_TRACE_GRAPHQL_URL`,
-  `OTS_SMOKE_EXPECTED_STEPS`, and `OTS_SMOKE_TRACE_IDS` with mappings for every
+  `AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1`, `AGENT_TESTBENCH_TRACE_GRAPHQL_URL`,
+  `AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS`, and `AGENT_TESTBENCH_SMOKE_TRACE_IDS` with mappings for every
   configured workflow step;
   otherwise the demo uses deterministic synthetic topology wiring for
   repeatable local smoke.
@@ -80,14 +80,14 @@ What to point out:
 讲解重点：
 
 - `demo:api-case` 会启动临时本地 HTTP 服务，并把 Evidence 索引写入 active
-  SQLite/PostgreSQL/MySQL Store 或显式 `OTSANDBOX_DEMO_STORE=postgres://...` /
-  `OTSANDBOX_DEMO_STORE=mysql://...` /
-  `OTSANDBOX_DEMO_STORE=sqlite://...`。
+  SQLite/PostgreSQL/MySQL Store 或显式 `AGENT_TESTBENCH_DEMO_STORE=postgres://...` /
+  `AGENT_TESTBENCH_DEMO_STORE=mysql://...` /
+  `AGENT_TESTBENCH_DEMO_STORE=sqlite://...`。
 - `release-check` 要求提供 SQLite、PostgreSQL 或 MySQL smoke Store DSN，然后运行守卫、
   Go 测试、demo、React build、active SQL Store CLI smoke 和 SQL Store 无头浏览器冒烟。
 - 真实 SkyWalking 验证是更严格的 sign-off 模式：设置
-  `OTSANDBOX_REQUIRE_REAL_SKYWALKING=1`、`OTS_TRACE_GRAPHQL_URL`、
-  `OTS_SMOKE_EXPECTED_STEPS` 和 `OTS_SMOKE_TRACE_IDS`，并覆盖配置工作流的
+  `AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1`、`AGENT_TESTBENCH_TRACE_GRAPHQL_URL`、
+  `AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS` 和 `AGENT_TESTBENCH_SMOKE_TRACE_IDS`，并覆盖配置工作流的
   每一个必需 step；否则 demo
   使用确定性的 synthetic topology wiring 做可重复本地冒烟。
 - template package 默认在核心仓库外维护，核心保持通用。

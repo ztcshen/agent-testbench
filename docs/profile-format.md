@@ -53,13 +53,13 @@ source of truth for template package assets.
 Publish a bundle before serving it through the workbench:
 
 ```sh
-otsandbox template-package init --output /path/to/template-package --id sample
-otsandbox template-package install --from /path/to/template-package
-otsandbox template-package verify --template-package sample --store local-personal
-otsandbox serve --profile sample --store local-personal
+agent-testbench template-package init --output /path/to/template-package --id sample
+agent-testbench template-package install --from /path/to/template-package
+agent-testbench template-package verify --template-package sample --store local-personal
+agent-testbench serve --profile sample --store local-personal
 ```
 
-For local bootstrapping, `otsandbox serve --profile /path/to/template-package`
+For local bootstrapping, `agent-testbench serve --profile /path/to/template-package`
 first publishes the external bundle into the Store/read-model, then serves that
 indexed view.
 
@@ -72,15 +72,15 @@ local logs.
 ## Standard Local Placement
 
 Installed template packages live outside the core repository. By default the CLI
-uses `$HOME/.otsandbox/profiles`; pass `--profile-home PATH` to use a team
+uses `$HOME/.agent-testbench/profiles`; pass `--profile-home PATH` to use a team
 checkout, mounted volume, or temporary test directory.
 
 ```sh
-otsandbox template-package install --from /path/to/template-package
-otsandbox template-package list
-otsandbox template-package pack --template-package sample --output sample-template-package.tar.gz
-otsandbox template-package inspect --template-package sample
-otsandbox template-package verify --template-package sample --store local-personal
+agent-testbench template-package install --from /path/to/template-package
+agent-testbench template-package list
+agent-testbench template-package pack --template-package sample --output sample-template-package.tar.gz
+agent-testbench template-package inspect --template-package sample
+agent-testbench template-package verify --template-package sample --store local-personal
 ```
 
 `template-package install` copies the external package into the template package
@@ -127,7 +127,7 @@ package from a local path, and can publish or verify the selected package id.
 
 ## Audit
 
-Use `otsandbox template-package audit --profile PATH --offline-template-package`
+Use `agent-testbench template-package audit --profile PATH --offline-template-package`
 to check a package before or after import. The audit verifies basic reference integrity across workflows, API
 Cases, request templates, fixtures, case dependencies, and workflow bindings.
 For example, it reports a workflow binding that points to a missing workflow,
@@ -143,7 +143,7 @@ publish step must fail before Store/read-model writes if reference integrity
 issues are found. The Control plane import API exposes the same behavior with
 `requireAuditOk: true`.
 
-Use `otsandbox template-package verify --template-package PATH --store NAME_OR_DSN`
+Use `agent-testbench template-package verify --template-package PATH --store NAME_OR_DSN`
 as the standard acceptance command for an external package. It audits the
 package, publishes it only if the audit is clean, then checks that the package index, active config
 version, catalog index, and base Control plane read-models were written for the
@@ -219,9 +219,9 @@ Use the CLI to inspect the plan before copying any generated assets into a
 template package:
 
 ```sh
-otsandbox template-package import-plan openapi --from /path/to/openapi.json --service-id service.catalog --evidence-dir .runtime/openapi --json
-otsandbox template-package import-plan http-capture --from /path/to/traffic.json --service-id service.catalog --evidence-dir .runtime/replay --json
-otsandbox template-package generation-plan openapi --from /path/to/openapi.json --service-id service.catalog --evidence-dir .runtime/generated --json
+agent-testbench template-package import-plan openapi --from /path/to/openapi.json --service-id service.catalog --evidence-dir .runtime/openapi --json
+agent-testbench template-package import-plan http-capture --from /path/to/traffic.json --service-id service.catalog --evidence-dir .runtime/replay --json
+agent-testbench template-package generation-plan openapi --from /path/to/openapi.json --service-id service.catalog --evidence-dir .runtime/generated --json
 ```
 
 Add `--output-dir PATH` to write the same plan as reviewable files:
@@ -306,7 +306,7 @@ review, and assign case suites without editing the core repository:
 - `timeoutSeconds`: optional request timeout for the control plane run API.
 - `defaultOverrides`: optional template package-owned defaults passed to the page.
 
-Use `otsandbox case discover` to query this metadata after publishing the
+Use `agent-testbench case discover` to query this metadata after publishing the
 template package into a Store.
 
 ## Executor Descriptors
@@ -333,7 +333,7 @@ Supported descriptor kinds are `http-case`, `playwright`, `postman`, `k6`,
 surface is a dry-run plan:
 
 ```sh
-otsandbox executor plan --profile /path/to/template-package --json
+agent-testbench executor plan --profile /path/to/template-package --json
 ```
 
 The plan validates ids, supported kinds, active status, required source paths or

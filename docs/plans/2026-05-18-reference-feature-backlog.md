@@ -55,16 +55,16 @@ read-model assertions. No runtime network calls should be required.
 Implementation progress:
 OpenAPI 3.x JSON import planning now exists in
 `internal/domain/profileimport/openapi`. The CLI exposes it as
-`otsandbox template-package import-plan openapi` through the Store-first command
+`agent-testbench template-package import-plan openapi` through the Store-first command
 alias, with optional `--output-dir` export for reviewable split template package
 assets and runnable `api-cases/*.json` case files. The control-plane API also
 exposes the same planner as `POST /api/template-packages/import-plan/openapi`
 for API-operated review flows. Static HTTP capture import planning follows the
 same review-only pattern through `internal/domain/profileimport/httpcapture`,
-`otsandbox template-package import-plan http-capture`, and
+`agent-testbench template-package import-plan http-capture`, and
 `POST /api/template-packages/import-plan/http-capture`. OpenAPI negative-case
 generation is likewise exposed through `internal/domain/profilegenerate/openapi`,
-`otsandbox template-package generation-plan openapi`, and
+`agent-testbench template-package generation-plan openapi`, and
 `POST /api/template-packages/generation-plan/openapi`. This keeps generated
 assets draft-only and outside any existing template package until a reviewer
 applies them.
@@ -102,7 +102,7 @@ Import Bundle bundles now support `executors` manifest entries and split
 validates supported external tool/script descriptors (`http-case`,
 `playwright`, `postman`, `k6`, `pytest`, `karate`, and `custom-command`) and
 reports ready versus blocked descriptors without executing external binaries.
-The CLI exposes this as `otsandbox executor plan`.
+The CLI exposes this as `agent-testbench executor plan`.
 
 ### 3. Test Case Lifecycle and Assignment Fields
 
@@ -227,7 +227,7 @@ Implementation progress:
 `internal/import bundleimport/httpcapture` now converts static HTTP capture JSON into
 reviewable draft services, interface nodes, request templates, API case
 metadata, and runnable `api-cases/*.json` files. The CLI exposes this as
-`otsandbox import bundle import-plan http-capture`, sharing the same review-only
+`agent-testbench import bundle import-plan http-capture`, sharing the same review-only
 `--output-dir` pattern as OpenAPI import planning. The implementation is
 intentionally limited to HTTP request/response pairs; eBPF capture,
 database/queue virtualization, mock registry, and time freezing remain deferred
@@ -272,7 +272,7 @@ Implementation progress:
 candidate cases from OpenAPI JSON request schemas. The first implemented
 generation rule is intentionally narrow: one missing-required-field case per
 required JSON request property, tagged `generated`, `schema`, and `negative`.
-The CLI exposes this as `otsandbox import bundle generation-plan openapi`, with the
+The CLI exposes this as `agent-testbench import bundle generation-plan openapi`, with the
 same review-only `--output-dir` pattern used by import planning. Fuzzing,
 stateful operation chaining, live response schema-violation discovery,
 white-box analysis, auth-aware generation, and database-aware setup remain

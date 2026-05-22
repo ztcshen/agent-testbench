@@ -47,7 +47,7 @@ agent-native, API-operated, Store-first, and local-first.
 
 ## Project Shape
 
-- `cmd/otsandbox/`: CLI entrypoint.
+- `cmd/agent-testbench/`: CLI entrypoint.
 - `internal/server/controlplane/`: generic control-plane API and workbench server.
 - `internal/runner/`: automation runners, request rendering, report output, and Evidence import helpers.
 - `internal/domain/`: generic profile, case-suite, redaction, and audit domain logic.
@@ -62,6 +62,6 @@ of becoming the daily maintenance surface.
 ## Naming
 
 The product name is **AgentTestBench** and the preferred repository slug is
-`agent-testbench`. Keep the legacy `otsandbox` CLI and `OTSANDBOX_*`
-environment namespace compatible until a dedicated breaking migration is
-planned.
+`agent-testbench`. The primary CLI path is `cmd/agent-testbench`, the wrapper is
+`bin/agent-testbench.sh`, and public environment variables use the
+`AGENT_TESTBENCH_*` namespace.

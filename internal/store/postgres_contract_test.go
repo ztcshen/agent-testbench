@@ -14,9 +14,9 @@ import (
 )
 
 func TestPostgresStoreContractWithExternalDatabase(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("OTSANDBOX_POSTGRES_TEST_DSN"))
+	dsn := strings.TrimSpace(os.Getenv("AGENT_TESTBENCH_POSTGRES_TEST_DSN"))
 	if dsn == "" {
-		t.Skip("set OTSANDBOX_POSTGRES_TEST_DSN to run the PostgreSQL Store contract")
+		t.Skip("set AGENT_TESTBENCH_POSTGRES_TEST_DSN to run the PostgreSQL Store contract")
 	}
 	ctx := context.Background()
 	admin, err := sql.Open("pgx", dsn)
@@ -27,7 +27,7 @@ func TestPostgresStoreContractWithExternalDatabase(t *testing.T) {
 	if err := admin.PingContext(ctx); err != nil {
 		t.Fatalf("ping postgres test database: %v", err)
 	}
-	schemaName := fmt.Sprintf("otsandbox_contract_%d", time.Now().UnixNano())
+	schemaName := fmt.Sprintf("agent_testbench_contract_%d", time.Now().UnixNano())
 	if _, err := admin.ExecContext(ctx, `create schema `+quotePostgresIdent(schemaName)); err != nil {
 		t.Fatalf("create postgres test schema: %v", err)
 	}

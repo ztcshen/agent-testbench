@@ -38,7 +38,7 @@ func TestSQLiteStoreUsesDefaultPathWhenURLIsEmpty(t *testing.T) {
 }
 
 func TestSQLiteStoreCanBeDisabledForPostgresOnlyValidation(t *testing.T) {
-	t.Setenv("OTSANDBOX_DISABLE_SQLITE_STORE", "1")
+	t.Setenv("AGENT_TESTBENCH_DISABLE_SQLITE_STORE", "1")
 
 	_, err := sqlite.Open(context.Background(), sqlite.Config{Path: filepath.Join(t.TempDir(), "store.sqlite")})
 	if err == nil {
