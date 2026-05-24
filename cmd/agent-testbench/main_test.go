@@ -1811,6 +1811,10 @@ func TestResearchScopeWritesNormalizedScopeFileForReleaseCheck(t *testing.T) {
 	if !strings.Contains(strings.Join(report.NextCommands, "\n"), "npm run release-check -- --scope-file '.release-check-scope'") {
 		t.Fatalf("next commands should reuse written scope file: %#v", report.NextCommands)
 	}
+	joinedNext := strings.Join(report.NextCommands, "\n")
+	if !strings.Contains(joinedNext, "research gate --feature 'quality-gates'"+featureRadarIndexFlag(indexPath)+" --require-min-matches 2") || !strings.Contains(joinedNext, "--scope-file '.release-check-scope'") {
+		t.Fatalf("next commands should carry the written scope file into research gate: %#v", report.NextCommands)
+	}
 }
 
 func TestResearchSyncPlansAndExecutesRadarMaintenanceWorkflow(t *testing.T) {

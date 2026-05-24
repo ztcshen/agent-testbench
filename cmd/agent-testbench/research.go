@@ -3646,7 +3646,7 @@ func featureScopeNextCommands(report featureScopeReport, indexPath string, minRe
 	commands := []string{report.ReleaseCheck.Command}
 	if report.Recommended.ID != "" {
 		commands = append(commands,
-			featureGateCommandWithLiveCheck(report.Recommended.ID, minReferences, "", 72, indexPath, liveCheck, maxStarDrift, maxPushedDriftHours),
+			featureGateCommandWithReleaseCheck(report.Recommended.ID, minReferences, "", 72, indexPath, liveCheck, maxStarDrift, maxPushedDriftHours, report.ReleaseCheck),
 			featurePlanCommandWithLiveCheck(report.Recommended.ID, minReferences, indexPath, liveCheck, maxStarDrift, maxPushedDriftHours),
 		)
 	}
@@ -3655,6 +3655,27 @@ func featureScopeNextCommands(report featureScopeReport, indexPath string, minRe
 		featureCompareRoadmapCommand(indexPath, minReferences, limit, referenceLimit, liveCheck, maxStarDrift, maxPushedDriftHours, githubAPIURL),
 	)
 	return uniquePreserveOrder(commands)
+}
+
+func featureGateCommandWithReleaseCheck(featureID string, minReferences int, requireCommand string, maxAgeHours int, indexPath string, liveCheck bool, maxStarDrift int, maxPushedDriftHours int, releaseCheck featureScopeReleaseCheck) string {
+	command := strings.TrimSuffix(featureGateCommandWithLiveCheck(featureID, minReferences, requireCommand, maxAgeHours, indexPath, liveCheck, maxStarDrift, maxPushedDriftHours), " --json")
+	command += featureReleaseCheckScopeFlags(releaseCheck)
+	return command + " --json"
+}
+
+func featureReleaseCheckScopeFlags(releaseCheck featureScopeReleaseCheck) string {
+	if !releaseCheck.Scoped {
+		return ""
+	}
+	scopeFile := strings.TrimSpace(releaseCheck.ScopeFile)
+	if scopeFile != "" {
+		return " --scope-file " + quoteCommandValue(scopeFile)
+	}
+	flags := ""
+	for _, scope := range releaseCheck.Scopes {
+		flags += " --scope " + quoteCommandValue(scope)
+	}
+	return flags
 }
 
 func featureRequireCommandFlag(value string) string {
