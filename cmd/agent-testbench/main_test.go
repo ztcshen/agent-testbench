@@ -74,7 +74,7 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	if !strings.Contains(out, "agent-testbench research sync") {
 		t.Fatalf("top-level help should expose feature radar sync automation:\n%s", out)
 	}
-	if !strings.Contains(out, "agent-testbench research sync --radar-root PATH") || !strings.Contains(out, "[--seed-only] [--strict-search]") {
+	if !strings.Contains(out, "agent-testbench research sync --radar-root PATH") || !strings.Contains(out, "[--seed-only] [--strict-search]") || !strings.Contains(out, "[--live-check] [--live-limit N]") {
 		t.Fatalf("top-level help should expose feature radar refresh modes:\n%s", out)
 	}
 	if !strings.Contains(out, "agent-testbench research coverage") {
@@ -1756,6 +1756,149 @@ func TestResearchSyncPassesRefreshModeFlags(t *testing.T) {
 		if !strings.Contains(refreshCommand, want) {
 			t.Fatalf("refresh command missing %q:\n%s", want, refreshCommand)
 		}
+	}
+}
+
+func TestResearchSyncLiveCheckGatesMaintainedFeatureIndex(t *testing.T) {
+	radarRoot := t.TempDir()
+	dataDir := filepath.Join(radarRoot, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("mkdir radar data: %v", err)
+	}
+	writeFile(t, filepath.Join(radarRoot, "package.json"), `{"scripts":{"refresh":"node src/cli.mjs refresh"}}`)
+	index := map[string]any{
+		"schemaVersion":     1,
+		"sourceGeneratedAt": "2026-05-24T04:39:07Z",
+		"policy": map[string]any{
+			"minStars":    3000,
+			"months":      3,
+			"pushedAfter": "2026-02-24",
+		},
+		"tokenIndex": map[string]any{
+			"quality gate": []string{"quality-gates"},
+		},
+		"features": map[string]any{
+			"quality-gates": map[string]any{
+				"id":      "quality-gates",
+				"title":   "Quality Gates",
+				"intent":  "Find projects that gate releases with policy checks.",
+				"aliases": []string{"quality gate"},
+				"topMatches": []map[string]any{
+					{
+						"fullName":     "example/gate-engine",
+						"url":          "https://github.com/example/gate-engine",
+						"stars":        3040,
+						"pushedAt":     "2026-05-20T00:00:00Z",
+						"featureScore": 95,
+						"reasons":      []string{"policy gate CLI"},
+					},
+					{
+						"fullName":     "example/gate-policy",
+						"url":          "https://github.com/example/gate-policy",
+						"stars":        4558,
+						"pushedAt":     "2026-05-22T00:00:00Z",
+						"featureScore": 90,
+						"reasons":      []string{"release gate policy"},
+					},
+				},
+			},
+		},
+		"projectIndex": map[string]any{
+			"example/gate-engine": map[string]any{
+				"fullName":        "example/gate-engine",
+				"url":             "https://github.com/example/gate-engine",
+				"stars":           3040,
+				"pushedAt":        "2026-05-20T00:00:00Z",
+				"language":        "Go",
+				"topics":          []string{"quality-gates"},
+				"matchedFeatures": []string{"quality-gates"},
+			},
+			"example/gate-policy": map[string]any{
+				"fullName":        "example/gate-policy",
+				"url":             "https://github.com/example/gate-policy",
+				"stars":           4558,
+				"pushedAt":        "2026-05-22T00:00:00Z",
+				"language":        "TypeScript",
+				"topics":          []string{"quality-gates"},
+				"matchedFeatures": []string{"quality-gates"},
+			},
+		},
+	}
+	indexPath := filepath.Join(dataDir, "feature-index.json")
+	writeFile(t, indexPath, mustJSON(t, index))
+
+	requested := []string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = append(requested, r.URL.Path)
+		if r.URL.Path != "/repos/example/gate-engine" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"full_name":"example/gate-engine","html_url":"https://github.com/example/gate-engine","stargazers_count":3200,"pushed_at":"2026-05-24T12:00:00Z","archived":false,"fork":false}`)
+	}))
+	defer server.Close()
+
+	out := runCLIFails(t,
+		"research", "sync",
+		"--radar-root", radarRoot,
+		"--min-references", "2",
+		"--live-check",
+		"--live-limit", "1",
+		"--reference-limit", "1",
+		"--github-api-url", server.URL,
+		"--max-star-drift", "50",
+		"--max-pushed-drift-hours", "24",
+		"--json",
+	)
+	var report struct {
+		OK        bool `json:"ok"`
+		Execute   bool `json:"execute"`
+		LiveCheck struct {
+			OK                bool `json:"ok"`
+			CheckedCount      int  `json:"checkedCount"`
+			CheckedCandidates int  `json:"checkedCandidates"`
+			RefreshNeeded     bool `json:"refreshNeeded"`
+			RefreshCount      int  `json:"refreshCount"`
+			RefreshCandidates int  `json:"refreshCandidates"`
+		} `json:"liveCheck"`
+		LiveRefreshPlan struct {
+			OK            bool `json:"ok"`
+			NeedsRefresh  bool `json:"needsRefresh"`
+			FocusFeatures []struct {
+				ID      string   `json:"id"`
+				Gate    string   `json:"gate"`
+				Reasons []string `json:"reasons"`
+			} `json:"focusFeatures"`
+		} `json:"liveRefreshPlan"`
+		Reasons []string `json:"reasons"`
+		Steps   []struct {
+			Name    string `json:"name"`
+			Skipped bool   `json:"skipped"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
+		t.Fatalf("decode research sync live-check json: %v\n%s", err, out)
+	}
+	if report.OK || report.Execute {
+		t.Fatalf("live drift should fail sync dry-run without executing npm steps: %#v", report)
+	}
+	if report.LiveCheck.OK || !report.LiveCheck.RefreshNeeded || report.LiveCheck.CheckedCandidates != 1 || report.LiveCheck.CheckedCount != 1 || report.LiveCheck.RefreshCount != 1 || report.LiveCheck.RefreshCandidates != 1 {
+		t.Fatalf("live check summary = %#v", report.LiveCheck)
+	}
+	if !report.LiveRefreshPlan.NeedsRefresh || report.LiveRefreshPlan.OK || len(report.LiveRefreshPlan.FocusFeatures) == 0 || report.LiveRefreshPlan.FocusFeatures[0].ID != "quality-gates" || report.LiveRefreshPlan.FocusFeatures[0].Gate != "needs-refresh" {
+		t.Fatalf("live refresh plan = %#v", report.LiveRefreshPlan)
+	}
+	if !strings.Contains(strings.Join(report.Reasons, "\n"), "live-check needs refresh for 1 reference(s)") {
+		t.Fatalf("sync reasons = %#v", report.Reasons)
+	}
+	for _, step := range report.Steps {
+		if !step.Skipped {
+			t.Fatalf("dry-run live check should keep npm step skipped: %#v", step)
+		}
+	}
+	if fmt.Sprint(requested) != "[/repos/example/gate-engine]" {
+		t.Fatalf("live check requests = %#v", requested)
 	}
 }
 

@@ -43,6 +43,9 @@ AgentTestBench can also plan or execute that same external maintenance chain:
   --strict-search \
   --max-age-hours 72 \
   --min-references 3 \
+  --live-check \
+  --max-star-drift 100 \
+  --max-pushed-drift-hours 72 \
   --execute \
   --json
 ```
@@ -182,7 +185,11 @@ without moving the crawler into the core repository. Dry-run mode emits the
 ordered external commands (`npm test`, `npm run refresh`, `npm run status`,
 `npm run audit`, `npm run coverage`, `npm run index`) with the caller's
 freshness and reference thresholds. `--execute` runs the same chain in the
-external radar root and returns per-step exit codes plus captured output.
+external radar root and returns per-step exit codes plus captured output. Add
+`--live-check` to read the maintained feature index after planning or execution,
+verify roadmap candidates against live GitHub repository metadata, and attach a
+`liveRefreshPlan` when policy-passing references have drifted enough to require
+refresh.
 
 `research features` returns the feature id, title, intent, aliases, reference
 count, and ranked reference projects. Use it as the local feature-search entry
@@ -322,8 +329,9 @@ external radar commands should run next. With `--live-check`, policy failures
 or `--max-star-drift` / `--max-pushed-drift-hours` drift mark the plan as
 refresh-needed even when the local index timestamp, audit, and coverage still
 look healthy. Use it before scheduled refreshes or before starting a new CLI
-slice from stale radar data. Use `research sync --execute` when the plan should
-be carried out immediately from AgentTestBench.
+slice from stale radar data. Use `research sync --execute --live-check` when the
+plan should be carried out immediately from AgentTestBench and verified against
+live GitHub metadata before the next slice starts.
 
 `research gate` is the pre-implementation guard for an individual CLI slice. It
 loads the external feature index, verifies freshness, runs the radar audit,
@@ -437,7 +445,7 @@ Recommended pre-design gate:
 
 ```sh
 ./bin/agent-testbench.sh research features --filter "new cli capability"
-./bin/agent-testbench.sh research sync --radar-root $RADAR_HOME --max-age-hours 72 --min-references 3 --strict-search
+./bin/agent-testbench.sh research sync --radar-root $RADAR_HOME --max-age-hours 72 --min-references 3 --strict-search --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research search --query "new cli capability" --limit 5 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research compare --query "new cli capability" --min-references 3 --limit 5 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research command --command "target command" --min-references 3 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
@@ -450,6 +458,7 @@ Recommended pre-design gate:
 ./bin/agent-testbench.sh research matrix --filter "new cli capability" --limit 3
 ./bin/agent-testbench.sh research refresh-plan --min-references 3 --max-age-hours 72
 ./bin/agent-testbench.sh research refresh-plan --min-references 3 --max-age-hours 72 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
+./bin/agent-testbench.sh research sync --radar-root $RADAR_HOME --strict-search --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research roadmap --min-references 3 --limit 5 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research backlog --min-references 3 --limit 5 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research gate \
