@@ -117,6 +117,9 @@ What to point out:
 - `agent-testbench research backlog --min-references 3` turns the roadmap into
   stateless prioritized tasks with references, implementation commands,
   verification commands, and acceptance criteria.
+- `agent-testbench research backlog --min-references 3 --live-check`
+  turns the live-checked roadmap into tasks, marking stale items as
+  `needs-refresh` before they become implementation work.
 - `agent-testbench research plan --feature "case run" --require-min-matches 3`
   turns the same feature search into a compact plan: reference gate, ranked
   projects, catalog-verified next commands, and verification commands. Add
@@ -195,6 +198,9 @@ What to point out:
   会在最终排序前用 GitHub 实时 metadata 复核候选引用，让 stale 或需要 refresh 的候选不会排在下一轮 CLI 切片前面。
 - `agent-testbench research backlog --min-references 3` 会把 roadmap 转成无状态
   优先级任务，包含参考项目、实现命令、验证命令和验收条件。
+- `agent-testbench research backlog --min-references 3 --live-check`
+  会把 live-checked roadmap 转成任务队列，并在实现前把 stale 项标记为
+  `needs-refresh`。
 - `agent-testbench research plan --feature "case run" --require-min-matches 3`
   会把同一套 feature 搜索整理成紧凑计划：参考门禁、排序后的项目、经过命令目录校验的
   next commands，以及 verification commands；加 `--live-check` 可以把实时 reference

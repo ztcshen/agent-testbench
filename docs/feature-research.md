@@ -291,14 +291,19 @@ When the next slice should become an execution queue, use `research backlog`:
   --min-references 3 \
   --limit 5 \
   --reference-limit 2 \
+  --live-check \
+  --max-star-drift 100 \
+  --max-pushed-drift-hours 72 \
   --json
 ```
 
 `research backlog` keeps the command stateless. It converts the roadmap into
 prioritized tasks with a stable task id, status, top references, implementation
-commands, verification commands, and acceptance criteria. Use this as the
-handoff between feature search and the next AgentTestBench CLI implementation
-slice.
+commands, verification commands, acceptance criteria, and optional live-check
+evidence. With `--live-check`, the backlog reuses the live-aware roadmap so
+ready tasks come from live-passing references, while stale tasks are marked
+`needs-refresh` before implementation work starts. Use this as the handoff
+between feature search and the next AgentTestBench CLI implementation slice.
 
 `research feature` also returns `nextCommands`. These are AgentTestBench CLI
 commands that make the matched feature actionable after the reference check:
@@ -366,7 +371,7 @@ Recommended pre-design gate:
 ./bin/agent-testbench.sh research matrix --filter "new cli capability" --limit 3
 ./bin/agent-testbench.sh research refresh-plan --min-references 3 --max-age-hours 72
 ./bin/agent-testbench.sh research roadmap --min-references 3 --limit 5 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
-./bin/agent-testbench.sh research backlog --min-references 3 --limit 5
+./bin/agent-testbench.sh research backlog --min-references 3 --limit 5 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research gate \
   --feature "new cli capability" \
   --require-min-matches 3 \

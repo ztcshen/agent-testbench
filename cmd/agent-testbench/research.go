@@ -327,27 +327,32 @@ type featureRoadmapItem struct {
 }
 
 type featureBacklogReport struct {
-	OK                bool                 `json:"ok"`
-	Policy            featureRadarPolicy   `json:"policy"`
-	SourceGeneratedAt string               `json:"sourceGeneratedAt"`
-	ReferenceGate     featureCoverageGate  `json:"referenceGate"`
-	Count             int                  `json:"count"`
-	Items             []featureBacklogItem `json:"items"`
+	OK                bool                       `json:"ok"`
+	Policy            featureRadarPolicy         `json:"policy"`
+	SourceGeneratedAt string                     `json:"sourceGeneratedAt"`
+	Checks            featureRoadmapChecks       `json:"checks"`
+	ReferenceGate     featureCoverageGate        `json:"referenceGate"`
+	LiveCheck         *featureRoadmapLiveSummary `json:"liveCheck,omitempty"`
+	Count             int                        `json:"count"`
+	Items             []featureBacklogItem       `json:"items"`
 }
 
 type featureBacklogItem struct {
-	TaskID                 string               `json:"taskId"`
-	Priority               int                  `json:"priority"`
-	FeatureID              string               `json:"featureId"`
-	Title                  string               `json:"title"`
-	Intent                 string               `json:"intent,omitempty"`
-	Status                 string               `json:"status"`
-	ReadinessScore         int                  `json:"readinessScore"`
-	References             []featureRadarMatch  `json:"references"`
-	PlanCommand            string               `json:"planCommand"`
-	ImplementationCommands []featureNextCommand `json:"implementationCommands"`
-	VerificationCommands   []string             `json:"verificationCommands"`
-	AcceptanceCriteria     []string             `json:"acceptanceCriteria"`
+	TaskID                 string                  `json:"taskId"`
+	Priority               int                     `json:"priority"`
+	FeatureID              string                  `json:"featureId"`
+	Title                  string                  `json:"title"`
+	Intent                 string                  `json:"intent,omitempty"`
+	Status                 string                  `json:"status"`
+	Gate                   string                  `json:"gate"`
+	ReadinessScore         int                     `json:"readinessScore"`
+	References             []featureRadarMatch     `json:"references"`
+	PlanCommand            string                  `json:"planCommand"`
+	ImplementationCommands []featureNextCommand    `json:"implementationCommands"`
+	VerificationCommands   []string                `json:"verificationCommands"`
+	AcceptanceCriteria     []string                `json:"acceptanceCriteria"`
+	LiveCheck              *featureLiveCheckReport `json:"liveCheck,omitempty"`
+	Reasons                []string                `json:"reasons,omitempty"`
 }
 
 type featureGateReport struct {
@@ -1130,6 +1135,11 @@ func runResearchBacklog(args []string) error {
 	minReferences := flags.Int("min-references", 3, "Require this many reference projects for a feature task to be ready")
 	limit := flags.Int("limit", 5, "Maximum backlog tasks to show")
 	referenceLimit := flags.Int("reference-limit", 2, "Maximum top references per backlog task to include")
+	liveCheck := flags.Bool("live-check", false, "Also verify backlog task references against live GitHub repository metadata before ranking")
+	githubAPIURL := flags.String("github-api-url", "https://api.github.com", "GitHub API base URL for --live-check")
+	tokenEnv := flags.String("token-env", "GITHUB_TOKEN", "Environment variable containing a GitHub token for --live-check")
+	maxStarDrift := flags.Int("max-star-drift", 0, "With --live-check, fail when live and local stars differ by more than N; 0 disables the drift gate")
+	maxPushedDriftHours := flags.Int("max-pushed-drift-hours", 0, "With --live-check, fail when live pushed_at is newer than local by more than N hours; 0 disables the drift gate")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -1145,11 +1155,34 @@ func runResearchBacklog(args []string) error {
 	if err != nil {
 		return err
 	}
-	report := buildFeatureBacklogReport(index, resolvedIndexPath, *minReferences, *limit, *referenceLimit)
-	if *jsonOutput {
-		return writeIndentedJSON(report)
+	roadmapLimit := *limit
+	if *liveCheck {
+		roadmapLimit = 0
 	}
-	printFeatureBacklogReport(report)
+	roadmap := buildFeatureRoadmapReport(index, resolvedIndexPath, *minReferences, roadmapLimit, *referenceLimit)
+	if *liveCheck {
+		attachFeatureRoadmapLiveChecks(context.Background(), &roadmap, featureRoadmapLiveOptions{
+			Index:               index,
+			IndexPath:           resolvedIndexPath,
+			ReferenceLimit:      *referenceLimit,
+			Limit:               *limit,
+			GitHubAPIURL:        *githubAPIURL,
+			Token:               os.Getenv(strings.TrimSpace(*tokenEnv)),
+			MaxStarDrift:        *maxStarDrift,
+			MaxPushedDriftHours: *maxPushedDriftHours,
+		})
+	}
+	report := buildFeatureBacklogReportFromRoadmap(roadmap, resolvedIndexPath)
+	if *jsonOutput {
+		if err := writeIndentedJSON(report); err != nil {
+			return err
+		}
+	} else {
+		printFeatureBacklogReport(report)
+	}
+	if *liveCheck && !report.OK {
+		return errors.New("feature research backlog live-check failed")
+	}
 	return nil
 }
 
@@ -2473,6 +2506,10 @@ func limitFeatureRoadmapItems(items []featureRoadmapItem, limit int) []featureRo
 
 func buildFeatureBacklogReport(index featureRadarIndex, indexPath string, minReferences int, limit int, referenceLimit int) featureBacklogReport {
 	roadmap := buildFeatureRoadmapReport(index, indexPath, minReferences, limit, referenceLimit)
+	return buildFeatureBacklogReportFromRoadmap(roadmap, indexPath)
+}
+
+func buildFeatureBacklogReportFromRoadmap(roadmap featureRoadmapReport, indexPath string) featureBacklogReport {
 	items := make([]featureBacklogItem, 0, len(roadmap.Items))
 	for index, item := range roadmap.Items {
 		priority := index + 1
@@ -2483,19 +2520,24 @@ func buildFeatureBacklogReport(index featureRadarIndex, indexPath string, minRef
 			Title:                  item.Title,
 			Intent:                 item.Intent,
 			Status:                 featureBacklogStatus(item),
+			Gate:                   item.Gate,
 			ReadinessScore:         item.ReadinessScore,
 			References:             item.TopReferences,
 			PlanCommand:            item.PlanCommand,
 			ImplementationCommands: featureImplementationCommands(item.ID, item.NextCommands),
 			VerificationCommands:   featureBacklogVerificationCommands(item, roadmap.ReferenceGate.Required, indexPath),
 			AcceptanceCriteria:     featureBacklogAcceptanceCriteria(item, roadmap.ReferenceGate.Required),
+			LiveCheck:              item.LiveCheck,
+			Reasons:                item.Reasons,
 		})
 	}
 	return featureBacklogReport{
 		OK:                roadmap.OK,
 		Policy:            roadmap.Policy,
 		SourceGeneratedAt: roadmap.SourceGeneratedAt,
+		Checks:            roadmap.Checks,
 		ReferenceGate:     roadmap.ReferenceGate,
+		LiveCheck:         roadmap.LiveCheck,
 		Count:             len(items),
 		Items:             items,
 	}
@@ -2507,6 +2549,12 @@ func featureBacklogStatus(item featureRoadmapItem) string {
 	}
 	if item.Gate == "passed" {
 		return "needs-command"
+	}
+	if item.Gate == "needs-refresh" {
+		return "needs-refresh"
+	}
+	if item.Gate == "live-failed" {
+		return "live-failed"
 	}
 	return "needs-references"
 }
@@ -2533,11 +2581,15 @@ func featureBacklogVerificationCommands(item featureRoadmapItem, minReferences i
 }
 
 func featureBacklogAcceptanceCriteria(item featureRoadmapItem, minReferences int) []string {
-	return []string{
+	criteria := []string{
 		fmt.Sprintf("feature reference gate passes with at least %d recent 3K+ star projects", minReferences),
 		"research plan captures the reference-backed design and verification commands",
 		fmt.Sprintf("at least one implementation command is available in the current CLI catalog (%d found)", item.ImplementationCommands),
 	}
+	if item.LiveCheck != nil {
+		criteria = append(criteria, "live reference check passes before implementation starts")
+	}
+	return criteria
 }
 
 func countRoadmapCommands(featureID string, commands []featureNextCommand) (int, int) {
@@ -3842,9 +3894,15 @@ func printFeatureRoadmapReport(report featureRoadmapReport) {
 func printFeatureBacklogReport(report featureBacklogReport) {
 	fmt.Println("Research Backlog")
 	fmt.Printf("Reference gate: %s required=%d passed=%d failed=%d\n", statusWord(report.OK), report.ReferenceGate.Required, report.ReferenceGate.Passed, report.ReferenceGate.Failed)
+	if report.LiveCheck != nil {
+		fmt.Printf("Live check: %s checked=%d failed=%d refresh-needed=%d\n", statusWord(report.LiveCheck.OK), report.LiveCheck.CheckedCount, report.LiveCheck.FailedCount, report.LiveCheck.RefreshCount)
+	}
 	fmt.Printf("Policy: stars >= %d, pushed >= %s\n", report.Policy.MinStars, report.Policy.PushedAfter)
 	for _, item := range report.Items {
 		fmt.Printf("- P%d %s (%s): %s score=%d\n", item.Priority, item.Title, item.FeatureID, item.Status, item.ReadinessScore)
+		for _, reason := range item.Reasons {
+			fmt.Printf("  Reason: %s\n", reason)
+		}
 		if len(item.References) > 0 {
 			fmt.Printf("  Reference: %s\n", item.References[0].FullName)
 		}
