@@ -176,9 +176,11 @@ still needs to stay grounded in feature-first 3K+ star OSS references.
 same touched paths that should later be passed to `release-check --scope`,
 turns those paths into a feature query, ranks radar feature candidates, and
 returns a copyable scoped `npm run release-check -- --scope ...` command beside
-the matching `compare`, `gate`, `plan`, and `roadmap` commands. Use it before
-or after editing so feature research, OSS references, and release validation
-share the same directory/file boundary.
+the matching `compare`, `gate`, `plan`, and `roadmap` commands. It can also
+derive directory scopes from Git with `--changed-since REF`, plus untracked files
+with `--include-untracked`, so a slice can start from the actual changed paths
+without hand-copying every file. Use it before or after editing so feature
+research, OSS references, and release validation share the same scoped boundary.
 
 `research sync` keeps radar maintenance visible from the AgentTestBench side
 without moving the crawler into the core repository. Dry-run mode emits the
@@ -450,6 +452,7 @@ Recommended pre-design gate:
 ./bin/agent-testbench.sh research compare --query "new cli capability" --min-references 3 --limit 5 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research command --command "target command" --min-references 3 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research scope --scope cmd/agent-testbench --scope docs/feature-research.md --min-references 3 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
+./bin/agent-testbench.sh research scope --changed-since HEAD --include-untracked --min-references 3 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research brief --query "new cli capability" --min-references 3 --format markdown
 ./bin/agent-testbench.sh research brief --query "new cli capability" --min-references 3 --live-check --max-star-drift 100 --max-pushed-drift-hours 72 --format markdown
 ./bin/agent-testbench.sh research status --max-age-hours 72

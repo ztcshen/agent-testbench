@@ -1129,6 +1129,8 @@ func runResearchScope(args []string) error {
 	var scopesFlag stringListFlag
 	flags.Var(&scopesFlag, "scope", "Touched file or directory to include in the research and release-check scope")
 	scopeFile := flags.String("scope-file", "", "File containing touched paths, one per line")
+	changedSince := flags.String("changed-since", "", "Git revision or base ref to derive touched directory scopes from")
+	includeUntracked := flags.Bool("include-untracked", false, "Include untracked Git files when deriving scopes with --changed-since")
 	query := flags.String("query", "", "Additional feature query text to combine with touched scope signals")
 	indexPath := flags.String("radar-index", "", "Path to github-feature-radar data/feature-index.json")
 	minReferences := flags.Int("min-references", 3, "Require this many reference projects before a feature is healthy")
@@ -1143,12 +1145,15 @@ func runResearchScope(args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	scopes, err := featureResearchScopes(scopesFlag.Values(), *scopeFile)
+	scopes, err := featureResearchScopes(scopesFlag.Values(), *scopeFile, featureScopeGitOptions{
+		ChangedSince:     *changedSince,
+		IncludeUntracked: *includeUntracked,
+	})
 	if err != nil {
 		return err
 	}
 	if len(scopes) == 0 {
-		return errors.New("research scope requires --scope PATH or --scope-file PATH")
+		return errors.New("research scope requires --scope PATH, --scope-file PATH, or --changed-since REF")
 	}
 	resolvedIndexPath := strings.TrimSpace(*indexPath)
 	if resolvedIndexPath == "" {
@@ -4268,7 +4273,12 @@ func featureScopeMatchesReleaseCheck(item featureCompareItem) bool {
 	return false
 }
 
-func featureResearchScopes(values []string, scopeFile string) ([]string, error) {
+type featureScopeGitOptions struct {
+	ChangedSince     string
+	IncludeUntracked bool
+}
+
+func featureResearchScopes(values []string, scopeFile string, gitOptions featureScopeGitOptions) ([]string, error) {
 	scopes := append([]string(nil), values...)
 	scopeFile = strings.TrimSpace(scopeFile)
 	if scopeFile != "" {
@@ -4280,7 +4290,69 @@ func featureResearchScopes(values []string, scopeFile string) ([]string, error) 
 			scopes = append(scopes, strings.TrimSpace(line))
 		}
 	}
+	gitScopes, err := featureGitChangedDirectoryScopes(gitOptions)
+	if err != nil {
+		return nil, err
+	}
+	scopes = append(scopes, gitScopes...)
 	return normalizeResearchScopes(scopes), nil
+}
+
+func featureGitChangedDirectoryScopes(options featureScopeGitOptions) ([]string, error) {
+	changedSince := strings.TrimSpace(options.ChangedSince)
+	scopes := []string{}
+	if changedSince != "" {
+		if strings.HasPrefix(changedSince, "-") {
+			return nil, fmt.Errorf("invalid --changed-since ref %q", changedSince)
+		}
+		paths, err := runFeatureGitOutput("diff", "--name-only", "--diff-filter=ACMRT", changedSince, "--")
+		if err != nil {
+			return nil, fmt.Errorf("derive changed scopes: %w", err)
+		}
+		scopes = append(scopes, featureDirectoryScopesFromGitPaths(paths)...)
+	}
+	if options.IncludeUntracked {
+		paths, err := runFeatureGitOutput("ls-files", "--others", "--exclude-standard")
+		if err != nil {
+			return nil, fmt.Errorf("derive untracked scopes: %w", err)
+		}
+		scopes = append(scopes, featureDirectoryScopesFromGitPaths(paths)...)
+	}
+	return scopes, nil
+}
+
+func runFeatureGitOutput(args ...string) ([]string, error) {
+	cmd := exec.Command("git", args...)
+	raw, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("git %s failed: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(raw)))
+	}
+	lines := []string{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		value := strings.TrimSpace(line)
+		if value == "" {
+			continue
+		}
+		lines = append(lines, value)
+	}
+	return lines, nil
+}
+
+func featureDirectoryScopesFromGitPaths(paths []string) []string {
+	scopes := []string{}
+	for _, path := range paths {
+		path = filepath.ToSlash(strings.TrimSpace(path))
+		if path == "" {
+			continue
+		}
+		dir := filepath.ToSlash(filepath.Dir(path))
+		if dir == "." || dir == "/" {
+			scopes = append(scopes, path)
+			continue
+		}
+		scopes = append(scopes, dir)
+	}
+	return scopes
 }
 
 func normalizeResearchScopes(values []string) []string {
@@ -4351,7 +4423,7 @@ func featureScopePathQuery(scope string) []string {
 	if strings.Contains(scope, "release-check") || strings.Contains(scope, "guardrail") {
 		parts = append(parts, "release gate", "quality gate", "checks")
 	}
-	if strings.HasPrefix(scope, "docs/") {
+	if scope == "docs" || strings.HasPrefix(scope, "docs/") {
 		parts = append(parts, "documentation", "reviewable runbook")
 	}
 	return parts
