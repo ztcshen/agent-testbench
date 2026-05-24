@@ -73,6 +73,9 @@ List the available feature index before choosing the next CLI slice:
   --radar-index $RADAR_HOME/data/feature-index.json \
   --query "quality gate" \
   --min-references 3 \
+  --live-check \
+  --max-star-drift 100 \
+  --max-pushed-drift-hours 72 \
   --format markdown
 
 ./bin/agent-testbench.sh research features \
@@ -98,10 +101,11 @@ commands when the query has no candidates.
 
 `research brief` is the one-shot pre-design runbook. It starts from a fuzzy
 query, selects the highest-ranked feature candidate, runs the same freshness,
-audit, reference, and optional command-path gates used by `research gate`, then
-returns the selected references plus copyable `search`, `matrix`, `gate`, and
-`plan` commands. Use it before changing a CLI capability so the implementation
-starts from the maintained feature radar instead of ad hoc repository lookup.
+audit, reference, optional live-reference, and optional command-path gates used
+by `research gate`, then returns the selected references plus copyable
+`search`, `matrix`, `gate`, `live-check`, and `plan` commands. Use it before
+changing a CLI capability so the implementation starts from the maintained
+feature radar instead of ad hoc repository lookup.
 
 `research sync` keeps radar maintenance visible from the AgentTestBench side
 without moving the crawler into the core repository. Dry-run mode emits the
@@ -342,6 +346,7 @@ Recommended pre-design gate:
 ./bin/agent-testbench.sh research sync --radar-root $RADAR_HOME --max-age-hours 72 --min-references 3
 ./bin/agent-testbench.sh research search --query "new cli capability" --limit 5
 ./bin/agent-testbench.sh research brief --query "new cli capability" --min-references 3 --format markdown
+./bin/agent-testbench.sh research brief --query "new cli capability" --min-references 3 --live-check --max-star-drift 100 --max-pushed-drift-hours 72 --format markdown
 ./bin/agent-testbench.sh research status --max-age-hours 72
 ./bin/agent-testbench.sh research audit --min-references 3
 ./bin/agent-testbench.sh research coverage --min-references 3

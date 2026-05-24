@@ -980,6 +980,102 @@ func TestResearchBriefBuildsSearchBackedImplementationBrief(t *testing.T) {
 	}
 }
 
+func TestResearchBriefCanRunLiveReferenceCheck(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/repos/example/gate-engine":
+			fmt.Fprint(w, `{"full_name":"example/gate-engine","html_url":"https://github.com/example/gate-engine","stargazers_count":3233,"pushed_at":"2026-05-24T12:00:00Z","archived":false,"fork":false}`)
+		case "/repos/example/gate-policy":
+			fmt.Fprint(w, `{"full_name":"example/gate-policy","html_url":"https://github.com/example/gate-policy","stargazers_count":4560,"pushed_at":"2026-05-22T12:00:00Z","archived":false,"fork":false}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
+	index := map[string]any{
+		"schemaVersion":     1,
+		"sourceGeneratedAt": "2026-05-24T04:38:55Z",
+		"policy": map[string]any{
+			"minStars":    3000,
+			"months":      3,
+			"pushedAfter": "2026-02-24",
+		},
+		"tokenIndex": map[string]any{
+			"gate": []string{"quality-gates"},
+		},
+		"features": map[string]any{
+			"quality-gates": map[string]any{
+				"id":     "quality-gates",
+				"title":  "Quality Gates",
+				"intent": "Find projects that gate releases with policy checks.",
+				"topMatches": []map[string]any{
+					{"fullName": "example/gate-engine", "url": "https://github.com/example/gate-engine", "stars": 3040, "pushedAt": "2026-05-20T12:00:00Z", "featureScore": 8},
+					{"fullName": "example/gate-policy", "url": "https://github.com/example/gate-policy", "stars": 4558, "pushedAt": "2026-05-22T12:00:00Z", "featureScore": 7},
+				},
+			},
+		},
+	}
+	if err := os.WriteFile(indexPath, []byte(mustJSON(t, index)), 0o644); err != nil {
+		t.Fatalf("write radar index: %v", err)
+	}
+
+	out := runCLIFails(t,
+		"research", "brief",
+		"--query", "gate",
+		"--radar-index", indexPath,
+		"--min-references", "2",
+		"--require-command", "case gate",
+		"--reference-limit", "2",
+		"--now", "2026-05-24T05:00:00Z",
+		"--live-check",
+		"--github-api-url", server.URL,
+		"--max-star-drift", "100",
+		"--max-pushed-drift-hours", "24",
+		"--json",
+	)
+	var report struct {
+		OK       bool     `json:"ok"`
+		Reasons  []string `json:"reasons"`
+		Selected struct {
+			ID string `json:"id"`
+		} `json:"selected"`
+		Checks struct {
+			LiveCheckOK bool `json:"liveCheckOk"`
+		} `json:"checks"`
+		LiveCheck struct {
+			OK            bool `json:"ok"`
+			RefreshNeeded bool `json:"refreshNeeded"`
+			RefreshCount  int  `json:"refreshCount"`
+		} `json:"liveCheck"`
+		GateCommand          string   `json:"gateCommand"`
+		VerificationCommands []string `json:"verificationCommands"`
+	}
+	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
+		t.Fatalf("decode live brief json: %v\n%s", err, out)
+	}
+	if report.OK || report.Selected.ID != "quality-gates" || report.Checks.LiveCheckOK || !report.LiveCheck.RefreshNeeded || report.LiveCheck.RefreshCount != 1 {
+		t.Fatalf("live brief identity = %#v", report)
+	}
+	if !strings.Contains(strings.Join(report.Reasons, "\n"), "live-check needs refresh for 1 reference(s)") {
+		t.Fatalf("live brief reasons = %#v", report.Reasons)
+	}
+	for _, want := range []string{"research gate --feature 'quality-gates'", "--live-check", "--max-star-drift 100", "--max-pushed-drift-hours 24"} {
+		if !strings.Contains(report.GateCommand, want) {
+			t.Fatalf("live brief gate command missing %q: %s", want, report.GateCommand)
+		}
+	}
+	if !strings.Contains(strings.Join(report.VerificationCommands, "\n"), "research live-check --feature 'quality-gates'"+featureRadarIndexFlag(indexPath)+" --limit 2 --max-star-drift 100 --max-pushed-drift-hours 24 --github-api-url "+quoteCommandValue(server.URL)+" --json") {
+		t.Fatalf("live brief verification commands = %#v", report.VerificationCommands)
+	}
+	nonLiveGate := "agent-testbench research gate --feature 'quality-gates'" + featureRadarIndexFlag(indexPath) + " --require-min-matches 2 --require-command 'case gate' --max-age-hours 72 --json"
+	if stringSliceContains(report.VerificationCommands, nonLiveGate) {
+		t.Fatalf("live brief should replace the non-live gate command: %#v", report.VerificationCommands)
+	}
+}
+
 func TestResearchSyncPlansAndExecutesRadarMaintenanceWorkflow(t *testing.T) {
 	radarRoot := t.TempDir()
 	dataDir := filepath.Join(radarRoot, "data")

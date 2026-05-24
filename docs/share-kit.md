@@ -74,6 +74,9 @@ What to point out:
   turns fuzzy feature wording into a reviewable pre-design brief: selected
   feature, freshness/audit/reference/command gates, top references, and
   copyable `search`, `matrix`, `gate`, and `plan` commands.
+- `agent-testbench research brief --query "quality gate" --live-check`
+  keeps that one-shot brief feature-first while also embedding live GitHub
+  reference policy and drift evidence.
 - `agent-testbench research live-check --feature "quality gate" --max-star-drift 100`
   rechecks selected references against live GitHub repository metadata, then
   reports policy failures or `refresh-needed` drift before demos or CLI
@@ -149,6 +152,9 @@ What to point out:
   会把模糊 feature 描述整理成可评审的设计前置 brief：选中的 feature、新鲜度、
   审计、引用数与命令门禁、top references，以及可复制的 `search`、`matrix`、
   `gate` 和 `plan` 命令。
+- `agent-testbench research brief --query "quality gate" --live-check`
+  会保持 one-shot brief 的 feature-first 入口，同时内嵌 GitHub 实时 reference
+  policy 与 drift 证据。
 - `agent-testbench research live-check --feature "quality gate" --max-star-drift 100`
   会用 GitHub 实时仓库元数据复核参考项目，并在 demo 或 CLI 实现依赖过期
   radar 数据前报告 policy failure 或 `refresh-needed` 漂移。
