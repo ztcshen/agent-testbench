@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -140,6 +141,15 @@ test("release-check scope-file runs targeted example tests without full Go suite
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
+});
+
+test("release-check scoped Go selection covers module metadata and reverse dependents", () => {
+  const script = readFileSync(path.join(rootDir, "tools", "release-check.sh"), "utf8");
+
+  assert.match(script, /go\.mod\|go\.sum/);
+  assert.match(script, /run_scoped_go_tests=1/);
+  assert.match(script, /go test -p 1 \.\/\.\.\. -count=1/);
+  assert.match(script, /go test \.\/\.\.\. -count=1/);
 });
 
 test("release-check missing Store guidance lists every supported smoke Store env", () => {

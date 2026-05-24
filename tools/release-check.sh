@@ -269,23 +269,16 @@ if [[ "$scoped_release_check" -eq 0 ]]; then
     npm run smoke:frontend:sql-active
   fi
 else
-  go_scope_dirs=()
   node_scope_tests=()
+  run_scoped_go_tests=0
   run_frontend_tests=0
   run_frontend_build=0
   ran_scoped_runtime_tests=0
 
   for path in "${scope_paths[@]}"; do
     case "$path" in
-      *.go)
-        go_scope_dirs+=("$(dirname "$path")")
-        ;;
-      cmd/*|internal/*)
-        if [[ -d "$path" ]]; then
-          while IFS= read -r dir; do
-            go_scope_dirs+=("$dir")
-          done < <(find "$path" -name '*.go' -not -path '*/node_modules/*' -exec dirname {} \; 2>/dev/null | sort -u)
-        fi
+      *.go|go.mod|go.sum|cmd/*|internal/*)
+        run_scoped_go_tests=1
         ;;
     esac
 
@@ -308,29 +301,6 @@ else
         ;;
     esac
   done
-
-  unique_go_scope_dirs=()
-  if [[ ${#go_scope_dirs[*]} -gt 0 ]]; then
-    for dir in "${go_scope_dirs[@]}"; do
-      duplicate=0
-      if [[ ${#unique_go_scope_dirs[*]} -gt 0 ]]; then
-        for seen_dir in "${unique_go_scope_dirs[@]}"; do
-          if [[ "$seen_dir" == "$dir" ]]; then
-            duplicate=1
-            break
-          fi
-        done
-      fi
-      if [[ "$duplicate" -eq 0 ]]; then
-        unique_go_scope_dirs+=("$dir")
-      fi
-    done
-  fi
-  if [[ ${#unique_go_scope_dirs[*]} -gt 0 ]]; then
-    go_scope_dirs=("${unique_go_scope_dirs[@]}")
-  else
-    go_scope_dirs=()
-  fi
 
   unique_node_scope_tests=()
   if [[ ${#node_scope_tests[*]} -gt 0 ]]; then
@@ -355,42 +325,14 @@ else
     node_scope_tests=()
   fi
 
-  if [[ ${#go_scope_dirs[@]} -gt 0 ]]; then
-    go_packages=()
-    for dir in "${go_scope_dirs[@]}"; do
-      if [[ -f "$dir/go.mod" ]]; then
-        go_packages+=(".")
-      elif compgen -G "$dir/*.go" >/dev/null; then
-        go_packages+=("./$dir")
-      fi
-    done
-    unique_go_packages=()
-    if [[ ${#go_packages[*]} -gt 0 ]]; then
-      for go_package in "${go_packages[@]}"; do
-        duplicate=0
-        if [[ ${#unique_go_packages[*]} -gt 0 ]]; then
-          for seen_go_package in "${unique_go_packages[@]}"; do
-            if [[ "$seen_go_package" == "$go_package" ]]; then
-              duplicate=1
-              break
-            fi
-          done
-        fi
-        if [[ "$duplicate" -eq 0 ]]; then
-          unique_go_packages+=("$go_package")
-        fi
-      done
-    fi
-    if [[ ${#unique_go_packages[*]} -gt 0 ]]; then
-      go_packages=("${unique_go_packages[@]}")
+  if [[ "$run_scoped_go_tests" -eq 1 ]]; then
+    step "running scoped Go tests"
+    if is_mysql_store_dsn "$smoke_store_dsn"; then
+      go test -p 1 ./... -count=1
     else
-      go_packages=()
+      go test ./... -count=1
     fi
-    if [[ ${#go_packages[@]} -gt 0 ]]; then
-      step "running scoped Go tests"
-      go test "${go_packages[@]}" -count=1
-      ran_scoped_runtime_tests=1
-    fi
+    ran_scoped_runtime_tests=1
   fi
 
   if [[ "$run_frontend_build" -eq 1 ]]; then

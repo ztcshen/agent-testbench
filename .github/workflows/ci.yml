@@ -65,7 +65,7 @@ jobs:
 
       - name: Run release gate
         run: |
-          if [[ -s .release-check-scope ]]; then
+          if [[ "${{ github.event_name }}" == "pull_request" && -s .release-check-scope ]]; then
             npm run release-check -- --scope-file .release-check-scope
           else
             npm run release-check
