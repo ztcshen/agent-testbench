@@ -53,6 +53,9 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	if !strings.Contains(out, "agent-testbench research search") {
 		t.Fatalf("top-level help should expose ranked feature search:\n%s", out)
 	}
+	if !strings.Contains(out, "agent-testbench research references") {
+		t.Fatalf("top-level help should expose feature-backed project references:\n%s", out)
+	}
 	if !strings.Contains(out, "agent-testbench research brief") {
 		t.Fatalf("top-level help should expose query-backed research briefs:\n%s", out)
 	}
@@ -581,6 +584,102 @@ func TestResearchSearchRejectsIndexWithoutTokenIndex(t *testing.T) {
 	out := runCLIFails(t, "research", "search", "--query", "gate", "--radar-index", indexPath)
 	if !strings.Contains(out, "research search requires a radar index with non-empty tokenIndex") {
 		t.Fatalf("missing token index failure = %q", out)
+	}
+}
+
+func TestResearchReferencesListsFeatureBackedProjectLedger(t *testing.T) {
+	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
+	index := map[string]any{
+		"schemaVersion":     1,
+		"sourceGeneratedAt": "2026-05-24T04:39:07Z",
+		"policy": map[string]any{
+			"minStars":    3000,
+			"months":      3,
+			"pushedAfter": "2026-02-24",
+		},
+		"tokenIndex": map[string]any{
+			"quality gate": []string{"quality-gates"},
+			"gate":         []string{"quality-gates"},
+		},
+		"features": map[string]any{
+			"quality-gates": map[string]any{
+				"id":     "quality-gates",
+				"title":  "Quality Gates",
+				"intent": "Find projects that gate releases with policy checks.",
+				"topMatches": []map[string]any{
+					{"fullName": "aquasecurity/trivy", "url": "https://github.com/aquasecurity/trivy", "stars": 35145, "pushedAt": "2026-05-22T11:51:15Z", "featureScore": 8, "reasons": []string{"high-star reference"}},
+					{"fullName": "semgrep/semgrep", "url": "https://github.com/semgrep/semgrep", "stars": 15252, "pushedAt": "2026-05-22T19:22:29Z", "featureScore": 7, "reasons": []string{"matches 'static analysis'"}},
+				},
+			},
+		},
+		"projectIndex": map[string]any{
+			"aquasecurity/trivy": map[string]any{
+				"fullName": "aquasecurity/trivy", "url": "https://github.com/aquasecurity/trivy", "stars": 35145, "pushedAt": "2026-05-22T11:51:15Z", "language": "Go", "topics": []string{"security", "scanner"}, "matchedFeatures": []string{"quality-gates"},
+			},
+			"semgrep/semgrep": map[string]any{
+				"fullName": "semgrep/semgrep", "url": "https://github.com/semgrep/semgrep", "stars": 15252, "pushedAt": "2026-05-22T19:22:29Z", "language": "OCaml", "topics": []string{"static-analysis"}, "matchedFeatures": []string{"quality-gates"},
+			},
+			"ossf/scorecard": map[string]any{
+				"fullName": "ossf/scorecard", "url": "https://github.com/ossf/scorecard", "stars": 8212, "pushedAt": "2026-05-20T08:00:00Z", "language": "Go", "topics": []string{"security", "scorecard"}, "matchedFeatures": []string{"quality-gates"},
+			},
+			"apache/airflow": map[string]any{
+				"fullName": "apache/airflow", "url": "https://github.com/apache/airflow", "stars": 43111, "pushedAt": "2026-05-22T08:00:00Z", "language": "Python", "matchedFeatures": []string{"workflow-orchestration"},
+			},
+		},
+	}
+	if err := os.WriteFile(indexPath, []byte(mustJSON(t, index)), 0o644); err != nil {
+		t.Fatalf("write radar index: %v", err)
+	}
+
+	out := runCLI(t, "research", "references", "--feature", "quality gate", "--radar-index", indexPath, "--limit", "3", "--json")
+	var report struct {
+		OK      bool   `json:"ok"`
+		Query   string `json:"query"`
+		Feature struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		} `json:"feature"`
+		Count      int `json:"count"`
+		References []struct {
+			FullName        string   `json:"fullName"`
+			Stars           int      `json:"stars"`
+			Language        string   `json:"language"`
+			Topics          []string `json:"topics"`
+			MatchedFeatures []string `json:"matchedFeatures"`
+			FeatureScore    int      `json:"featureScore"`
+			Reasons         []string `json:"reasons"`
+		} `json:"references"`
+		NextCommands []string `json:"nextCommands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode research references json: %v\n%s", err, out)
+	}
+	if !report.OK || report.Query != "quality gate" || report.Feature.ID != "quality-gates" || report.Count != 3 {
+		t.Fatalf("reference report identity = %#v", report)
+	}
+	gotNames := []string{report.References[0].FullName, report.References[1].FullName, report.References[2].FullName}
+	wantNames := []string{"aquasecurity/trivy", "semgrep/semgrep", "ossf/scorecard"}
+	if fmt.Sprint(gotNames) != fmt.Sprint(wantNames) {
+		t.Fatalf("references should prefer top matches before project ledger extras, got %#v", gotNames)
+	}
+	if report.References[0].Language != "Go" || !stringSliceContains(report.References[0].Topics, "scanner") || !stringSliceContains(report.References[0].MatchedFeatures, "quality-gates") {
+		t.Fatalf("enriched first reference = %#v", report.References[0])
+	}
+	if report.References[2].FeatureScore != 0 || report.References[2].Language != "Go" || !stringSliceContains(report.References[2].Topics, "scorecard") {
+		t.Fatalf("ledger extra reference = %#v", report.References[2])
+	}
+	joinedCommands := strings.Join(report.NextCommands, "\n")
+	for _, want := range []string{"research search --query 'quality gate'", "research matrix --filter 'quality-gates'", "research plan --feature 'quality-gates'"} {
+		if !strings.Contains(joinedCommands, want) {
+			t.Fatalf("next commands missing %q:\n%s", want, joinedCommands)
+		}
+	}
+
+	textOut := runCLI(t, "research", "references", "--feature", "quality gate", "--radar-index", indexPath, "--limit", "2")
+	for _, want := range []string{"Feature References", "Feature: Quality Gates", "aquasecurity/trivy", "language: Go", "Next commands:"} {
+		if !strings.Contains(textOut, want) {
+			t.Fatalf("research references text missing %q:\n%s", want, textOut)
+		}
 	}
 }
 
@@ -2070,6 +2169,7 @@ func TestResearchPlanContextualizesRadarMaintenanceCommands(t *testing.T) {
 	for _, want := range []string{
 		"agent-testbench research sync " + wantRoot + " --execute --json",
 		"agent-testbench research search --query 'github radar' " + wantIndex + " --min-references 3 --json",
+		"agent-testbench research references --feature 'github-radar-generation' " + wantIndex + " --limit 10 --json",
 		"agent-testbench research features --filter 'github-radar-generation' " + wantIndex + " --json",
 		"agent-testbench research feature --feature 'github-radar-generation' " + wantIndex + " --require-min-matches 3 --json",
 	} {

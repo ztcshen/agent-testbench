@@ -188,6 +188,17 @@ type featureMatrixReference struct {
 	MatchedFeatures []string `json:"matchedFeatures,omitempty"`
 }
 
+type featureReferencesReport struct {
+	OK                bool                     `json:"ok"`
+	Query             string                   `json:"query"`
+	Feature           featureRadarFeature      `json:"feature"`
+	Count             int                      `json:"count"`
+	Policy            featureRadarPolicy       `json:"policy"`
+	SourceGeneratedAt string                   `json:"sourceGeneratedAt"`
+	References        []featureMatrixReference `json:"references"`
+	NextCommands      []string                 `json:"nextCommands"`
+}
+
 type featureRefreshPlanReport struct {
 	OK                bool                  `json:"ok"`
 	NeedsRefresh      bool                  `json:"needsRefresh"`
@@ -427,6 +438,8 @@ func runResearch(args []string) error {
 		return runResearchFeatures(args[1:])
 	case "search":
 		return runResearchSearch(args[1:])
+	case "references":
+		return runResearchReferences(args[1:])
 	case "brief":
 		return runResearchBrief(args[1:])
 	case "sync":
@@ -565,6 +578,44 @@ func runResearchSearch(args []string) error {
 		return json.NewEncoder(os.Stdout).Encode(report)
 	}
 	printFeatureSearchReport(report)
+	return nil
+}
+
+func runResearchReferences(args []string) error {
+	flags := flag.NewFlagSet("research references", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	featureQuery := flags.String("feature", "", "Feature text, id, or alias to search")
+	query := flags.String("query", "", "Alias for --feature")
+	indexPath := flags.String("radar-index", "", "Path to github-feature-radar data/feature-index.json")
+	limit := flags.Int("limit", 10, "Maximum reference projects to include")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	resolvedQuery := researchFirstNonEmpty(*featureQuery, *query)
+	if strings.TrimSpace(resolvedQuery) == "" {
+		return errors.New("research references requires --feature TEXT")
+	}
+	resolvedIndexPath := strings.TrimSpace(*indexPath)
+	if resolvedIndexPath == "" {
+		resolvedIndexPath = strings.TrimSpace(os.Getenv(featureRadarIndexEnv))
+	}
+	if resolvedIndexPath == "" {
+		return fmt.Errorf("research references requires --radar-index PATH or %s", featureRadarIndexEnv)
+	}
+	index, err := readFeatureRadarIndex(resolvedIndexPath)
+	if err != nil {
+		return err
+	}
+	feature, err := findFeatureRadarFeature(index, resolvedQuery)
+	if err != nil {
+		return err
+	}
+	report := buildFeatureReferencesReport(index, resolvedIndexPath, resolvedQuery, feature, *limit)
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printFeatureReferencesReport(report)
 	return nil
 }
 
@@ -1276,6 +1327,85 @@ func featureMatrixReferenceFromMatch(match featureRadarMatch, project featureRad
 	}
 }
 
+func buildFeatureReferencesReport(index featureRadarIndex, indexPath string, query string, feature featureRadarFeature, limit int) featureReferencesReport {
+	if limit <= 0 {
+		limit = 10
+	}
+	references := featureProjectReferences(index, feature, limit)
+	return featureReferencesReport{
+		OK:                len(references) > 0,
+		Query:             strings.TrimSpace(query),
+		Feature:           feature,
+		Count:             len(references),
+		Policy:            index.Policy,
+		SourceGeneratedAt: index.SourceGeneratedAt,
+		References:        references,
+		NextCommands:      featureReferenceCommands(query, feature.ID, indexPath),
+	}
+}
+
+func featureProjectReferences(index featureRadarIndex, feature featureRadarFeature, limit int) []featureMatrixReference {
+	seen := map[string]bool{}
+	references := []featureMatrixReference{}
+	for _, match := range feature.TopMatches {
+		fullName := strings.TrimSpace(match.FullName)
+		if fullName == "" || seen[fullName] {
+			continue
+		}
+		references = append(references, featureMatrixReferenceFromMatch(match, index.ProjectIndex[fullName]))
+		seen[fullName] = true
+	}
+
+	extras := []featureRadarProject{}
+	for fullName, project := range index.ProjectIndex {
+		if seen[fullName] || !featureProjectHasFeature(project, feature.ID) {
+			continue
+		}
+		extras = append(extras, project)
+	}
+	sort.Slice(extras, func(i, j int) bool {
+		if extras[i].Stars != extras[j].Stars {
+			return extras[i].Stars > extras[j].Stars
+		}
+		if extras[i].PushedAt != extras[j].PushedAt {
+			return extras[i].PushedAt > extras[j].PushedAt
+		}
+		return extras[i].FullName < extras[j].FullName
+	})
+	for _, project := range extras {
+		match := featureRadarMatch{
+			FullName: project.FullName,
+			URL:      project.URL,
+			Stars:    project.Stars,
+			PushedAt: project.PushedAt,
+			Language: project.Language,
+			Topics:   project.Topics,
+		}
+		references = append(references, featureMatrixReferenceFromMatch(match, project))
+	}
+	if limit > 0 && len(references) > limit {
+		return references[:limit]
+	}
+	return references
+}
+
+func featureProjectHasFeature(project featureRadarProject, featureID string) bool {
+	for _, value := range projectMatchedFeatures(project) {
+		if value == featureID {
+			return true
+		}
+	}
+	return false
+}
+
+func featureReferenceCommands(query string, featureID string, indexPath string) []string {
+	return []string{
+		"agent-testbench research search --query " + quoteCommandValue(query) + featureRadarIndexFlag(indexPath) + " --json",
+		featureMatrixCommand(featureID, 5, indexPath),
+		featurePlanCommand(featureID, 3, indexPath),
+	}
+}
+
 func projectMatchedFeatures(project featureRadarProject) []string {
 	if len(project.MatchedFeatures) > 0 {
 		return project.MatchedFeatures
@@ -1933,6 +2063,8 @@ func concreteFeaturePlanCommand(command featureNextCommand, featureID string, fe
 		return "agent-testbench research sync --radar-root " + quoteCommandValue(featureRadarRootFromIndexPath(indexPath)) + " --execute --json"
 	case "research search":
 		return "agent-testbench research search --query " + quoteCommandValue(featureQuery) + featureRadarIndexFlag(indexPath) + featureMinReferencesFlag(minReferences) + " --json"
+	case "research references":
+		return "agent-testbench research references --feature " + quoteCommandValue(featureID) + featureRadarIndexFlag(indexPath) + " --limit 10 --json"
 	case "research features":
 		return "agent-testbench research features --filter " + quoteCommandValue(featureID) + featureRadarIndexFlag(indexPath) + " --json"
 	case "research feature":
@@ -2524,12 +2656,14 @@ func featureNextCommands(featureID string) []featureNextCommand {
 		commands = []featureNextCommand{
 			{Command: "agent-testbench research sync --radar-root PATH --execute --json", Purpose: "Run the external GitHub Feature Radar maintenance workflow: test, refresh, status, audit, coverage, and index."},
 			{Command: "agent-testbench research search --query TEXT --json", Purpose: "Rank candidate feature records from the external GitHub Feature Radar token index."},
+			{Command: "agent-testbench research references --feature TEXT --json", Purpose: "List maintained high-star reference projects for a matched feature from the external project ledger."},
 			{Command: "agent-testbench research features --filter TEXT --json", Purpose: "Search feature records from the external GitHub Feature Radar index."},
 			{Command: "agent-testbench research feature --feature TEXT --require-min-matches 3 --json", Purpose: "Gate a CLI design slice on enough qualifying open-source references."},
 		}
 	default:
 		commands = []featureNextCommand{
 			{Command: "agent-testbench research search --query TEXT --json", Purpose: "Rank candidate feature records before choosing the next CLI command."},
+			{Command: "agent-testbench research references --feature TEXT --json", Purpose: "List maintained high-star reference projects for a matched feature from the project ledger."},
 			{Command: "agent-testbench research features --filter TEXT --json", Purpose: "Find the closest maintained feature record before choosing the next CLI command."},
 		}
 	}
@@ -2732,6 +2866,43 @@ func printFeatureSearchReport(report featureSearchReport) {
 		}
 		if len(candidate.TopReferences) > 0 {
 			fmt.Printf("  Top reference: %s\n", candidate.TopReferences[0].FullName)
+		}
+	}
+}
+
+func printFeatureReferencesReport(report featureReferencesReport) {
+	fmt.Println("Feature References")
+	fmt.Printf("Feature: %s (%s)\n", report.Feature.Title, report.Feature.ID)
+	if report.Query != "" {
+		fmt.Printf("Query: %s\n", report.Query)
+	}
+	fmt.Printf("Projects: %d\n", report.Count)
+	fmt.Printf("Policy: stars >= %d, pushed >= %s\n", report.Policy.MinStars, report.Policy.PushedAfter)
+	if report.SourceGeneratedAt != "" {
+		fmt.Printf("Radar index: %s\n", report.SourceGeneratedAt)
+	}
+	for _, ref := range report.References {
+		fmt.Printf("- %s (%d stars, pushed %s, score %d)\n", ref.FullName, ref.Stars, shortDate(ref.PushedAt), ref.FeatureScore)
+		if ref.URL != "" {
+			fmt.Printf("  %s\n", ref.URL)
+		}
+		if ref.Language != "" {
+			fmt.Printf("  language: %s\n", ref.Language)
+		}
+		if len(ref.Topics) > 0 {
+			fmt.Printf("  topics: %s\n", strings.Join(ref.Topics, ", "))
+		}
+		if len(ref.MatchedFeatures) > 0 {
+			fmt.Printf("  features: %s\n", strings.Join(ref.MatchedFeatures, ", "))
+		}
+		if len(ref.Reasons) > 0 {
+			fmt.Printf("  reasons: %s\n", strings.Join(ref.Reasons, "; "))
+		}
+	}
+	if len(report.NextCommands) > 0 {
+		fmt.Println("Next commands:")
+		for _, command := range report.NextCommands {
+			fmt.Printf("- %s\n", command)
 		}
 	}
 }

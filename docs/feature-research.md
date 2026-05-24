@@ -79,6 +79,12 @@ List the available feature index before choosing the next CLI slice:
   --radar-index $RADAR_HOME/data/feature-index.json \
   --filter "gate" \
   --json
+
+./bin/agent-testbench.sh research references \
+  --radar-index $RADAR_HOME/data/feature-index.json \
+  --feature "quality gate" \
+  --limit 10 \
+  --json
 ```
 
 `research search` is the feature-search front door. It uses the generated
@@ -107,6 +113,14 @@ external radar root and returns per-step exit codes plus captured output.
 `research features` returns the feature id, title, intent, aliases, reference
 count, and ranked reference projects. Use it as the local feature-search entry
 point; the crawler stays in the external radar project.
+
+`research references` keeps project lookup feature-first. It resolves a feature
+query through the radar token index, then lists the maintained project ledger
+entries attached to that feature. Ranked `topMatches` stay first, and
+additional `projectIndex` entries fill out the list with language, topics,
+matched feature ids, stars, pushed date, and evidence reasons. Use it when a CLI
+slice needs a broader set of current 3K+ star projects to compare before
+implementation, without switching to ad hoc project-name search.
 
 ```sh
 ./bin/agent-testbench.sh research feature \
