@@ -82,6 +82,10 @@ What to point out:
   command availability, implementation-command count, star signal, and live
   GitHub drift so agents can choose the next CLI slice without overfitting to
   the first fuzzy match.
+- `agent-testbench research command --command "workflow gate" --live-check`
+  starts from an existing CLI surface, maps it back to feature records and
+  reference projects, then returns live-aware `gate`, `plan`, `roadmap`, and
+  `compare` follow-up commands.
 - `agent-testbench research live-check --feature "quality gate" --max-star-drift 100`
   rechecks selected references against live GitHub repository metadata, then
   reports policy failures or `refresh-needed` drift before demos or CLI
@@ -177,6 +181,9 @@ What to point out:
 - `agent-testbench research compare --query "quality gate workflow" --live-check`
   会按 query score、引用覆盖、命令可用性、实现命令数量、star 信号和 GitHub
   实时 drift 横向比较多个 feature 候选，避免 agent 只依赖第一个模糊命中。
+- `agent-testbench research command --command "workflow gate" --live-check`
+  会从已有 CLI 入口反查 feature 记录和参考项目，并返回带 live-check 证据的
+  `gate`、`plan`、`roadmap` 与 `compare` 后续命令。
 - `agent-testbench research live-check --feature "quality gate" --max-star-drift 100`
   会用 GitHub 实时仓库元数据复核参考项目，并在 demo 或 CLI 实现依赖过期
   radar 数据前报告 policy failure 或 `refresh-needed` 漂移。
@@ -228,8 +235,9 @@ What to point out:
   SQLite/PostgreSQL/MySQL Store 或显式 `AGENT_TESTBENCH_DEMO_STORE=postgres://...` /
   `AGENT_TESTBENCH_DEMO_STORE=mysql://...` /
   `AGENT_TESTBENCH_DEMO_STORE=sqlite://...`。
-- `release-check` 要求提供 SQLite、PostgreSQL 或 MySQL smoke Store DSN，然后运行守卫、
-  Go 测试、demo、React build、active SQL Store CLI smoke 和 SQL Store 无头浏览器冒烟。
+- `release-check` 要求提供 SQLite、PostgreSQL 或 MySQL smoke Store DSN；日常 PR
+  或单个切片验证要传 `--scope` / `--scope-file`，让 gate 只检查本次触达目录并选择匹配测试。
+  未指定范围的全量检查保留给正式发布签核。
 - 真实 SkyWalking 验证是更严格的 sign-off 模式：设置
   `AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1`、`AGENT_TESTBENCH_TRACE_GRAPHQL_URL`、
   `AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS` 和 `AGENT_TESTBENCH_SMOKE_TRACE_IDS`，并覆盖配置工作流的

@@ -87,6 +87,15 @@ List the available feature index before choosing the next CLI slice:
   --max-pushed-drift-hours 72 \
   --json
 
+./bin/agent-testbench.sh research command \
+  --radar-index $RADAR_HOME/data/feature-index.json \
+  --command "workflow gate" \
+  --min-references 3 \
+  --live-check \
+  --max-star-drift 100 \
+  --max-pushed-drift-hours 72 \
+  --json
+
 ./bin/agent-testbench.sh research features \
   --radar-index $RADAR_HOME/data/feature-index.json \
   --filter "gate" \
@@ -124,6 +133,15 @@ count, star signal, and optional live GitHub policy/drift evidence. With
 and moved behind live-passing candidates, while `recommended` points at the
 best currently usable feature and `nextCommands` give the matching brief,
 roadmap, and refresh-plan commands.
+
+`research command` is the command-first entry point for an existing
+AgentTestBench surface. It verifies that the command path exists in the current
+CLI catalog, maps it back to radar feature records whose `nextCommands` mention
+that surface, ranks those features by reference coverage, implementation
+commands, star signal, and optional live GitHub policy/drift evidence, then
+returns copyable `gate`, `plan`, `roadmap`, and `compare` commands. Use it when
+the next slice starts from a concrete CLI command, such as `workflow gate`, but
+still needs to stay grounded in feature-first 3K+ star OSS references.
 
 `research sync` keeps radar maintenance visible from the AgentTestBench side
 without moving the crawler into the core repository. Dry-run mode emits the
@@ -388,6 +406,7 @@ Recommended pre-design gate:
 ./bin/agent-testbench.sh research sync --radar-root $RADAR_HOME --max-age-hours 72 --min-references 3
 ./bin/agent-testbench.sh research search --query "new cli capability" --limit 5
 ./bin/agent-testbench.sh research compare --query "new cli capability" --min-references 3 --limit 5 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
+./bin/agent-testbench.sh research command --command "target command" --min-references 3 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research brief --query "new cli capability" --min-references 3 --format markdown
 ./bin/agent-testbench.sh research brief --query "new cli capability" --min-references 3 --live-check --max-star-drift 100 --max-pushed-drift-hours 72 --format markdown
 ./bin/agent-testbench.sh research status --max-age-hours 72

@@ -516,6 +516,51 @@ type featureCompareItem struct {
 	Reasons                []string                `json:"reasons,omitempty"`
 }
 
+type featureCommandReport struct {
+	OK                bool                       `json:"ok"`
+	Command           string                     `json:"command"`
+	CatalogCommand    string                     `json:"catalogCommand,omitempty"`
+	CommandPath       []string                   `json:"commandPath,omitempty"`
+	Policy            featureRadarPolicy         `json:"policy"`
+	SourceGeneratedAt string                     `json:"sourceGeneratedAt"`
+	Checks            featureCommandChecks       `json:"checks"`
+	LiveCheck         *featureRoadmapLiveSummary `json:"liveCheck,omitempty"`
+	Recommended       featureCommandItem         `json:"recommended,omitempty"`
+	Count             int                        `json:"count"`
+	Items             []featureCommandItem       `json:"items"`
+	NextCommands      []string                   `json:"nextCommands"`
+	Reasons           []string                   `json:"reasons,omitempty"`
+}
+
+type featureCommandChecks struct {
+	CommandAvailable bool `json:"commandAvailable"`
+	FeaturesFound    bool `json:"featuresFound"`
+	LiveCheckOK      bool `json:"liveCheckOk,omitempty"`
+}
+
+type featureCommandItem struct {
+	Rank                   int                     `json:"rank"`
+	ID                     string                  `json:"id"`
+	Title                  string                  `json:"title"`
+	Intent                 string                  `json:"intent,omitempty"`
+	Score                  int                     `json:"score"`
+	CatalogCommand         string                  `json:"catalogCommand"`
+	CommandPath            []string                `json:"commandPath,omitempty"`
+	Command                string                  `json:"command"`
+	Purpose                string                  `json:"purpose,omitempty"`
+	References             int                     `json:"references"`
+	Gate                   string                  `json:"gate"`
+	AvailableCommands      int                     `json:"availableCommands"`
+	ImplementationCommands int                     `json:"implementationCommands"`
+	TotalStars             int                     `json:"totalStars"`
+	PlanCommand            string                  `json:"planCommand"`
+	GateCommand            string                  `json:"gateCommand"`
+	TopReferences          []featureRadarMatch     `json:"topReferences"`
+	NextCommands           []featureNextCommand    `json:"nextCommands"`
+	LiveCheck              *featureLiveCheckReport `json:"liveCheck,omitempty"`
+	Reasons                []string                `json:"reasons,omitempty"`
+}
+
 type featureSyncReport struct {
 	OK            bool              `json:"ok"`
 	Execute       bool              `json:"execute"`
@@ -564,6 +609,8 @@ func runResearch(args []string) error {
 		return runResearchBrief(args[1:])
 	case "compare":
 		return runResearchCompare(args[1:])
+	case "command":
+		return runResearchCommand(args[1:])
 	case "sync":
 		return runResearchSync(args[1:])
 	case "plan":
@@ -952,6 +999,63 @@ func runResearchCompare(args []string) error {
 	}
 	if !report.OK {
 		return errors.New("feature research compare failed")
+	}
+	return nil
+}
+
+func runResearchCommand(args []string) error {
+	flags := flag.NewFlagSet("research command", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	command := flags.String("command", "", "AgentTestBench command path to map back to radar features")
+	indexPath := flags.String("radar-index", "", "Path to github-feature-radar data/feature-index.json")
+	minReferences := flags.Int("min-references", 3, "Require this many reference projects before a feature is healthy")
+	limit := flags.Int("limit", 5, "Maximum matching features to include")
+	referenceLimit := flags.Int("reference-limit", 2, "Maximum top references per matched feature")
+	liveCheck := flags.Bool("live-check", false, "Also verify matched feature references against live GitHub repository metadata")
+	githubAPIURL := flags.String("github-api-url", "https://api.github.com", "GitHub API base URL for --live-check")
+	tokenEnv := flags.String("token-env", "GITHUB_TOKEN", "Environment variable containing a GitHub token for --live-check")
+	maxStarDrift := flags.Int("max-star-drift", 0, "With --live-check, fail when live and local stars differ by more than N; 0 disables the drift gate")
+	maxPushedDriftHours := flags.Int("max-pushed-drift-hours", 0, "With --live-check, fail when live pushed_at is newer than local by more than N hours; 0 disables the drift gate")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*command) == "" {
+		return errors.New("research command requires --command TEXT")
+	}
+	resolvedIndexPath := strings.TrimSpace(*indexPath)
+	if resolvedIndexPath == "" {
+		resolvedIndexPath = strings.TrimSpace(os.Getenv(featureRadarIndexEnv))
+	}
+	if resolvedIndexPath == "" {
+		return fmt.Errorf("research command requires --radar-index PATH or %s", featureRadarIndexEnv)
+	}
+	index, err := readFeatureRadarIndex(resolvedIndexPath)
+	if err != nil {
+		return err
+	}
+	report := buildFeatureCommandReport(index, resolvedIndexPath, *command, *minReferences, *limit, *referenceLimit)
+	if *liveCheck {
+		attachFeatureCommandLiveChecks(context.Background(), &report, featureRoadmapLiveOptions{
+			Index:               index,
+			IndexPath:           resolvedIndexPath,
+			ReferenceLimit:      *referenceLimit,
+			GitHubAPIURL:        *githubAPIURL,
+			Token:               os.Getenv(strings.TrimSpace(*tokenEnv)),
+			MaxStarDrift:        *maxStarDrift,
+			MaxPushedDriftHours: *maxPushedDriftHours,
+		}, *minReferences)
+	}
+	report.NextCommands = featureCommandNextCommands(report, resolvedIndexPath, *minReferences, *limit, *referenceLimit, *liveCheck, *maxStarDrift, *maxPushedDriftHours)
+	if *jsonOutput {
+		if err := writeIndentedJSON(report); err != nil {
+			return err
+		}
+	} else {
+		printFeatureCommandReport(report)
+	}
+	if !report.OK {
+		return errors.New("feature research command mapping failed")
 	}
 	return nil
 }
@@ -3096,6 +3200,19 @@ func featureCommandMatches(command featureNextCommand, requireCommand string) bo
 		normalizeFeatureRadarText(strings.Join(command.CommandPath, " ")) == needle
 }
 
+func commandCatalogContains(catalogCommand string) bool {
+	catalogCommand = strings.TrimSpace(catalogCommand)
+	if catalogCommand == "" {
+		return false
+	}
+	for _, item := range commandCatalog("").Commands {
+		if item.Command == catalogCommand {
+			return true
+		}
+	}
+	return false
+}
+
 func featureGateVerificationCommands(featureQuery string, requireMinMatches int, requireCommand string, maxAgeHours int, indexPath string, nextCommands []featureNextCommand) []string {
 	commands := []string{
 		fmt.Sprintf("agent-testbench research refresh-plan%s --require-ready --min-references %d --max-age-hours %d --json", featureRadarIndexFlag(indexPath), requireMinMatches, maxAgeHours),
@@ -3205,6 +3322,28 @@ func featureGitHubAPIURLFlag(value string) string {
 		return ""
 	}
 	return " --github-api-url " + quoteCommandValue(value)
+}
+
+func featureCommandNextCommands(report featureCommandReport, indexPath string, minReferences int, limit int, referenceLimit int, liveCheck bool, maxStarDrift int, maxPushedDriftHours int) []string {
+	commands := []string{}
+	if report.Recommended.ID != "" {
+		commands = append(commands,
+			featureGateCommandWithLiveCheck(report.Recommended.ID, minReferences, report.CatalogCommand, 72, indexPath, liveCheck, maxStarDrift, maxPushedDriftHours),
+			featurePlanCommandWithLiveCheck(report.Recommended.ID, minReferences, indexPath, liveCheck, maxStarDrift, maxPushedDriftHours),
+		)
+	}
+	commands = append(commands,
+		featureCompareRoadmapCommand(indexPath, minReferences, limit, referenceLimit, liveCheck, maxStarDrift, maxPushedDriftHours, ""),
+		"agent-testbench research compare --query "+quoteCommandValue(report.Command)+featureRadarIndexFlag(indexPath)+fmt.Sprintf(" --min-references %d --limit %d --reference-limit %d", minReferences, limit, referenceLimit)+featureResearchLiveFlags(liveCheck, maxStarDrift, maxPushedDriftHours)+" --json",
+	)
+	return uniquePreserveOrder(commands)
+}
+
+func featureResearchLiveFlags(liveCheck bool, maxStarDrift int, maxPushedDriftHours int) string {
+	if !liveCheck {
+		return ""
+	}
+	return " --live-check" + featureStarDriftFlag(maxStarDrift) + featurePushedDriftFlag(maxPushedDriftHours)
 }
 
 func featureRequireCommandFlag(value string) string {
@@ -3555,6 +3694,185 @@ func sortFeatureCompareItems(items []featureCompareItem) {
 }
 
 func rankFeatureCompareItems(items []featureCompareItem) {
+	for index := range items {
+		items[index].Rank = index + 1
+	}
+}
+
+func buildFeatureCommandReport(index featureRadarIndex, indexPath string, command string, minReferences int, limit int, referenceLimit int) featureCommandReport {
+	if minReferences <= 0 {
+		minReferences = 3
+	}
+	if limit <= 0 {
+		limit = 5
+	}
+	if referenceLimit <= 0 {
+		referenceLimit = 2
+	}
+	command = strings.TrimSpace(command)
+	commandPath := featureNextCommandPath(command)
+	catalogCommand := strings.Join(commandPath, " ")
+	commandAvailable := commandCatalogContains(catalogCommand)
+	ids := make([]string, 0, len(index.Features))
+	for id := range index.Features {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	items := []featureCommandItem{}
+	for _, id := range ids {
+		feature := index.Features[id]
+		nextCommands := featureNextCommands(feature.ID)
+		for _, next := range nextCommands {
+			if !featureCommandMatches(next, command) {
+				continue
+			}
+			availableCommands, implementationCommands := countRoadmapCommands(feature.ID, nextCommands)
+			totalStars := totalFeatureStars(feature.TopMatches)
+			score := featureReadinessScore(len(feature.TopMatches), availableCommands, implementationCommands, totalStars)
+			items = append(items, featureCommandItem{
+				ID:                     feature.ID,
+				Title:                  feature.Title,
+				Intent:                 feature.Intent,
+				Score:                  score,
+				CatalogCommand:         next.CatalogCommand,
+				CommandPath:            next.CommandPath,
+				Command:                next.Command,
+				Purpose:                next.Purpose,
+				References:             len(feature.TopMatches),
+				Gate:                   featureGateStatus(len(feature.TopMatches), minReferences),
+				AvailableCommands:      availableCommands,
+				ImplementationCommands: implementationCommands,
+				TotalStars:             totalStars,
+				PlanCommand:            featurePlanCommand(feature.ID, minReferences, indexPath),
+				GateCommand:            featureGateCommand(feature.ID, minReferences, next.CatalogCommand, 72, indexPath),
+				TopReferences:          enrichFeatureRadarMatches(index, limitFeatureRadarMatches(feature.TopMatches, referenceLimit)),
+				NextCommands:           nextCommands,
+			})
+			break
+		}
+	}
+	sortFeatureCommandItems(items)
+	rankFeatureCommandItems(items)
+	if len(items) > limit {
+		items = items[:limit]
+		rankFeatureCommandItems(items)
+	}
+	report := featureCommandReport{
+		OK:                commandAvailable && len(items) > 0,
+		Command:           command,
+		CatalogCommand:    catalogCommand,
+		CommandPath:       commandPath,
+		Policy:            index.Policy,
+		SourceGeneratedAt: index.SourceGeneratedAt,
+		Checks: featureCommandChecks{
+			CommandAvailable: commandAvailable,
+			FeaturesFound:    len(items) > 0,
+		},
+		Count: len(items),
+		Items: items,
+	}
+	if len(items) > 0 {
+		report.Recommended = items[0]
+	}
+	if !commandAvailable {
+		report.Reasons = append(report.Reasons, fmt.Sprintf("command %q is not available in the AgentTestBench catalog", command))
+	}
+	if len(items) == 0 {
+		report.Reasons = append(report.Reasons, fmt.Sprintf("no radar feature maps to command %q", command))
+	}
+	return report
+}
+
+func attachFeatureCommandLiveChecks(ctx context.Context, report *featureCommandReport, options featureRoadmapLiveOptions, minReferences int) {
+	if minReferences <= 0 {
+		minReferences = 3
+	}
+	summary := featureRoadmapLiveSummary{OK: true}
+	for index := range report.Items {
+		feature := options.Index.Features[report.Items[index].ID]
+		liveReport := buildFeatureLiveCheckReport(ctx, featureLiveCheckOptions{
+			Index:               options.Index,
+			IndexPath:           options.IndexPath,
+			Query:               feature.ID,
+			Feature:             feature,
+			References:          featureProjectReferences(options.Index, feature, options.ReferenceLimit),
+			GitHubAPIURL:        options.GitHubAPIURL,
+			Token:               options.Token,
+			MaxStarDrift:        options.MaxStarDrift,
+			MaxPushedDriftHours: options.MaxPushedDriftHours,
+		})
+		report.Items[index].LiveCheck = &liveReport
+		report.Items[index].PlanCommand = featurePlanCommandWithLiveCheck(report.Items[index].ID, minReferences, options.IndexPath, true, options.MaxStarDrift, options.MaxPushedDriftHours)
+		report.Items[index].GateCommand = featureGateCommandWithLiveCheck(report.Items[index].ID, minReferences, report.Items[index].CatalogCommand, 72, options.IndexPath, true, options.MaxStarDrift, options.MaxPushedDriftHours)
+		summary.CheckedCandidates++
+		summary.CheckedCount += liveReport.CheckedCount
+		if liveReport.OK {
+			continue
+		}
+		summary.OK = false
+		if liveReport.FailedCount > 0 {
+			summary.FailedCount += liveReport.FailedCount
+			summary.FailedCandidates++
+			report.Items[index].Gate = "live-failed"
+			report.Items[index].Score -= 20000
+			report.Items[index].Reasons = append(report.Items[index].Reasons, fmt.Sprintf("live-check has %d failed reference(s)", liveReport.FailedCount))
+		}
+		if liveReport.RefreshCount > 0 {
+			summary.RefreshNeeded = true
+			summary.RefreshCount += liveReport.RefreshCount
+			summary.RefreshCandidates++
+			if liveReport.FailedCount == 0 {
+				report.Items[index].Gate = "needs-refresh"
+			}
+			report.Items[index].Score -= 10000
+			report.Items[index].Reasons = append(report.Items[index].Reasons, fmt.Sprintf("live-check needs refresh for %d reference(s)", liveReport.RefreshCount))
+		}
+		if liveReport.FailedCount == 0 && liveReport.RefreshCount == 0 {
+			report.Items[index].Gate = "live-failed"
+			report.Items[index].Score -= 20000
+			report.Items[index].Reasons = append(report.Items[index].Reasons, "live-check did not pass")
+		}
+	}
+	report.LiveCheck = &summary
+	report.Checks.LiveCheckOK = summary.OK
+	report.OK = report.OK && summary.OK
+	if !summary.OK {
+		if summary.FailedCount > 0 {
+			report.Reasons = append(report.Reasons, fmt.Sprintf("live-check has %d failed reference(s)", summary.FailedCount))
+		}
+		if summary.RefreshCount > 0 {
+			report.Reasons = append(report.Reasons, fmt.Sprintf("live-check needs refresh for %d reference(s)", summary.RefreshCount))
+		}
+		if summary.FailedCount == 0 && summary.RefreshCount == 0 {
+			report.Reasons = append(report.Reasons, "live-check did not pass")
+		}
+	}
+	sortFeatureCommandItems(report.Items)
+	rankFeatureCommandItems(report.Items)
+	if len(report.Items) > 0 {
+		report.Recommended = report.Items[0]
+	}
+}
+
+func sortFeatureCommandItems(items []featureCommandItem) {
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Gate != items[j].Gate {
+			return featureRoadmapGateRank(items[i].Gate) < featureRoadmapGateRank(items[j].Gate)
+		}
+		if items[i].Score != items[j].Score {
+			return items[i].Score > items[j].Score
+		}
+		if items[i].References != items[j].References {
+			return items[i].References > items[j].References
+		}
+		if items[i].TotalStars != items[j].TotalStars {
+			return items[i].TotalStars > items[j].TotalStars
+		}
+		return items[i].ID < items[j].ID
+	})
+}
+
+func rankFeatureCommandItems(items []featureCommandItem) {
 	for index := range items {
 		items[index].Rank = index + 1
 	}
@@ -4238,6 +4556,45 @@ func printFeatureCompareReport(report featureCompareReport) {
 		if len(item.TopReferences) > 0 {
 			fmt.Printf("  Top reference: %s\n", item.TopReferences[0].FullName)
 		}
+		fmt.Printf("  Plan: %s\n", item.PlanCommand)
+	}
+	if len(report.NextCommands) > 0 {
+		fmt.Println("Next commands:")
+		for _, command := range report.NextCommands {
+			fmt.Printf("- %s\n", command)
+		}
+	}
+}
+
+func printFeatureCommandReport(report featureCommandReport) {
+	fmt.Println("Research Command")
+	fmt.Printf("Command: %s\n", report.Command)
+	fmt.Printf("Checks: command=%s features=%s", statusWord(report.Checks.CommandAvailable), statusWord(report.Checks.FeaturesFound))
+	if report.LiveCheck != nil {
+		fmt.Printf(" live=%s", statusWord(report.Checks.LiveCheckOK))
+	}
+	fmt.Println()
+	if report.LiveCheck != nil {
+		fmt.Printf("Live check: %s checked=%d failed=%d refresh-needed=%d\n", statusWord(report.LiveCheck.OK), report.LiveCheck.CheckedCount, report.LiveCheck.FailedCount, report.LiveCheck.RefreshCount)
+	}
+	if len(report.Reasons) > 0 {
+		fmt.Println("Reasons:")
+		for _, reason := range report.Reasons {
+			fmt.Printf("- %s\n", reason)
+		}
+	}
+	if report.Recommended.ID != "" {
+		fmt.Printf("Recommended: %s (%s)\n", report.Recommended.Title, report.Recommended.ID)
+	}
+	for _, item := range report.Items {
+		fmt.Printf("- #%d %s (%s): %s references=%d command=%s\n", item.Rank, item.Title, item.ID, item.Gate, item.References, item.CatalogCommand)
+		for _, reason := range item.Reasons {
+			fmt.Printf("  Reason: %s\n", reason)
+		}
+		if len(item.TopReferences) > 0 {
+			fmt.Printf("  Top reference: %s\n", item.TopReferences[0].FullName)
+		}
+		fmt.Printf("  Gate: %s\n", item.GateCommand)
 		fmt.Printf("  Plan: %s\n", item.PlanCommand)
 	}
 	if len(report.NextCommands) > 0 {

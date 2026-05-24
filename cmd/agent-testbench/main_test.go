@@ -65,6 +65,9 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	if !strings.Contains(out, "agent-testbench research compare") {
 		t.Fatalf("top-level help should expose query-backed feature comparison:\n%s", out)
 	}
+	if !strings.Contains(out, "agent-testbench research command") {
+		t.Fatalf("top-level help should expose command-backed feature research:\n%s", out)
+	}
 	if !strings.Contains(out, "agent-testbench research sync") {
 		t.Fatalf("top-level help should expose feature radar sync automation:\n%s", out)
 	}
@@ -1204,6 +1207,126 @@ func TestResearchCompareRanksCandidateFeaturesWithLiveChecks(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(report.NextCommands, "\n"), "research brief --query 'api gate'"+featureRadarIndexFlag(indexPath)+" --min-references 2 --live-check --max-star-drift 100 --max-pushed-drift-hours 24 --github-api-url "+quoteCommandValue(server.URL)+" --json") {
 		t.Fatalf("compare next commands = %#v", report.NextCommands)
+	}
+}
+
+func TestResearchCommandMapsCatalogCommandToFeatureReferences(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/repos/example/workflow-runner":
+			fmt.Fprint(w, `{"full_name":"example/workflow-runner","html_url":"https://github.com/example/workflow-runner","stargazers_count":9000,"pushed_at":"2026-05-24T12:00:00Z","archived":false,"fork":false}`)
+		case "/repos/example/workflow-gate":
+			fmt.Fprint(w, `{"full_name":"example/workflow-gate","html_url":"https://github.com/example/workflow-gate","stargazers_count":7200,"pushed_at":"2026-05-22T12:00:00Z","archived":false,"fork":false}`)
+		case "/repos/example/gate-engine":
+			fmt.Fprint(w, `{"full_name":"example/gate-engine","html_url":"https://github.com/example/gate-engine","stargazers_count":3400,"pushed_at":"2026-05-24T12:00:00Z","archived":false,"fork":false}`)
+		case "/repos/example/gate-policy":
+			fmt.Fprint(w, `{"full_name":"example/gate-policy","html_url":"https://github.com/example/gate-policy","stargazers_count":4558,"pushed_at":"2026-05-22T12:00:00Z","archived":false,"fork":false}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
+	index := map[string]any{
+		"schemaVersion":     1,
+		"sourceGeneratedAt": "2026-05-24T04:39:07Z",
+		"policy": map[string]any{
+			"minStars":    3000,
+			"months":      3,
+			"pushedAfter": "2026-02-24",
+		},
+		"features": map[string]any{
+			"workflow-orchestration": map[string]any{
+				"id":     "workflow-orchestration",
+				"title":  "Workflow Orchestration",
+				"intent": "Find projects that model workflow execution and reporting.",
+				"topMatches": []map[string]any{
+					{"fullName": "example/workflow-runner", "url": "https://github.com/example/workflow-runner", "stars": 9000, "pushedAt": "2026-05-24T12:00:00Z"},
+					{"fullName": "example/workflow-gate", "url": "https://github.com/example/workflow-gate", "stars": 7200, "pushedAt": "2026-05-22T12:00:00Z"},
+				},
+			},
+			"quality-gates": map[string]any{
+				"id":     "quality-gates",
+				"title":  "Quality Gates",
+				"intent": "Find projects that gate releases.",
+				"topMatches": []map[string]any{
+					{"fullName": "example/gate-engine", "url": "https://github.com/example/gate-engine", "stars": 3040, "pushedAt": "2026-05-20T12:00:00Z"},
+					{"fullName": "example/gate-policy", "url": "https://github.com/example/gate-policy", "stars": 4558, "pushedAt": "2026-05-22T12:00:00Z"},
+				},
+			},
+		},
+	}
+	if err := os.WriteFile(indexPath, []byte(mustJSON(t, index)), 0o644); err != nil {
+		t.Fatalf("write radar index: %v", err)
+	}
+
+	out := runCLIFails(t,
+		"research", "command",
+		"--command", "workflow gate",
+		"--radar-index", indexPath,
+		"--min-references", "2",
+		"--limit", "2",
+		"--reference-limit", "2",
+		"--live-check",
+		"--github-api-url", server.URL,
+		"--max-star-drift", "100",
+		"--max-pushed-drift-hours", "24",
+		"--json",
+	)
+	var report struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Checks  struct {
+			CommandAvailable bool `json:"commandAvailable"`
+			FeaturesFound    bool `json:"featuresFound"`
+			LiveCheckOK      bool `json:"liveCheckOk"`
+		} `json:"checks"`
+		LiveCheck struct {
+			OK                bool `json:"ok"`
+			CheckedCandidates int  `json:"checkedCandidates"`
+			RefreshCandidates int  `json:"refreshCandidates"`
+		} `json:"liveCheck"`
+		Recommended struct {
+			ID             string `json:"id"`
+			CatalogCommand string `json:"catalogCommand"`
+			PlanCommand    string `json:"planCommand"`
+		} `json:"recommended"`
+		Items []struct {
+			Rank                   int      `json:"rank"`
+			ID                     string   `json:"id"`
+			CatalogCommand         string   `json:"catalogCommand"`
+			Gate                   string   `json:"gate"`
+			References             int      `json:"references"`
+			ImplementationCommands int      `json:"implementationCommands"`
+			Reasons                []string `json:"reasons"`
+			PlanCommand            string   `json:"planCommand"`
+			LiveCheck              struct {
+				OK           bool `json:"ok"`
+				RefreshCount int  `json:"refreshCount"`
+			} `json:"liveCheck"`
+		} `json:"items"`
+		NextCommands []string `json:"nextCommands"`
+	}
+	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
+		t.Fatalf("decode research command json: %v\n%s", err, out)
+	}
+	if report.OK || report.Command != "workflow gate" || !report.Checks.CommandAvailable || !report.Checks.FeaturesFound || report.Checks.LiveCheckOK || report.LiveCheck.OK || report.LiveCheck.CheckedCandidates != 2 || report.LiveCheck.RefreshCandidates != 1 {
+		t.Fatalf("research command summary = %#v", report)
+	}
+	if len(report.Items) != 2 || report.Items[0].ID != "workflow-orchestration" || report.Items[0].CatalogCommand != "workflow gate" || report.Items[0].ImplementationCommands == 0 || report.Items[0].Gate != "passed" {
+		t.Fatalf("research command should rank live-passing feature first: %#v", report.Items)
+	}
+	if report.Recommended.ID != "workflow-orchestration" || !strings.Contains(report.Recommended.PlanCommand, "--live-check") {
+		t.Fatalf("research command recommended = %#v", report.Recommended)
+	}
+	stale := report.Items[1]
+	if stale.ID != "quality-gates" || stale.Gate != "needs-refresh" || stale.LiveCheck.RefreshCount != 1 || !strings.Contains(strings.Join(stale.Reasons, "\n"), "live-check needs refresh for 1 reference(s)") {
+		t.Fatalf("research command stale item = %#v", stale)
+	}
+	if !strings.Contains(strings.Join(report.NextCommands, "\n"), "research gate --feature 'workflow-orchestration'"+featureRadarIndexFlag(indexPath)+" --require-min-matches 2 --require-command 'workflow gate' --max-age-hours 72 --live-check --max-star-drift 100 --max-pushed-drift-hours 24 --json") {
+		t.Fatalf("research command next commands = %#v", report.NextCommands)
 	}
 }
 
