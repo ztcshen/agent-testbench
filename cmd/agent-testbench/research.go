@@ -598,6 +598,8 @@ type featureSyncReport struct {
 	RefreshLimit  int               `json:"refreshLimit"`
 	MaxAgeHours   int               `json:"maxAgeHours"`
 	MinReferences int               `json:"minReferences"`
+	SeedOnly      bool              `json:"seedOnly"`
+	StrictSearch  bool              `json:"strictSearch"`
 	Checks        featureSyncChecks `json:"checks"`
 	Steps         []featureSyncStep `json:"steps"`
 	Reasons       []string          `json:"reasons,omitempty"`
@@ -1182,6 +1184,8 @@ func runResearchSync(args []string) error {
 	refreshLimit := flags.Int("refresh-limit", 20, "GitHub search result limit to pass to npm run refresh")
 	maxAgeHours := flags.Int("max-age-hours", 72, "Freshness gate to pass to npm run status")
 	minReferences := flags.Int("min-references", 3, "Reference coverage gate to pass to npm run status and coverage")
+	seedOnly := flags.Bool("seed-only", false, "Pass --seed-only to the external radar refresh for a fast curated-reference refresh")
+	strictSearch := flags.Bool("strict-search", false, "Pass --strict-search to the external radar refresh so GitHub search failures fail CI")
 	npmCommand := flags.String("npm", "npm", "npm executable used when --execute is set")
 	execute := flags.Bool("execute", false, "Run the external radar maintenance workflow instead of printing it")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable sync report")
@@ -1198,6 +1202,8 @@ func runResearchSync(args []string) error {
 		RefreshLimit:  *refreshLimit,
 		MaxAgeHours:   *maxAgeHours,
 		MinReferences: *minReferences,
+		SeedOnly:      *seedOnly,
+		StrictSearch:  *strictSearch,
 		NPMCommand:    *npmCommand,
 		Execute:       *execute,
 	})
@@ -2528,6 +2534,8 @@ type featureSyncOptions struct {
 	RefreshLimit  int
 	MaxAgeHours   int
 	MinReferences int
+	SeedOnly      bool
+	StrictSearch  bool
 	NPMCommand    string
 	Execute       bool
 }
@@ -2583,8 +2591,10 @@ func buildFeatureSyncReport(ctx context.Context, options featureSyncOptions) fea
 		RefreshLimit:  options.RefreshLimit,
 		MaxAgeHours:   options.MaxAgeHours,
 		MinReferences: options.MinReferences,
+		SeedOnly:      options.SeedOnly,
+		StrictSearch:  options.StrictSearch,
 		Checks:        featureSyncChecksFor(options.RadarRoot, options.RadarIndex),
-		Steps:         featureSyncSteps(options.RadarRoot, options.RadarIndex, options.NPMCommand, options.RefreshLimit, options.MaxAgeHours, options.MinReferences),
+		Steps:         featureSyncSteps(options.RadarRoot, options.RadarIndex, options.NPMCommand, options.RefreshLimit, options.MaxAgeHours, options.MinReferences, options.SeedOnly, options.StrictSearch),
 	}
 	if !report.Checks.RootExists {
 		report.Reasons = append(report.Reasons, "radar root does not exist")
@@ -2639,14 +2649,21 @@ func pathIsFile(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
-func featureSyncSteps(root string, indexPath string, npmCommand string, refreshLimit int, maxAgeHours int, minReferences int) []featureSyncStep {
+func featureSyncSteps(root string, indexPath string, npmCommand string, refreshLimit int, maxAgeHours int, minReferences int, seedOnly bool, strictSearch bool) []featureSyncStep {
 	jsonPath := featureSyncRadarJSONPath(indexPath)
+	refreshArgs := []string{"run", "refresh", "--", "--limit", fmt.Sprintf("%d", refreshLimit), "--out", jsonPath, "--index", indexPath}
+	if seedOnly {
+		refreshArgs = append(refreshArgs, "--seed-only")
+	}
+	if strictSearch {
+		refreshArgs = append(refreshArgs, "--strict-search")
+	}
 	definitions := []struct {
 		name string
 		args []string
 	}{
 		{name: "test", args: []string{"test"}},
-		{name: "refresh", args: []string{"run", "refresh", "--", "--limit", fmt.Sprintf("%d", refreshLimit), "--out", jsonPath, "--index", indexPath}},
+		{name: "refresh", args: refreshArgs},
 		{name: "status", args: []string{"run", "status", "--", "--out", jsonPath, "--max-age-hours", fmt.Sprintf("%d", maxAgeHours), "--min-references", fmt.Sprintf("%d", minReferences)}},
 		{name: "audit", args: []string{"run", "audit", "--", "--out", jsonPath}},
 		{name: "coverage", args: []string{"run", "coverage", "--", "--out", jsonPath, "--min-references", fmt.Sprintf("%d", minReferences)}},
@@ -4488,7 +4505,7 @@ func featureNextCommands(featureID string) []featureNextCommand {
 		}
 	case "github-radar-generation":
 		commands = []featureNextCommand{
-			{Command: "agent-testbench research sync --radar-root PATH --execute --json", Purpose: "Run the external GitHub Feature Radar maintenance workflow: test, refresh, status, audit, coverage, and index."},
+			{Command: "agent-testbench research sync --radar-root PATH --execute --json", Purpose: "Run the external GitHub Feature Radar maintenance workflow: test, refresh, status, audit, coverage, and index; add --seed-only for fast curated refreshes or --strict-search for CI."},
 			{Command: "agent-testbench research search --query TEXT --json", Purpose: "Rank candidate feature records from the external GitHub Feature Radar token index."},
 			{Command: "agent-testbench research references --feature TEXT --json", Purpose: "List maintained high-star reference projects for a matched feature from the external project ledger."},
 			{Command: "agent-testbench research features --filter TEXT --json", Purpose: "Search feature records from the external GitHub Feature Radar index."},
@@ -4955,6 +4972,7 @@ func printFeatureSyncReport(report featureSyncReport) {
 	fmt.Printf("Radar Root: %s\n", report.RadarRoot)
 	fmt.Printf("Radar Index: %s\n", report.RadarIndex)
 	fmt.Printf("Gates: max-age-hours=%d min-references=%d refresh-limit=%d\n", report.MaxAgeHours, report.MinReferences, report.RefreshLimit)
+	fmt.Printf("Refresh modes: seed-only=%t strict-search=%t\n", report.SeedOnly, report.StrictSearch)
 	fmt.Printf("Checks: root=%t package.json=%t radar-index=%t\n", report.Checks.RootExists, report.Checks.PackageJSON, report.Checks.RadarIndex)
 	if len(report.Reasons) > 0 {
 		fmt.Println("Reasons:")

@@ -99,9 +99,10 @@ What to point out:
 - `agent-testbench research plan --feature "case run" --live-check`
   turns the chosen feature into a reviewable implementation plan while carrying
   live GitHub policy/drift evidence into the plan's verification commands.
-- `agent-testbench research sync --radar-root ./github-feature-radar --execute`
+- `agent-testbench research sync --radar-root ./github-feature-radar --strict-search --execute`
   runs the external radar maintenance chain from AgentTestBench: test, refresh,
-  status, audit, coverage, and index, with per-step JSON results.
+  status, audit, coverage, and index, with per-step JSON results; use
+  `--seed-only` for fast curated-reference refreshes under search rate limits.
 - `agent-testbench research status --max-age-hours 72` checks whether the
   external feature index is fresh enough to trust, reports feature/reference
   and project-index counts, and prints the refresh, audit, coverage, and index
@@ -199,9 +200,10 @@ What to point out:
 - `agent-testbench research plan --feature "case run" --live-check`
   会把选定 feature 变成可评审的实现计划，并把 GitHub 实时 policy/drift
   证据带入计划里的验证命令。
-- `agent-testbench research sync --radar-root ./github-feature-radar --execute`
+- `agent-testbench research sync --radar-root ./github-feature-radar --strict-search --execute`
   可以从 AgentTestBench 侧执行外部 radar 的维护链路：test、refresh、status、
-  audit、coverage 和 index，并返回每一步的 JSON 结果。
+  audit、coverage 和 index，并返回每一步的 JSON 结果；遇到搜索限流时可用
+  `--seed-only` 快速刷新 curated references。
 - `agent-testbench research status --max-age-hours 72` 会先检查外部 feature
   index 是否足够新鲜可信，报告 feature/reference 与项目索引数量；如果过期，
   会打印 refresh、audit、coverage 和 index 的恢复命令。

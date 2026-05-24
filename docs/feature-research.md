@@ -32,6 +32,7 @@ AgentTestBench can also plan or execute that same external maintenance chain:
 ./bin/agent-testbench.sh research sync \
   --radar-root $RADAR_HOME \
   --refresh-limit 20 \
+  --seed-only \
   --max-age-hours 72 \
   --min-references 3 \
   --json
@@ -39,11 +40,17 @@ AgentTestBench can also plan or execute that same external maintenance chain:
 ./bin/agent-testbench.sh research sync \
   --radar-root $RADAR_HOME \
   --refresh-limit 20 \
+  --strict-search \
   --max-age-hours 72 \
   --min-references 3 \
   --execute \
   --json
 ```
+
+Use `--seed-only` for a fast curated-reference refresh when unauthenticated
+GitHub search is rate-limited. Use `--strict-search` in CI or scheduled
+maintenance when a GitHub search failure should fail the run instead of falling
+back to cached references.
 
 For broader GitHub search, set `GITHUB_TOKEN`:
 
@@ -421,7 +428,7 @@ Recommended pre-design gate:
 
 ```sh
 ./bin/agent-testbench.sh research features --filter "new cli capability"
-./bin/agent-testbench.sh research sync --radar-root $RADAR_HOME --max-age-hours 72 --min-references 3
+./bin/agent-testbench.sh research sync --radar-root $RADAR_HOME --max-age-hours 72 --min-references 3 --strict-search
 ./bin/agent-testbench.sh research search --query "new cli capability" --limit 5
 ./bin/agent-testbench.sh research compare --query "new cli capability" --min-references 3 --limit 5 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research command --command "target command" --min-references 3 --live-check --max-star-drift 100 --max-pushed-drift-hours 72

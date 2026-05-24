@@ -74,6 +74,9 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	if !strings.Contains(out, "agent-testbench research sync") {
 		t.Fatalf("top-level help should expose feature radar sync automation:\n%s", out)
 	}
+	if !strings.Contains(out, "agent-testbench research sync --radar-root PATH") || !strings.Contains(out, "[--seed-only] [--strict-search]") {
+		t.Fatalf("top-level help should expose feature radar refresh modes:\n%s", out)
+	}
 	if !strings.Contains(out, "agent-testbench research coverage") {
 		t.Fatalf("top-level help should expose feature radar coverage gates:\n%s", out)
 	}
@@ -1564,6 +1567,51 @@ printf 'ran %s\n' "$*"
 	} {
 		if !strings.Contains(calls, want) {
 			t.Fatalf("fake npm calls missing %q:\n%s", want, calls)
+		}
+	}
+}
+
+func TestResearchSyncPassesRefreshModeFlags(t *testing.T) {
+	radarRoot := t.TempDir()
+	dataDir := filepath.Join(radarRoot, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("mkdir radar data: %v", err)
+	}
+	writeFile(t, filepath.Join(radarRoot, "package.json"), `{"scripts":{"refresh":"node src/cli.mjs refresh"}}`)
+	writeFile(t, filepath.Join(dataDir, "feature-index.json"), `{"features":{}}`)
+
+	out := runCLI(t,
+		"research", "sync",
+		"--radar-root", radarRoot,
+		"--refresh-limit", "9",
+		"--seed-only",
+		"--strict-search",
+		"--json",
+	)
+	var report struct {
+		SeedOnly     bool `json:"seedOnly"`
+		StrictSearch bool `json:"strictSearch"`
+		Steps        []struct {
+			Name    string `json:"name"`
+			Command string `json:"command"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode research sync json: %v\n%s", err, out)
+	}
+	if !report.SeedOnly || !report.StrictSearch {
+		t.Fatalf("sync refresh modes were not reported: %#v", report)
+	}
+	var refreshCommand string
+	for _, step := range report.Steps {
+		if step.Name == "refresh" {
+			refreshCommand = step.Command
+			break
+		}
+	}
+	for _, want := range []string{"npm run refresh", "--limit 9", "--seed-only", "--strict-search"} {
+		if !strings.Contains(refreshCommand, want) {
+			t.Fatalf("refresh command missing %q:\n%s", want, refreshCommand)
 		}
 	}
 }
