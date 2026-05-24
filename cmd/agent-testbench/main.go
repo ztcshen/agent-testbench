@@ -446,7 +446,7 @@ Usage:
   agent-testbench research refresh-plan --radar-index PATH [--min-references N] [--max-age-hours N] [--limit N] [--require-ready] [--json]
   agent-testbench research roadmap --radar-index PATH [--min-references N] [--limit N] [--reference-limit N] [--json]
   agent-testbench research backlog --radar-index PATH [--min-references N] [--limit N] [--reference-limit N] [--json]
-  agent-testbench research gate --feature TEXT --radar-index PATH [--require-min-matches N] [--require-command COMMAND] [--max-age-hours N] [--json]
+  agent-testbench research gate --feature TEXT --radar-index PATH [--require-min-matches N] [--require-command COMMAND] [--max-age-hours N] [--live-check] [--max-star-drift N] [--max-pushed-drift-hours N] [--json]
   agent-testbench research plan --feature TEXT --radar-index PATH [--limit N] [--require-min-matches N] [--format text|json|markdown] [--json]
   agent-testbench case diagnose [--store NAME_OR_DSN] [--case-run ID | --run ID [--case-id ID] [--step-id ID]] [--json]
   agent-testbench case gate [--store NAME_OR_DSN] [--run ID] [--require-no-failures] [--require-evidence] [--min-passed N] [--json]

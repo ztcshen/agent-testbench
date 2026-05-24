@@ -200,6 +200,9 @@ Before picking the next CLI slice, check the whole feature index:
   --require-min-matches 3 \
   --require-command "workflow report" \
   --max-age-hours 72 \
+  --live-check \
+  --max-star-drift 100 \
+  --max-pushed-drift-hours 72 \
   --json
 ```
 
@@ -247,8 +250,10 @@ loads the external feature index, verifies freshness, runs the radar audit,
 checks that the matched feature has enough recent 3K+ star references, and can
 require a concrete AgentTestBench command path such as `workflow report` or
 `case gate`. The JSON report returns `checks`, `referenceGate`, `commandGate`,
-ranked references, and verification commands; the command exits non-zero when
-any gate fails.
+optional `liveCheck`, ranked references, and verification commands; the command
+exits non-zero when any gate fails. Add `--live-check` when the implementation
+slice must prove its references still pass live GitHub policy and have not
+drifted beyond the configured star or pushed-at thresholds.
 
 To choose the next implementation or demo slice, ask the CLI to rank roadmap
 candidates:
@@ -347,7 +352,10 @@ Recommended pre-design gate:
 ./bin/agent-testbench.sh research gate \
   --feature "new cli capability" \
   --require-min-matches 3 \
-  --require-command "target command"
+  --require-command "target command" \
+  --live-check \
+  --max-star-drift 100 \
+  --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research plan \
   --feature "new cli capability" \
   --require-min-matches 3 \

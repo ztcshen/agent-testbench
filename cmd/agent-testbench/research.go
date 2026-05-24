@@ -323,17 +323,18 @@ type featureBacklogItem struct {
 }
 
 type featureGateReport struct {
-	OK                   bool                 `json:"ok"`
-	Feature              featureRadarFeature  `json:"feature"`
-	Policy               featureRadarPolicy   `json:"policy"`
-	SourceGeneratedAt    string               `json:"sourceGeneratedAt"`
-	Checks               featureGateChecks    `json:"checks"`
-	ReferenceGate        featureReferenceGate `json:"referenceGate"`
-	CommandGate          featureCommandGate   `json:"commandGate"`
-	References           []featureRadarMatch  `json:"references"`
-	NextCommands         []featureNextCommand `json:"nextCommands"`
-	VerificationCommands []string             `json:"verificationCommands"`
-	Reasons              []string             `json:"reasons,omitempty"`
+	OK                   bool                    `json:"ok"`
+	Feature              featureRadarFeature     `json:"feature"`
+	Policy               featureRadarPolicy      `json:"policy"`
+	SourceGeneratedAt    string                  `json:"sourceGeneratedAt"`
+	Checks               featureGateChecks       `json:"checks"`
+	ReferenceGate        featureReferenceGate    `json:"referenceGate"`
+	CommandGate          featureCommandGate      `json:"commandGate"`
+	LiveCheck            *featureLiveCheckReport `json:"liveCheck,omitempty"`
+	References           []featureRadarMatch     `json:"references"`
+	NextCommands         []featureNextCommand    `json:"nextCommands"`
+	VerificationCommands []string                `json:"verificationCommands"`
+	Reasons              []string                `json:"reasons,omitempty"`
 }
 
 type featureGateChecks struct {
@@ -341,6 +342,7 @@ type featureGateChecks struct {
 	AuditOK         bool `json:"auditOk"`
 	ReferenceGateOK bool `json:"referenceGateOk"`
 	CommandGateOK   bool `json:"commandGateOk"`
+	LiveCheckOK     bool `json:"liveCheckOk,omitempty"`
 }
 
 type featureCommandGate struct {
@@ -1124,6 +1126,11 @@ func runResearchGate(args []string) error {
 	requireMinMatches := flags.Int("require-min-matches", 3, "Fail when fewer than this many reference projects are available")
 	requireCommand := flags.String("require-command", "", "Require a matching AgentTestBench command path, for example 'workflow report'")
 	maxAgeHours := flags.Int("max-age-hours", 72, "Fail when the feature index is older than this many hours")
+	liveCheck := flags.Bool("live-check", false, "Also verify selected references against live GitHub repository metadata")
+	githubAPIURL := flags.String("github-api-url", "https://api.github.com", "GitHub API base URL for --live-check")
+	tokenEnv := flags.String("token-env", "GITHUB_TOKEN", "Environment variable containing a GitHub token for --live-check")
+	maxStarDrift := flags.Int("max-star-drift", 0, "With --live-check, fail when live and local stars differ by more than N; 0 disables the drift gate")
+	maxPushedDriftHours := flags.Int("max-pushed-drift-hours", 0, "With --live-check, fail when live pushed_at is newer than local by more than N hours; 0 disables the drift gate")
 	nowValue := flags.String("now", "", "Override current time for deterministic checks (RFC3339)")
 	limit := flags.Int("limit", 5, "Maximum number of reference projects to include")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON gate report")
@@ -1153,6 +1160,22 @@ func runResearchGate(args []string) error {
 		return err
 	}
 	report := buildFeatureGateReport(index, resolvedIndexPath, feature, *featureQuery, *requireMinMatches, *requireCommand, *maxAgeHours, checkedAt, *limit)
+	if *liveCheck {
+		liveReport := buildFeatureLiveCheckReport(context.Background(), featureLiveCheckOptions{
+			Index:               index,
+			IndexPath:           resolvedIndexPath,
+			Query:               *featureQuery,
+			Feature:             feature,
+			References:          featureProjectReferences(index, feature, *limit),
+			GitHubAPIURL:        *githubAPIURL,
+			Token:               os.Getenv(strings.TrimSpace(*tokenEnv)),
+			CheckedAt:           checkedAt,
+			MaxStarDrift:        *maxStarDrift,
+			MaxPushedDriftHours: *maxPushedDriftHours,
+		})
+		attachFeatureGateLiveCheck(&report, liveReport)
+		report.VerificationCommands = append([]string{featureGateLiveCheckCommand(*featureQuery, resolvedIndexPath, *limit, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL)}, report.VerificationCommands...)
+	}
 	if *jsonOutput {
 		if err := writeIndentedJSON(report); err != nil {
 			return err
@@ -2489,6 +2512,25 @@ func buildFeatureGateReport(index featureRadarIndex, indexPath string, feature f
 	return report
 }
 
+func attachFeatureGateLiveCheck(report *featureGateReport, liveReport featureLiveCheckReport) {
+	report.LiveCheck = &liveReport
+	report.Checks.LiveCheckOK = liveReport.OK
+	if liveReport.OK {
+		report.OK = len(report.Reasons) == 0
+		return
+	}
+	if liveReport.FailedCount > 0 {
+		report.Reasons = append(report.Reasons, fmt.Sprintf("live-check has %d failed reference(s)", liveReport.FailedCount))
+	}
+	if liveReport.RefreshCount > 0 {
+		report.Reasons = append(report.Reasons, fmt.Sprintf("live-check needs refresh for %d reference(s)", liveReport.RefreshCount))
+	}
+	if liveReport.FailedCount == 0 && liveReport.RefreshCount == 0 {
+		report.Reasons = append(report.Reasons, "live-check did not pass")
+	}
+	report.OK = false
+}
+
 func buildFeatureCommandGate(commands []featureNextCommand, requireCommand string) featureCommandGate {
 	required := strings.TrimSpace(requireCommand)
 	if required == "" {
@@ -2542,6 +2584,23 @@ func featureGateVerificationCommands(featureQuery string, requireMinMatches int,
 		}
 	}
 	return commands
+}
+
+func featureGateLiveCheckCommand(featureQuery string, indexPath string, limit int, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string) string {
+	command := "agent-testbench research live-check --feature " + quoteCommandValue(featureQuery) + featureRadarIndexFlag(indexPath)
+	if limit > 0 {
+		command += fmt.Sprintf(" --limit %d", limit)
+	}
+	if maxStarDrift > 0 {
+		command += fmt.Sprintf(" --max-star-drift %d", maxStarDrift)
+	}
+	if maxPushedDriftHours > 0 {
+		command += fmt.Sprintf(" --max-pushed-drift-hours %d", maxPushedDriftHours)
+	}
+	if strings.TrimSpace(githubAPIURL) != "" && strings.TrimSpace(githubAPIURL) != "https://api.github.com" {
+		command += " --github-api-url " + quoteCommandValue(githubAPIURL)
+	}
+	return command + " --json"
 }
 
 func featureRequireCommandFlag(value string) string {
@@ -3510,7 +3569,11 @@ func printFeatureBacklogReport(report featureBacklogReport) {
 func printFeatureGateReport(report featureGateReport) {
 	fmt.Println("Research Gate")
 	fmt.Printf("Feature: %s (%s)\n", report.Feature.Title, report.Feature.ID)
-	fmt.Printf("Checks: fresh=%s audit=%s references=%s command=%s\n", statusWord(report.Checks.Fresh), statusWord(report.Checks.AuditOK), statusWord(report.Checks.ReferenceGateOK), statusWord(report.Checks.CommandGateOK))
+	checks := fmt.Sprintf("Checks: fresh=%s audit=%s references=%s command=%s", statusWord(report.Checks.Fresh), statusWord(report.Checks.AuditOK), statusWord(report.Checks.ReferenceGateOK), statusWord(report.Checks.CommandGateOK))
+	if report.LiveCheck != nil {
+		checks += " live=" + statusWord(report.Checks.LiveCheckOK)
+	}
+	fmt.Println(checks)
 	fmt.Printf("Reference gate: %s required=%d found=%d\n", statusWord(report.ReferenceGate.OK), report.ReferenceGate.Required, report.ReferenceGate.Found)
 	matched := report.CommandGate.Matched.CatalogCommand
 	if matched == "" {
@@ -3520,6 +3583,9 @@ func printFeatureGateReport(report featureGateReport) {
 	fmt.Printf("Policy: stars >= %d, pushed >= %s\n", report.Policy.MinStars, report.Policy.PushedAfter)
 	if report.SourceGeneratedAt != "" {
 		fmt.Printf("Radar index: %s\n", report.SourceGeneratedAt)
+	}
+	if report.LiveCheck != nil {
+		fmt.Printf("Live check: %s checked=%d failed=%d refresh-needed=%d\n", statusWord(report.LiveCheck.OK), report.LiveCheck.CheckedCount, report.LiveCheck.FailedCount, report.LiveCheck.RefreshCount)
 	}
 	if len(report.Reasons) > 0 {
 		fmt.Println("Reasons:")

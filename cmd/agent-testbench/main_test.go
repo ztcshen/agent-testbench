@@ -2528,6 +2528,109 @@ func TestResearchGateFailsWhenRequiredCommandIsUnavailable(t *testing.T) {
 	}
 }
 
+func TestResearchGateCanRequireLiveReferenceCheck(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/repos/example/workflow-runner":
+			fmt.Fprint(w, `{"full_name":"example/workflow-runner","html_url":"https://github.com/example/workflow-runner","stargazers_count":3302,"pushed_at":"2026-05-24T12:00:00Z","archived":false,"fork":false}`)
+		case "/repos/example/workflow-ui":
+			fmt.Fprint(w, `{"full_name":"example/workflow-ui","html_url":"https://github.com/example/workflow-ui","stargazers_count":4110,"pushed_at":"2026-05-23T12:00:00Z","archived":false,"fork":false}`)
+		case "/repos/example/workflow-worker":
+			fmt.Fprint(w, `{"full_name":"example/workflow-worker","html_url":"https://github.com/example/workflow-worker","stargazers_count":5120,"pushed_at":"2026-05-22T12:00:00Z","archived":false,"fork":false}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
+	index := map[string]any{
+		"schemaVersion":     1,
+		"sourceGeneratedAt": "2026-05-24T04:38:55Z",
+		"policy": map[string]any{
+			"minStars":    3000,
+			"months":      3,
+			"pushedAfter": "2026-02-24",
+		},
+		"tokenIndex": map[string]any{
+			"workflow report": []string{"workflow-orchestration"},
+		},
+		"features": map[string]any{
+			"workflow-orchestration": map[string]any{
+				"id":     "workflow-orchestration",
+				"title":  "Workflow Orchestration",
+				"intent": "Run multi-step API workflows.",
+				"topMatches": []map[string]any{
+					{"fullName": "example/workflow-runner", "url": "https://github.com/example/workflow-runner", "stars": 3040, "pushedAt": "2026-05-20T12:00:00Z"},
+					{"fullName": "example/workflow-ui", "url": "https://github.com/example/workflow-ui", "stars": 4108, "pushedAt": "2026-05-23T12:00:00Z"},
+					{"fullName": "example/workflow-worker", "url": "https://github.com/example/workflow-worker", "stars": 5118, "pushedAt": "2026-05-22T12:00:00Z"},
+				},
+			},
+		},
+	}
+	if err := os.WriteFile(indexPath, []byte(mustJSON(t, index)), 0o644); err != nil {
+		t.Fatalf("write radar index: %v", err)
+	}
+
+	out := runCLIFails(t,
+		"research", "gate",
+		"--feature", "workflow report",
+		"--radar-index", indexPath,
+		"--require-min-matches", "3",
+		"--require-command", "workflow report",
+		"--max-age-hours", "24",
+		"--now", "2026-05-24T10:00:00Z",
+		"--live-check",
+		"--github-api-url", server.URL,
+		"--max-star-drift", "100",
+		"--max-pushed-drift-hours", "24",
+		"--json",
+	)
+	var report struct {
+		OK      bool     `json:"ok"`
+		Reasons []string `json:"reasons"`
+		Checks  struct {
+			Fresh           bool `json:"fresh"`
+			AuditOK         bool `json:"auditOk"`
+			ReferenceGateOK bool `json:"referenceGateOk"`
+			CommandGateOK   bool `json:"commandGateOk"`
+			LiveCheckOK     bool `json:"liveCheckOk"`
+		} `json:"checks"`
+		LiveCheck struct {
+			OK            bool `json:"ok"`
+			RefreshNeeded bool `json:"refreshNeeded"`
+			RefreshCount  int  `json:"refreshCount"`
+			References    []struct {
+				FullName         string   `json:"fullName"`
+				Status           string   `json:"status"`
+				RefreshReasons   []string `json:"refreshReasons"`
+				PushedDeltaHours int      `json:"pushedDeltaHours"`
+			} `json:"references"`
+		} `json:"liveCheck"`
+		VerificationCommands []string `json:"verificationCommands"`
+	}
+	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
+		t.Fatalf("decode live research gate json: %v\n%s", err, out)
+	}
+	if report.OK || !report.Checks.Fresh || !report.Checks.AuditOK || !report.Checks.ReferenceGateOK || !report.Checks.CommandGateOK || report.Checks.LiveCheckOK {
+		t.Fatalf("gate checks should fail only live-check = %#v", report)
+	}
+	if report.LiveCheck.OK || !report.LiveCheck.RefreshNeeded || report.LiveCheck.RefreshCount != 1 {
+		t.Fatalf("live-check gate = %#v", report.LiveCheck)
+	}
+	first := report.LiveCheck.References[0]
+	if first.FullName != "example/workflow-runner" || first.Status != "refresh-needed" || first.PushedDeltaHours != 96 || !stringSliceContains(first.RefreshReasons, "star_drift") || !stringSliceContains(first.RefreshReasons, "pushed_at_drift") {
+		t.Fatalf("live-check reference = %#v", first)
+	}
+	if !strings.Contains(strings.Join(report.Reasons, "\n"), "live-check needs refresh for 1 reference(s)") {
+		t.Fatalf("live gate reasons = %#v", report.Reasons)
+	}
+	if !strings.Contains(strings.Join(report.VerificationCommands, "\n"), "agent-testbench research live-check --feature 'workflow report'"+featureRadarIndexFlag(indexPath)+" --limit 5 --max-star-drift 100 --max-pushed-drift-hours 24 --github-api-url "+quoteCommandValue(server.URL)+" --json") {
+		t.Fatalf("verification commands missing live-check = %#v", report.VerificationCommands)
+	}
+}
+
 func TestResearchGateMatchesRequiredCommandPathExactly(t *testing.T) {
 	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
 	index := map[string]any{
