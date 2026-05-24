@@ -56,6 +56,9 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	if !strings.Contains(out, "agent-testbench research references") {
 		t.Fatalf("top-level help should expose feature-backed project references:\n%s", out)
 	}
+	if !strings.Contains(out, "agent-testbench research live-check") {
+		t.Fatalf("top-level help should expose live GitHub reference checks:\n%s", out)
+	}
 	if !strings.Contains(out, "agent-testbench research brief") {
 		t.Fatalf("top-level help should expose query-backed research briefs:\n%s", out)
 	}
@@ -679,6 +682,103 @@ func TestResearchReferencesListsFeatureBackedProjectLedger(t *testing.T) {
 	for _, want := range []string{"Feature References", "Feature: Quality Gates", "aquasecurity/trivy", "language: Go", "Next commands:"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("research references text missing %q:\n%s", want, textOut)
+		}
+	}
+}
+
+func TestResearchLiveCheckVerifiesGitHubPolicyAgainstLiveMetadata(t *testing.T) {
+	requested := []string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = append(requested, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/repos/aquasecurity/trivy":
+			fmt.Fprint(w, `{"full_name":"aquasecurity/trivy","html_url":"https://github.com/aquasecurity/trivy","stargazers_count":35199,"pushed_at":"2026-05-24T12:00:00Z","archived":false,"fork":false}`)
+		case "/repos/semgrep/semgrep":
+			fmt.Fprint(w, `{"full_name":"semgrep/semgrep","html_url":"https://github.com/semgrep/semgrep","stargazers_count":2999,"pushed_at":"2026-01-05T12:00:00Z","archived":true,"fork":false}`)
+		case "/repos/ossf/scorecard":
+			fmt.Fprint(w, `{"full_name":"ossf/scorecard","html_url":"https://github.com/ossf/scorecard","stargazers_count":8212,"pushed_at":"2026-05-20T08:00:00Z","archived":false,"fork":false}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
+	index := map[string]any{
+		"schemaVersion":     1,
+		"sourceGeneratedAt": "2026-05-24T04:39:07Z",
+		"policy": map[string]any{
+			"minStars":    3000,
+			"months":      3,
+			"pushedAfter": "2026-02-24",
+		},
+		"tokenIndex": map[string]any{
+			"quality gate": []string{"quality-gates"},
+		},
+		"features": map[string]any{
+			"quality-gates": map[string]any{
+				"id":    "quality-gates",
+				"title": "Quality Gates",
+				"topMatches": []map[string]any{
+					{"fullName": "aquasecurity/trivy", "url": "https://github.com/aquasecurity/trivy", "stars": 35145, "pushedAt": "2026-05-22T11:51:15Z", "featureScore": 8},
+					{"fullName": "semgrep/semgrep", "url": "https://github.com/semgrep/semgrep", "stars": 15252, "pushedAt": "2026-05-22T19:22:29Z", "featureScore": 7},
+				},
+			},
+		},
+		"projectIndex": map[string]any{
+			"aquasecurity/trivy": map[string]any{"fullName": "aquasecurity/trivy", "url": "https://github.com/aquasecurity/trivy", "stars": 35145, "pushedAt": "2026-05-22T11:51:15Z", "matchedFeatures": []string{"quality-gates"}},
+			"semgrep/semgrep":    map[string]any{"fullName": "semgrep/semgrep", "url": "https://github.com/semgrep/semgrep", "stars": 15252, "pushedAt": "2026-05-22T19:22:29Z", "matchedFeatures": []string{"quality-gates"}},
+			"ossf/scorecard":     map[string]any{"fullName": "ossf/scorecard", "url": "https://github.com/ossf/scorecard", "stars": 8212, "pushedAt": "2026-05-20T08:00:00Z", "matchedFeatures": []string{"quality-gates"}},
+		},
+	}
+	if err := os.WriteFile(indexPath, []byte(mustJSON(t, index)), 0o644); err != nil {
+		t.Fatalf("write radar index: %v", err)
+	}
+
+	out := runCLIFails(t, "research", "live-check", "--feature", "quality gate", "--radar-index", indexPath, "--github-api-url", server.URL, "--limit", "3", "--json")
+	out = firstJSONObject(t, out)
+	var report struct {
+		OK           bool   `json:"ok"`
+		Query        string `json:"query"`
+		CheckedCount int    `json:"checkedCount"`
+		Feature      struct {
+			ID string `json:"id"`
+		} `json:"feature"`
+		References []struct {
+			FullName      string   `json:"fullName"`
+			Status        string   `json:"status"`
+			OK            bool     `json:"ok"`
+			LocalStars    int      `json:"localStars"`
+			LiveStars     int      `json:"liveStars"`
+			LocalPushedAt string   `json:"localPushedAt"`
+			LivePushedAt  string   `json:"livePushedAt"`
+			Archived      bool     `json:"archived"`
+			Fork          bool     `json:"fork"`
+			Reasons       []string `json:"reasons"`
+		} `json:"references"`
+		NextCommands []string `json:"nextCommands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode live-check json: %v\n%s", err, out)
+	}
+	if report.OK || report.Query != "quality gate" || report.Feature.ID != "quality-gates" || report.CheckedCount != 3 {
+		t.Fatalf("live-check identity = %#v", report)
+	}
+	if len(requested) != 3 || !stringSliceContains(requested, "/repos/aquasecurity/trivy") || !stringSliceContains(requested, "/repos/semgrep/semgrep") || !stringSliceContains(requested, "/repos/ossf/scorecard") {
+		t.Fatalf("requested paths = %#v", requested)
+	}
+	if !report.References[0].OK || report.References[0].LiveStars != 35199 || report.References[0].LocalStars != 35145 {
+		t.Fatalf("first live reference = %#v", report.References[0])
+	}
+	failed := report.References[1]
+	if failed.FullName != "semgrep/semgrep" || failed.Status != "failed" || !failed.Archived || failed.LiveStars != 2999 || !stringSliceContains(failed.Reasons, "under_min_stars") || !stringSliceContains(failed.Reasons, "not_pushed_recently") || !stringSliceContains(failed.Reasons, "archived") {
+		t.Fatalf("failed live reference = %#v", failed)
+	}
+	joinedCommands := strings.Join(report.NextCommands, "\n")
+	for _, want := range []string{"research references --feature 'quality-gates'", "research sync", "research refresh-plan"} {
+		if !strings.Contains(joinedCommands, want) {
+			t.Fatalf("live-check next commands missing %q:\n%s", want, joinedCommands)
 		}
 	}
 }
@@ -14491,6 +14591,21 @@ func hasReadModels(readModels []string, required ...string) bool {
 		}
 	}
 	return true
+}
+
+func firstJSONObject(t *testing.T, out string) string {
+	t.Helper()
+	start := strings.Index(out, "{")
+	end := strings.LastIndex(out, "\n}")
+	if end < 0 {
+		end = strings.LastIndex(out, "}")
+	} else {
+		end++
+	}
+	if start < 0 || end < start {
+		t.Fatalf("output does not contain a JSON object:\n%s", out)
+	}
+	return out[start : end+1]
 }
 
 func runCLIFails(t *testing.T, args ...string) string {

@@ -6,6 +6,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -197,6 +200,33 @@ type featureReferencesReport struct {
 	SourceGeneratedAt string                   `json:"sourceGeneratedAt"`
 	References        []featureMatrixReference `json:"references"`
 	NextCommands      []string                 `json:"nextCommands"`
+}
+
+type featureLiveCheckReport struct {
+	OK                bool                        `json:"ok"`
+	Query             string                      `json:"query,omitempty"`
+	Feature           featureRadarFeature         `json:"feature,omitempty"`
+	CheckedAt         string                      `json:"checkedAt"`
+	CheckedCount      int                         `json:"checkedCount"`
+	Policy            featureRadarPolicy          `json:"policy"`
+	SourceGeneratedAt string                      `json:"sourceGeneratedAt"`
+	References        []featureLiveCheckReference `json:"references"`
+	NextCommands      []string                    `json:"nextCommands"`
+}
+
+type featureLiveCheckReference struct {
+	FullName      string   `json:"fullName"`
+	URL           string   `json:"url,omitempty"`
+	Status        string   `json:"status"`
+	OK            bool     `json:"ok"`
+	LocalStars    int      `json:"localStars"`
+	LiveStars     int      `json:"liveStars"`
+	LocalPushedAt string   `json:"localPushedAt,omitempty"`
+	LivePushedAt  string   `json:"livePushedAt,omitempty"`
+	Archived      bool     `json:"archived"`
+	Fork          bool     `json:"fork"`
+	Reasons       []string `json:"reasons,omitempty"`
+	Error         string   `json:"error,omitempty"`
 }
 
 type featureRefreshPlanReport struct {
@@ -440,6 +470,8 @@ func runResearch(args []string) error {
 		return runResearchSearch(args[1:])
 	case "references":
 		return runResearchReferences(args[1:])
+	case "live-check":
+		return runResearchLiveCheck(args[1:])
 	case "brief":
 		return runResearchBrief(args[1:])
 	case "sync":
@@ -616,6 +648,65 @@ func runResearchReferences(args []string) error {
 		return writeIndentedJSON(report)
 	}
 	printFeatureReferencesReport(report)
+	return nil
+}
+
+func runResearchLiveCheck(args []string) error {
+	flags := flag.NewFlagSet("research live-check", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	featureQuery := flags.String("feature", "", "Feature text, id, or alias to check")
+	query := flags.String("query", "", "Alias for --feature")
+	indexPath := flags.String("radar-index", "", "Path to github-feature-radar data/feature-index.json")
+	limit := flags.Int("limit", 20, "Maximum reference projects to check")
+	githubAPIURL := flags.String("github-api-url", "https://api.github.com", "GitHub API base URL")
+	tokenEnv := flags.String("token-env", "GITHUB_TOKEN", "Environment variable containing a GitHub token")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	resolvedIndexPath := strings.TrimSpace(*indexPath)
+	if resolvedIndexPath == "" {
+		resolvedIndexPath = strings.TrimSpace(os.Getenv(featureRadarIndexEnv))
+	}
+	if resolvedIndexPath == "" {
+		return fmt.Errorf("research live-check requires --radar-index PATH or %s", featureRadarIndexEnv)
+	}
+	index, err := readFeatureRadarIndex(resolvedIndexPath)
+	if err != nil {
+		return err
+	}
+	resolvedQuery := researchFirstNonEmpty(*featureQuery, *query)
+	var feature featureRadarFeature
+	var references []featureMatrixReference
+	if strings.TrimSpace(resolvedQuery) != "" {
+		feature, err = findFeatureRadarFeature(index, resolvedQuery)
+		if err != nil {
+			return err
+		}
+		references = featureProjectReferences(index, feature, *limit)
+	} else {
+		references = featureProjectIndexReferences(index, *limit)
+	}
+	report := buildFeatureLiveCheckReport(context.Background(), featureLiveCheckOptions{
+		Index:        index,
+		IndexPath:    resolvedIndexPath,
+		Query:        resolvedQuery,
+		Feature:      feature,
+		References:   references,
+		GitHubAPIURL: *githubAPIURL,
+		Token:        os.Getenv(strings.TrimSpace(*tokenEnv)),
+		CheckedAt:    time.Now().UTC(),
+	})
+	if *jsonOutput {
+		if err := writeIndentedJSON(report); err != nil {
+			return err
+		}
+	} else {
+		printFeatureLiveCheckReport(report)
+	}
+	if !report.OK {
+		return errors.New("feature live-check failed")
+	}
 	return nil
 }
 
@@ -1389,6 +1480,41 @@ func featureProjectReferences(index featureRadarIndex, feature featureRadarFeatu
 	return references
 }
 
+func featureProjectIndexReferences(index featureRadarIndex, limit int) []featureMatrixReference {
+	projects := make([]featureRadarProject, 0, len(index.ProjectIndex))
+	for fullName, project := range index.ProjectIndex {
+		if strings.TrimSpace(project.FullName) == "" {
+			project.FullName = fullName
+		}
+		projects = append(projects, project)
+	}
+	sort.Slice(projects, func(i, j int) bool {
+		if projects[i].Stars != projects[j].Stars {
+			return projects[i].Stars > projects[j].Stars
+		}
+		if projects[i].PushedAt != projects[j].PushedAt {
+			return projects[i].PushedAt > projects[j].PushedAt
+		}
+		return projects[i].FullName < projects[j].FullName
+	})
+	if limit > 0 && len(projects) > limit {
+		projects = projects[:limit]
+	}
+	references := make([]featureMatrixReference, 0, len(projects))
+	for _, project := range projects {
+		match := featureRadarMatch{
+			FullName: project.FullName,
+			URL:      project.URL,
+			Stars:    project.Stars,
+			PushedAt: project.PushedAt,
+			Language: project.Language,
+			Topics:   project.Topics,
+		}
+		references = append(references, featureMatrixReferenceFromMatch(match, project))
+	}
+	return references
+}
+
 func featureProjectHasFeature(project featureRadarProject, featureID string) bool {
 	for _, value := range projectMatchedFeatures(project) {
 		if value == featureID {
@@ -1404,6 +1530,163 @@ func featureReferenceCommands(query string, featureID string, indexPath string) 
 		featureMatrixCommand(featureID, 5, indexPath),
 		featurePlanCommand(featureID, 3, indexPath),
 	}
+}
+
+type featureLiveCheckOptions struct {
+	Index        featureRadarIndex
+	IndexPath    string
+	Query        string
+	Feature      featureRadarFeature
+	References   []featureMatrixReference
+	GitHubAPIURL string
+	Token        string
+	CheckedAt    time.Time
+}
+
+type githubRepositoryMetadata struct {
+	FullName        string `json:"full_name"`
+	URL             string `json:"html_url"`
+	StargazersCount int    `json:"stargazers_count"`
+	PushedAt        string `json:"pushed_at"`
+	Archived        bool   `json:"archived"`
+	Fork            bool   `json:"fork"`
+}
+
+func buildFeatureLiveCheckReport(ctx context.Context, options featureLiveCheckOptions) featureLiveCheckReport {
+	checkedAt := options.CheckedAt
+	if checkedAt.IsZero() {
+		checkedAt = time.Now().UTC()
+	}
+	report := featureLiveCheckReport{
+		OK:                true,
+		Query:             strings.TrimSpace(options.Query),
+		Feature:           options.Feature,
+		CheckedAt:         checkedAt.UTC().Format(time.RFC3339),
+		Policy:            options.Index.Policy,
+		SourceGeneratedAt: options.Index.SourceGeneratedAt,
+		References:        []featureLiveCheckReference{},
+		NextCommands:      featureLiveCheckCommands(options.Query, options.Feature.ID, options.IndexPath),
+	}
+	if len(options.References) == 0 {
+		report.OK = false
+		return report
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	for _, ref := range options.References {
+		item := featureLiveCheckReference{
+			FullName:      ref.FullName,
+			URL:           ref.URL,
+			LocalStars:    ref.Stars,
+			LocalPushedAt: ref.PushedAt,
+		}
+		live, err := fetchGitHubRepositoryMetadata(ctx, client, options.GitHubAPIURL, options.Token, ref.FullName)
+		if err != nil {
+			item.Status = "failed"
+			item.OK = false
+			item.Reasons = []string{"request_failed"}
+			item.Error = err.Error()
+			report.OK = false
+			report.References = append(report.References, item)
+			continue
+		}
+		item.URL = researchFirstNonEmpty(live.URL, item.URL)
+		item.LiveStars = live.StargazersCount
+		item.LivePushedAt = live.PushedAt
+		item.Archived = live.Archived
+		item.Fork = live.Fork
+		item.Reasons = featureLivePolicyViolations(options.Index.Policy, live)
+		item.OK = len(item.Reasons) == 0
+		item.Status = "passed"
+		if !item.OK {
+			item.Status = "failed"
+			report.OK = false
+		}
+		report.References = append(report.References, item)
+	}
+	report.CheckedCount = len(report.References)
+	return report
+}
+
+func fetchGitHubRepositoryMetadata(ctx context.Context, client *http.Client, apiBaseURL string, token string, fullName string) (githubRepositoryMetadata, error) {
+	endpoint, err := githubRepositoryURL(apiBaseURL, fullName)
+	if err != nil {
+		return githubRepositoryMetadata{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return githubRepositoryMetadata{}, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "agent-testbench-research-live-check")
+	if strings.TrimSpace(token) != "" {
+		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(token))
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return githubRepositoryMetadata{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return githubRepositoryMetadata{}, fmt.Errorf("github repository %s returned HTTP %d: %s", fullName, resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	var metadata githubRepositoryMetadata
+	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
+		return githubRepositoryMetadata{}, fmt.Errorf("decode github repository %s: %w", fullName, err)
+	}
+	if strings.TrimSpace(metadata.FullName) == "" {
+		metadata.FullName = fullName
+	}
+	return metadata, nil
+}
+
+func githubRepositoryURL(apiBaseURL string, fullName string) (string, error) {
+	apiBaseURL = strings.TrimRight(strings.TrimSpace(apiBaseURL), "/")
+	if apiBaseURL == "" {
+		apiBaseURL = "https://api.github.com"
+	}
+	parts := strings.Split(strings.TrimSpace(fullName), "/")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return "", fmt.Errorf("invalid GitHub repository fullName %q", fullName)
+	}
+	return apiBaseURL + "/repos/" + url.PathEscape(parts[0]) + "/" + url.PathEscape(parts[1]), nil
+}
+
+func featureLivePolicyViolations(policy featureRadarPolicy, metadata githubRepositoryMetadata) []string {
+	reasons := []string{}
+	if policy.MinStars > 0 && metadata.StargazersCount < policy.MinStars {
+		reasons = append(reasons, "under_min_stars")
+	}
+	if strings.TrimSpace(metadata.PushedAt) == "" || (policy.PushedAfter != "" && shortDate(metadata.PushedAt) < policy.PushedAfter) {
+		reasons = append(reasons, "not_pushed_recently")
+	}
+	if metadata.Archived {
+		reasons = append(reasons, "archived")
+	}
+	if metadata.Fork {
+		reasons = append(reasons, "fork")
+	}
+	return reasons
+}
+
+func featureLiveCheckCommands(query string, featureID string, indexPath string) []string {
+	commands := []string{}
+	if strings.TrimSpace(featureID) != "" {
+		commands = append(commands,
+			"agent-testbench research references --feature "+quoteCommandValue(featureID)+featureRadarIndexFlag(indexPath)+" --limit 10 --json",
+			"agent-testbench research refresh-plan"+featureRadarIndexFlag(indexPath)+" --min-references 3 --max-age-hours 72 --json",
+			"agent-testbench research sync --radar-root "+quoteCommandValue(featureRadarRootFromIndexPath(indexPath))+" --execute --json",
+		)
+	} else {
+		commands = append(commands,
+			"agent-testbench research refresh-plan"+featureRadarIndexFlag(indexPath)+" --min-references 3 --max-age-hours 72 --json",
+			"agent-testbench research sync --radar-root "+quoteCommandValue(featureRadarRootFromIndexPath(indexPath))+" --execute --json",
+		)
+	}
+	if strings.TrimSpace(query) != "" {
+		commands = append([]string{"agent-testbench research search --query " + quoteCommandValue(query) + featureRadarIndexFlag(indexPath) + " --json"}, commands...)
+	}
+	return commands
 }
 
 func projectMatchedFeatures(project featureRadarProject) []string {
@@ -2897,6 +3180,46 @@ func printFeatureReferencesReport(report featureReferencesReport) {
 		}
 		if len(ref.Reasons) > 0 {
 			fmt.Printf("  reasons: %s\n", strings.Join(ref.Reasons, "; "))
+		}
+	}
+	if len(report.NextCommands) > 0 {
+		fmt.Println("Next commands:")
+		for _, command := range report.NextCommands {
+			fmt.Printf("- %s\n", command)
+		}
+	}
+}
+
+func printFeatureLiveCheckReport(report featureLiveCheckReport) {
+	fmt.Println("Feature Live Check")
+	if report.Query != "" {
+		fmt.Printf("Query: %s\n", report.Query)
+	}
+	if report.Feature.ID != "" {
+		fmt.Printf("Feature: %s (%s)\n", report.Feature.Title, report.Feature.ID)
+	}
+	fmt.Printf("Status: %s\n", statusWord(report.OK))
+	fmt.Printf("Checked: %d at %s\n", report.CheckedCount, report.CheckedAt)
+	fmt.Printf("Policy: stars >= %d, pushed >= %s\n", report.Policy.MinStars, report.Policy.PushedAfter)
+	if report.SourceGeneratedAt != "" {
+		fmt.Printf("Radar index: %s\n", report.SourceGeneratedAt)
+	}
+	for _, ref := range report.References {
+		fmt.Printf("- %s: %s (live %d stars, pushed %s; local %d stars, pushed %s)\n", ref.FullName, ref.Status, ref.LiveStars, shortDate(ref.LivePushedAt), ref.LocalStars, shortDate(ref.LocalPushedAt))
+		if ref.URL != "" {
+			fmt.Printf("  %s\n", ref.URL)
+		}
+		if ref.Archived {
+			fmt.Println("  archived: true")
+		}
+		if ref.Fork {
+			fmt.Println("  fork: true")
+		}
+		if len(ref.Reasons) > 0 {
+			fmt.Printf("  reasons: %s\n", strings.Join(ref.Reasons, "; "))
+		}
+		if ref.Error != "" {
+			fmt.Printf("  error: %s\n", ref.Error)
 		}
 	}
 	if len(report.NextCommands) > 0 {

@@ -122,6 +122,13 @@ matched feature ids, stars, pushed date, and evidence reasons. Use it when a CLI
 slice needs a broader set of current 3K+ star projects to compare before
 implementation, without switching to ad hoc project-name search.
 
+`research live-check` revalidates those reference projects against GitHub's live
+repository metadata before a CLI slice uses them as design evidence. It fetches
+stars, pushed date, archived status, and fork status from the GitHub REST API,
+then fails non-zero when a selected reference no longer satisfies the radar
+policy. Use `--token-env GITHUB_TOKEN` or another token environment variable
+when local rate limits are too low.
+
 ```sh
 ./bin/agent-testbench.sh research feature \
   --feature "case run" \
@@ -176,6 +183,12 @@ Before picking the next CLI slice, check the whole feature index:
   --limit 5 \
   --json
 
+./bin/agent-testbench.sh research live-check \
+  --radar-index $RADAR_HOME/data/feature-index.json \
+  --feature "workflow report" \
+  --limit 5 \
+  --json
+
 ./bin/agent-testbench.sh research gate \
   --radar-index $RADAR_HOME/data/feature-index.json \
   --feature "workflow report" \
@@ -209,6 +222,11 @@ name searches.
 ranked references with project-index metadata: language, matched features, and
 evidence reasons. Use it when a feature should be compared against mature OSS
 patterns before writing the next CLI behavior or demo.
+
+`research live-check` is the last-mile drift guard for a feature's reference
+projects. It keeps the local radar index useful for fast search while verifying
+the specific slice references against current GitHub data before implementation
+or demo work depends on them.
 
 `research refresh-plan` combines freshness, audit, and coverage checks into a
 maintenance plan. It tells agents whether the radar needs refresh, why, which
