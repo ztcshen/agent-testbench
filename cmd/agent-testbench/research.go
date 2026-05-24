@@ -314,6 +314,7 @@ type featureRoadmapLiveSummary struct {
 	OK                bool     `json:"ok"`
 	CheckedCount      int      `json:"checkedCount"`
 	CheckedCandidates int      `json:"checkedCandidates"`
+	SkippedCandidates int      `json:"skippedCandidates,omitempty"`
 	SkippedCount      int      `json:"skippedCount,omitempty"`
 	FailedCount       int      `json:"failedCount"`
 	FailedCandidates  int      `json:"failedCandidates"`
@@ -3161,6 +3162,14 @@ type featureRoadmapLiveOptions struct {
 func attachFeatureRoadmapLiveChecks(ctx context.Context, report *featureRoadmapReport, options featureRoadmapLiveOptions) {
 	summary := featureRoadmapLiveSummary{OK: true}
 	for index := range report.Items {
+		if summary.RateLimited {
+			markFeatureRoadmapLiveSkipped(&summary, len(report.Items)-index)
+			for skippedIndex := index; skippedIndex < len(report.Items); skippedIndex++ {
+				report.Items[skippedIndex].Gate = "live-skipped"
+				report.Items[skippedIndex].Reasons = append(report.Items[skippedIndex].Reasons, "live-check skipped after GitHub rate limit")
+			}
+			break
+		}
 		feature := options.Index.Features[report.Items[index].ID]
 		liveReport := buildFeatureLiveCheckReport(ctx, featureLiveCheckOptions{
 			Index:               options.Index,
@@ -3222,6 +3231,14 @@ func absorbFeatureRoadmapLiveSummary(summary *featureRoadmapLiveSummary, liveRep
 	summary.AuthRequired = summary.AuthRequired || liveReport.AuthRequired
 	summary.RateLimitResetAt = earliestNonEmptyRFC3339(summary.RateLimitResetAt, liveReport.RateLimitResetAt)
 	summary.Diagnostics = uniquePreserveOrder(append(summary.Diagnostics, liveReport.Diagnostics...))
+}
+
+func markFeatureRoadmapLiveSkipped(summary *featureRoadmapLiveSummary, skippedCandidates int) {
+	if skippedCandidates <= 0 {
+		return
+	}
+	summary.SkippedCandidates += skippedCandidates
+	summary.Diagnostics = uniquePreserveOrder(append(summary.Diagnostics, fmt.Sprintf("%d candidate(s) skipped after GitHub rate limit to avoid repeated failed GitHub requests.", skippedCandidates)))
 }
 
 func earliestNonEmptyRFC3339(left string, right string) string {
@@ -3990,6 +4007,13 @@ func attachFeatureSearchLiveChecks(ctx context.Context, report *featureSearchRep
 	}
 	summary := featureRoadmapLiveSummary{OK: true}
 	for index := range report.Candidates {
+		if summary.RateLimited {
+			markFeatureRoadmapLiveSkipped(&summary, len(report.Candidates)-index)
+			for skippedIndex := index; skippedIndex < len(report.Candidates); skippedIndex++ {
+				report.Candidates[skippedIndex].Gate = "live-skipped"
+			}
+			break
+		}
 		feature := options.Index.Features[report.Candidates[index].ID]
 		liveReport := buildFeatureLiveCheckReport(ctx, featureLiveCheckOptions{
 			Index:               options.Index,
@@ -4179,6 +4203,15 @@ func attachFeatureCompareLiveChecks(ctx context.Context, report *featureCompareR
 	}
 	summary := featureRoadmapLiveSummary{OK: true}
 	for index := range report.Items {
+		if summary.RateLimited {
+			markFeatureRoadmapLiveSkipped(&summary, len(report.Items)-index)
+			for skippedIndex := index; skippedIndex < len(report.Items); skippedIndex++ {
+				report.Items[skippedIndex].Gate = "live-skipped"
+				report.Items[skippedIndex].SelectionScore -= 20000
+				report.Items[skippedIndex].Reasons = append(report.Items[skippedIndex].Reasons, "live-check skipped after GitHub rate limit")
+			}
+			break
+		}
 		feature := options.Index.Features[report.Items[index].ID]
 		liveReport := buildFeatureLiveCheckReport(ctx, featureLiveCheckOptions{
 			Index:               options.Index,
@@ -4361,6 +4394,15 @@ func attachFeatureCommandLiveChecks(ctx context.Context, report *featureCommandR
 	}
 	summary := featureRoadmapLiveSummary{OK: true}
 	for index := range report.Items {
+		if summary.RateLimited {
+			markFeatureRoadmapLiveSkipped(&summary, len(report.Items)-index)
+			for skippedIndex := index; skippedIndex < len(report.Items); skippedIndex++ {
+				report.Items[skippedIndex].Gate = "live-skipped"
+				report.Items[skippedIndex].Score -= 20000
+				report.Items[skippedIndex].Reasons = append(report.Items[skippedIndex].Reasons, "live-check skipped after GitHub rate limit")
+			}
+			break
+		}
 		feature := options.Index.Features[report.Items[index].ID]
 		liveReport := buildFeatureLiveCheckReport(ctx, featureLiveCheckOptions{
 			Index:               options.Index,

@@ -3410,6 +3410,15 @@ func TestResearchRoadmapLiveCheckSummarizesGitHubRateLimit(t *testing.T) {
 					{"fullName": "semgrep/semgrep", "url": "https://github.com/semgrep/semgrep", "stars": 15252, "pushedAt": "2026-05-22T19:22:29Z"},
 				},
 			},
+			"api-test-runner": map[string]any{
+				"id":     "api-test-runner",
+				"title":  "API Test Runner",
+				"intent": "Find projects that run API tests.",
+				"topMatches": []map[string]any{
+					{"fullName": "example/api-runner", "url": "https://github.com/example/api-runner", "stars": 3400, "pushedAt": "2026-05-22T11:51:15Z"},
+					{"fullName": "example/api-report", "url": "https://github.com/example/api-report", "stars": 3200, "pushedAt": "2026-05-22T19:22:29Z"},
+				},
+			},
 		},
 	}
 	if err := os.WriteFile(indexPath, []byte(mustJSON(t, index)), 0o644); err != nil {
@@ -3420,7 +3429,7 @@ func TestResearchRoadmapLiveCheckSummarizesGitHubRateLimit(t *testing.T) {
 		"research", "roadmap",
 		"--radar-index", indexPath,
 		"--min-references", "2",
-		"--limit", "1",
+		"--limit", "2",
 		"--reference-limit", "2",
 		"--live-check",
 		"--github-api-url", server.URL,
@@ -3429,16 +3438,19 @@ func TestResearchRoadmapLiveCheckSummarizesGitHubRateLimit(t *testing.T) {
 	var report struct {
 		OK        bool `json:"ok"`
 		LiveCheck struct {
-			OK               bool     `json:"ok"`
-			CheckedCount     int      `json:"checkedCount"`
-			SkippedCount     int      `json:"skippedCount"`
-			RateLimited      bool     `json:"rateLimited"`
-			AuthRequired     bool     `json:"authRequired"`
-			RateLimitResetAt string   `json:"rateLimitResetAt"`
-			Diagnostics      []string `json:"diagnostics"`
+			OK                bool     `json:"ok"`
+			CheckedCount      int      `json:"checkedCount"`
+			SkippedCount      int      `json:"skippedCount"`
+			SkippedCandidates int      `json:"skippedCandidates"`
+			RateLimited       bool     `json:"rateLimited"`
+			AuthRequired      bool     `json:"authRequired"`
+			RateLimitResetAt  string   `json:"rateLimitResetAt"`
+			Diagnostics       []string `json:"diagnostics"`
 		} `json:"liveCheck"`
 		Items []struct {
-			ID        string `json:"id"`
+			ID        string   `json:"id"`
+			Gate      string   `json:"gate"`
+			Reasons   []string `json:"reasons"`
 			LiveCheck struct {
 				SkippedCount     int    `json:"skippedCount"`
 				RateLimited      bool   `json:"rateLimited"`
@@ -3449,16 +3461,19 @@ func TestResearchRoadmapLiveCheckSummarizesGitHubRateLimit(t *testing.T) {
 	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
 		t.Fatalf("decode rate-limited roadmap json: %v\n%s", err, out)
 	}
-	if report.OK || report.LiveCheck.OK || !report.LiveCheck.RateLimited || !report.LiveCheck.AuthRequired || report.LiveCheck.CheckedCount != 1 || report.LiveCheck.SkippedCount != 1 || report.LiveCheck.RateLimitResetAt != resetAt.Format(time.RFC3339) {
+	if report.OK || report.LiveCheck.OK || !report.LiveCheck.RateLimited || !report.LiveCheck.AuthRequired || report.LiveCheck.CheckedCount != 1 || report.LiveCheck.SkippedCount != 1 || report.LiveCheck.SkippedCandidates != 1 || report.LiveCheck.RateLimitResetAt != resetAt.Format(time.RFC3339) {
 		t.Fatalf("rate-limited roadmap summary = %#v", report.LiveCheck)
 	}
 	if len(requests) != 1 || requests[0] != "/repos/aquasecurity/trivy" {
 		t.Fatalf("rate-limited roadmap should stop after first request, got %#v", requests)
 	}
-	if len(report.Items) != 1 || report.Items[0].ID != "quality-gates" || !report.Items[0].LiveCheck.RateLimited || report.Items[0].LiveCheck.SkippedCount != 1 || report.Items[0].LiveCheck.RateLimitResetAt != resetAt.Format(time.RFC3339) {
+	if len(report.Items) != 2 || report.Items[0].ID != "quality-gates" || !report.Items[0].LiveCheck.RateLimited || report.Items[0].LiveCheck.SkippedCount != 1 || report.Items[0].LiveCheck.RateLimitResetAt != resetAt.Format(time.RFC3339) {
 		t.Fatalf("rate-limited roadmap item = %#v", report.Items)
 	}
-	if !strings.Contains(strings.Join(report.LiveCheck.Diagnostics, "\n"), "1 reference(s) skipped") || !strings.Contains(strings.Join(report.LiveCheck.Diagnostics, "\n"), resetAt.Format(time.RFC3339)) {
+	if report.Items[1].ID != "api-test-runner" || report.Items[1].Gate != "live-skipped" || !strings.Contains(strings.Join(report.Items[1].Reasons, "\n"), "live-check skipped after GitHub rate limit") {
+		t.Fatalf("rate-limited roadmap skipped item = %#v", report.Items[1])
+	}
+	if !strings.Contains(strings.Join(report.LiveCheck.Diagnostics, "\n"), "1 reference(s) skipped") || !strings.Contains(strings.Join(report.LiveCheck.Diagnostics, "\n"), "1 candidate(s) skipped") || !strings.Contains(strings.Join(report.LiveCheck.Diagnostics, "\n"), resetAt.Format(time.RFC3339)) {
 		t.Fatalf("rate-limited roadmap diagnostics = %#v", report.LiveCheck.Diagnostics)
 	}
 }
