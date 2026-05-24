@@ -1200,6 +1200,7 @@ func featureRadarRefreshCommands(indexPath string) []string {
 	root := filepath.Dir(filepath.Dir(indexPath))
 	return []string{
 		fmt.Sprintf("cd %s && npm run refresh -- --limit 20", quoteShellPath(root)),
+		fmt.Sprintf("cd %s && npm run status -- --max-age-hours 72 --min-references 3", quoteShellPath(root)),
 		fmt.Sprintf("cd %s && npm run audit", quoteShellPath(root)),
 		fmt.Sprintf("cd %s && npm run coverage -- --min-references 3", quoteShellPath(root)),
 		fmt.Sprintf("cd %s && npm run index", quoteShellPath(root)),

@@ -20,6 +20,7 @@ export RADAR_HOME=/path/to/github-feature-radar
 cd $RADAR_HOME
 npm test
 npm run refresh -- --seed-only
+npm run status -- --max-age-hours 72 --min-references 3
 npm run audit
 npm run index
 ```
@@ -118,8 +119,8 @@ Before picking the next CLI slice, check the whole feature index:
 `research status` checks the generated/source timestamp before AgentTestBench
 trusts the local radar index. It reports feature, ranked-reference, project
 index, and cached refresh counts from the radar `refreshSummary`, fails when
-the index is stale, and prints the refresh/audit/coverage/index commands needed
-to make the external radar usable again.
+the index is stale, and prints the refresh/status/audit/coverage/index commands
+needed to make the external radar usable again.
 
 `research audit` checks the local radar index for policy violations before the
 CLI trusts it: references must have a GitHub name and URL, meet the configured

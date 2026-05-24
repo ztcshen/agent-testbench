@@ -778,7 +778,7 @@ func TestResearchRefreshPlanPrioritizesStaleCoverageAndAuditSignals(t *testing.T
 	if !stringSliceContains(report.FocusFeatures[0].Reasons, "reference coverage below 3") || !strings.Contains(report.FocusFeatures[0].MatrixCommand, "research matrix --filter \"workflow-orchestration\"") || !strings.Contains(report.FocusFeatures[0].PlanCommand, "research plan --feature \"workflow-orchestration\"") || !strings.Contains(report.FocusFeatures[0].RefreshCommand, "npm run refresh") {
 		t.Fatalf("focus feature commands = %#v", report.FocusFeatures[0])
 	}
-	if len(report.NextCommands) < 4 || !strings.Contains(report.NextCommands[0], "npm run refresh") || !strings.Contains(report.NextCommands[1], "npm run audit") || !strings.Contains(report.NextCommands[2], "npm run coverage -- --min-references 3") || !strings.Contains(report.NextCommands[3], "npm run index") {
+	if len(report.NextCommands) < 5 || !strings.Contains(report.NextCommands[0], "npm run refresh") || !strings.Contains(report.NextCommands[1], "npm run status -- --max-age-hours 72 --min-references 3") || !strings.Contains(report.NextCommands[2], "npm run audit") || !strings.Contains(report.NextCommands[3], "npm run coverage -- --min-references 3") || !strings.Contains(report.NextCommands[4], "npm run index") {
 		t.Fatalf("next commands = %#v", report.NextCommands)
 	}
 	if !stringSliceContains(report.Reasons, "feature index is older than 72h") || !stringSliceContains(report.Reasons, "audit has 5 violation(s)") || !stringSliceContains(report.Reasons, "coverage has 1 feature(s) below 3 references") {
@@ -882,7 +882,7 @@ func TestResearchStatusReportsFeatureIndexFreshness(t *testing.T) {
 	if report.Counts.Features != 2 || report.Counts.References != 2 || report.Counts.Projects != 3 || report.Counts.CachedResults != 1 || report.Counts.CachedFeatures != 1 {
 		t.Fatalf("status counts = %#v", report.Counts)
 	}
-	if len(report.NextRefreshCommands) < 3 || !strings.Contains(report.NextRefreshCommands[0], "npm run refresh") || !strings.Contains(report.NextRefreshCommands[1], "npm run audit") || !strings.Contains(report.NextRefreshCommands[2], "npm run coverage -- --min-references 3") {
+	if len(report.NextRefreshCommands) < 4 || !strings.Contains(report.NextRefreshCommands[0], "npm run refresh") || !strings.Contains(report.NextRefreshCommands[1], "npm run status -- --max-age-hours 72 --min-references 3") || !strings.Contains(report.NextRefreshCommands[2], "npm run audit") || !strings.Contains(report.NextRefreshCommands[3], "npm run coverage -- --min-references 3") {
 		t.Fatalf("next refresh commands = %#v", report.NextRefreshCommands)
 	}
 
