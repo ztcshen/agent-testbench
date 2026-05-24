@@ -219,6 +219,9 @@ type featureLiveCheckReport struct {
 	FailedCount       int                         `json:"failedCount"`
 	RefreshNeeded     bool                        `json:"refreshNeeded"`
 	RefreshCount      int                         `json:"refreshCount"`
+	RateLimited       bool                        `json:"rateLimited,omitempty"`
+	AuthRequired      bool                        `json:"authRequired,omitempty"`
+	Diagnostics       []string                    `json:"diagnostics,omitempty"`
 	Policy            featureRadarPolicy          `json:"policy"`
 	SourceGeneratedAt string                      `json:"sourceGeneratedAt"`
 	References        []featureLiveCheckReference `json:"references"`
@@ -241,6 +244,7 @@ type featureLiveCheckReference struct {
 	Reasons          []string `json:"reasons,omitempty"`
 	RefreshNeeded    bool     `json:"refreshNeeded,omitempty"`
 	RefreshReasons   []string `json:"refreshReasons,omitempty"`
+	RateLimited      bool     `json:"rateLimited,omitempty"`
 	Error            string   `json:"error,omitempty"`
 }
 
@@ -796,6 +800,7 @@ func runResearchSearch(args []string) error {
 			ReferenceLimit:      *referenceLimit,
 			GitHubAPIURL:        *githubAPIURL,
 			Token:               os.Getenv(strings.TrimSpace(*tokenEnv)),
+			TokenEnv:            strings.TrimSpace(*tokenEnv),
 			MaxStarDrift:        *maxStarDrift,
 			MaxPushedDriftHours: *maxPushedDriftHours,
 		}, *minReferences)
@@ -900,6 +905,7 @@ func runResearchLiveCheck(args []string) error {
 		References:          references,
 		GitHubAPIURL:        *githubAPIURL,
 		Token:               os.Getenv(strings.TrimSpace(*tokenEnv)),
+		TokenEnv:            strings.TrimSpace(*tokenEnv),
 		CheckedAt:           time.Now().UTC(),
 		MaxStarDrift:        *maxStarDrift,
 		MaxPushedDriftHours: *maxPushedDriftHours,
@@ -978,6 +984,7 @@ func runResearchBrief(args []string) error {
 			References:          featureProjectReferences(index, feature, *referenceLimit),
 			GitHubAPIURL:        *githubAPIURL,
 			Token:               os.Getenv(strings.TrimSpace(*tokenEnv)),
+			TokenEnv:            strings.TrimSpace(*tokenEnv),
 			CheckedAt:           checkedAt,
 			MaxStarDrift:        *maxStarDrift,
 			MaxPushedDriftHours: *maxPushedDriftHours,
@@ -1051,6 +1058,7 @@ func runResearchCompare(args []string) error {
 			ReferenceLimit:      *referenceLimit,
 			GitHubAPIURL:        *githubAPIURL,
 			Token:               os.Getenv(strings.TrimSpace(*tokenEnv)),
+			TokenEnv:            strings.TrimSpace(*tokenEnv),
 			MaxStarDrift:        *maxStarDrift,
 			MaxPushedDriftHours: *maxPushedDriftHours,
 		}, *minReferences)
@@ -1108,6 +1116,7 @@ func runResearchCommand(args []string) error {
 			ReferenceLimit:      *referenceLimit,
 			GitHubAPIURL:        *githubAPIURL,
 			Token:               os.Getenv(strings.TrimSpace(*tokenEnv)),
+			TokenEnv:            strings.TrimSpace(*tokenEnv),
 			MaxStarDrift:        *maxStarDrift,
 			MaxPushedDriftHours: *maxPushedDriftHours,
 		}, *minReferences)
@@ -1191,6 +1200,7 @@ func runResearchScope(args []string) error {
 			ReferenceLimit:      *referenceLimit,
 			GitHubAPIURL:        *githubAPIURL,
 			Token:               os.Getenv(strings.TrimSpace(*tokenEnv)),
+			TokenEnv:            strings.TrimSpace(*tokenEnv),
 			MaxStarDrift:        *maxStarDrift,
 			MaxPushedDriftHours: *maxPushedDriftHours,
 		}, *minReferences)
@@ -1261,6 +1271,7 @@ func runResearchSync(args []string) error {
 		ReferenceLimit:      *referenceLimit,
 		GitHubAPIURL:        *githubAPIURL,
 		Token:               os.Getenv(strings.TrimSpace(*tokenEnv)),
+		TokenEnv:            strings.TrimSpace(*tokenEnv),
 		MaxStarDrift:        *maxStarDrift,
 		MaxPushedDriftHours: *maxPushedDriftHours,
 		NPMCommand:          *npmCommand,
@@ -1459,6 +1470,7 @@ func runResearchRefreshPlan(args []string) error {
 			ReferenceLimit:      *referenceLimit,
 			GitHubAPIURL:        *githubAPIURL,
 			Token:               os.Getenv(strings.TrimSpace(*tokenEnv)),
+			TokenEnv:            strings.TrimSpace(*tokenEnv),
 			MaxStarDrift:        *maxStarDrift,
 			MaxPushedDriftHours: *maxPushedDriftHours,
 		})
@@ -1517,6 +1529,7 @@ func runResearchRoadmap(args []string) error {
 			Limit:               *limit,
 			GitHubAPIURL:        *githubAPIURL,
 			Token:               os.Getenv(strings.TrimSpace(*tokenEnv)),
+			TokenEnv:            strings.TrimSpace(*tokenEnv),
 			MaxStarDrift:        *maxStarDrift,
 			MaxPushedDriftHours: *maxPushedDriftHours,
 		})
@@ -1574,6 +1587,7 @@ func runResearchBacklog(args []string) error {
 			Limit:               *limit,
 			GitHubAPIURL:        *githubAPIURL,
 			Token:               os.Getenv(strings.TrimSpace(*tokenEnv)),
+			TokenEnv:            strings.TrimSpace(*tokenEnv),
 			MaxStarDrift:        *maxStarDrift,
 			MaxPushedDriftHours: *maxPushedDriftHours,
 		})
@@ -1640,6 +1654,7 @@ func runResearchPlan(args []string) error {
 			References:          featureProjectReferences(index, feature, *limit),
 			GitHubAPIURL:        *githubAPIURL,
 			Token:               os.Getenv(strings.TrimSpace(*tokenEnv)),
+			TokenEnv:            strings.TrimSpace(*tokenEnv),
 			MaxStarDrift:        *maxStarDrift,
 			MaxPushedDriftHours: *maxPushedDriftHours,
 		})
@@ -1749,6 +1764,7 @@ func runResearchGate(args []string) error {
 			References:          featureProjectReferences(index, feature, *limit),
 			GitHubAPIURL:        *githubAPIURL,
 			Token:               os.Getenv(strings.TrimSpace(*tokenEnv)),
+			TokenEnv:            strings.TrimSpace(*tokenEnv),
 			CheckedAt:           checkedAt,
 			MaxStarDrift:        *maxStarDrift,
 			MaxPushedDriftHours: *maxPushedDriftHours,
@@ -2154,6 +2170,7 @@ type featureLiveCheckOptions struct {
 	References          []featureMatrixReference
 	GitHubAPIURL        string
 	Token               string
+	TokenEnv            string
 	CheckedAt           time.Time
 	MaxStarDrift        int
 	MaxPushedDriftHours int
@@ -2172,6 +2189,10 @@ func buildFeatureLiveCheckReport(ctx context.Context, options featureLiveCheckOp
 	checkedAt := options.CheckedAt
 	if checkedAt.IsZero() {
 		checkedAt = time.Now().UTC()
+	}
+	tokenEnv := strings.TrimSpace(options.TokenEnv)
+	if tokenEnv == "" {
+		tokenEnv = "GITHUB_TOKEN"
 	}
 	report := featureLiveCheckReport{
 		OK:                true,
@@ -2201,6 +2222,13 @@ func buildFeatureLiveCheckReport(ctx context.Context, options featureLiveCheckOp
 			item.OK = false
 			item.Reasons = []string{"request_failed"}
 			item.Error = err.Error()
+			var apiErr githubRepositoryAPIError
+			if errors.As(err, &apiErr) && apiErr.RateLimited {
+				item.RateLimited = true
+				item.Reasons = []string{"github_rate_limited"}
+				report.RateLimited = true
+				report.AuthRequired = strings.TrimSpace(options.Token) == ""
+			}
 			report.OK = false
 			report.FailedCount++
 			report.References = append(report.References, item)
@@ -2232,7 +2260,22 @@ func buildFeatureLiveCheckReport(ctx context.Context, options featureLiveCheckOp
 		report.References = append(report.References, item)
 	}
 	report.CheckedCount = len(report.References)
+	if report.RateLimited {
+		report.Diagnostics = featureLiveRateLimitDiagnostics(report.AuthRequired, tokenEnv)
+		report.NextCommands = uniquePreserveOrder(append(featureLiveRateLimitCommands(options.Query, options.Feature.ID, options.IndexPath, tokenEnv), report.NextCommands...))
+	}
 	return report
+}
+
+type githubRepositoryAPIError struct {
+	FullName    string
+	StatusCode  int
+	Body        string
+	RateLimited bool
+}
+
+func (err githubRepositoryAPIError) Error() string {
+	return fmt.Sprintf("github repository %s returned HTTP %d: %s", err.FullName, err.StatusCode, strings.TrimSpace(err.Body))
 }
 
 func fetchGitHubRepositoryMetadata(ctx context.Context, client *http.Client, apiBaseURL string, token string, fullName string) (githubRepositoryMetadata, error) {
@@ -2256,7 +2299,13 @@ func fetchGitHubRepositoryMetadata(ctx context.Context, client *http.Client, api
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return githubRepositoryMetadata{}, fmt.Errorf("github repository %s returned HTTP %d: %s", fullName, resp.StatusCode, strings.TrimSpace(string(raw)))
+		body := strings.TrimSpace(string(raw))
+		return githubRepositoryMetadata{}, githubRepositoryAPIError{
+			FullName:    fullName,
+			StatusCode:  resp.StatusCode,
+			Body:        body,
+			RateLimited: githubResponseLooksRateLimited(resp, body),
+		}
 	}
 	var metadata githubRepositoryMetadata
 	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
@@ -2266,6 +2315,21 @@ func fetchGitHubRepositoryMetadata(ctx context.Context, client *http.Client, api
 		metadata.FullName = fullName
 	}
 	return metadata, nil
+}
+
+func githubResponseLooksRateLimited(resp *http.Response, body string) bool {
+	if resp == nil {
+		return false
+	}
+	statusRateLimited := resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests
+	if !statusRateLimited {
+		return false
+	}
+	if strings.TrimSpace(resp.Header.Get("X-RateLimit-Remaining")) == "0" {
+		return true
+	}
+	body = strings.ToLower(body)
+	return strings.Contains(body, "rate limit") || strings.Contains(body, "secondary rate limit")
 }
 
 func githubRepositoryURL(apiBaseURL string, fullName string) (string, error) {
@@ -2356,6 +2420,33 @@ func featureLiveCheckCommands(query string, featureID string, indexPath string) 
 		commands = append([]string{"agent-testbench research search --query " + quoteCommandValue(query) + featureRadarIndexFlag(indexPath) + " --json"}, commands...)
 	}
 	return commands
+}
+
+func featureLiveRateLimitDiagnostics(authRequired bool, tokenEnv string) []string {
+	if strings.TrimSpace(tokenEnv) == "" {
+		tokenEnv = "GITHUB_TOKEN"
+	}
+	diagnostics := []string{"GitHub API rate limit reached while validating live reference metadata."}
+	if authRequired {
+		diagnostics = append(diagnostics, "Set "+tokenEnv+" to a GitHub token and rerun live-check for a higher API limit.")
+	}
+	return diagnostics
+}
+
+func featureLiveRateLimitCommands(query string, featureID string, indexPath string, tokenEnv string) []string {
+	if strings.TrimSpace(tokenEnv) == "" {
+		tokenEnv = "GITHUB_TOKEN"
+	}
+	commands := []string{"export " + tokenEnv + "=<github-token>"}
+	command := "agent-testbench research live-check"
+	if strings.TrimSpace(featureID) != "" {
+		command += " --feature " + quoteCommandValue(featureID)
+	} else if strings.TrimSpace(query) != "" {
+		command += " --feature " + quoteCommandValue(query)
+	}
+	command += featureRadarIndexFlag(indexPath)
+	command += " --token-env " + tokenEnv + " --json"
+	return append(commands, command)
 }
 
 func projectMatchedFeatures(project featureRadarProject) []string {
@@ -2630,6 +2721,7 @@ type featureSyncOptions struct {
 	ReferenceLimit      int
 	GitHubAPIURL        string
 	Token               string
+	TokenEnv            string
 	MaxStarDrift        int
 	MaxPushedDriftHours int
 	NPMCommand          string
@@ -2756,6 +2848,7 @@ func attachFeatureSyncLiveCheck(ctx context.Context, report *featureSyncReport, 
 		Limit:               options.LiveLimit,
 		GitHubAPIURL:        options.GitHubAPIURL,
 		Token:               options.Token,
+		TokenEnv:            options.TokenEnv,
 		MaxStarDrift:        options.MaxStarDrift,
 		MaxPushedDriftHours: options.MaxPushedDriftHours,
 	})
@@ -3025,6 +3118,7 @@ type featureRoadmapLiveOptions struct {
 	Limit               int
 	GitHubAPIURL        string
 	Token               string
+	TokenEnv            string
 	MaxStarDrift        int
 	MaxPushedDriftHours int
 }
@@ -3041,6 +3135,7 @@ func attachFeatureRoadmapLiveChecks(ctx context.Context, report *featureRoadmapR
 			References:          featureProjectReferences(options.Index, feature, options.ReferenceLimit),
 			GitHubAPIURL:        options.GitHubAPIURL,
 			Token:               options.Token,
+			TokenEnv:            options.TokenEnv,
 			MaxStarDrift:        options.MaxStarDrift,
 			MaxPushedDriftHours: options.MaxPushedDriftHours,
 		})
@@ -3834,6 +3929,7 @@ func attachFeatureSearchLiveChecks(ctx context.Context, report *featureSearchRep
 			References:          featureProjectReferences(options.Index, feature, options.ReferenceLimit),
 			GitHubAPIURL:        options.GitHubAPIURL,
 			Token:               options.Token,
+			TokenEnv:            options.TokenEnv,
 			MaxStarDrift:        options.MaxStarDrift,
 			MaxPushedDriftHours: options.MaxPushedDriftHours,
 		})
@@ -4023,6 +4119,7 @@ func attachFeatureCompareLiveChecks(ctx context.Context, report *featureCompareR
 			References:          featureProjectReferences(options.Index, feature, options.ReferenceLimit),
 			GitHubAPIURL:        options.GitHubAPIURL,
 			Token:               options.Token,
+			TokenEnv:            options.TokenEnv,
 			MaxStarDrift:        options.MaxStarDrift,
 			MaxPushedDriftHours: options.MaxPushedDriftHours,
 		})
@@ -4205,6 +4302,7 @@ func attachFeatureCommandLiveChecks(ctx context.Context, report *featureCommandR
 			References:          featureProjectReferences(options.Index, feature, options.ReferenceLimit),
 			GitHubAPIURL:        options.GitHubAPIURL,
 			Token:               options.Token,
+			TokenEnv:            options.TokenEnv,
 			MaxStarDrift:        options.MaxStarDrift,
 			MaxPushedDriftHours: options.MaxPushedDriftHours,
 		})
@@ -5135,6 +5233,12 @@ func printFeatureLiveCheckReport(report featureLiveCheckReport) {
 	fmt.Printf("Status: %s\n", statusWord(report.OK))
 	if report.FailedCount > 0 || report.RefreshNeeded {
 		fmt.Printf("Failures: %d, refresh needed: %d\n", report.FailedCount, report.RefreshCount)
+	}
+	if report.RateLimited {
+		fmt.Println("Rate limited: yes")
+		for _, diagnostic := range report.Diagnostics {
+			fmt.Printf("  %s\n", diagnostic)
+		}
 	}
 	fmt.Printf("Checked: %d at %s\n", report.CheckedCount, report.CheckedAt)
 	fmt.Printf("Policy: stars >= %d, pushed >= %s\n", report.Policy.MinStars, report.Policy.PushedAfter)

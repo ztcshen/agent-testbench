@@ -1023,6 +1023,74 @@ func TestResearchLiveCheckFlagsReferenceDriftBeforePolicyFails(t *testing.T) {
 	}
 }
 
+func TestResearchLiveCheckDiagnosesGitHubRateLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, `{"message":"API rate limit exceeded for 203.0.113.10."}`)
+	}))
+	defer server.Close()
+
+	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
+	index := map[string]any{
+		"schemaVersion":     1,
+		"sourceGeneratedAt": "2026-05-24T04:39:07Z",
+		"policy": map[string]any{
+			"minStars":    3000,
+			"months":      3,
+			"pushedAfter": "2026-02-24",
+		},
+		"tokenIndex": map[string]any{
+			"quality gate": []string{"quality-gates"},
+		},
+		"features": map[string]any{
+			"quality-gates": map[string]any{
+				"id":    "quality-gates",
+				"title": "Quality Gates",
+				"topMatches": []map[string]any{
+					{"fullName": "aquasecurity/trivy", "url": "https://github.com/aquasecurity/trivy", "stars": 35145, "pushedAt": "2026-05-22T11:51:15Z", "featureScore": 8},
+				},
+			},
+		},
+		"projectIndex": map[string]any{
+			"aquasecurity/trivy": map[string]any{"fullName": "aquasecurity/trivy", "url": "https://github.com/aquasecurity/trivy", "stars": 35145, "pushedAt": "2026-05-22T11:51:15Z", "matchedFeatures": []string{"quality-gates"}},
+		},
+	}
+	if err := os.WriteFile(indexPath, []byte(mustJSON(t, index)), 0o644); err != nil {
+		t.Fatalf("write radar index: %v", err)
+	}
+
+	out := runCLIFails(t, "research", "live-check", "--feature", "quality gate", "--radar-index", indexPath, "--github-api-url", server.URL, "--json")
+	out = firstJSONObject(t, out)
+	var report struct {
+		OK           bool     `json:"ok"`
+		RateLimited  bool     `json:"rateLimited"`
+		AuthRequired bool     `json:"authRequired"`
+		Diagnostics  []string `json:"diagnostics"`
+		References   []struct {
+			FullName    string   `json:"fullName"`
+			Status      string   `json:"status"`
+			RateLimited bool     `json:"rateLimited"`
+			Reasons     []string `json:"reasons"`
+		} `json:"references"`
+		NextCommands []string `json:"nextCommands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode rate-limit report: %v\n%s", err, out)
+	}
+	if report.OK || !report.RateLimited || !report.AuthRequired || len(report.Diagnostics) == 0 {
+		t.Fatalf("rate-limit summary = %#v", report)
+	}
+	if len(report.References) != 1 || report.References[0].FullName != "aquasecurity/trivy" || report.References[0].Status != "failed" || !report.References[0].RateLimited || !stringSliceContains(report.References[0].Reasons, "github_rate_limited") {
+		t.Fatalf("rate-limit reference = %#v", report.References)
+	}
+	joinedCommands := strings.Join(report.NextCommands, "\n")
+	if !strings.Contains(joinedCommands, "export GITHUB_TOKEN=") || !strings.Contains(joinedCommands, "research live-check --feature 'quality-gates'") || !strings.Contains(joinedCommands, "--token-env GITHUB_TOKEN") {
+		t.Fatalf("rate-limit next commands = %s", joinedCommands)
+	}
+}
+
 func TestResearchBriefBuildsSearchBackedImplementationBrief(t *testing.T) {
 	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
 	index := map[string]any{
