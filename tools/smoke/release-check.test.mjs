@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
@@ -143,11 +143,48 @@ test("release-check scope-file runs targeted example tests without full Go suite
   }
 });
 
-test("release-check scoped Go selection covers module metadata and reverse dependents", () => {
+test("release-check scoped Go selection runs only touched package directories", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agent-testbench-release-go-scope-"));
+  const binDir = path.join(tempDir, "bin");
+  const goLog = path.join(tempDir, "go.log");
+  const fakeGo = path.join(binDir, "go");
+  try {
+    await mkdir(binDir, { recursive: true });
+    await writeFile(fakeGo, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> "${goLog}"\n`);
+    await chmod(fakeGo, 0o755);
+
+    const result = runReleaseCheck(releaseCheckEnv({
+      AGENT_TESTBENCH_SMOKE_STORE_DSN: "sqlite:///tmp/agent-testbench-go-scope-test.sqlite",
+      PATH: `${binDir}:${process.env.PATH}`,
+    }), ["--scope", "internal/store/mysql/config.go"]);
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /running scoped Go tests/);
+    assert.match(result.stdout, /go test \.\/internal\/store\/mysql -count=1/);
+    assert.doesNotMatch(result.stdout, /go test \.\/\.\.\. -count=1/);
+    assert.match(readFileSync(goLog, "utf8"), /^test \.\/internal\/store\/mysql -count=1$/m);
+
+    await writeFile(goLog, "");
+    const dirResult = runReleaseCheck(releaseCheckEnv({
+      AGENT_TESTBENCH_SMOKE_STORE_DSN: "sqlite:///tmp/agent-testbench-go-dir-scope-test.sqlite",
+      PATH: `${binDir}:${process.env.PATH}`,
+    }), ["--scope", "internal/store/mysql"]);
+
+    assert.equal(dirResult.status, 0, dirResult.stderr || dirResult.stdout);
+    assert.match(dirResult.stdout, /go test \.\/internal\/store\/mysql\/\.\.\. -count=1/);
+    assert.doesNotMatch(dirResult.stdout, /go test \.\/\.\.\. -count=1/);
+    assert.match(readFileSync(goLog, "utf8"), /^test \.\/internal\/store\/mysql\/\.\.\. -count=1$/m);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("release-check scoped Go selection covers module metadata and package paths", () => {
   const script = readFileSync(path.join(rootDir, "tools", "release-check.sh"), "utf8");
 
   assert.match(script, /go\.mod\|go\.sum/);
-  assert.match(script, /run_scoped_go_tests=1/);
+  assert.match(script, /go_scope_all=1/);
+  assert.match(script, /go_scope_packages/);
   assert.match(script, /go test -p 1 \.\/\.\.\. -count=1/);
   assert.match(script, /go test \.\/\.\.\. -count=1/);
 });

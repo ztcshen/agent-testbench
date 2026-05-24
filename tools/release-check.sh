@@ -270,17 +270,74 @@ if [[ "$scoped_release_check" -eq 0 ]]; then
   fi
 else
   node_scope_tests=()
-  run_scoped_go_tests=0
+  go_scope_all=0
+  go_scope_packages=()
   run_frontend_tests=0
   run_frontend_build=0
   ran_scoped_runtime_tests=0
 
-  for path in "${scope_paths[@]}"; do
+  add_go_scope_package() {
+    local package=$1
+    local seen_package
+    if [[ ${#go_scope_packages[*]} -gt 0 ]]; then
+      for seen_package in "${go_scope_packages[@]}"; do
+        if [[ "$seen_package" == "$package" ]]; then
+          return
+        fi
+      done
+    fi
+    go_scope_packages+=("$package")
+  }
+
+  collect_go_scope_package() {
+    local path=$1
+    local dir
+    path=${path#./}
+
     case "$path" in
-      *.go|go.mod|go.sum|cmd/*|internal/*)
-        run_scoped_go_tests=1
+      go.mod|go.sum)
+        go_scope_all=1
+        return
+        ;;
+      *.go)
+        dir=$(dirname -- "$path")
+        if [[ "$dir" == "." ]]; then
+          go_scope_all=1
+        else
+          add_go_scope_package "./$dir"
+        fi
+        return
         ;;
     esac
+
+    case "$path" in
+      cmd/*|internal/*)
+        if [[ -d "$path" ]]; then
+          if [[ -n "$(find "$path" -name '*.go' -print -quit)" ]]; then
+            add_go_scope_package "./$path/..."
+          fi
+          return
+        fi
+
+        dir=$(dirname -- "$path")
+        while [[ "$dir" != "." && "$dir" != "/" ]]; do
+          if compgen -G "$dir/*.go" >/dev/null; then
+            add_go_scope_package "./$dir"
+            return
+          fi
+          case "$dir" in
+            cmd|internal)
+              return
+              ;;
+          esac
+          dir=$(dirname -- "$dir")
+        done
+        ;;
+    esac
+  }
+
+  for path in "${scope_paths[@]}"; do
+    collect_go_scope_package "$path"
 
     case "$path" in
       control-plane/frontend/src/*|control-plane/frontend/build.mjs|package.json|package-lock.json)
@@ -325,12 +382,24 @@ else
     node_scope_tests=()
   fi
 
-  if [[ "$run_scoped_go_tests" -eq 1 ]]; then
+  if [[ "$go_scope_all" -eq 1 || ${#go_scope_packages[*]} -gt 0 ]]; then
     step "running scoped Go tests"
-    if is_mysql_store_dsn "$smoke_store_dsn"; then
-      go test -p 1 ./... -count=1
+    if [[ "$go_scope_all" -eq 1 ]]; then
+      if is_mysql_store_dsn "$smoke_store_dsn"; then
+        echo "  go test -p 1 ./... -count=1"
+        go test -p 1 ./... -count=1
+      else
+        echo "  go test ./... -count=1"
+        go test ./... -count=1
+      fi
     else
-      go test ./... -count=1
+      if is_mysql_store_dsn "$smoke_store_dsn"; then
+        printf '  go test -p 1 %s -count=1\n' "${go_scope_packages[*]}"
+        go test -p 1 "${go_scope_packages[@]}" -count=1
+      else
+        printf '  go test %s -count=1\n' "${go_scope_packages[*]}"
+        go test "${go_scope_packages[@]}" -count=1
+      fi
     fi
     ran_scoped_runtime_tests=1
   fi

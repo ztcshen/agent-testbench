@@ -13,6 +13,19 @@ AGENT_TESTBENCH_SMOKE_STORE_DSN="postgres://user:pass@host:5432/agent_testbench_
 AGENT_TESTBENCH_SMOKE_STORE_DSN="mysql://user:pass@host:3306/agent_testbench_smoke?tls=false" npm run release-check
 ```
 
+For pull-request or local slice validation, pass an explicit scope so the gate
+checks only the touched paths and selects matching runtime tests:
+
+```sh
+AGENT_TESTBENCH_SMOKE_STORE_DSN="sqlite:///tmp/agent-testbench-smoke.sqlite" npm run release-check -- --scope internal/store/mysql
+AGENT_TESTBENCH_SMOKE_STORE_DSN="sqlite:///tmp/agent-testbench-smoke.sqlite" npm run release-check -- --scope-file .release-check-scope
+```
+
+When scoped to a Go file, release-check runs only that package. When scoped to a
+Go directory, it runs that directory tree. Module metadata changes such as
+`go.mod` and `go.sum` still run the full Go suite because they can affect every
+package.
+
 ## Optional Real-Environment Sign-Off
 
 Generic MySQL release-check wiring is available. A project or organization that
