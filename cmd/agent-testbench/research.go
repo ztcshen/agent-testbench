@@ -1210,10 +1210,31 @@ func quoteShellPath(path string) string {
 	if path == "" {
 		return "."
 	}
-	if strings.ContainsAny(path, " \t\n'\"") {
+	if shellPathNeedsQuoting(path) {
 		return "'" + strings.ReplaceAll(path, "'", "'\\''") + "'"
 	}
 	return path
+}
+
+func shellPathNeedsQuoting(path string) bool {
+	for _, item := range path {
+		if item >= 'a' && item <= 'z' {
+			continue
+		}
+		if item >= 'A' && item <= 'Z' {
+			continue
+		}
+		if item >= '0' && item <= '9' {
+			continue
+		}
+		switch item {
+		case '/', '.', '_', '-':
+			continue
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 func buildFeatureRoadmapReport(index featureRadarIndex, minReferences int, limit int, referenceLimit int) featureRoadmapReport {

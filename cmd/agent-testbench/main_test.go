@@ -907,6 +907,23 @@ func TestResearchStatusReportsFeatureIndexFreshness(t *testing.T) {
 	}
 }
 
+func TestFeatureRadarRefreshCommandsQuoteShellPaths(t *testing.T) {
+	commands := featureRadarRefreshCommands("/tmp/radar work; rm -rf nope/data/feature-index.json")
+	if len(commands) == 0 {
+		t.Fatalf("expected refresh commands")
+	}
+	for _, command := range commands {
+		if !strings.HasPrefix(command, "cd '/tmp/radar work; rm -rf nope' && npm run ") {
+			t.Fatalf("refresh command should quote unsafe shell path: %q", command)
+		}
+	}
+
+	commands = featureRadarRefreshCommands("/tmp/radar-work/data/feature-index.json")
+	if !strings.HasPrefix(commands[0], "cd /tmp/radar-work && npm run refresh") {
+		t.Fatalf("safe refresh command should stay readable: %q", commands[0])
+	}
+}
+
 func TestResearchMatrixExplainsFeatureReferenceCoverage(t *testing.T) {
 	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
 	index := map[string]any{
