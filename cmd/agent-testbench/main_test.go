@@ -1948,6 +1948,76 @@ func TestResearchPlanGeneratedCommandsIncludeRadarIndex(t *testing.T) {
 	}
 }
 
+func TestResearchPlanContextualizesRadarMaintenanceCommands(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "feature radar")
+	dir := filepath.Join(root, "data")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("make radar dir: %v", err)
+	}
+	indexPath := filepath.Join(dir, "feature-index.json")
+	index := map[string]any{
+		"schemaVersion":     1,
+		"sourceGeneratedAt": "2026-05-24T04:39:07Z",
+		"policy": map[string]any{
+			"minStars":    3000,
+			"months":      3,
+			"pushedAfter": "2026-02-24",
+		},
+		"tokenIndex": map[string]any{
+			"github radar": []string{"github-radar-generation"},
+		},
+		"features": map[string]any{
+			"github-radar-generation": map[string]any{
+				"id":     "github-radar-generation",
+				"title":  "GitHub Radar Generation",
+				"intent": "Find projects that continuously generate GitHub rankings.",
+				"topMatches": []map[string]any{
+					{"fullName": "EvanLi/Github-Ranking", "url": "https://github.com/EvanLi/Github-Ranking", "stars": 11214, "pushedAt": "2026-05-24T04:07:09Z"},
+					{"fullName": "star-history/star-history", "url": "https://github.com/star-history/star-history", "stars": 9079, "pushedAt": "2026-04-30T07:53:48Z"},
+					{"fullName": "gayanvoice/top-github-users", "url": "https://github.com/gayanvoice/top-github-users", "stars": 4764, "pushedAt": "2026-05-24T01:34:01Z"},
+				},
+			},
+		},
+	}
+	if err := os.WriteFile(indexPath, []byte(mustJSON(t, index)), 0o644); err != nil {
+		t.Fatalf("write radar index: %v", err)
+	}
+
+	out := runCLI(t, "research", "plan", "--feature", "github radar", "--radar-index", indexPath, "--require-min-matches", "3", "--json")
+	var report struct {
+		NextCommands []struct {
+			Command string `json:"command"`
+		} `json:"nextCommands"`
+		VerificationCommands []string `json:"verificationCommands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode research plan json: %v\n%s", err, out)
+	}
+	nextCommands := []string{}
+	for _, item := range report.NextCommands {
+		nextCommands = append(nextCommands, item.Command)
+	}
+	joinedNext := strings.Join(nextCommands, "\n")
+	joinedVerification := strings.Join(report.VerificationCommands, "\n")
+	for _, joined := range []string{joinedNext, joinedVerification} {
+		if strings.Contains(joined, " TEXT") || strings.Contains(joined, " PATH") {
+			t.Fatalf("research plan commands should be concrete:\n%s", joined)
+		}
+	}
+	wantIndex := "--radar-index " + quoteCommandValue(indexPath)
+	wantRoot := "--radar-root " + quoteCommandValue(root)
+	for _, want := range []string{
+		"agent-testbench research sync " + wantRoot + " --execute --json",
+		"agent-testbench research search --query 'github radar' " + wantIndex + " --min-references 3 --json",
+		"agent-testbench research features --filter 'github-radar-generation' " + wantIndex + " --json",
+		"agent-testbench research feature --feature 'github-radar-generation' " + wantIndex + " --require-min-matches 3 --json",
+	} {
+		if !strings.Contains(joinedNext, want) || !strings.Contains(joinedVerification, want) {
+			t.Fatalf("research plan missing contextual command %q\nnext:\n%s\nverification:\n%s", want, joinedNext, joinedVerification)
+		}
+	}
+}
+
 func TestResearchGateApprovesFreshAuditedFeatureWithRequiredCommand(t *testing.T) {
 	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
 	index := map[string]any{

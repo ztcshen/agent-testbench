@@ -1862,7 +1862,7 @@ func featurePlanCommand(featureID string, minReferences int, indexPath string) s
 }
 
 func buildFeatureResearchPlan(index featureRadarIndex, indexPath string, feature featureRadarFeature, featureQuery string, limit int, requireMinMatches int) featureResearchPlanReport {
-	nextCommands := featureNextCommands(feature.ID)
+	nextCommands := contextualizeFeaturePlanCommands(featureNextCommands(feature.ID), feature.ID, featureQuery, requireMinMatches, indexPath)
 	gate := featureReferenceGate{
 		Required: requireMinMatches,
 		Found:    len(feature.TopMatches),
@@ -1878,6 +1878,48 @@ func buildFeatureResearchPlan(index featureRadarIndex, indexPath string, feature
 		NextCommands:         nextCommands,
 		VerificationCommands: featureVerificationCommands(featureQuery, requireMinMatches, indexPath, nextCommands),
 	}
+}
+
+func contextualizeFeaturePlanCommands(commands []featureNextCommand, featureID string, featureQuery string, requireMinMatches int, indexPath string) []featureNextCommand {
+	out := make([]featureNextCommand, len(commands))
+	copy(out, commands)
+	for index := range out {
+		out[index].Command = concreteFeaturePlanCommand(out[index], featureID, featureQuery, requireMinMatches, indexPath)
+	}
+	return out
+}
+
+func concreteFeaturePlanCommand(command featureNextCommand, featureID string, featureQuery string, requireMinMatches int, indexPath string) string {
+	minReferences := normalizedMinimumReferences(requireMinMatches)
+	switch command.CatalogCommand {
+	case "research sync":
+		return "agent-testbench research sync --radar-root " + quoteCommandValue(featureRadarRootFromIndexPath(indexPath)) + " --execute --json"
+	case "research search":
+		return "agent-testbench research search --query " + quoteCommandValue(featureQuery) + featureRadarIndexFlag(indexPath) + featureMinReferencesFlag(minReferences) + " --json"
+	case "research features":
+		return "agent-testbench research features --filter " + quoteCommandValue(featureID) + featureRadarIndexFlag(indexPath) + " --json"
+	case "research feature":
+		return "agent-testbench research feature --feature " + quoteCommandValue(featureID) + featureRadarIndexFlag(indexPath) + featureRequireMinFlag(minReferences) + " --json"
+	}
+	return command.Command
+}
+
+func featureRadarRootFromIndexPath(indexPath string) string {
+	cleaned := filepath.Clean(strings.TrimSpace(indexPath))
+	if cleaned == "." || cleaned == "" {
+		return "PATH"
+	}
+	if filepath.Base(cleaned) == "feature-index.json" && filepath.Base(filepath.Dir(cleaned)) == "data" {
+		return filepath.Dir(filepath.Dir(cleaned))
+	}
+	return filepath.Dir(cleaned)
+}
+
+func normalizedMinimumReferences(value int) int {
+	if value <= 0 {
+		return 3
+	}
+	return value
 }
 
 func buildFeatureGateReport(index featureRadarIndex, indexPath string, feature featureRadarFeature, featureQuery string, requireMinMatches int, requireCommand string, maxAgeHours int, checkedAt time.Time, limit int) featureGateReport {
