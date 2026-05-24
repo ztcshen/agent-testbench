@@ -308,12 +308,18 @@ For one-shot planning, use `research plan`:
 ./bin/agent-testbench.sh research plan \
   --feature "case run" \
   --require-min-matches 3 \
+  --live-check \
+  --max-star-drift 100 \
+  --max-pushed-drift-hours 72 \
   --json
 ```
 
 The plan includes the reference gate, ranked references, catalog-verified
-`nextCommands`, and `verificationCommands` that can be pasted into a terminal or
-used by an agent runbook.
+`nextCommands`, optional live GitHub reference policy/drift evidence, and
+`verificationCommands` that can be pasted into a terminal or used by an agent
+runbook. With `--live-check`, the plan exits non-zero when selected references
+fail the live policy or need a radar refresh before implementation depends on
+them.
 
 Use Markdown when the research result should be reviewed, pasted into a design
 note, or used as a demo artifact:
@@ -364,6 +370,9 @@ Recommended pre-design gate:
 ./bin/agent-testbench.sh research plan \
   --feature "new cli capability" \
   --require-min-matches 3 \
+  --live-check \
+  --max-star-drift 100 \
+  --max-pushed-drift-hours 72 \
   --format markdown
 ```
 
@@ -400,9 +409,11 @@ consumer of `feature-index.json`, not a GitHub crawler inside the core CLI.
 When you drill into a specific feature, the report includes `nextCommands` so
 the research result can become a concrete AgentTestBench CLI action.
 `research plan` wraps this into a single payload with verification commands for
-the next implementation/demo slice. `research coverage` checks every indexed
-feature against the same minimum-reference gate, which makes the feature radar
-itself a reusable prerequisite for CLI roadmap work.
+the next implementation/demo slice, and can add `--live-check` so the plan
+itself carries current GitHub reference policy/drift evidence. `research
+coverage` checks every indexed feature against the same minimum-reference gate,
+which makes the feature radar itself a reusable prerequisite for CLI roadmap
+work.
 
 ### Case Run Dry-Run Preflight
 

@@ -53,10 +53,10 @@ cd agent-testbench
 npm ci
 npm run demo:services -- --port 49190
 AGENT_TESTBENCH_DEMO_STORE="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run demo:api-case
-AGENT_TESTBENCH_SMOKE_STORE_DSN="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run release-check -- --scope cmd/agent-testbench
 # MySQL:
 AGENT_TESTBENCH_DEMO_STORE="mysql://user:pass@host:3306/agent_testbench_smoke?tls=false" npm run demo:api-case
-AGENT_TESTBENCH_SMOKE_STORE_DSN="mysql://user:pass@host:3306/agent_testbench_smoke?tls=false" npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN="mysql://user:pass@host:3306/agent_testbench_smoke?tls=false" npm run release-check -- --scope cmd/agent-testbench
 ```
 
 What to point out:
@@ -84,6 +84,9 @@ What to point out:
 - `agent-testbench research gate --feature "workflow report" --live-check`
   combines freshness, audit, reference coverage, command availability, and live
   reference checks into one pre-implementation CLI gate.
+- `agent-testbench research plan --feature "case run" --live-check`
+  turns the chosen feature into a reviewable implementation plan while carrying
+  live GitHub policy/drift evidence into the plan's verification commands.
 - `agent-testbench research sync --radar-root ./github-feature-radar --execute`
   runs the external radar maintenance chain from AgentTestBench: test, refresh,
   status, audit, coverage, and index, with per-step JSON results.
@@ -127,9 +130,10 @@ What to point out:
   `AGENT_TESTBENCH_DEMO_STORE=mysql://...` /
   `AGENT_TESTBENCH_DEMO_STORE=sqlite://...`. MySQL demo Stores must use dedicated
   sandbox/smoke/test/CI-looking database names, not application schemas.
-- `release-check` requires a SQLite, PostgreSQL, or MySQL smoke Store DSN, then runs
-  guardrails, Go tests, the demo, the React build, active SQL Store CLI smoke,
-  and SQL Store headless browser smoke tests.
+- `release-check` requires a SQLite, PostgreSQL, or MySQL smoke Store DSN.
+  Daily PR/slice validation should pass `--scope` or `--scope-file` so the gate
+  checks only touched paths and selects matching runtime tests; unscoped runs
+  remain available for full release sign-off.
 - Live SkyWalking validation is a stricter sign-off mode: set
   `AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1`, `AGENT_TESTBENCH_TRACE_GRAPHQL_URL`,
   `AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS`, and `AGENT_TESTBENCH_SMOKE_TRACE_IDS` with mappings for every
@@ -161,6 +165,9 @@ What to point out:
 - `agent-testbench research gate --feature "workflow report" --live-check`
   会把 freshness、audit、reference coverage、命令可用性和实时 reference
   校验合成一个 CLI 实现前置门禁。
+- `agent-testbench research plan --feature "case run" --live-check`
+  会把选定 feature 变成可评审的实现计划，并把 GitHub 实时 policy/drift
+  证据带入计划里的验证命令。
 - `agent-testbench research sync --radar-root ./github-feature-radar --execute`
   可以从 AgentTestBench 侧执行外部 radar 的维护链路：test、refresh、status、
   audit、coverage 和 index，并返回每一步的 JSON 结果。
@@ -185,7 +192,8 @@ What to point out:
   优先级任务，包含参考项目、实现命令、验证命令和验收条件。
 - `agent-testbench research plan --feature "case run" --require-min-matches 3`
   会把同一套 feature 搜索整理成紧凑计划：参考门禁、排序后的项目、经过命令目录校验的
-  next commands，以及 verification commands；加 `--format markdown` 可以生成便于评审或演示的 runbook。
+  next commands，以及 verification commands；加 `--live-check` 可以把实时 reference
+  policy/drift 证据纳入计划，加 `--format markdown` 可以生成便于评审或演示的 runbook。
 - `/demo-gallery.html` 现在包含 CLI 自动化演示动画：恢复目标运行时、排序高风险用例、
   执行用例、生成 workflow report、处理 Evidence tasks、定位 Root cause，并发布质量报告。
 - `demo:services` 会启动零售履约、IoT 遥测控制和内容审核三个通用 demo target，

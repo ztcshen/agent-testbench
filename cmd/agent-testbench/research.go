@@ -83,14 +83,22 @@ type featureResearchReport struct {
 }
 
 type featureResearchPlanReport struct {
-	OK                   bool                 `json:"ok"`
-	Feature              featureRadarFeature  `json:"feature"`
-	Policy               featureRadarPolicy   `json:"policy"`
-	SourceGeneratedAt    string               `json:"sourceGeneratedAt"`
-	ReferenceGate        featureReferenceGate `json:"referenceGate"`
-	References           []featureRadarMatch  `json:"references"`
-	NextCommands         []featureNextCommand `json:"nextCommands"`
-	VerificationCommands []string             `json:"verificationCommands"`
+	OK                   bool                    `json:"ok"`
+	Feature              featureRadarFeature     `json:"feature"`
+	Policy               featureRadarPolicy      `json:"policy"`
+	SourceGeneratedAt    string                  `json:"sourceGeneratedAt"`
+	Checks               featurePlanChecks       `json:"checks"`
+	ReferenceGate        featureReferenceGate    `json:"referenceGate"`
+	LiveCheck            *featureLiveCheckReport `json:"liveCheck,omitempty"`
+	References           []featureRadarMatch     `json:"references"`
+	NextCommands         []featureNextCommand    `json:"nextCommands"`
+	VerificationCommands []string                `json:"verificationCommands"`
+	Reasons              []string                `json:"reasons,omitempty"`
+}
+
+type featurePlanChecks struct {
+	ReferenceGateOK bool `json:"referenceGateOk"`
+	LiveCheckOK     bool `json:"liveCheckOk,omitempty"`
 }
 
 type featureCoverageReport struct {
@@ -1106,6 +1114,11 @@ func runResearchPlan(args []string) error {
 	limit := flags.Int("limit", 5, "Maximum number of reference projects to include")
 	requireMinMatches := flags.Int("require-min-matches", 0, "Fail when fewer than this many reference projects are available")
 	outputFormat := flags.String("format", "text", "Output format: text, json, or markdown")
+	liveCheck := flags.Bool("live-check", false, "Also verify selected references against live GitHub repository metadata")
+	githubAPIURL := flags.String("github-api-url", "https://api.github.com", "GitHub API base URL for --live-check")
+	tokenEnv := flags.String("token-env", "GITHUB_TOKEN", "Environment variable containing a GitHub token for --live-check")
+	maxStarDrift := flags.Int("max-star-drift", 0, "With --live-check, fail when live and local stars differ by more than N; 0 disables the drift gate")
+	maxPushedDriftHours := flags.Int("max-pushed-drift-hours", 0, "With --live-check, fail when live pushed_at is newer than local by more than N hours; 0 disables the drift gate")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON plan")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -1132,6 +1145,21 @@ func runResearchPlan(args []string) error {
 	if *requireMinMatches > 0 && !report.ReferenceGate.OK {
 		return fmt.Errorf("feature %q requires at least %d reference projects, found %d", feature.ID, *requireMinMatches, len(feature.TopMatches))
 	}
+	if *liveCheck {
+		liveReport := buildFeatureLiveCheckReport(context.Background(), featureLiveCheckOptions{
+			Index:               index,
+			IndexPath:           resolvedIndexPath,
+			Query:               feature.ID,
+			Feature:             feature,
+			References:          featureProjectReferences(index, feature, *limit),
+			GitHubAPIURL:        *githubAPIURL,
+			Token:               os.Getenv(strings.TrimSpace(*tokenEnv)),
+			MaxStarDrift:        *maxStarDrift,
+			MaxPushedDriftHours: *maxPushedDriftHours,
+		})
+		attachFeaturePlanLiveCheck(&report, liveReport)
+		report.VerificationCommands = append([]string{featureGateLiveCheckCommand(feature.ID, resolvedIndexPath, *limit, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL)}, report.VerificationCommands...)
+	}
 	format := strings.ToLower(strings.TrimSpace(*outputFormat))
 	if *jsonOutput {
 		format = "json"
@@ -1140,11 +1168,16 @@ func runResearchPlan(args []string) error {
 	case "", "text":
 		printFeatureResearchPlan(report)
 	case "json":
-		return json.NewEncoder(os.Stdout).Encode(report)
+		if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
+			return err
+		}
 	case "markdown", "md":
 		printFeatureResearchPlanMarkdown(report)
 	default:
 		return fmt.Errorf("unsupported research plan format %q", *outputFormat)
+	}
+	if !report.OK {
+		return errors.New("feature research plan failed")
 	}
 	return nil
 }
@@ -2426,15 +2459,21 @@ func buildFeatureResearchPlan(index featureRadarIndex, indexPath string, feature
 		Found:    len(feature.TopMatches),
 		OK:       requireMinMatches == 0 || len(feature.TopMatches) >= requireMinMatches,
 	}
+	reasons := []string{}
+	if !gate.OK {
+		reasons = append(reasons, fmt.Sprintf("feature %q requires at least %d reference projects, found %d", feature.ID, gate.Required, gate.Found))
+	}
 	return featureResearchPlanReport{
 		OK:                   gate.OK,
 		Feature:              feature,
 		Policy:               index.Policy,
 		SourceGeneratedAt:    index.SourceGeneratedAt,
+		Checks:               featurePlanChecks{ReferenceGateOK: gate.OK},
 		ReferenceGate:        gate,
 		References:           references,
 		NextCommands:         nextCommands,
 		VerificationCommands: featureVerificationCommands(featureQuery, requireMinMatches, indexPath, nextCommands),
+		Reasons:              reasons,
 	}
 }
 
@@ -2544,6 +2583,25 @@ func buildFeatureGateReport(index featureRadarIndex, indexPath string, feature f
 }
 
 func attachFeatureGateLiveCheck(report *featureGateReport, liveReport featureLiveCheckReport) {
+	report.LiveCheck = &liveReport
+	report.Checks.LiveCheckOK = liveReport.OK
+	if liveReport.OK {
+		report.OK = len(report.Reasons) == 0
+		return
+	}
+	if liveReport.FailedCount > 0 {
+		report.Reasons = append(report.Reasons, fmt.Sprintf("live-check has %d failed reference(s)", liveReport.FailedCount))
+	}
+	if liveReport.RefreshCount > 0 {
+		report.Reasons = append(report.Reasons, fmt.Sprintf("live-check needs refresh for %d reference(s)", liveReport.RefreshCount))
+	}
+	if liveReport.FailedCount == 0 && liveReport.RefreshCount == 0 {
+		report.Reasons = append(report.Reasons, "live-check did not pass")
+	}
+	report.OK = false
+}
+
+func attachFeaturePlanLiveCheck(report *featureResearchPlanReport, liveReport featureLiveCheckReport) {
 	report.LiveCheck = &liveReport
 	report.Checks.LiveCheckOK = liveReport.OK
 	if liveReport.OK {
@@ -3689,6 +3747,12 @@ func printFeatureResearchPlan(report featureResearchPlanReport) {
 	fmt.Printf("Feature: %s (%s)\n", report.Feature.Title, report.Feature.ID)
 	fmt.Printf("Reference gate: %s required=%d found=%d\n", statusWord(report.ReferenceGate.OK), report.ReferenceGate.Required, report.ReferenceGate.Found)
 	fmt.Printf("Policy: stars >= %d, pushed >= %s\n", report.Policy.MinStars, report.Policy.PushedAfter)
+	if report.LiveCheck != nil {
+		fmt.Printf("Live check: %s checked=%d failed=%d refresh-needed=%d\n", statusWord(report.LiveCheck.OK), report.LiveCheck.CheckedCount, report.LiveCheck.FailedCount, report.LiveCheck.RefreshCount)
+	}
+	for _, reason := range report.Reasons {
+		fmt.Printf("Reason: %s\n", reason)
+	}
 	fmt.Println("References:")
 	for _, match := range report.References {
 		fmt.Printf("- %s (%d stars, pushed %s)\n", match.FullName, match.Stars, shortDate(match.PushedAt))
@@ -3713,6 +3777,21 @@ func printFeatureResearchPlanMarkdown(report featureResearchPlanReport) {
 	fmt.Println("| Required | Found | Status |")
 	fmt.Println("| --- | --- | --- |")
 	fmt.Printf("| %d | %d | %s |\n\n", report.ReferenceGate.Required, report.ReferenceGate.Found, statusWord(report.ReferenceGate.OK))
+	if report.LiveCheck != nil {
+		fmt.Println("## Live Check")
+		fmt.Println()
+		fmt.Println("| Status | Checked | Failed | Refresh Needed |")
+		fmt.Println("| --- | ---: | ---: | ---: |")
+		fmt.Printf("| %s | %d | %d | %d |\n\n", statusWord(report.LiveCheck.OK), report.LiveCheck.CheckedCount, report.LiveCheck.FailedCount, report.LiveCheck.RefreshCount)
+	}
+	if len(report.Reasons) > 0 {
+		fmt.Println("## Reasons")
+		fmt.Println()
+		for _, reason := range report.Reasons {
+			fmt.Printf("- %s\n", reason)
+		}
+		fmt.Println()
+	}
 	fmt.Println("## References")
 	fmt.Println()
 	fmt.Println("| Project | Stars | Pushed | Score |")

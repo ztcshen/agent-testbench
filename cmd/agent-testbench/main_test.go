@@ -2337,6 +2337,98 @@ func TestResearchPlanConnectsFeatureReferencesToVerificationCommands(t *testing.
 	}
 }
 
+func TestResearchPlanCanRunLiveReferenceCheck(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/repos/example/api-runner":
+			fmt.Fprint(w, `{"full_name":"example/api-runner","html_url":"https://github.com/example/api-runner","stargazers_count":3310,"pushed_at":"2026-05-24T12:00:00Z","archived":false,"fork":false}`)
+		case "/repos/example/report-runner":
+			fmt.Fprint(w, `{"full_name":"example/report-runner","html_url":"https://github.com/example/report-runner","stargazers_count":4520,"pushed_at":"2026-05-22T12:00:00Z","archived":false,"fork":false}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
+	index := map[string]any{
+		"schemaVersion":     1,
+		"sourceGeneratedAt": "2026-05-20T04:39:07Z",
+		"policy": map[string]any{
+			"minStars":    3000,
+			"months":      3,
+			"pushedAfter": "2026-02-24",
+		},
+		"tokenIndex": map[string]any{
+			"case run": []string{"api-test-runner"},
+		},
+		"features": map[string]any{
+			"api-test-runner": map[string]any{
+				"id":     "api-test-runner",
+				"title":  "API Test Runner",
+				"intent": "Find projects that run API tests with reproducible reports.",
+				"topMatches": []map[string]any{
+					{"fullName": "example/api-runner", "url": "https://github.com/example/api-runner", "stars": 3040, "pushedAt": "2026-05-20T12:00:00Z", "featureScore": 8},
+					{"fullName": "example/report-runner", "url": "https://github.com/example/report-runner", "stars": 4520, "pushedAt": "2026-05-22T12:00:00Z", "featureScore": 7},
+				},
+			},
+		},
+	}
+	if err := os.WriteFile(indexPath, []byte(mustJSON(t, index)), 0o644); err != nil {
+		t.Fatalf("write radar index: %v", err)
+	}
+
+	out := runCLIFails(t,
+		"research", "plan",
+		"--feature", "case run",
+		"--radar-index", indexPath,
+		"--require-min-matches", "2",
+		"--limit", "2",
+		"--live-check",
+		"--github-api-url", server.URL,
+		"--max-star-drift", "100",
+		"--max-pushed-drift-hours", "24",
+		"--json",
+	)
+	var report struct {
+		OK      bool     `json:"ok"`
+		Reasons []string `json:"reasons"`
+		Checks  struct {
+			ReferenceGateOK bool `json:"referenceGateOk"`
+			LiveCheckOK     bool `json:"liveCheckOk"`
+		} `json:"checks"`
+		LiveCheck struct {
+			OK            bool `json:"ok"`
+			RefreshNeeded bool `json:"refreshNeeded"`
+			RefreshCount  int  `json:"refreshCount"`
+			References    []struct {
+				FullName         string   `json:"fullName"`
+				Status           string   `json:"status"`
+				RefreshReasons   []string `json:"refreshReasons"`
+				PushedDeltaHours int      `json:"pushedDeltaHours"`
+			} `json:"references"`
+		} `json:"liveCheck"`
+		VerificationCommands []string `json:"verificationCommands"`
+	}
+	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
+		t.Fatalf("decode live research plan json: %v\n%s", err, out)
+	}
+	if report.OK || !report.Checks.ReferenceGateOK || report.Checks.LiveCheckOK || !report.LiveCheck.RefreshNeeded || report.LiveCheck.RefreshCount != 1 {
+		t.Fatalf("live plan identity = %#v", report)
+	}
+	first := report.LiveCheck.References[0]
+	if first.FullName != "example/api-runner" || first.Status != "refresh-needed" || first.PushedDeltaHours != 96 || !stringSliceContains(first.RefreshReasons, "star_drift") || !stringSliceContains(first.RefreshReasons, "pushed_at_drift") {
+		t.Fatalf("live plan reference = %#v", first)
+	}
+	if !strings.Contains(strings.Join(report.Reasons, "\n"), "live-check needs refresh for 1 reference(s)") {
+		t.Fatalf("live plan reasons = %#v", report.Reasons)
+	}
+	if !strings.Contains(strings.Join(report.VerificationCommands, "\n"), "agent-testbench research live-check --feature 'api-test-runner'"+featureRadarIndexFlag(indexPath)+" --limit 2 --max-star-drift 100 --max-pushed-drift-hours 24 --github-api-url "+quoteCommandValue(server.URL)+" --json") {
+		t.Fatalf("verification commands missing live-check = %#v", report.VerificationCommands)
+	}
+}
+
 func TestResearchPlanGeneratedCommandsIncludeRadarIndex(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "radar index $HOME")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
