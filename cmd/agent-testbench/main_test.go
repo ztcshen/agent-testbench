@@ -849,6 +849,114 @@ func TestResearchTermsListsFeatureSearchTokens(t *testing.T) {
 	}
 }
 
+func TestResearchSuggestRanksFeatureSearchQueryTerms(t *testing.T) {
+	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
+	index := map[string]any{
+		"schemaVersion":     1,
+		"sourceGeneratedAt": "2026-05-24T04:39:07Z",
+		"policy": map[string]any{
+			"minStars":    3000,
+			"months":      3,
+			"pushedAfter": "2026-02-24",
+		},
+		"tokenIndex": map[string]any{
+			"release gate":    []string{"quality-gates"},
+			"quality gate":    []string{"quality-gates"},
+			"workflow runner": []string{"workflow-orchestration"},
+			"api testing":     []string{"api-test-runner"},
+		},
+		"features": map[string]any{
+			"quality-gates": map[string]any{
+				"id":     "quality-gates",
+				"title":  "Quality Gates",
+				"intent": "Find projects that gate releases with policy checks.",
+				"topMatches": []map[string]any{
+					{"fullName": "aquasecurity/trivy", "url": "https://github.com/aquasecurity/trivy", "stars": 35145, "pushedAt": "2026-05-22T11:51:15Z"},
+					{"fullName": "semgrep/semgrep", "url": "https://github.com/semgrep/semgrep", "stars": 15252, "pushedAt": "2026-05-22T19:22:29Z"},
+				},
+			},
+			"workflow-orchestration": map[string]any{
+				"id":     "workflow-orchestration",
+				"title":  "Workflow Orchestration",
+				"intent": "Find projects that model workflow automation.",
+				"topMatches": []map[string]any{
+					{"fullName": "n8n-io/n8n", "url": "https://github.com/n8n-io/n8n", "stars": 189461, "pushedAt": "2026-05-24T09:05:35Z"},
+				},
+			},
+			"api-test-runner": map[string]any{
+				"id":     "api-test-runner",
+				"title":  "API Test Runner",
+				"intent": "Find projects that run API tests.",
+				"topMatches": []map[string]any{
+					{"fullName": "microsoft/playwright", "url": "https://github.com/microsoft/playwright", "stars": 89316, "pushedAt": "2026-05-24T01:19:02Z"},
+				},
+			},
+		},
+	}
+	if err := os.WriteFile(indexPath, []byte(mustJSON(t, index)), 0o644); err != nil {
+		t.Fatalf("write radar index: %v", err)
+	}
+
+	out := runCLI(t, "research", "suggest", "--query", "relese gatte wrkflow", "--radar-index", indexPath, "--limit", "2", "--json")
+	var report struct {
+		OK          bool   `json:"ok"`
+		Query       string `json:"query"`
+		Count       int    `json:"count"`
+		Suggestions []struct {
+			Term              string   `json:"term"`
+			Score             int      `json:"score"`
+			MatchedQueryTerms []string `json:"matchedQueryTerms"`
+			FeatureCount      int      `json:"featureCount"`
+			ReferenceCount    int      `json:"referenceCount"`
+			SearchCommand     string   `json:"searchCommand"`
+			Features          []struct {
+				ID         string `json:"id"`
+				References int    `json:"references"`
+			} `json:"features"`
+		} `json:"suggestions"`
+		NextCommands []string `json:"nextCommands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode research suggest json: %v\n%s", err, out)
+	}
+	if !report.OK || report.Query != "relese gatte wrkflow" || report.Count != 2 || len(report.Suggestions) != 2 {
+		t.Fatalf("suggest report = %#v", report)
+	}
+	top := report.Suggestions[0]
+	if top.Term != "release gate" || top.Score <= 0 || top.FeatureCount != 1 || top.ReferenceCount != 2 || !strings.Contains(top.SearchCommand, "research search --query 'release gate'") {
+		t.Fatalf("top suggestion = %#v", top)
+	}
+	for _, want := range []string{"relese", "gatte"} {
+		if !stringSliceContains(top.MatchedQueryTerms, want) {
+			t.Fatalf("top suggestion missing matched term %q: %#v", want, top.MatchedQueryTerms)
+		}
+	}
+	if len(top.Features) != 1 || top.Features[0].ID != "quality-gates" || top.Features[0].References != 2 {
+		t.Fatalf("top suggestion features = %#v", top.Features)
+	}
+	if report.Suggestions[1].Term != "workflow runner" || !stringSliceContains(report.Suggestions[1].MatchedQueryTerms, "wrkflow") {
+		t.Fatalf("second suggestion = %#v", report.Suggestions[1])
+	}
+	joinedCommands := strings.Join(report.NextCommands, "\n")
+	for _, want := range []string{"research search --query 'release gate'", "research search --query 'workflow runner'", "research terms --filter 'release gate'"} {
+		if !strings.Contains(joinedCommands, want) {
+			t.Fatalf("suggest next commands missing %q:\n%s", want, joinedCommands)
+		}
+	}
+
+	textOut := runCLI(t, "research", "suggest", "--query", "relese gatte wrkflow", "--radar-index", indexPath, "--limit", "1")
+	for _, want := range []string{"Feature Search Suggestions", "release gate score=", "matches: gatte, relese", "quality-gates", "Next commands:"} {
+		if !strings.Contains(textOut, want) {
+			t.Fatalf("suggest text missing %q:\n%s", want, textOut)
+		}
+	}
+
+	catalogOut := runCLI(t, "commands", "--filter", "research suggest", "--json")
+	if !strings.Contains(catalogOut, "agent-testbench research suggest --query TEXT --radar-index PATH") {
+		t.Fatalf("command catalog missing research suggest:\n%s", catalogOut)
+	}
+}
+
 func TestResearchReferencesListsFeatureBackedProjectLedger(t *testing.T) {
 	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
 	index := map[string]any{
@@ -4148,6 +4256,7 @@ func TestResearchPlanContextualizesRadarMaintenanceCommands(t *testing.T) {
 	for _, want := range []string{
 		"agent-testbench research sync " + wantRoot + " --execute --json",
 		"agent-testbench research search --query 'github radar' " + wantIndex + " --min-references 3 --json",
+		"agent-testbench research suggest --query 'github radar' " + wantIndex + " --limit 5 --json",
 		"agent-testbench research references --feature 'github-radar-generation' " + wantIndex + " --limit 10 --json",
 		"agent-testbench research features --filter 'github-radar-generation' " + wantIndex + " --json",
 		"agent-testbench research feature --feature 'github-radar-generation' " + wantIndex + " --require-min-matches 3 --json",

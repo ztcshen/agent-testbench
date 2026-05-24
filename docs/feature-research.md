@@ -124,6 +124,12 @@ List the available feature index before choosing the next CLI slice:
   --filter "gate" \
   --json
 
+./bin/agent-testbench.sh research suggest \
+  --radar-index $RADAR_HOME/data/feature-index.json \
+  --query "release gte workflow" \
+  --limit 5 \
+  --json
+
 ./bin/agent-testbench.sh research references \
   --radar-index $RADAR_HOME/data/feature-index.json \
   --feature "quality gate" \
@@ -207,6 +213,13 @@ count, and ready-to-run `research search` commands, so a CLI slice can start
 from high-signal terms instead of guessing project names. Add `--filter` to
 focus the glossary; direct term matches rank before broader feature-title
 matches so suggestions stay close to the intended query.
+
+`research suggest` helps when a feature query is fuzzy, misspelled, or uses
+different wording than the maintained radar index. It ranks nearby
+`tokenIndex` terms, returns the matched query words, mapped feature/reference
+counts, and copyable `research search` commands. Suggestions are diversified by
+their primary feature first, so one strong feature term does not crowd out
+another useful capability area.
 
 `research references` keeps project lookup feature-first. It resolves a feature
 query through the radar token index, then lists the maintained project ledger
@@ -463,6 +476,7 @@ Recommended pre-design gate:
 ```sh
 ./bin/agent-testbench.sh research features --filter "new cli capability"
 ./bin/agent-testbench.sh research sync --radar-root $RADAR_HOME --max-age-hours 72 --min-references 3 --strict-search --live-check --max-star-drift 100 --max-pushed-drift-hours 72
+./bin/agent-testbench.sh research suggest --query "new cli capability typo" --limit 5
 ./bin/agent-testbench.sh research search --query "new cli capability" --limit 5 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research compare --query "new cli capability" --min-references 3 --limit 5 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research command --command "target command" --min-references 3 --live-check --max-star-drift 100 --max-pushed-drift-hours 72

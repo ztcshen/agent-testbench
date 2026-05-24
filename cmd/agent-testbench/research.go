@@ -483,12 +483,33 @@ type featureTermsReport struct {
 	NextCommands      []string           `json:"nextCommands,omitempty"`
 }
 
+type featureSuggestReport struct {
+	OK                bool                    `json:"ok"`
+	Query             string                  `json:"query"`
+	NormalizedQuery   string                  `json:"normalizedQuery"`
+	Count             int                     `json:"count"`
+	Policy            featureRadarPolicy      `json:"policy"`
+	SourceGeneratedAt string                  `json:"sourceGeneratedAt"`
+	Suggestions       []featureTermSuggestion `json:"suggestions"`
+	NextCommands      []string                `json:"nextCommands,omitempty"`
+}
+
 type featureTermItem struct {
 	Term           string               `json:"term"`
 	FeatureCount   int                  `json:"featureCount"`
 	ReferenceCount int                  `json:"referenceCount"`
 	Features       []featureTermFeature `json:"features"`
 	SearchCommand  string               `json:"searchCommand"`
+}
+
+type featureTermSuggestion struct {
+	Term              string               `json:"term"`
+	Score             int                  `json:"score"`
+	MatchedQueryTerms []string             `json:"matchedQueryTerms"`
+	FeatureCount      int                  `json:"featureCount"`
+	ReferenceCount    int                  `json:"referenceCount"`
+	Features          []featureTermFeature `json:"features"`
+	SearchCommand     string               `json:"searchCommand"`
 }
 
 type featureTermFeature struct {
@@ -678,6 +699,8 @@ func runResearch(args []string) error {
 		return runResearchFeatures(args[1:])
 	case "terms":
 		return runResearchTerms(args[1:])
+	case "suggest":
+		return runResearchSuggest(args[1:])
 	case "search":
 		return runResearchSearch(args[1:])
 	case "references":
@@ -821,6 +844,41 @@ func runResearchTerms(args []string) error {
 		return json.NewEncoder(os.Stdout).Encode(report)
 	}
 	printFeatureTermsReport(report)
+	return nil
+}
+
+func runResearchSuggest(args []string) error {
+	flags := flag.NewFlagSet("research suggest", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	query := flags.String("query", "", "Feature search text to turn into suggested radar terms")
+	indexPath := flags.String("radar-index", "", "Path to github-feature-radar data/feature-index.json")
+	limit := flags.Int("limit", 5, "Maximum suggested feature search terms to show")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*query) == "" {
+		return errors.New("research suggest requires --query TEXT")
+	}
+	resolvedIndexPath := strings.TrimSpace(*indexPath)
+	if resolvedIndexPath == "" {
+		resolvedIndexPath = strings.TrimSpace(os.Getenv(featureRadarIndexEnv))
+	}
+	if resolvedIndexPath == "" {
+		return fmt.Errorf("research suggest requires --radar-index PATH or %s", featureRadarIndexEnv)
+	}
+	index, err := readFeatureRadarIndex(resolvedIndexPath)
+	if err != nil {
+		return err
+	}
+	if len(index.TokenIndex) == 0 {
+		return errors.New("research suggest requires a radar index with non-empty tokenIndex; regenerate the feature index before suggesting search terms")
+	}
+	report := buildFeatureSuggestReport(index, resolvedIndexPath, *query, *limit)
+	if *jsonOutput {
+		return json.NewEncoder(os.Stdout).Encode(report)
+	}
+	printFeatureSuggestReport(report)
 	return nil
 }
 
@@ -2490,6 +2548,39 @@ func absInt(value int) int {
 	return value
 }
 
+func maxInt(left int, right int) int {
+	if left > right {
+		return left
+	}
+	return right
+}
+
+func minInt(values ...int) int {
+	if len(values) == 0 {
+		return 0
+	}
+	minimum := values[0]
+	for _, value := range values[1:] {
+		if value < minimum {
+			minimum = value
+		}
+	}
+	return minimum
+}
+
+func commonPrefixLength(left string, right string) int {
+	limit := len(left)
+	if len(right) < limit {
+		limit = len(right)
+	}
+	for index := 0; index < limit; index++ {
+		if left[index] != right[index] {
+			return index
+		}
+	}
+	return limit
+}
+
 func featureLiveCheckCommands(query string, featureID string, indexPath string) []string {
 	commands := []string{}
 	if strings.TrimSpace(featureID) != "" {
@@ -3561,6 +3652,8 @@ func concreteFeaturePlanCommand(command featureNextCommand, featureID string, fe
 		return "agent-testbench research sync --radar-root " + quoteCommandValue(featureRadarRootFromIndexPath(indexPath)) + " --execute --json"
 	case "research search":
 		return "agent-testbench research search --query " + quoteCommandValue(featureQuery) + featureRadarIndexFlag(indexPath) + featureMinReferencesFlag(minReferences) + " --json"
+	case "research suggest":
+		return "agent-testbench research suggest --query " + quoteCommandValue(featureQuery) + featureRadarIndexFlag(indexPath) + " --limit 5 --json"
 	case "research references":
 		return "agent-testbench research references --feature " + quoteCommandValue(featureID) + featureRadarIndexFlag(indexPath) + " --limit 10 --json"
 	case "research features":
@@ -3987,6 +4080,90 @@ func buildFeatureRadarCatalogReport(index featureRadarIndex, filter string) feat
 	return report
 }
 
+func buildFeatureSuggestReport(index featureRadarIndex, indexPath string, query string, limit int) featureSuggestReport {
+	if limit <= 0 {
+		limit = 5
+	}
+	query = strings.TrimSpace(query)
+	normalizedQuery := normalizeFeatureRadarText(query)
+	queryTerms := strings.Fields(normalizedQuery)
+	suggestions := []featureTermSuggestion{}
+	for token, featureIDs := range index.TokenIndex {
+		item, ok := buildFeatureTermItem(index, indexPath, token, featureIDs)
+		if !ok {
+			continue
+		}
+		score, matchedTerms := featureSuggestionScore(item, normalizedQuery, queryTerms)
+		if score <= 0 {
+			continue
+		}
+		suggestions = append(suggestions, featureTermSuggestion{
+			Term:              item.Term,
+			Score:             score,
+			MatchedQueryTerms: matchedTerms,
+			FeatureCount:      item.FeatureCount,
+			ReferenceCount:    item.ReferenceCount,
+			Features:          item.Features,
+			SearchCommand:     item.SearchCommand,
+		})
+	}
+	sort.Slice(suggestions, func(i, j int) bool {
+		if suggestions[i].Score != suggestions[j].Score {
+			return suggestions[i].Score > suggestions[j].Score
+		}
+		if suggestions[i].ReferenceCount != suggestions[j].ReferenceCount {
+			return suggestions[i].ReferenceCount > suggestions[j].ReferenceCount
+		}
+		if suggestions[i].FeatureCount != suggestions[j].FeatureCount {
+			return suggestions[i].FeatureCount > suggestions[j].FeatureCount
+		}
+		return suggestions[i].Term < suggestions[j].Term
+	})
+	suggestions = limitDiverseFeatureTermSuggestions(suggestions, limit)
+	return featureSuggestReport{
+		OK:                len(suggestions) > 0,
+		Query:             query,
+		NormalizedQuery:   normalizedQuery,
+		Count:             len(suggestions),
+		Policy:            index.Policy,
+		SourceGeneratedAt: index.SourceGeneratedAt,
+		Suggestions:       suggestions,
+		NextCommands:      featureSuggestNextCommands(suggestions, indexPath),
+	}
+}
+
+func buildFeatureTermItem(index featureRadarIndex, indexPath string, token string, featureIDs []string) (featureTermItem, bool) {
+	token = strings.TrimSpace(token)
+	if token == "" || !featureSearchDisplayToken(token) {
+		return featureTermItem{}, false
+	}
+	item := featureTermItem{Term: token}
+	for _, featureID := range uniquePreserveOrder(featureIDs) {
+		feature, ok := index.Features[featureID]
+		if !ok {
+			continue
+		}
+		item.Features = append(item.Features, featureTermFeature{
+			ID:         feature.ID,
+			Title:      feature.Title,
+			References: len(feature.TopMatches),
+		})
+		item.ReferenceCount += len(feature.TopMatches)
+	}
+	if len(item.Features) == 0 {
+		return featureTermItem{}, false
+	}
+	sort.Slice(item.Features, func(i, j int) bool {
+		if item.Features[i].References != item.Features[j].References {
+			return item.Features[i].References > item.Features[j].References
+		}
+		return item.Features[i].ID < item.Features[j].ID
+	})
+	item.FeatureCount = len(item.Features)
+	item.SearchCommand = "agent-testbench research search --query " + quoteCommandValue(token) + featureRadarIndexFlag(indexPath) + " --json"
+	return item, true
+}
+
 func buildFeatureTermsReport(index featureRadarIndex, indexPath string, filter string, limit int) featureTermsReport {
 	if limit <= 0 {
 		limit = 20
@@ -3994,34 +4171,10 @@ func buildFeatureTermsReport(index featureRadarIndex, indexPath string, filter s
 	filter = strings.TrimSpace(filter)
 	terms := []featureTermItem{}
 	for token, featureIDs := range index.TokenIndex {
-		token = strings.TrimSpace(token)
-		if token == "" || !featureSearchDisplayToken(token) {
+		item, ok := buildFeatureTermItem(index, indexPath, token, featureIDs)
+		if !ok || !featureTermMatchesFilter(item, filter) {
 			continue
 		}
-		item := featureTermItem{Term: token}
-		for _, featureID := range uniquePreserveOrder(featureIDs) {
-			feature, ok := index.Features[featureID]
-			if !ok {
-				continue
-			}
-			item.Features = append(item.Features, featureTermFeature{
-				ID:         feature.ID,
-				Title:      feature.Title,
-				References: len(feature.TopMatches),
-			})
-			item.ReferenceCount += len(feature.TopMatches)
-		}
-		if len(item.Features) == 0 || !featureTermMatchesFilter(item, filter) {
-			continue
-		}
-		sort.Slice(item.Features, func(i, j int) bool {
-			if item.Features[i].References != item.Features[j].References {
-				return item.Features[i].References > item.Features[j].References
-			}
-			return item.Features[i].ID < item.Features[j].ID
-		})
-		item.FeatureCount = len(item.Features)
-		item.SearchCommand = "agent-testbench research search --query " + quoteCommandValue(token) + featureRadarIndexFlag(indexPath) + " --json"
 		terms = append(terms, item)
 	}
 	sort.Slice(terms, func(i, j int) bool {
@@ -4072,6 +4225,179 @@ func featureTermTokenMatchesFilter(term string, filter string) bool {
 		return true
 	}
 	return strings.Contains(normalizeFeatureRadarText(term), normalizeFeatureRadarText(filter))
+}
+
+func featureSuggestionScore(item featureTermItem, normalizedQuery string, queryTerms []string) (int, []string) {
+	termText := normalizeFeatureRadarText(item.Term)
+	if termText == "" {
+		return 0, nil
+	}
+	score := 0
+	if normalizedQuery == termText {
+		score += 120
+	} else if strings.Contains(normalizedQuery, termText) || strings.Contains(termText, normalizedQuery) {
+		score += 60
+	}
+	tokenWords := strings.Fields(termText)
+	featureTextParts := []string{}
+	for _, feature := range item.Features {
+		featureTextParts = append(featureTextParts, feature.ID, feature.Title)
+	}
+	featureText := normalizeFeatureRadarText(strings.Join(featureTextParts, " "))
+	matchedTerms := []string{}
+	for _, queryTerm := range uniqueSortedStrings(queryTerms) {
+		best := featureSuggestionTermScore(queryTerm, termText, tokenWords, featureText)
+		if best <= 0 {
+			continue
+		}
+		score += best
+		matchedTerms = append(matchedTerms, queryTerm)
+	}
+	if len(matchedTerms) == 0 && score <= 0 {
+		return 0, nil
+	}
+	score += item.FeatureCount*3 + item.ReferenceCount
+	return score, uniqueSortedStrings(matchedTerms)
+}
+
+func featureSuggestionTermScore(queryTerm string, termText string, tokenWords []string, featureText string) int {
+	queryTerm = strings.TrimSpace(queryTerm)
+	if queryTerm == "" {
+		return 0
+	}
+	best := 0
+	if strings.Contains(termText, queryTerm) || strings.Contains(queryTerm, termText) {
+		best = maxInt(best, 40)
+	}
+	for _, word := range tokenWords {
+		switch {
+		case word == queryTerm:
+			best = maxInt(best, 50)
+		case strings.Contains(word, queryTerm) || strings.Contains(queryTerm, word):
+			best = maxInt(best, 35)
+		case featureTermEditDistanceWithin(queryTerm, word, featureSuggestionEditLimit(queryTerm, word)):
+			best = maxInt(best, 28)
+		case commonPrefixLength(queryTerm, word) >= 3:
+			best = maxInt(best, 16)
+		}
+	}
+	if best == 0 && strings.Contains(featureText, queryTerm) {
+		best = 10
+	}
+	return best
+}
+
+func featureSuggestionEditLimit(left string, right string) int {
+	shorter := len(left)
+	if len(right) < shorter {
+		shorter = len(right)
+	}
+	if shorter < 4 {
+		return 0
+	}
+	if shorter <= 7 {
+		return 1
+	}
+	return 2
+}
+
+func featureTermEditDistanceWithin(left string, right string, limit int) bool {
+	if limit <= 0 {
+		return left == right
+	}
+	if absInt(len(left)-len(right)) > limit {
+		return false
+	}
+	previous := make([]int, len(right)+1)
+	for j := range previous {
+		previous[j] = j
+	}
+	for i := 1; i <= len(left); i++ {
+		current := make([]int, len(right)+1)
+		current[0] = i
+		rowMin := current[0]
+		for j := 1; j <= len(right); j++ {
+			cost := 0
+			if left[i-1] != right[j-1] {
+				cost = 1
+			}
+			current[j] = minInt(
+				previous[j]+1,
+				current[j-1]+1,
+				previous[j-1]+cost,
+			)
+			if current[j] < rowMin {
+				rowMin = current[j]
+			}
+		}
+		if rowMin > limit {
+			return false
+		}
+		previous = current
+	}
+	return previous[len(right)] <= limit
+}
+
+func limitDiverseFeatureTermSuggestions(suggestions []featureTermSuggestion, limit int) []featureTermSuggestion {
+	if limit <= 0 || len(suggestions) <= limit {
+		return suggestions
+	}
+	selected := []featureTermSuggestion{}
+	seenPrimaryFeatures := map[string]bool{}
+	for _, suggestion := range suggestions {
+		primary := featureSuggestionPrimaryFeature(suggestion)
+		if primary != "" && seenPrimaryFeatures[primary] {
+			continue
+		}
+		selected = append(selected, suggestion)
+		if primary != "" {
+			seenPrimaryFeatures[primary] = true
+		}
+		if len(selected) >= limit {
+			return selected
+		}
+	}
+	for _, suggestion := range suggestions {
+		if featureSuggestionContains(selected, suggestion.Term) {
+			continue
+		}
+		selected = append(selected, suggestion)
+		if len(selected) >= limit {
+			break
+		}
+	}
+	return selected
+}
+
+func featureSuggestionPrimaryFeature(suggestion featureTermSuggestion) string {
+	if len(suggestion.Features) == 0 {
+		return ""
+	}
+	return suggestion.Features[0].ID
+}
+
+func featureSuggestionContains(suggestions []featureTermSuggestion, term string) bool {
+	for _, suggestion := range suggestions {
+		if suggestion.Term == term {
+			return true
+		}
+	}
+	return false
+}
+
+func featureSuggestNextCommands(suggestions []featureTermSuggestion, indexPath string) []string {
+	commands := []string{}
+	for _, suggestion := range suggestions {
+		commands = append(commands, suggestion.SearchCommand)
+		if len(commands) >= 3 {
+			break
+		}
+	}
+	if len(suggestions) > 0 {
+		commands = append(commands, "agent-testbench research terms --filter "+quoteCommandValue(suggestions[0].Term)+featureRadarIndexFlag(indexPath)+" --limit 10 --json")
+	}
+	commands = append(commands, fmt.Sprintf("agent-testbench research refresh-plan%s --min-references %d --max-age-hours 72 --json", featureRadarIndexFlag(indexPath), 3))
+	return uniquePreserveOrder(commands)
 }
 
 func featureTermsNextCommands(terms []featureTermItem, indexPath string, filter string) []string {
@@ -5258,6 +5584,7 @@ func featureNextCommands(featureID string) []featureNextCommand {
 		commands = []featureNextCommand{
 			{Command: "agent-testbench research sync --radar-root PATH --live-check --execute --json", Purpose: "Run the external GitHub Feature Radar maintenance workflow: test, refresh, status, audit, coverage, index, and optional live GitHub drift gates; add --seed-only for fast curated refreshes or --strict-search for CI."},
 			{Command: "agent-testbench research search --query TEXT --json", Purpose: "Rank candidate feature records from the external GitHub Feature Radar token index."},
+			{Command: "agent-testbench research suggest --query TEXT --json", Purpose: "Suggest nearby maintained feature search terms before running a fuzzy feature search."},
 			{Command: "agent-testbench research references --feature TEXT --json", Purpose: "List maintained high-star reference projects for a matched feature from the external project ledger."},
 			{Command: "agent-testbench research features --filter TEXT --json", Purpose: "Search feature records from the external GitHub Feature Radar index."},
 			{Command: "agent-testbench research feature --feature TEXT --require-min-matches 3 --json", Purpose: "Gate a CLI design slice on enough qualifying open-source references."},
@@ -5265,6 +5592,7 @@ func featureNextCommands(featureID string) []featureNextCommand {
 	default:
 		commands = []featureNextCommand{
 			{Command: "agent-testbench research search --query TEXT --json", Purpose: "Rank candidate feature records before choosing the next CLI command."},
+			{Command: "agent-testbench research suggest --query TEXT --json", Purpose: "Suggest maintained feature terms when a query is fuzzy or misspelled."},
 			{Command: "agent-testbench research references --feature TEXT --json", Purpose: "List maintained high-star reference projects for a matched feature from the project ledger."},
 			{Command: "agent-testbench research features --filter TEXT --json", Purpose: "Find the closest maintained feature record before choosing the next CLI command."},
 		}
@@ -5429,6 +5757,42 @@ func printFeatureRadarCatalogReport(report featureRadarCatalogReport) {
 		}
 		if len(feature.TopMatches) > 0 {
 			fmt.Printf("  Top reference: %s\n", feature.TopMatches[0].FullName)
+		}
+	}
+}
+
+func printFeatureSuggestReport(report featureSuggestReport) {
+	fmt.Println("Feature Search Suggestions")
+	fmt.Printf("Query: %s\n", report.Query)
+	fmt.Printf("Suggestions: %d\n", report.Count)
+	fmt.Printf("Policy: stars >= %d, pushed >= %s\n", report.Policy.MinStars, report.Policy.PushedAfter)
+	if report.SourceGeneratedAt != "" {
+		fmt.Printf("Radar index: %s\n", report.SourceGeneratedAt)
+	}
+	if report.Count == 0 {
+		fmt.Println("No suggestions")
+		return
+	}
+	for _, suggestion := range report.Suggestions {
+		fmt.Printf("- %s score=%d features=%d references=%d\n", suggestion.Term, suggestion.Score, suggestion.FeatureCount, suggestion.ReferenceCount)
+		if len(suggestion.MatchedQueryTerms) > 0 {
+			fmt.Printf("  matches: %s\n", strings.Join(suggestion.MatchedQueryTerms, ", "))
+		}
+		featureNames := []string{}
+		for _, feature := range suggestion.Features {
+			featureNames = append(featureNames, fmt.Sprintf("%s(%d)", feature.ID, feature.References))
+		}
+		if len(featureNames) > 0 {
+			fmt.Printf("  features: %s\n", strings.Join(featureNames, ", "))
+		}
+		if suggestion.SearchCommand != "" {
+			fmt.Printf("  Search: %s\n", suggestion.SearchCommand)
+		}
+	}
+	if len(report.NextCommands) > 0 {
+		fmt.Println("Next commands:")
+		for _, command := range report.NextCommands {
+			fmt.Printf("- %s\n", command)
 		}
 	}
 }

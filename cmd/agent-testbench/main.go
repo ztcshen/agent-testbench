@@ -435,6 +435,7 @@ Usage:
   agent-testbench research feature --feature TEXT --radar-index PATH [--limit N] [--require-min-matches N] [--json]
   agent-testbench research features --radar-index PATH [--filter TEXT] [--json]
   agent-testbench research terms --radar-index PATH [--filter TEXT] [--limit N] [--json]
+  agent-testbench research suggest --query TEXT --radar-index PATH [--limit N] [--json]
   agent-testbench research search --query TEXT --radar-index PATH [--limit N] [--reference-limit N] [--min-references N] [--live-check] [--max-star-drift N] [--max-pushed-drift-hours N] [--github-api-url URL] [--json]
   agent-testbench research references --feature TEXT --radar-index PATH [--limit N] [--json]
   agent-testbench research live-check --radar-index PATH [--feature TEXT] [--limit N] [--max-star-drift N] [--max-pushed-drift-hours N] [--github-api-url URL] [--token-env NAME] [--json]
