@@ -22,7 +22,27 @@ npm test
 npm run refresh -- --seed-only
 npm run status -- --max-age-hours 72 --min-references 3
 npm run audit
+npm run coverage -- --min-references 3
 npm run index
+```
+
+AgentTestBench can also plan or execute that same external maintenance chain:
+
+```sh
+./bin/agent-testbench.sh research sync \
+  --radar-root $RADAR_HOME \
+  --refresh-limit 20 \
+  --max-age-hours 72 \
+  --min-references 3 \
+  --json
+
+./bin/agent-testbench.sh research sync \
+  --radar-root $RADAR_HOME \
+  --refresh-limit 20 \
+  --max-age-hours 72 \
+  --min-references 3 \
+  --execute \
+  --json
 ```
 
 For broader GitHub search, set `GITHUB_TOKEN`:
@@ -73,6 +93,13 @@ audit, reference, and optional command-path gates used by `research gate`, then
 returns the selected references plus copyable `search`, `matrix`, `gate`, and
 `plan` commands. Use it before changing a CLI capability so the implementation
 starts from the maintained feature radar instead of ad hoc repository lookup.
+
+`research sync` keeps radar maintenance visible from the AgentTestBench side
+without moving the crawler into the core repository. Dry-run mode emits the
+ordered external commands (`npm test`, `npm run refresh`, `npm run status`,
+`npm run audit`, `npm run coverage`, `npm run index`) with the caller's
+freshness and reference thresholds. `--execute` runs the same chain in the
+external radar root and returns per-step exit codes plus captured output.
 
 `research features` returns the feature id, title, intent, aliases, reference
 count, and ranked reference projects. Use it as the local feature-search entry
@@ -170,7 +197,8 @@ patterns before writing the next CLI behavior or demo.
 maintenance plan. It tells agents whether the radar needs refresh, why, which
 feature records should be expanded first, and which external radar commands
 should run next. Use it before scheduled refreshes or before starting a new CLI
-slice from stale radar data.
+slice from stale radar data. Use `research sync --execute` when the plan should
+be carried out immediately from AgentTestBench.
 
 `research gate` is the pre-implementation guard for an individual CLI slice. It
 loads the external feature index, verifies freshness, runs the radar audit,
@@ -218,7 +246,7 @@ slice.
 commands that make the matched feature actionable after the reference check:
 for example `api-test-runner` points to `case run --dry-run`, `quality-gates`
 points to `case gate` and `workflow gate`, and `github-radar-generation`
-points back to `research features` / `research feature`. Each recommendation is
+points to `research sync` plus the feature-search commands. Each recommendation is
 checked against the current command catalog and includes `commandPath`,
 `catalogCommand`, and `available`, so stale recommendations are visible in the
 same JSON payload.
@@ -264,6 +292,7 @@ Recommended pre-design gate:
 
 ```sh
 ./bin/agent-testbench.sh research features --filter "new cli capability"
+./bin/agent-testbench.sh research sync --radar-root $RADAR_HOME --max-age-hours 72 --min-references 3
 ./bin/agent-testbench.sh research search --query "new cli capability" --limit 5
 ./bin/agent-testbench.sh research brief --query "new cli capability" --min-references 3 --format markdown
 ./bin/agent-testbench.sh research status --max-age-hours 72

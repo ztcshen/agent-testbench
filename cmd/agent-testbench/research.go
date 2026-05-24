@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -13,6 +15,7 @@ import (
 )
 
 const featureRadarIndexEnv = "AGENT_TESTBENCH_FEATURE_RADAR_INDEX"
+const featureRadarRootEnv = "AGENT_TESTBENCH_FEATURE_RADAR_ROOT"
 
 type featureRadarIndex struct {
 	GeneratedAt       string                         `json:"generatedAt"`
@@ -370,6 +373,35 @@ type featureBriefReport struct {
 	Reasons              []string                 `json:"reasons,omitempty"`
 }
 
+type featureSyncReport struct {
+	OK            bool              `json:"ok"`
+	Execute       bool              `json:"execute"`
+	RadarRoot     string            `json:"radarRoot"`
+	RadarIndex    string            `json:"radarIndex"`
+	RefreshLimit  int               `json:"refreshLimit"`
+	MaxAgeHours   int               `json:"maxAgeHours"`
+	MinReferences int               `json:"minReferences"`
+	Checks        featureSyncChecks `json:"checks"`
+	Steps         []featureSyncStep `json:"steps"`
+	Reasons       []string          `json:"reasons,omitempty"`
+}
+
+type featureSyncChecks struct {
+	RootExists  bool `json:"rootExists"`
+	PackageJSON bool `json:"packageJson"`
+	RadarIndex  bool `json:"radarIndex"`
+}
+
+type featureSyncStep struct {
+	Name     string   `json:"name"`
+	Command  string   `json:"command"`
+	OK       bool     `json:"ok"`
+	Skipped  bool     `json:"skipped"`
+	ExitCode int      `json:"exitCode,omitempty"`
+	Output   string   `json:"output,omitempty"`
+	args     []string `json:"-"`
+}
+
 func runResearch(args []string) error {
 	if len(args) == 0 {
 		return errors.New("missing research command")
@@ -383,6 +415,8 @@ func runResearch(args []string) error {
 		return runResearchSearch(args[1:])
 	case "brief":
 		return runResearchBrief(args[1:])
+	case "sync":
+		return runResearchSync(args[1:])
 	case "plan":
 		return runResearchPlan(args[1:])
 	case "coverage":
@@ -581,6 +615,46 @@ func runResearchBrief(args []string) error {
 	}
 	if !report.OK {
 		return errors.New("feature research brief gate failed")
+	}
+	return nil
+}
+
+func runResearchSync(args []string) error {
+	flags := flag.NewFlagSet("research sync", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	radarRoot := flags.String("radar-root", "", "Path to the external github-feature-radar project root")
+	indexPath := flags.String("radar-index", "", "Path to github-feature-radar data/feature-index.json")
+	refreshLimit := flags.Int("refresh-limit", 20, "GitHub search result limit to pass to npm run refresh")
+	maxAgeHours := flags.Int("max-age-hours", 72, "Freshness gate to pass to npm run status")
+	minReferences := flags.Int("min-references", 3, "Reference coverage gate to pass to npm run status and coverage")
+	npmCommand := flags.String("npm", "npm", "npm executable used when --execute is set")
+	execute := flags.Bool("execute", false, "Run the external radar maintenance workflow instead of printing it")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable sync report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	resolvedRoot, resolvedIndex, err := resolveFeatureSyncPaths(*radarRoot, *indexPath)
+	if err != nil {
+		return err
+	}
+	report := buildFeatureSyncReport(context.Background(), featureSyncOptions{
+		RadarRoot:     resolvedRoot,
+		RadarIndex:    resolvedIndex,
+		RefreshLimit:  *refreshLimit,
+		MaxAgeHours:   *maxAgeHours,
+		MinReferences: *minReferences,
+		NPMCommand:    *npmCommand,
+		Execute:       *execute,
+	})
+	if *jsonOutput {
+		if err := writeIndentedJSON(report); err != nil {
+			return err
+		}
+	} else {
+		printFeatureSyncReport(report)
+	}
+	if !report.OK {
+		return errors.New("feature radar sync failed")
 	}
 	return nil
 }
@@ -1336,6 +1410,208 @@ func parseFeatureRadarTimestamp(value string) (time.Time, error) {
 	return time.Parse("2006-01-02T15:04:05Z", value)
 }
 
+type featureSyncOptions struct {
+	RadarRoot     string
+	RadarIndex    string
+	RefreshLimit  int
+	MaxAgeHours   int
+	MinReferences int
+	NPMCommand    string
+	Execute       bool
+}
+
+func resolveFeatureSyncPaths(root string, indexPath string) (string, string, error) {
+	root = strings.TrimSpace(root)
+	indexPath = strings.TrimSpace(indexPath)
+	if root == "" {
+		root = strings.TrimSpace(os.Getenv(featureRadarRootEnv))
+	}
+	if indexPath == "" {
+		indexPath = strings.TrimSpace(os.Getenv(featureRadarIndexEnv))
+	}
+	if root == "" && indexPath != "" {
+		root = filepath.Dir(filepath.Dir(expandUserHomePath(indexPath)))
+	}
+	if root == "" {
+		return "", "", fmt.Errorf("research sync requires --radar-root PATH, --radar-index PATH, %s, or %s", featureRadarRootEnv, featureRadarIndexEnv)
+	}
+	root = expandUserHomePath(root)
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	if indexPath == "" {
+		indexPath = filepath.Join(root, "data", "feature-index.json")
+	} else {
+		indexPath = expandUserHomePath(indexPath)
+		if abs, err := filepath.Abs(indexPath); err == nil {
+			indexPath = abs
+		}
+	}
+	return root, indexPath, nil
+}
+
+func buildFeatureSyncReport(ctx context.Context, options featureSyncOptions) featureSyncReport {
+	if options.RefreshLimit <= 0 {
+		options.RefreshLimit = 20
+	}
+	if options.MaxAgeHours <= 0 {
+		options.MaxAgeHours = 72
+	}
+	if options.MinReferences <= 0 {
+		options.MinReferences = 3
+	}
+	if strings.TrimSpace(options.NPMCommand) == "" {
+		options.NPMCommand = "npm"
+	}
+	report := featureSyncReport{
+		Execute:       options.Execute,
+		RadarRoot:     options.RadarRoot,
+		RadarIndex:    options.RadarIndex,
+		RefreshLimit:  options.RefreshLimit,
+		MaxAgeHours:   options.MaxAgeHours,
+		MinReferences: options.MinReferences,
+		Checks:        featureSyncChecksFor(options.RadarRoot, options.RadarIndex),
+		Steps:         featureSyncSteps(options.RadarRoot, options.NPMCommand, options.RefreshLimit, options.MaxAgeHours, options.MinReferences),
+	}
+	if !report.Checks.RootExists {
+		report.Reasons = append(report.Reasons, "radar root does not exist")
+	}
+	if !report.Checks.PackageJSON {
+		report.Reasons = append(report.Reasons, "radar root is missing package.json")
+	}
+	if len(report.Reasons) > 0 {
+		report.OK = false
+		return report
+	}
+	if !options.Execute {
+		for index := range report.Steps {
+			report.Steps[index].Skipped = true
+		}
+		report.OK = true
+		return report
+	}
+	report.Steps = executeFeatureSyncSteps(ctx, options.RadarRoot, options.NPMCommand, report.Steps)
+	report.OK = true
+	for _, step := range report.Steps {
+		if step.Skipped {
+			continue
+		}
+		if !step.OK {
+			report.OK = false
+			report.Reasons = append(report.Reasons, fmt.Sprintf("step %s failed with exit code %d", step.Name, step.ExitCode))
+			break
+		}
+	}
+	return report
+}
+
+func featureSyncChecksFor(root string, indexPath string) featureSyncChecks {
+	return featureSyncChecks{
+		RootExists:  pathIsDir(root),
+		PackageJSON: pathIsFile(filepath.Join(root, "package.json")),
+		RadarIndex:  pathIsFile(indexPath),
+	}
+}
+
+func pathIsDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+func pathIsFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+func featureSyncSteps(root string, npmCommand string, refreshLimit int, maxAgeHours int, minReferences int) []featureSyncStep {
+	definitions := []struct {
+		name string
+		args []string
+	}{
+		{name: "test", args: []string{"test"}},
+		{name: "refresh", args: []string{"run", "refresh", "--", "--limit", fmt.Sprintf("%d", refreshLimit)}},
+		{name: "status", args: []string{"run", "status", "--", "--max-age-hours", fmt.Sprintf("%d", maxAgeHours), "--min-references", fmt.Sprintf("%d", minReferences)}},
+		{name: "audit", args: []string{"run", "audit"}},
+		{name: "coverage", args: []string{"run", "coverage", "--", "--min-references", fmt.Sprintf("%d", minReferences)}},
+		{name: "index", args: []string{"run", "index"}},
+	}
+	steps := make([]featureSyncStep, 0, len(definitions))
+	for _, item := range definitions {
+		steps = append(steps, featureSyncStep{
+			Name:    item.name,
+			Command: featureSyncShellCommand(root, npmCommand, item.args),
+			args:    item.args,
+		})
+	}
+	return steps
+}
+
+func featureSyncShellCommand(root string, npmCommand string, args []string) string {
+	tokens := []string{quoteShellExecutable(npmCommand)}
+	for _, arg := range args {
+		tokens = append(tokens, quoteShellArgIfNeeded(arg))
+	}
+	return fmt.Sprintf("cd %s && %s", quoteShellPath(root), strings.Join(tokens, " "))
+}
+
+func quoteShellExecutable(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "npm"
+	}
+	if shellPathNeedsQuoting(value) {
+		return quoteShellValue(expandUserHomePath(value))
+	}
+	return value
+}
+
+func quoteShellArgIfNeeded(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "''"
+	}
+	if shellPathNeedsQuoting(value) {
+		return quoteShellValue(value)
+	}
+	return value
+}
+
+func executeFeatureSyncSteps(ctx context.Context, root string, npmCommand string, steps []featureSyncStep) []featureSyncStep {
+	out := make([]featureSyncStep, len(steps))
+	copy(out, steps)
+	failed := false
+	for index := range out {
+		if failed {
+			out[index].Skipped = true
+			continue
+		}
+		cmd := exec.CommandContext(ctx, npmCommand, out[index].args...)
+		cmd.Dir = root
+		raw, err := cmd.CombinedOutput()
+		out[index].Output = strings.TrimSpace(string(raw))
+		if err != nil {
+			out[index].OK = false
+			out[index].ExitCode = commandExitCode(err)
+			failed = true
+			continue
+		}
+		out[index].OK = true
+		out[index].ExitCode = 0
+	}
+	return out
+}
+
+func commandExitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
+	}
+	return -1
+}
+
 func researchFirstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -1413,7 +1689,7 @@ func buildFeatureRoadmapReport(index featureRadarIndex, indexPath string, minRef
 	items := make([]featureRoadmapItem, 0, len(coverage.Features))
 	for _, feature := range coverage.Features {
 		nextCommands := featureNextCommands(feature.ID)
-		availableCommands, implementationCommands := countRoadmapCommands(nextCommands)
+		availableCommands, implementationCommands := countRoadmapCommands(feature.ID, nextCommands)
 		totalStars := totalFeatureStars(index.Features[feature.ID].TopMatches)
 		item := featureRoadmapItem{
 			ID:                     feature.ID,
@@ -1474,7 +1750,7 @@ func buildFeatureBacklogReport(index featureRadarIndex, indexPath string, minRef
 			ReadinessScore:         item.ReadinessScore,
 			References:             item.TopReferences,
 			PlanCommand:            item.PlanCommand,
-			ImplementationCommands: featureImplementationCommands(item.NextCommands),
+			ImplementationCommands: featureImplementationCommands(item.ID, item.NextCommands),
 			VerificationCommands:   featureBacklogVerificationCommands(item, roadmap.ReferenceGate.Required, indexPath),
 			AcceptanceCriteria:     featureBacklogAcceptanceCriteria(item, roadmap.ReferenceGate.Required),
 		})
@@ -1499,10 +1775,10 @@ func featureBacklogStatus(item featureRoadmapItem) string {
 	return "needs-references"
 }
 
-func featureImplementationCommands(commands []featureNextCommand) []featureNextCommand {
+func featureImplementationCommands(featureID string, commands []featureNextCommand) []featureNextCommand {
 	out := []featureNextCommand{}
 	for _, command := range commands {
-		if command.Available && len(command.CommandPath) > 0 && command.CommandPath[0] != "research" {
+		if featureNextCommandIsImplementation(featureID, command) {
 			out = append(out, command)
 		}
 	}
@@ -1514,7 +1790,7 @@ func featureBacklogVerificationCommands(item featureRoadmapItem, minReferences i
 		fmt.Sprintf("agent-testbench research coverage%s --min-references %d --json", featureRadarIndexFlag(indexPath), minReferences),
 		item.PlanCommand,
 	}
-	for _, command := range featureImplementationCommands(item.NextCommands) {
+	for _, command := range featureImplementationCommands(item.ID, item.NextCommands) {
 		commands = append(commands, command.Command)
 	}
 	return commands
@@ -1528,7 +1804,7 @@ func featureBacklogAcceptanceCriteria(item featureRoadmapItem, minReferences int
 	}
 }
 
-func countRoadmapCommands(commands []featureNextCommand) (int, int) {
+func countRoadmapCommands(featureID string, commands []featureNextCommand) (int, int) {
 	available := 0
 	implementation := 0
 	for _, command := range commands {
@@ -1536,11 +1812,21 @@ func countRoadmapCommands(commands []featureNextCommand) (int, int) {
 			continue
 		}
 		available++
-		if len(command.CommandPath) > 0 && command.CommandPath[0] != "research" {
+		if featureNextCommandIsImplementation(featureID, command) {
 			implementation++
 		}
 	}
 	return available, implementation
+}
+
+func featureNextCommandIsImplementation(featureID string, command featureNextCommand) bool {
+	if !command.Available || len(command.CommandPath) == 0 {
+		return false
+	}
+	if command.CommandPath[0] != "research" {
+		return true
+	}
+	return featureID == "github-radar-generation" && command.CatalogCommand == "research sync"
 }
 
 func totalFeatureStars(matches []featureRadarMatch) int {
@@ -2064,6 +2350,7 @@ func featureNextCommands(featureID string) []featureNextCommand {
 		}
 	case "github-radar-generation":
 		commands = []featureNextCommand{
+			{Command: "agent-testbench research sync --radar-root PATH --execute --json", Purpose: "Run the external GitHub Feature Radar maintenance workflow: test, refresh, status, audit, coverage, and index."},
 			{Command: "agent-testbench research search --query TEXT --json", Purpose: "Rank candidate feature records from the external GitHub Feature Radar token index."},
 			{Command: "agent-testbench research features --filter TEXT --json", Purpose: "Search feature records from the external GitHub Feature Radar index."},
 			{Command: "agent-testbench research feature --feature TEXT --require-min-matches 3 --json", Purpose: "Gate a CLI design slice on enough qualifying open-source references."},
@@ -2291,6 +2578,36 @@ func printFeatureBriefReport(report featureBriefReport) {
 	fmt.Println("Verification commands:")
 	for _, command := range report.VerificationCommands {
 		fmt.Printf("- %s\n", command)
+	}
+}
+
+func printFeatureSyncReport(report featureSyncReport) {
+	fmt.Println("Feature Radar Sync")
+	fmt.Printf("OK: %t\n", report.OK)
+	fmt.Printf("Execute: %t\n", report.Execute)
+	fmt.Printf("Radar Root: %s\n", report.RadarRoot)
+	fmt.Printf("Radar Index: %s\n", report.RadarIndex)
+	fmt.Printf("Gates: max-age-hours=%d min-references=%d refresh-limit=%d\n", report.MaxAgeHours, report.MinReferences, report.RefreshLimit)
+	fmt.Printf("Checks: root=%t package.json=%t radar-index=%t\n", report.Checks.RootExists, report.Checks.PackageJSON, report.Checks.RadarIndex)
+	if len(report.Reasons) > 0 {
+		fmt.Println("Reasons:")
+		for _, reason := range report.Reasons {
+			fmt.Printf("- %s\n", reason)
+		}
+	}
+	fmt.Println("Steps:")
+	for _, step := range report.Steps {
+		status := "planned"
+		if report.Execute {
+			status = "passed"
+			if step.Skipped {
+				status = "skipped"
+			} else if !step.OK {
+				status = fmt.Sprintf("failed:%d", step.ExitCode)
+			}
+		}
+		fmt.Printf("- %s [%s]\n", step.Name, status)
+		fmt.Printf("  %s\n", step.Command)
 	}
 }
 

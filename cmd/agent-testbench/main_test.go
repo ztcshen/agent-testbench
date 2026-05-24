@@ -56,6 +56,9 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	if !strings.Contains(out, "agent-testbench research brief") {
 		t.Fatalf("top-level help should expose query-backed research briefs:\n%s", out)
 	}
+	if !strings.Contains(out, "agent-testbench research sync") {
+		t.Fatalf("top-level help should expose feature radar sync automation:\n%s", out)
+	}
 	if !strings.Contains(out, "agent-testbench research coverage") {
 		t.Fatalf("top-level help should expose feature radar coverage gates:\n%s", out)
 	}
@@ -608,6 +611,177 @@ func TestResearchBriefBuildsSearchBackedImplementationBrief(t *testing.T) {
 	failedOut := runCLIFails(t, "research", "brief", "--query", "gate", "--radar-index", indexPath, "--min-references", "2", "--require-command", "workflow report", "--now", "2026-05-24T05:00:00Z", "--json")
 	if !strings.Contains(failedOut, `"ok":false`) || !strings.Contains(failedOut, "required command workflow report is not available") {
 		t.Fatalf("failed research brief should emit a machine-readable failed gate:\n%s", failedOut)
+	}
+}
+
+func TestResearchSyncPlansAndExecutesRadarMaintenanceWorkflow(t *testing.T) {
+	radarRoot := t.TempDir()
+	dataDir := filepath.Join(radarRoot, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("mkdir radar data: %v", err)
+	}
+	writeFile(t, filepath.Join(radarRoot, "package.json"), `{"scripts":{"refresh":"node src/cli.mjs refresh"}}`)
+	writeFile(t, filepath.Join(dataDir, "feature-index.json"), `{"features":{}}`)
+
+	dryRunOut := runCLI(t, "research", "sync", "--radar-root", radarRoot, "--refresh-limit", "10", "--max-age-hours", "24", "--min-references", "5", "--json")
+	var dryRunReport struct {
+		OK            bool   `json:"ok"`
+		Execute       bool   `json:"execute"`
+		RadarRoot     string `json:"radarRoot"`
+		RadarIndex    string `json:"radarIndex"`
+		RefreshLimit  int    `json:"refreshLimit"`
+		MaxAgeHours   int    `json:"maxAgeHours"`
+		MinReferences int    `json:"minReferences"`
+		Checks        struct {
+			RootExists  bool `json:"rootExists"`
+			PackageJSON bool `json:"packageJson"`
+			RadarIndex  bool `json:"radarIndex"`
+		} `json:"checks"`
+		Steps []struct {
+			Name    string `json:"name"`
+			Command string `json:"command"`
+			Skipped bool   `json:"skipped"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal([]byte(dryRunOut), &dryRunReport); err != nil {
+		t.Fatalf("decode research sync dry-run json: %v\n%s", err, dryRunOut)
+	}
+	if !dryRunReport.OK || dryRunReport.Execute || dryRunReport.RadarRoot != radarRoot || dryRunReport.RefreshLimit != 10 || dryRunReport.MaxAgeHours != 24 || dryRunReport.MinReferences != 5 {
+		t.Fatalf("dry-run identity = %#v", dryRunReport)
+	}
+	if !dryRunReport.Checks.RootExists || !dryRunReport.Checks.PackageJSON || !dryRunReport.Checks.RadarIndex {
+		t.Fatalf("dry-run checks = %#v", dryRunReport.Checks)
+	}
+	if len(dryRunReport.Steps) != 6 {
+		t.Fatalf("dry-run steps = %#v", dryRunReport.Steps)
+	}
+	joinedCommands := ""
+	for _, step := range dryRunReport.Steps {
+		if !step.Skipped {
+			t.Fatalf("dry-run step should be skipped before --execute: %#v", step)
+		}
+		joinedCommands += step.Command + "\n"
+	}
+	for _, want := range []string{
+		"npm test",
+		"npm run refresh -- --limit 10",
+		"npm run status -- --max-age-hours 24 --min-references 5",
+		"npm run audit",
+		"npm run coverage -- --min-references 5",
+		"npm run index",
+	} {
+		if !strings.Contains(joinedCommands, want) {
+			t.Fatalf("sync commands missing %q:\n%s", want, joinedCommands)
+		}
+	}
+
+	textOut := runCLI(t, "research", "sync", "--radar-root", radarRoot, "--refresh-limit", "10", "--max-age-hours", "24", "--min-references", "5")
+	for _, want := range []string{"Feature Radar Sync", "Execute: false", "npm run refresh -- --limit 10", "npm run status -- --max-age-hours 24 --min-references 5"} {
+		if !strings.Contains(textOut, want) {
+			t.Fatalf("research sync text missing %q:\n%s", want, textOut)
+		}
+	}
+
+	fakeBin := t.TempDir()
+	callsPath := filepath.Join(fakeBin, "npm-calls.txt")
+	writeFile(t, filepath.Join(fakeBin, "npm"), `#!/bin/sh
+printf '%s\n' "$*" >> "$RADAR_NPM_CALLS"
+printf 'ran %s\n' "$*"
+`)
+	if err := os.Chmod(filepath.Join(fakeBin, "npm"), 0o755); err != nil {
+		t.Fatalf("chmod fake npm: %v", err)
+	}
+	executeOut := runCLIWithEnv(t, []string{
+		"PATH=" + fakeBin + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"RADAR_NPM_CALLS=" + callsPath,
+	}, "research", "sync", "--radar-root", radarRoot, "--refresh-limit", "7", "--max-age-hours", "12", "--min-references", "4", "--execute", "--json")
+	var executeReport struct {
+		OK      bool `json:"ok"`
+		Execute bool `json:"execute"`
+		Steps   []struct {
+			Name     string `json:"name"`
+			OK       bool   `json:"ok"`
+			ExitCode int    `json:"exitCode"`
+			Output   string `json:"output"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal([]byte(executeOut), &executeReport); err != nil {
+		t.Fatalf("decode research sync execute json: %v\n%s", err, executeOut)
+	}
+	if !executeReport.OK || !executeReport.Execute || len(executeReport.Steps) != 6 {
+		t.Fatalf("execute report = %#v", executeReport)
+	}
+	for _, step := range executeReport.Steps {
+		if !step.OK || step.ExitCode != 0 || !strings.Contains(step.Output, "ran ") {
+			t.Fatalf("executed step = %#v", step)
+		}
+	}
+	callsRaw, err := os.ReadFile(callsPath)
+	if err != nil {
+		t.Fatalf("read fake npm calls: %v", err)
+	}
+	calls := string(callsRaw)
+	for _, want := range []string{
+		"test\n",
+		"run refresh -- --limit 7\n",
+		"run status -- --max-age-hours 12 --min-references 4\n",
+		"run audit\n",
+		"run coverage -- --min-references 4\n",
+		"run index\n",
+	} {
+		if !strings.Contains(calls, want) {
+			t.Fatalf("fake npm calls missing %q:\n%s", want, calls)
+		}
+	}
+}
+
+func TestResearchBacklogTreatsRadarSyncAsRadarGenerationImplementation(t *testing.T) {
+	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
+	index := map[string]any{
+		"schemaVersion":     1,
+		"sourceGeneratedAt": "2026-05-24T04:39:07Z",
+		"policy": map[string]any{
+			"minStars":    3000,
+			"months":      3,
+			"pushedAfter": "2026-02-24",
+		},
+		"features": map[string]any{
+			"github-radar-generation": map[string]any{
+				"id":     "github-radar-generation",
+				"title":  "GitHub Radar Generation",
+				"intent": "Find projects that continuously generate GitHub rankings.",
+				"topMatches": []map[string]any{
+					{"fullName": "EvanLi/Github-Ranking", "url": "https://github.com/EvanLi/Github-Ranking", "stars": 11211, "pushedAt": "2026-05-24T04:07:09Z"},
+					{"fullName": "star-history/star-history", "url": "https://github.com/star-history/star-history", "stars": 9079, "pushedAt": "2026-04-30T07:53:48Z"},
+					{"fullName": "gayanvoice/top-github-users", "url": "https://github.com/gayanvoice/top-github-users", "stars": 4764, "pushedAt": "2026-05-24T01:34:01Z"},
+				},
+			},
+		},
+	}
+	if err := os.WriteFile(indexPath, []byte(mustJSON(t, index)), 0o644); err != nil {
+		t.Fatalf("write radar index: %v", err)
+	}
+
+	out := runCLI(t, "research", "backlog", "--radar-index", indexPath, "--min-references", "3", "--limit", "1", "--reference-limit", "1", "--json")
+	var report struct {
+		Items []struct {
+			FeatureID              string `json:"featureId"`
+			Status                 string `json:"status"`
+			ImplementationCommands []struct {
+				Command        string `json:"command"`
+				CatalogCommand string `json:"catalogCommand"`
+				Available      bool   `json:"available"`
+			} `json:"implementationCommands"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode radar generation backlog json: %v\n%s", err, out)
+	}
+	if len(report.Items) != 1 || report.Items[0].FeatureID != "github-radar-generation" || report.Items[0].Status != "ready" {
+		t.Fatalf("radar generation backlog item = %#v", report.Items)
+	}
+	if len(report.Items[0].ImplementationCommands) != 1 || !report.Items[0].ImplementationCommands[0].Available || report.Items[0].ImplementationCommands[0].CatalogCommand != "research sync" || !strings.Contains(report.Items[0].ImplementationCommands[0].Command, "agent-testbench research sync") {
+		t.Fatalf("radar generation implementation commands = %#v", report.Items[0].ImplementationCommands)
 	}
 }
 

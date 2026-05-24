@@ -74,6 +74,9 @@ What to point out:
   turns fuzzy feature wording into a reviewable pre-design brief: selected
   feature, freshness/audit/reference/command gates, top references, and
   copyable `search`, `matrix`, `gate`, and `plan` commands.
+- `agent-testbench research sync --radar-root ./github-feature-radar --execute`
+  runs the external radar maintenance chain from AgentTestBench: test, refresh,
+  status, audit, coverage, and index, with per-step JSON results.
 - `agent-testbench research status --max-age-hours 72` checks whether the
   external feature index is fresh enough to trust, reports feature/reference
   and project-index counts, and prints the refresh, audit, coverage, and index
@@ -139,6 +142,9 @@ What to point out:
   会把模糊 feature 描述整理成可评审的设计前置 brief：选中的 feature、新鲜度、
   审计、引用数与命令门禁、top references，以及可复制的 `search`、`matrix`、
   `gate` 和 `plan` 命令。
+- `agent-testbench research sync --radar-root ./github-feature-radar --execute`
+  可以从 AgentTestBench 侧执行外部 radar 的维护链路：test、refresh、status、
+  audit、coverage 和 index，并返回每一步的 JSON 结果。
 - `agent-testbench research status --max-age-hours 72` 会先检查外部 feature
   index 是否足够新鲜可信，报告 feature/reference 与项目索引数量；如果过期，
   会打印 refresh、audit、coverage 和 index 的恢复命令。

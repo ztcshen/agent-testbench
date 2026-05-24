@@ -436,6 +436,7 @@ Usage:
   agent-testbench research features --radar-index PATH [--filter TEXT] [--json]
   agent-testbench research search --query TEXT --radar-index PATH [--limit N] [--reference-limit N] [--min-references N] [--json]
   agent-testbench research brief --query TEXT --radar-index PATH [--min-references N] [--require-command COMMAND] [--max-age-hours N] [--reference-limit N] [--format text|json|markdown] [--json]
+  agent-testbench research sync --radar-root PATH [--radar-index PATH] [--refresh-limit N] [--max-age-hours N] [--min-references N] [--execute] [--json]
   agent-testbench research coverage --radar-index PATH [--min-references N] [--limit N] [--json]
   agent-testbench research audit --radar-index PATH [--min-references N] [--json]
   agent-testbench research status --radar-index PATH [--max-age-hours N] [--json]
