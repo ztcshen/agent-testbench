@@ -245,29 +245,33 @@ type featureLiveCheckReference struct {
 }
 
 type featureRefreshPlanReport struct {
-	OK                bool                  `json:"ok"`
-	NeedsRefresh      bool                  `json:"needsRefresh"`
-	Reasons           []string              `json:"reasons,omitempty"`
-	SourceGeneratedAt string                `json:"sourceGeneratedAt"`
-	Checks            featureRefreshChecks  `json:"checks"`
-	Counts            featureRefreshCounts  `json:"counts"`
-	FocusFeatures     []featureRefreshFocus `json:"focusFeatures"`
-	NextCommands      []string              `json:"nextCommands"`
+	OK                bool                       `json:"ok"`
+	NeedsRefresh      bool                       `json:"needsRefresh"`
+	Reasons           []string                   `json:"reasons,omitempty"`
+	SourceGeneratedAt string                     `json:"sourceGeneratedAt"`
+	Checks            featureRefreshChecks       `json:"checks"`
+	Counts            featureRefreshCounts       `json:"counts"`
+	LiveCheck         *featureRoadmapLiveSummary `json:"liveCheck,omitempty"`
+	FocusFeatures     []featureRefreshFocus      `json:"focusFeatures"`
+	NextCommands      []string                   `json:"nextCommands"`
 }
 
 type featureRefreshChecks struct {
-	Fresh      bool `json:"fresh"`
-	AuditOK    bool `json:"auditOk"`
-	CoverageOK bool `json:"coverageOk"`
+	Fresh       bool `json:"fresh"`
+	AuditOK     bool `json:"auditOk"`
+	CoverageOK  bool `json:"coverageOk"`
+	LiveCheckOK bool `json:"liveCheckOk,omitempty"`
 }
 
 type featureRefreshCounts struct {
-	Features          int `json:"features"`
-	References        int `json:"references"`
-	Projects          int `json:"projects"`
-	AuditViolations   int `json:"auditViolations"`
-	CoverageFailures  int `json:"coverageFailures"`
-	ProjectViolations int `json:"projectViolations"`
+	Features           int `json:"features"`
+	References         int `json:"references"`
+	Projects           int `json:"projects"`
+	AuditViolations    int `json:"auditViolations"`
+	CoverageFailures   int `json:"coverageFailures"`
+	ProjectViolations  int `json:"projectViolations"`
+	LiveCheckFailures  int `json:"liveCheckFailures,omitempty"`
+	LiveCheckRefreshes int `json:"liveCheckRefreshes,omitempty"`
 }
 
 type featureRefreshFocus struct {
@@ -1037,6 +1041,12 @@ func runResearchRefreshPlan(args []string) error {
 	maxAgeHours := flags.Int("max-age-hours", 72, "Mark the feature index stale after this many hours")
 	nowValue := flags.String("now", "", "Override current time for deterministic checks (RFC3339)")
 	limit := flags.Int("limit", 5, "Maximum focus features to include")
+	referenceLimit := flags.Int("reference-limit", 2, "Maximum top references per live-checked focus candidate")
+	liveCheck := flags.Bool("live-check", false, "Also verify maintenance candidates against live GitHub repository metadata")
+	githubAPIURL := flags.String("github-api-url", "https://api.github.com", "GitHub API base URL for --live-check")
+	tokenEnv := flags.String("token-env", "GITHUB_TOKEN", "Environment variable containing a GitHub token for --live-check")
+	maxStarDrift := flags.Int("max-star-drift", 0, "With --live-check, fail when live and local stars differ by more than N; 0 disables the drift gate")
+	maxPushedDriftHours := flags.Int("max-pushed-drift-hours", 0, "With --live-check, fail when live pushed_at is newer than local by more than N hours; 0 disables the drift gate")
 	requireReady := flags.Bool("require-ready", false, "Exit non-zero when the radar needs refresh")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
@@ -1058,6 +1068,19 @@ func runResearchRefreshPlan(args []string) error {
 		return err
 	}
 	report := buildFeatureRefreshPlanReport(index, resolvedIndexPath, *minReferences, *maxAgeHours, checkedAt, *limit)
+	if *liveCheck {
+		roadmap := buildFeatureRoadmapReport(index, resolvedIndexPath, *minReferences, *limit, *referenceLimit)
+		attachFeatureRoadmapLiveChecks(context.Background(), &roadmap, featureRoadmapLiveOptions{
+			Index:               index,
+			IndexPath:           resolvedIndexPath,
+			ReferenceLimit:      *referenceLimit,
+			GitHubAPIURL:        *githubAPIURL,
+			Token:               os.Getenv(strings.TrimSpace(*tokenEnv)),
+			MaxStarDrift:        *maxStarDrift,
+			MaxPushedDriftHours: *maxPushedDriftHours,
+		})
+		attachFeatureRefreshPlanLiveCheck(&report, roadmap, index, resolvedIndexPath, *minReferences, *limit, firstFeatureRefreshCommand(report.NextCommands), *referenceLimit, *maxStarDrift, *maxPushedDriftHours, *githubAPIURL)
+	}
 	if *jsonOutput {
 		if err := writeIndentedJSON(report); err != nil {
 			return err
@@ -1972,6 +1995,32 @@ func buildFeatureRefreshPlanReport(index featureRadarIndex, indexPath string, mi
 	return report
 }
 
+func attachFeatureRefreshPlanLiveCheck(report *featureRefreshPlanReport, roadmap featureRoadmapReport, index featureRadarIndex, indexPath string, minReferences int, limit int, refreshCommand string, referenceLimit int, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string) {
+	if roadmap.LiveCheck == nil {
+		return
+	}
+	report.LiveCheck = roadmap.LiveCheck
+	report.Checks.LiveCheckOK = roadmap.LiveCheck.OK
+	report.Counts.LiveCheckFailures = roadmap.LiveCheck.FailedCount
+	report.Counts.LiveCheckRefreshes = roadmap.LiveCheck.RefreshCount
+	if !roadmap.LiveCheck.OK {
+		if roadmap.LiveCheck.FailedCount > 0 {
+			report.Reasons = append(report.Reasons, fmt.Sprintf("live-check has %d failed reference(s)", roadmap.LiveCheck.FailedCount))
+		}
+		if roadmap.LiveCheck.RefreshCount > 0 {
+			report.Reasons = append(report.Reasons, fmt.Sprintf("live-check needs refresh for %d reference(s)", roadmap.LiveCheck.RefreshCount))
+		}
+		if roadmap.LiveCheck.FailedCount == 0 && roadmap.LiveCheck.RefreshCount == 0 {
+			report.Reasons = append(report.Reasons, "live-check did not pass")
+		}
+		report.OK = false
+	}
+	report.Reasons = uniquePreserveOrder(report.Reasons)
+	report.NeedsRefresh = len(report.Reasons) > 0
+	report.FocusFeatures = mergeFeatureRefreshLiveFocus(report.FocusFeatures, roadmap, index, indexPath, minReferences, limit, refreshCommand)
+	report.NextCommands = uniquePreserveOrder(append(report.NextCommands, featureRefreshLiveRoadmapCommand(indexPath, minReferences, limit, referenceLimit, maxStarDrift, maxPushedDriftHours, githubAPIURL)))
+}
+
 func firstFeatureRefreshCommand(commands []string) string {
 	if len(commands) == 0 {
 		return "npm run refresh -- --limit 20"
@@ -2034,6 +2083,91 @@ func buildFeatureRefreshFocus(index featureRadarIndex, indexPath string, coverag
 		return items[:limit]
 	}
 	return items
+}
+
+func mergeFeatureRefreshLiveFocus(existing []featureRefreshFocus, roadmap featureRoadmapReport, index featureRadarIndex, indexPath string, minReferences int, limit int, refreshCommand string) []featureRefreshFocus {
+	items := append([]featureRefreshFocus{}, existing...)
+	positions := map[string]int{}
+	for i := range items {
+		positions[items[i].ID] = i
+	}
+	for _, item := range roadmap.Items {
+		if item.LiveCheck == nil || item.LiveCheck.OK {
+			continue
+		}
+		reasons := featureRefreshLiveReasons(item.LiveCheck)
+		if position, ok := positions[item.ID]; ok {
+			items[position].Reasons = uniquePreserveOrder(append(items[position].Reasons, reasons...))
+			if featureRefreshGateRank(item.Gate) < featureRefreshGateRank(items[position].Gate) {
+				items[position].Gate = item.Gate
+			}
+			if strings.TrimSpace(items[position].PlanCommand) == "" || strings.Contains(item.PlanCommand, "--live-check") {
+				items[position].PlanCommand = item.PlanCommand
+			}
+			continue
+		}
+		positions[item.ID] = len(items)
+		items = append(items, featureRefreshFocus{
+			ID:              item.ID,
+			Title:           item.Title,
+			References:      item.References,
+			Gate:            item.Gate,
+			Reasons:         reasons,
+			MatrixCommand:   "agent-testbench research matrix --filter " + quoteCommandValue(item.ID) + featureRadarIndexFlag(indexPath) + " --limit 3 --json",
+			PlanCommand:     item.PlanCommand,
+			RefreshCommand:  refreshCommand,
+			TopProjectNames: featureRefreshProjectNames(index.Features[item.ID].TopMatches),
+		})
+	}
+	sortFeatureRefreshFocus(items)
+	if len(items) > limit && limit > 0 {
+		return items[:limit]
+	}
+	return items
+}
+
+func featureRefreshLiveReasons(liveReport *featureLiveCheckReport) []string {
+	if liveReport == nil || liveReport.OK {
+		return nil
+	}
+	reasons := []string{}
+	if liveReport.FailedCount > 0 {
+		reasons = append(reasons, fmt.Sprintf("live-check has %d failed reference(s)", liveReport.FailedCount))
+	}
+	if liveReport.RefreshCount > 0 {
+		reasons = append(reasons, fmt.Sprintf("live-check needs refresh for %d reference(s)", liveReport.RefreshCount))
+	}
+	if liveReport.FailedCount == 0 && liveReport.RefreshCount == 0 {
+		reasons = append(reasons, "live-check did not pass")
+	}
+	return reasons
+}
+
+func sortFeatureRefreshFocus(items []featureRefreshFocus) {
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Gate != items[j].Gate {
+			return featureRefreshGateRank(items[i].Gate) < featureRefreshGateRank(items[j].Gate)
+		}
+		if items[i].References != items[j].References {
+			return items[i].References < items[j].References
+		}
+		return items[i].ID < items[j].ID
+	})
+}
+
+func featureRefreshGateRank(gate string) int {
+	switch gate {
+	case "failed":
+		return 0
+	case "live-failed":
+		return 1
+	case "needs-refresh":
+		return 2
+	case "passed":
+		return 3
+	default:
+		return 4
+	}
 }
 
 func featureRefreshProjectNames(matches []featureRadarMatch) []string {
@@ -2880,6 +3014,27 @@ func featureGateLiveCheckCommand(featureQuery string, indexPath string, limit in
 	if limit > 0 {
 		command += fmt.Sprintf(" --limit %d", limit)
 	}
+	if maxStarDrift > 0 {
+		command += fmt.Sprintf(" --max-star-drift %d", maxStarDrift)
+	}
+	if maxPushedDriftHours > 0 {
+		command += fmt.Sprintf(" --max-pushed-drift-hours %d", maxPushedDriftHours)
+	}
+	if strings.TrimSpace(githubAPIURL) != "" && strings.TrimSpace(githubAPIURL) != "https://api.github.com" {
+		command += " --github-api-url " + quoteCommandValue(githubAPIURL)
+	}
+	return command + " --json"
+}
+
+func featureRefreshLiveRoadmapCommand(indexPath string, minReferences int, limit int, referenceLimit int, maxStarDrift int, maxPushedDriftHours int, githubAPIURL string) string {
+	command := fmt.Sprintf("agent-testbench research roadmap%s --min-references %d", featureRadarIndexFlag(indexPath), minReferences)
+	if limit > 0 {
+		command += fmt.Sprintf(" --limit %d", limit)
+	}
+	if referenceLimit > 0 {
+		command += fmt.Sprintf(" --reference-limit %d", referenceLimit)
+	}
+	command += " --live-check"
 	if maxStarDrift > 0 {
 		command += fmt.Sprintf(" --max-star-drift %d", maxStarDrift)
 	}
@@ -3846,8 +4001,19 @@ func printFeatureRefreshPlanReport(report featureRefreshPlanReport) {
 	if report.SourceGeneratedAt != "" {
 		fmt.Printf("Radar index: %s\n", report.SourceGeneratedAt)
 	}
-	fmt.Printf("Checks: fresh=%s audit=%s coverage=%s\n", statusWord(report.Checks.Fresh), statusWord(report.Checks.AuditOK), statusWord(report.Checks.CoverageOK))
-	fmt.Printf("Counts: features=%d references=%d projects=%d auditViolations=%d coverageFailures=%d projectViolations=%d\n", report.Counts.Features, report.Counts.References, report.Counts.Projects, report.Counts.AuditViolations, report.Counts.CoverageFailures, report.Counts.ProjectViolations)
+	checks := fmt.Sprintf("Checks: fresh=%s audit=%s coverage=%s", statusWord(report.Checks.Fresh), statusWord(report.Checks.AuditOK), statusWord(report.Checks.CoverageOK))
+	if report.LiveCheck != nil {
+		checks += " live=" + statusWord(report.Checks.LiveCheckOK)
+	}
+	fmt.Println(checks)
+	counts := fmt.Sprintf("Counts: features=%d references=%d projects=%d auditViolations=%d coverageFailures=%d projectViolations=%d", report.Counts.Features, report.Counts.References, report.Counts.Projects, report.Counts.AuditViolations, report.Counts.CoverageFailures, report.Counts.ProjectViolations)
+	if report.LiveCheck != nil {
+		counts += fmt.Sprintf(" liveFailures=%d liveRefreshes=%d", report.Counts.LiveCheckFailures, report.Counts.LiveCheckRefreshes)
+	}
+	fmt.Println(counts)
+	if report.LiveCheck != nil {
+		fmt.Printf("Live check: %s checked=%d failed=%d refresh-needed=%d\n", statusWord(report.LiveCheck.OK), report.LiveCheck.CheckedCount, report.LiveCheck.FailedCount, report.LiveCheck.RefreshCount)
+	}
 	if len(report.Reasons) > 0 {
 		fmt.Println("Reasons:")
 		for _, reason := range report.Reasons {

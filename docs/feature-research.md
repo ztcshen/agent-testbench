@@ -188,6 +188,9 @@ Before picking the next CLI slice, check the whole feature index:
   --min-references 3 \
   --max-age-hours 72 \
   --limit 5 \
+  --live-check \
+  --max-star-drift 100 \
+  --max-pushed-drift-hours 72 \
   --json
 
 ./bin/agent-testbench.sh research live-check \
@@ -242,10 +245,13 @@ or demo work depends on them. The JSON report includes live/local stars,
 `starDelta`, live/local pushed dates, `pushedDeltaHours`, policy failure
 reasons, refresh reasons, and a `refreshNeeded` summary for automation.
 
-`research refresh-plan` combines freshness, audit, and coverage checks into a
-maintenance plan. It tells agents whether the radar needs refresh, why, which
-feature records should be expanded first, and which external radar commands
-should run next. Use it before scheduled refreshes or before starting a new CLI
+`research refresh-plan` combines freshness, audit, coverage, and optional live
+GitHub drift checks into a maintenance plan. It tells agents whether the radar
+needs refresh, why, which feature records should be expanded first, and which
+external radar commands should run next. With `--live-check`, policy failures
+or `--max-star-drift` / `--max-pushed-drift-hours` drift mark the plan as
+refresh-needed even when the local index timestamp, audit, and coverage still
+look healthy. Use it before scheduled refreshes or before starting a new CLI
 slice from stale radar data. Use `research sync --execute` when the plan should
 be carried out immediately from AgentTestBench.
 
@@ -370,6 +376,7 @@ Recommended pre-design gate:
 ./bin/agent-testbench.sh research coverage --min-references 3
 ./bin/agent-testbench.sh research matrix --filter "new cli capability" --limit 3
 ./bin/agent-testbench.sh research refresh-plan --min-references 3 --max-age-hours 72
+./bin/agent-testbench.sh research refresh-plan --min-references 3 --max-age-hours 72 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research roadmap --min-references 3 --limit 5 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research backlog --min-references 3 --limit 5 --live-check --max-star-drift 100 --max-pushed-drift-hours 72
 ./bin/agent-testbench.sh research gate \

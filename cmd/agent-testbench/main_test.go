@@ -1745,6 +1745,127 @@ func TestResearchRefreshPlanPrioritizesStaleCoverageAndAuditSignals(t *testing.T
 	}
 }
 
+func TestResearchRefreshPlanCanUseLiveCheckDriftSignals(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/repos/example/gate-engine":
+			fmt.Fprint(w, `{"full_name":"example/gate-engine","html_url":"https://github.com/example/gate-engine","stargazers_count":3400,"pushed_at":"2026-05-24T12:00:00Z","archived":false,"fork":false}`)
+		case "/repos/example/gate-policy":
+			fmt.Fprint(w, `{"full_name":"example/gate-policy","html_url":"https://github.com/example/gate-policy","stargazers_count":4558,"pushed_at":"2026-05-22T12:00:00Z","archived":false,"fork":false}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	indexPath := filepath.Join(t.TempDir(), "feature-index.json")
+	index := map[string]any{
+		"schemaVersion":     1,
+		"generatedAt":       "2026-05-24T04:39:07Z",
+		"sourceGeneratedAt": "2026-05-24T04:39:07Z",
+		"policy": map[string]any{
+			"minStars":    3000,
+			"months":      3,
+			"pushedAfter": "2026-02-24",
+		},
+		"features": map[string]any{
+			"quality-gates": map[string]any{
+				"id":     "quality-gates",
+				"title":  "Quality Gates",
+				"intent": "Find projects that gate releases.",
+				"topMatches": []map[string]any{
+					{"fullName": "example/gate-engine", "url": "https://github.com/example/gate-engine", "stars": 3040, "pushedAt": "2026-05-20T12:00:00Z"},
+					{"fullName": "example/gate-policy", "url": "https://github.com/example/gate-policy", "stars": 4558, "pushedAt": "2026-05-22T12:00:00Z"},
+				},
+			},
+		},
+		"projectIndex": map[string]any{
+			"example/gate-engine": map[string]any{
+				"fullName":        "example/gate-engine",
+				"url":             "https://github.com/example/gate-engine",
+				"stars":           3040,
+				"pushedAt":        "2026-05-20T12:00:00Z",
+				"matchedFeatures": []string{"quality-gates"},
+			},
+			"example/gate-policy": map[string]any{
+				"fullName":        "example/gate-policy",
+				"url":             "https://github.com/example/gate-policy",
+				"stars":           4558,
+				"pushedAt":        "2026-05-22T12:00:00Z",
+				"matchedFeatures": []string{"quality-gates"},
+			},
+		},
+	}
+	if err := os.WriteFile(indexPath, []byte(mustJSON(t, index)), 0o644); err != nil {
+		t.Fatalf("write radar index: %v", err)
+	}
+
+	out := runCLIFails(t,
+		"research", "refresh-plan",
+		"--radar-index", indexPath,
+		"--min-references", "2",
+		"--max-age-hours", "72",
+		"--now", "2026-05-24T05:00:00Z",
+		"--limit", "1",
+		"--live-check",
+		"--github-api-url", server.URL,
+		"--max-star-drift", "100",
+		"--max-pushed-drift-hours", "24",
+		"--require-ready",
+		"--json",
+	)
+	var report struct {
+		OK           bool     `json:"ok"`
+		NeedsRefresh bool     `json:"needsRefresh"`
+		Reasons      []string `json:"reasons"`
+		Checks       struct {
+			Fresh       bool `json:"fresh"`
+			AuditOK     bool `json:"auditOk"`
+			CoverageOK  bool `json:"coverageOk"`
+			LiveCheckOK bool `json:"liveCheckOk"`
+		} `json:"checks"`
+		Counts struct {
+			LiveCheckRefreshes int `json:"liveCheckRefreshes"`
+		} `json:"counts"`
+		LiveCheck struct {
+			OK                bool `json:"ok"`
+			RefreshNeeded     bool `json:"refreshNeeded"`
+			RefreshCount      int  `json:"refreshCount"`
+			CheckedCandidates int  `json:"checkedCandidates"`
+		} `json:"liveCheck"`
+		FocusFeatures []struct {
+			ID          string   `json:"id"`
+			Gate        string   `json:"gate"`
+			Reasons     []string `json:"reasons"`
+			PlanCommand string   `json:"planCommand"`
+		} `json:"focusFeatures"`
+		NextCommands []string `json:"nextCommands"`
+	}
+	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
+		t.Fatalf("decode live refresh plan json: %v\n%s", err, out)
+	}
+	if report.OK || !report.NeedsRefresh || !report.Checks.Fresh || !report.Checks.AuditOK || !report.Checks.CoverageOK || report.Checks.LiveCheckOK {
+		t.Fatalf("live refresh plan checks = %#v", report)
+	}
+	if report.LiveCheck.OK || !report.LiveCheck.RefreshNeeded || report.LiveCheck.RefreshCount != 1 || report.LiveCheck.CheckedCandidates != 1 || report.Counts.LiveCheckRefreshes != 1 {
+		t.Fatalf("live refresh plan summary = %#v", report)
+	}
+	if !strings.Contains(strings.Join(report.Reasons, "\n"), "live-check needs refresh for 1 reference(s)") {
+		t.Fatalf("live refresh plan reasons = %#v", report.Reasons)
+	}
+	if len(report.FocusFeatures) != 1 || report.FocusFeatures[0].ID != "quality-gates" || report.FocusFeatures[0].Gate != "needs-refresh" || !strings.Contains(strings.Join(report.FocusFeatures[0].Reasons, "\n"), "live-check needs refresh for 1 reference(s)") || !strings.Contains(report.FocusFeatures[0].PlanCommand, "--live-check") {
+		t.Fatalf("live refresh plan focus features = %#v", report.FocusFeatures)
+	}
+	joinedNextCommands := strings.Join(report.NextCommands, "\n")
+	if !strings.Contains(joinedNextCommands, "research roadmap"+featureRadarIndexFlag(indexPath)+" --min-references 2 --limit 1 --reference-limit 2 --live-check --max-star-drift 100 --max-pushed-drift-hours 24 --github-api-url "+quoteCommandValue(server.URL)+" --json") {
+		t.Fatalf("live refresh plan next commands = %#v", report.NextCommands)
+	}
+	if !strings.Contains(out, "feature radar refresh plan is not ready") {
+		t.Fatalf("live refresh plan should fail require-ready:\n%s", out)
+	}
+}
+
 func TestResearchStatusReportsFeatureIndexFreshness(t *testing.T) {
 	indexPath := filepath.Join(t.TempDir(), "data", "feature-index.json")
 	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {

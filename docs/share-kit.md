@@ -108,6 +108,10 @@ What to point out:
   merges freshness, audit, and coverage checks into the next maintenance plan:
   why the radar needs refresh, which features need more references, and which
   external radar commands to run.
+- `agent-testbench research refresh-plan --min-references 3 --max-age-hours 72 --live-check`
+  adds live GitHub policy and drift signals to that maintenance plan, so a
+  locally fresh index still asks for refresh when reference stars or pushed_at
+  data has moved beyond the configured thresholds.
 - `agent-testbench research roadmap --min-references 3` ranks the next feature
   candidates by reference coverage, catalog-verified next commands, and star
   signal, then prints a ready-to-run `research plan` command for each item.
@@ -191,6 +195,9 @@ What to point out:
 - `agent-testbench research refresh-plan --min-references 3 --max-age-hours 72`
   会把新鲜度、审计和覆盖检查合成下一次维护计划：为什么需要刷新、哪些 feature
   需要补引用，以及应该执行哪些外部 radar 命令。
+- `agent-testbench research refresh-plan --min-references 3 --max-age-hours 72 --live-check`
+  会把 GitHub 实时 policy/drift 信号也纳入维护计划；即使本地 index 仍新鲜，
+  当 reference stars 或 pushed_at 漂移超过阈值时也会要求刷新。
 - `agent-testbench research roadmap --min-references 3` 会按引用覆盖、命令目录已校验的
   next commands 和 star 信号排序下一批 feature 候选，并为每一项输出可直接执行的
   `research plan` 命令。

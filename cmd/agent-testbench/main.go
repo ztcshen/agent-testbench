@@ -443,7 +443,7 @@ Usage:
   agent-testbench research audit --radar-index PATH [--min-references N] [--json]
   agent-testbench research status --radar-index PATH [--max-age-hours N] [--json]
   agent-testbench research matrix --radar-index PATH [--filter TEXT] [--limit N] [--json]
-  agent-testbench research refresh-plan --radar-index PATH [--min-references N] [--max-age-hours N] [--limit N] [--require-ready] [--json]
+  agent-testbench research refresh-plan --radar-index PATH [--min-references N] [--max-age-hours N] [--limit N] [--reference-limit N] [--live-check] [--max-star-drift N] [--max-pushed-drift-hours N] [--github-api-url URL] [--require-ready] [--json]
   agent-testbench research roadmap --radar-index PATH [--min-references N] [--limit N] [--reference-limit N] [--live-check] [--max-star-drift N] [--max-pushed-drift-hours N] [--github-api-url URL] [--json]
   agent-testbench research backlog --radar-index PATH [--min-references N] [--limit N] [--reference-limit N] [--live-check] [--max-star-drift N] [--max-pushed-drift-hours N] [--github-api-url URL] [--json]
   agent-testbench research gate --feature TEXT --radar-index PATH [--require-min-matches N] [--require-command COMMAND] [--max-age-hours N] [--live-check] [--max-star-drift N] [--max-pushed-drift-hours N] [--json]
