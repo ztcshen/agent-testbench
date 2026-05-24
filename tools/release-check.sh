@@ -21,6 +21,7 @@ is_sqlite_store_dsn() {
 }
 
 scope_paths=()
+full_release_check=0
 add_scope_path() {
   local path=$1
   path=${path#./}
@@ -31,6 +32,10 @@ add_scope_path() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --full)
+      full_release_check=1
+      shift
+      ;;
     --scope)
       if [[ $# -lt 2 ]]; then
         echo "--scope requires a path" >&2
@@ -103,6 +108,19 @@ if [[ ${#scope_paths[@]} -gt 0 ]]; then
   scoped_release_check=1
 fi
 
+if [[ "$scoped_release_check" -eq 1 && "$full_release_check" -eq 1 ]]; then
+  echo "release-check cannot combine --full with --scope or --scope-file." >&2
+  exit 1
+fi
+
+if [[ "$scoped_release_check" -eq 0 && "$full_release_check" -eq 0 ]]; then
+  echo "release-check requires --scope, --scope-file, or --full." >&2
+  echo "Slice validation: AGENT_TESTBENCH_SMOKE_STORE_DSN='sqlite:///tmp/agent-testbench-smoke.sqlite' npm run release-check -- --scope PATH" >&2
+  echo "Scope file: AGENT_TESTBENCH_SMOKE_STORE_DSN='sqlite:///tmp/agent-testbench-smoke.sqlite' npm run release-check -- --scope-file .release-check-scope" >&2
+  echo "Full sign-off: AGENT_TESTBENCH_SMOKE_STORE_DSN='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run release-check -- --full" >&2
+  exit 1
+fi
+
 if [[ "$scoped_release_check" -eq 1 ]]; then
   step "checking release scope"
   printf '  %s\n' "${scope_paths[@]}"
@@ -127,9 +145,9 @@ step "checking SQL smoke Store"
 if [[ -z "${AGENT_TESTBENCH_SMOKE_STORE_DSN:-${AGENT_TESTBENCH_SMOKE_STORE:-}}" ]]; then
   echo "AGENT_TESTBENCH_SMOKE_STORE_DSN or AGENT_TESTBENCH_SMOKE_STORE is required for release-check." >&2
   echo "SQL Store examples:" >&2
-  echo "PostgreSQL: AGENT_TESTBENCH_SMOKE_STORE_DSN='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run release-check" >&2
-  echo "MySQL: AGENT_TESTBENCH_SMOKE_STORE='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run release-check" >&2
-  echo "SQLite: AGENT_TESTBENCH_SMOKE_STORE='sqlite:///tmp/agent-testbench-smoke.sqlite' npm run release-check" >&2
+  echo "PostgreSQL: AGENT_TESTBENCH_SMOKE_STORE_DSN='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run release-check -- --full" >&2
+  echo "MySQL: AGENT_TESTBENCH_SMOKE_STORE='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run release-check -- --full" >&2
+  echo "SQLite: AGENT_TESTBENCH_SMOKE_STORE='sqlite:///tmp/agent-testbench-smoke.sqlite' npm run release-check -- --scope PATH" >&2
   exit 1
 fi
 smoke_store_dsn="${AGENT_TESTBENCH_SMOKE_STORE_DSN:-${AGENT_TESTBENCH_SMOKE_STORE:-}}"

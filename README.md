@@ -96,13 +96,13 @@ npm ci
 # SQL Store examples:
 # PostgreSQL:
 AGENT_TESTBENCH_DEMO_STORE='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run demo:api-case
-AGENT_TESTBENCH_SMOKE_STORE_DSN='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run release-check -- --scope cmd/agent-testbench
 # MySQL:
 AGENT_TESTBENCH_DEMO_STORE='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run demo:api-case
-AGENT_TESTBENCH_SMOKE_STORE_DSN='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run release-check -- --scope cmd/agent-testbench
 # SQLite:
 AGENT_TESTBENCH_DEMO_STORE="sqlite://$PWD/.runtime/agent-testbench-smoke.sqlite" npm run demo:api-case
-AGENT_TESTBENCH_SMOKE_STORE_DSN="sqlite://$PWD/.runtime/agent-testbench-smoke.sqlite" npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN="sqlite://$PWD/.runtime/agent-testbench-smoke.sqlite" npm run release-check -- --scope cmd/agent-testbench
 ```
 
 The primary CLI is `agent-testbench`; public configuration and smoke-test
@@ -209,8 +209,10 @@ Current working areas:
   acceptance workflow recording, and verified publishing gates.
 - Workbench: local React pages backed by Control plane APIs for catalog,
   workflow, environment, run, Evidence, and topology review.
-- Release gate: `AGENT_TESTBENCH_SMOKE_STORE_DSN=postgres://... npm run release-check`
-  or `AGENT_TESTBENCH_SMOKE_STORE_DSN=mysql://... npm run release-check`; for an
+- Release gate: daily slices should run `npm run release-check -- --scope PATH`;
+  full sign-off uses
+  `AGENT_TESTBENCH_SMOKE_STORE_DSN=postgres://... npm run release-check -- --full`
+  or `AGENT_TESTBENCH_SMOKE_STORE_DSN=mysql://... npm run release-check -- --full`; for an
   optional organization-owned MySQL Store sign-off, run
   `npm run release-check:mysql-real:preflight` first, then
   `npm run release-check:mysql-real` with
@@ -228,9 +230,9 @@ for that workflow before running the strict gate.
 Run the full local gate before publishing a change:
 
 ```sh
-AGENT_TESTBENCH_SMOKE_STORE_DSN='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run release-check -- --full
 # or
-AGENT_TESTBENCH_SMOKE_STORE_DSN='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run release-check -- --full
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and
