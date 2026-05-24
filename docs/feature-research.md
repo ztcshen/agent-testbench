@@ -201,6 +201,13 @@ refresh.
 count, and ranked reference projects. Use it as the local feature-search entry
 point; the crawler stays in the external radar project.
 
+`research terms` turns the maintained `tokenIndex` into a browsable feature
+search glossary. It lists the searchable term, mapped feature count, reference
+count, and ready-to-run `research search` commands, so a CLI slice can start
+from high-signal terms instead of guessing project names. Add `--filter` to
+focus the glossary; direct term matches rank before broader feature-title
+matches so suggestions stay close to the intended query.
+
 `research references` keeps project lookup feature-first. It resolves a feature
 query through the radar token index, then lists the maintained project ledger
 entries attached to that feature. Ranked `topMatches` stay first, and

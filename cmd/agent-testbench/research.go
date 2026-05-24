@@ -473,6 +473,30 @@ type featureSearchCandidate struct {
 	TopReferences []featureRadarMatch     `json:"topReferences"`
 }
 
+type featureTermsReport struct {
+	OK                bool               `json:"ok"`
+	Filter            string             `json:"filter,omitempty"`
+	Count             int                `json:"count"`
+	Policy            featureRadarPolicy `json:"policy"`
+	SourceGeneratedAt string             `json:"sourceGeneratedAt"`
+	Terms             []featureTermItem  `json:"terms"`
+	NextCommands      []string           `json:"nextCommands,omitempty"`
+}
+
+type featureTermItem struct {
+	Term           string               `json:"term"`
+	FeatureCount   int                  `json:"featureCount"`
+	ReferenceCount int                  `json:"referenceCount"`
+	Features       []featureTermFeature `json:"features"`
+	SearchCommand  string               `json:"searchCommand"`
+}
+
+type featureTermFeature struct {
+	ID         string `json:"id"`
+	Title      string `json:"title"`
+	References int    `json:"references"`
+}
+
 type featureBriefReport struct {
 	OK                   bool                     `json:"ok"`
 	Query                string                   `json:"query"`
@@ -652,6 +676,8 @@ func runResearch(args []string) error {
 		return runResearchFeature(args[1:])
 	case "features":
 		return runResearchFeatures(args[1:])
+	case "terms":
+		return runResearchTerms(args[1:])
 	case "search":
 		return runResearchSearch(args[1:])
 	case "references":
@@ -763,6 +789,38 @@ func runResearchFeatures(args []string) error {
 		return json.NewEncoder(os.Stdout).Encode(report)
 	}
 	printFeatureRadarCatalogReport(report)
+	return nil
+}
+
+func runResearchTerms(args []string) error {
+	flags := flag.NewFlagSet("research terms", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	indexPath := flags.String("radar-index", "", "Path to github-feature-radar data/feature-index.json")
+	filter := flags.String("filter", "", "Filter terms by token text or mapped feature")
+	limit := flags.Int("limit", 20, "Maximum feature search terms to show")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	resolvedIndexPath := strings.TrimSpace(*indexPath)
+	if resolvedIndexPath == "" {
+		resolvedIndexPath = strings.TrimSpace(os.Getenv(featureRadarIndexEnv))
+	}
+	if resolvedIndexPath == "" {
+		return fmt.Errorf("research terms requires --radar-index PATH or %s", featureRadarIndexEnv)
+	}
+	index, err := readFeatureRadarIndex(resolvedIndexPath)
+	if err != nil {
+		return err
+	}
+	if len(index.TokenIndex) == 0 {
+		return errors.New("research terms requires a radar index with non-empty tokenIndex; regenerate the feature index before browsing search terms")
+	}
+	report := buildFeatureTermsReport(index, resolvedIndexPath, *filter, *limit)
+	if *jsonOutput {
+		return json.NewEncoder(os.Stdout).Encode(report)
+	}
+	printFeatureTermsReport(report)
 	return nil
 }
 
@@ -3929,6 +3987,109 @@ func buildFeatureRadarCatalogReport(index featureRadarIndex, filter string) feat
 	return report
 }
 
+func buildFeatureTermsReport(index featureRadarIndex, indexPath string, filter string, limit int) featureTermsReport {
+	if limit <= 0 {
+		limit = 20
+	}
+	filter = strings.TrimSpace(filter)
+	terms := []featureTermItem{}
+	for token, featureIDs := range index.TokenIndex {
+		token = strings.TrimSpace(token)
+		if token == "" || !featureSearchDisplayToken(token) {
+			continue
+		}
+		item := featureTermItem{Term: token}
+		for _, featureID := range uniquePreserveOrder(featureIDs) {
+			feature, ok := index.Features[featureID]
+			if !ok {
+				continue
+			}
+			item.Features = append(item.Features, featureTermFeature{
+				ID:         feature.ID,
+				Title:      feature.Title,
+				References: len(feature.TopMatches),
+			})
+			item.ReferenceCount += len(feature.TopMatches)
+		}
+		if len(item.Features) == 0 || !featureTermMatchesFilter(item, filter) {
+			continue
+		}
+		sort.Slice(item.Features, func(i, j int) bool {
+			if item.Features[i].References != item.Features[j].References {
+				return item.Features[i].References > item.Features[j].References
+			}
+			return item.Features[i].ID < item.Features[j].ID
+		})
+		item.FeatureCount = len(item.Features)
+		item.SearchCommand = "agent-testbench research search --query " + quoteCommandValue(token) + featureRadarIndexFlag(indexPath) + " --json"
+		terms = append(terms, item)
+	}
+	sort.Slice(terms, func(i, j int) bool {
+		leftDirect := featureTermTokenMatchesFilter(terms[i].Term, filter)
+		rightDirect := featureTermTokenMatchesFilter(terms[j].Term, filter)
+		if leftDirect != rightDirect {
+			return leftDirect
+		}
+		if terms[i].FeatureCount != terms[j].FeatureCount {
+			return terms[i].FeatureCount > terms[j].FeatureCount
+		}
+		if terms[i].ReferenceCount != terms[j].ReferenceCount {
+			return terms[i].ReferenceCount > terms[j].ReferenceCount
+		}
+		return terms[i].Term < terms[j].Term
+	})
+	if len(terms) > limit {
+		terms = terms[:limit]
+	}
+	report := featureTermsReport{
+		OK:                len(terms) > 0,
+		Filter:            filter,
+		Count:             len(terms),
+		Policy:            index.Policy,
+		SourceGeneratedAt: index.SourceGeneratedAt,
+		Terms:             terms,
+		NextCommands:      featureTermsNextCommands(terms, indexPath, filter),
+	}
+	return report
+}
+
+func featureTermMatchesFilter(item featureTermItem, filter string) bool {
+	filter = strings.TrimSpace(filter)
+	if filter == "" {
+		return true
+	}
+	needle := normalizeFeatureRadarText(filter)
+	haystack := []string{item.Term}
+	for _, feature := range item.Features {
+		haystack = append(haystack, feature.ID, feature.Title)
+	}
+	return strings.Contains(normalizeFeatureRadarText(strings.Join(haystack, " ")), needle)
+}
+
+func featureTermTokenMatchesFilter(term string, filter string) bool {
+	filter = strings.TrimSpace(filter)
+	if filter == "" {
+		return true
+	}
+	return strings.Contains(normalizeFeatureRadarText(term), normalizeFeatureRadarText(filter))
+}
+
+func featureTermsNextCommands(terms []featureTermItem, indexPath string, filter string) []string {
+	commands := []string{}
+	for _, term := range terms {
+		commands = append(commands, term.SearchCommand)
+		if len(commands) >= 3 {
+			break
+		}
+	}
+	filter = strings.TrimSpace(filter)
+	if filter != "" {
+		commands = append(commands, "agent-testbench research matrix --filter "+quoteCommandValue(filter)+featureRadarIndexFlag(indexPath)+" --limit 5 --json")
+	}
+	commands = append(commands, fmt.Sprintf("agent-testbench research refresh-plan%s --min-references %d --max-age-hours 72 --json", featureRadarIndexFlag(indexPath), 3))
+	return uniquePreserveOrder(commands)
+}
+
 func buildFeatureSearchReport(index featureRadarIndex, indexPath string, query string, limit int, referenceLimit int, minReferences int) featureSearchReport {
 	if limit <= 0 {
 		limit = 5
@@ -5268,6 +5429,41 @@ func printFeatureRadarCatalogReport(report featureRadarCatalogReport) {
 		}
 		if len(feature.TopMatches) > 0 {
 			fmt.Printf("  Top reference: %s\n", feature.TopMatches[0].FullName)
+		}
+	}
+}
+
+func printFeatureTermsReport(report featureTermsReport) {
+	fmt.Println("Feature Search Terms")
+	fmt.Printf("Terms: %d\n", report.Count)
+	fmt.Printf("Policy: stars >= %d, pushed >= %s\n", report.Policy.MinStars, report.Policy.PushedAfter)
+	if report.SourceGeneratedAt != "" {
+		fmt.Printf("Radar index: %s\n", report.SourceGeneratedAt)
+	}
+	if report.Filter != "" {
+		fmt.Printf("Filter: %s\n", report.Filter)
+	}
+	if report.Count == 0 {
+		fmt.Println("No terms")
+		return
+	}
+	for _, term := range report.Terms {
+		fmt.Printf("- %s features=%d references=%d\n", term.Term, term.FeatureCount, term.ReferenceCount)
+		featureNames := []string{}
+		for _, feature := range term.Features {
+			featureNames = append(featureNames, fmt.Sprintf("%s(%d)", feature.ID, feature.References))
+		}
+		if len(featureNames) > 0 {
+			fmt.Printf("  features: %s\n", strings.Join(featureNames, ", "))
+		}
+		if term.SearchCommand != "" {
+			fmt.Printf("  Search: %s\n", term.SearchCommand)
+		}
+	}
+	if len(report.NextCommands) > 0 {
+		fmt.Println("Next commands:")
+		for _, command := range report.NextCommands {
+			fmt.Printf("- %s\n", command)
 		}
 	}
 }
