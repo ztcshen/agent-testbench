@@ -34,6 +34,7 @@ test("pull request CI passes changed paths into release-check scope", () => {
 
   const releaseJob = workflow.slice(releaseJobIndex, signoffJobIndex);
   assert.match(releaseJob, /Collect release scope/);
+  assert.match(releaseJob, /refs\/remotes\/origin\/\$\{\{\s*github\.base_ref\s*\}\}/);
   assert.match(releaseJob, /git diff --name-only --diff-filter=ACMRT/);
   assert.match(releaseJob, /npm run release-check -- --scope-file \.release-check-scope/);
 });
