@@ -204,6 +204,37 @@ test("release-check scoped Go selection runs only touched package directories", 
   }
 });
 
+test("release-check scoped Go selection includes reverse dependent packages", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agent-testbench-release-go-dependents-"));
+  const binDir = path.join(tempDir, "bin");
+  const goLog = path.join(tempDir, "go.log");
+  const fakeGo = path.join(binDir, "go");
+  try {
+    await mkdir(binDir, { recursive: true });
+    await writeFile(fakeGo, `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "${goLog}"
+if [[ "$1" == "list" && "$2" == "-f" ]]; then
+  printf '%s\\n' "agent-testbench/internal/store/mysql " "agent-testbench/cmd/agent-testbench agent-testbench/internal/store/mysql agent-testbench/internal/store" "agent-testbench/internal/runner/apicase agent-testbench/internal/store"
+elif [[ "$1" == "list" ]]; then
+  printf '%s\\n' "agent-testbench/internal/store/mysql"
+fi
+`);
+    await chmod(fakeGo, 0o755);
+
+    const result = runReleaseCheck(releaseCheckEnv({
+      AGENT_TESTBENCH_SMOKE_STORE_DSN: "sqlite:///tmp/agent-testbench-go-dependents-test.sqlite",
+      PATH: `${binDir}:${process.env.PATH}`,
+    }), ["--scope", "internal/store/mysql/config.go"]);
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /running scoped Go tests/);
+    assert.match(result.stdout, /agent-testbench\/cmd\/agent-testbench/);
+    assert.match(readFileSync(goLog, "utf8"), /^test \.\/internal\/store\/mysql agent-testbench\/cmd\/agent-testbench -count=1$/m);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("release-check scoped Go selection covers module metadata and package paths", () => {
   const script = readFileSync(path.join(rootDir, "tools", "release-check.sh"), "utf8");
 

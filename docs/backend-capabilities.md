@@ -236,9 +236,13 @@ The backend writes runtime artifacts that must not be committed:
 - browser smoke output / 浏览器冒烟测试输出；
 - temporary template package-home directories / 临时 template package-home 目录。
 
-`.gitignore` and `npm run release-check` guard these boundaries.
+`.gitignore` and explicit `npm run release-check -- --scope PATH`,
+`npm run release-check -- --scope-file PATH`, or `npm run release-check -- --full`
+gates guard these boundaries.
 
-`.gitignore` 和 `npm run release-check` 会守住这些边界。
+`.gitignore` 以及显式的 `npm run release-check -- --scope PATH`、
+`npm run release-check -- --scope-file PATH` 或
+`npm run release-check -- --full` 门禁会守住这些边界。
 
 ## Current Boundaries / 当前边界
 

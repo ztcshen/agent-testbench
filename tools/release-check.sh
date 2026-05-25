@@ -307,6 +307,20 @@ else
     go_scope_packages+=("$package")
   }
 
+  go_test_packages=()
+  add_go_test_package() {
+    local package=$1
+    local seen_package
+    if [[ ${#go_test_packages[*]} -gt 0 ]]; then
+      for seen_package in "${go_test_packages[@]}"; do
+        if [[ "$seen_package" == "$package" ]]; then
+          return
+        fi
+      done
+    fi
+    go_test_packages+=("$package")
+  }
+
   collect_go_scope_package() {
     local path=$1
     local dir
@@ -411,12 +425,42 @@ else
         go test ./... -count=1
       fi
     else
+      for package in "${go_scope_packages[@]}"; do
+        add_go_test_package "$package"
+      done
+
+      target_go_imports=()
+      while IFS= read -r import_path; do
+        if [[ -n "$import_path" ]]; then
+          target_go_imports+=("$import_path")
+        fi
+      done < <(go list "${go_scope_packages[@]}")
+
+      if [[ ${#target_go_imports[*]} -gt 0 ]]; then
+        while IFS= read -r package_line; do
+          package=${package_line%% *}
+          deps=""
+          if [[ "$package_line" == *" "* ]]; then
+            deps=${package_line#* }
+          fi
+          for target_import in "${target_go_imports[@]}"; do
+            if [[ "$package" == "$target_import" ]]; then
+              continue
+            fi
+            if [[ " $deps " == *" $target_import "* ]]; then
+              add_go_test_package "$package"
+              break
+            fi
+          done
+        done < <(go list -f '{{.ImportPath}} {{join .Deps " "}}' ./...)
+      fi
+
       if is_mysql_store_dsn "$smoke_store_dsn"; then
-        printf '  go test -p 1 %s -count=1\n' "${go_scope_packages[*]}"
-        go test -p 1 "${go_scope_packages[@]}" -count=1
+        printf '  go test -p 1 %s -count=1\n' "${go_test_packages[*]}"
+        go test -p 1 "${go_test_packages[@]}" -count=1
       else
-        printf '  go test %s -count=1\n' "${go_scope_packages[*]}"
-        go test "${go_scope_packages[@]}" -count=1
+        printf '  go test %s -count=1\n' "${go_test_packages[*]}"
+        go test "${go_test_packages[@]}" -count=1
       fi
     fi
     ran_scoped_runtime_tests=1
