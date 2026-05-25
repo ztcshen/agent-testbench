@@ -770,10 +770,10 @@ func runStoreDDL(args []string) error {
 	}
 	switch selectedBackend {
 	case "postgres", "postgresql":
-		fmt.Println(strings.Join(sqlstore.CoreSchemaSQL(sqlstore.PostgresDialect{}), "\n\n"))
+		fmt.Println(strings.Join(sqlstore.SchemaDDL(sqlstore.PostgresDialect{}), "\n\n"))
 		return nil
 	case "mysql":
-		fmt.Println(strings.Join(sqlstore.CoreSchemaSQL(sqlstore.MySQLDialect{}), "\n\n"))
+		fmt.Println(strings.Join(sqlstore.SchemaDDL(sqlstore.MySQLDialect{}), "\n\n"))
 		return nil
 	default:
 		return fmt.Errorf("unsupported DDL backend %q; supported backends: postgres, mysql", *backend)

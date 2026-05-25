@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	CurrentSchemaVersion = 10
+	CurrentSchemaVersion = 11
 	CoreSchemaName       = "create shared sql store schema"
 )
 
@@ -53,6 +53,13 @@ func UpgradeSchema(ctx context.Context, db *sql.DB, d Dialect) (SchemaStatusResu
 			return SchemaStatusResult{}, fmt.Errorf("apply shared sql store migration: %w", err)
 		}
 	}
+	if current < 11 {
+		for _, statement := range schemaCommentSQL(d) {
+			if _, err := db.ExecContext(ctx, statement); err != nil {
+				return SchemaStatusResult{}, fmt.Errorf("apply shared sql store comments: %w", err)
+			}
+		}
+	}
 	query := fmt.Sprintf(`
 insert into schema_versions (version, name, applied_at)
 values (%s)
@@ -94,7 +101,7 @@ func CoreSchemaSQL(d Dialect) []string {
 	timeType := d.TimeType()
 	jsonType := d.JSONType()
 	boolType := d.BoolType()
-	statements := []string{
+	return []string{
 		fmt.Sprintf(`
 create table if not exists schema_versions (
   version integer primary key,
@@ -319,6 +326,10 @@ create table if not exists component_config_assets (
 		d.CreateIndexSQL("idx_component_config_assets_target", "component_config_assets", []string{"env_id", "target_component_id", "asset_kind", "apply_order", "asset_id"}),
 		d.CreateIndexSQL("idx_component_config_assets_owner_order", "component_config_assets", []string{"env_id", "owner_component_id", "apply_order", "asset_id"}),
 	}
+}
+
+func SchemaDDL(d Dialect) []string {
+	statements := append([]string{}, CoreSchemaSQL(d)...)
 	return append(statements, schemaCommentSQL(d)...)
 }
 
@@ -368,9 +379,6 @@ func incrementalSchemaSQL(d Dialect, current int) []string {
 			"alter table `config_read_model` modify column `profile_id` varchar(255) not null, modify column `model_key` varchar(255) not null;",
 			"alter table `profile_catalogs` modify column `profile_id` varchar(255) not null;",
 		)
-	}
-	if current < 10 {
-		statements = append(statements, schemaCommentSQL(d)...)
 	}
 	return statements
 }

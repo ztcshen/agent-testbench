@@ -9,10 +9,11 @@ type schemaTableComment struct {
 }
 
 type schemaColumnComment struct {
-	Name      string
-	MySQLType string
-	Nullable  bool
-	Comment   string
+	Name         string
+	MySQLType    string
+	MySQLDefault string
+	Nullable     bool
+	Comment      string
 }
 
 func schemaCommentSQL(d Dialect) []string {
@@ -35,7 +36,11 @@ func schemaCommentSQL(d Dialect) []string {
 				if column.Nullable {
 					nullable = ""
 				}
-				statements = append(statements, fmt.Sprintf("alter table %s modify column %s %s%s comment %s;", d.QuoteIdent(table.Table), d.QuoteIdent(column.Name), column.MySQLType, nullable, sqlLiteral(column.Comment)))
+				defaultClause := ""
+				if column.MySQLDefault != "" {
+					defaultClause = " default " + column.MySQLDefault
+				}
+				statements = append(statements, fmt.Sprintf("alter table %s modify column %s %s%s%s comment %s;", d.QuoteIdent(table.Table), d.QuoteIdent(column.Name), column.MySQLType, nullable, defaultClause, sqlLiteral(column.Comment)))
 			}
 		}
 	}
@@ -66,7 +71,7 @@ func schemaCommentSpecs() []schemaTableComment {
 			Columns: []schemaColumnComment{
 				{Name: "id", MySQLType: v255, Comment: "Stable workflow run identifier."},
 				{Name: "profile_id", MySQLType: v128, Comment: "Profile that supplied the workflow definition."},
-				{Name: "environment_id", MySQLType: v128, Comment: "Environment where the workflow run executed."},
+				{Name: "environment_id", MySQLType: v128, MySQLDefault: "''", Comment: "Environment where the workflow run executed."},
 				{Name: "workflow_id", MySQLType: v128, Comment: "Workflow definition executed by this run."},
 				{Name: "status", MySQLType: v128, Comment: "Current workflow run status."},
 				{Name: "evidence_root", MySQLType: text, Comment: "Root URI or path for evidence produced by the run."},
