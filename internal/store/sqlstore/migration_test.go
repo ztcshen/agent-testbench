@@ -184,8 +184,27 @@ func TestCoreSchemaSQLIncludesEnvironmentComponentAssets(t *testing.T) {
 	}
 }
 
-func TestCoreSchemaSQLIncludesPostgreSQLComments(t *testing.T) {
-	statements := sqlstore.CoreSchemaSQL(sqlstore.PostgresDialect{})
+func TestCoreSchemaSQLDoesNotApplyCommentsBeforeIncrementalMigrations(t *testing.T) {
+	for _, dialect := range []sqlstore.Dialect{sqlstore.PostgresDialect{}, sqlstore.MySQLDialect{}} {
+		t.Run(dialect.Name(), func(t *testing.T) {
+			statements := sqlstore.CoreSchemaSQL(dialect)
+			joined := strings.Join(statements, "\n")
+			for _, unwanted := range []string{
+				"comment on table",
+				"comment on column",
+				" comment = ",
+				" comment '",
+			} {
+				if strings.Contains(joined, unwanted) {
+					t.Fatalf("core schema should not contain comment DDL before incremental migrations %q:\n%s", unwanted, joined)
+				}
+			}
+		})
+	}
+}
+
+func TestSchemaDDLIncludesPostgreSQLComments(t *testing.T) {
+	statements := sqlstore.SchemaDDL(sqlstore.PostgresDialect{})
 	joined := strings.Join(statements, "\n")
 	for _, want := range []string{
 		`comment on table "runs" is 'Workflow run records and their execution summary.'`,
@@ -199,11 +218,12 @@ func TestCoreSchemaSQLIncludesPostgreSQLComments(t *testing.T) {
 	}
 }
 
-func TestCoreSchemaSQLIncludesMySQLComments(t *testing.T) {
-	statements := sqlstore.CoreSchemaSQL(sqlstore.MySQLDialect{})
+func TestSchemaDDLIncludesMySQLComments(t *testing.T) {
+	statements := sqlstore.SchemaDDL(sqlstore.MySQLDialect{})
 	joined := strings.Join(statements, "\n")
 	for _, want := range []string{
 		"alter table `runs` comment = 'Workflow run records and their execution summary.'",
+		"alter table `runs` modify column `environment_id` varchar(128) not null default '' comment 'Environment where the workflow run executed.'",
 		"alter table `runs` modify column `summary_json` json not null comment 'Machine-readable run summary used by APIs and reports.'",
 		"alter table `environment_components` comment = 'Runtime components that make up a registered environment.'",
 		"alter table `component_config_assets` modify column `content_inline` mediumtext not null comment 'Inline asset content when the asset is stored directly in the Store.'",
@@ -279,6 +299,93 @@ func TestUpgradeSchemaAddsCommentsFromVersionNine(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUpgradeSchemaAppliesCommentsAfterLegacyColumnMigrations(t *testing.T) {
+	tests := []struct {
+		name             string
+		dialect          sqlstore.Dialect
+		addColumnSQL     string
+		columnCommentSQL string
+	}{
+		{
+			name:             "postgres",
+			dialect:          sqlstore.PostgresDialect{},
+			addColumnSQL:     `alter table "runs" add column "environment_id" text not null default ''`,
+			columnCommentSQL: `comment on column "runs"."environment_id" is 'Environment where the workflow run executed.'`,
+		},
+		{
+			name:             "mysql",
+			dialect:          sqlstore.MySQLDialect{},
+			addColumnSQL:     "alter table `runs` add column `environment_id` varchar(128) not null default ''",
+			columnCommentSQL: "alter table `runs` modify column `environment_id` varchar(128) not null default '' comment 'Environment where the workflow run executed.'",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			db, state := openFakeSQLDB(t)
+			defer db.Close()
+
+			state.queueRows(fakeRows{
+				columns: []string{"exists"},
+				values:  [][]driver.Value{{int64(1)}},
+			})
+			state.queueRows(fakeRows{
+				columns: []string{"version"},
+				values:  [][]driver.Value{{int64(5)}},
+			})
+			state.queueRows(fakeRows{
+				columns: []string{"exists"},
+				values:  [][]driver.Value{{int64(1)}},
+			})
+			state.queueRows(fakeRows{
+				columns: []string{"version"},
+				values:  [][]driver.Value{{int64(sqlstore.CurrentSchemaVersion)}},
+			})
+
+			if _, err := sqlstore.UpgradeSchema(ctx, db, tt.dialect); err != nil {
+				t.Fatalf("upgrade v5 schema: %v", err)
+			}
+
+			execs := state.execsSnapshot()
+			addIndex := -1
+			commentIndex := -1
+			commentCount := 0
+			for i, exec := range execs {
+				if strings.Contains(exec.query, tt.addColumnSQL) && addIndex == -1 {
+					addIndex = i
+				}
+				if strings.Contains(exec.query, tt.columnCommentSQL) {
+					if commentIndex == -1 {
+						commentIndex = i
+					}
+					commentCount++
+				}
+			}
+			if addIndex == -1 {
+				t.Fatalf("%s v5 upgrade missing add-column migration:\n%s", tt.name, joinExecQueries(execs))
+			}
+			if commentIndex == -1 {
+				t.Fatalf("%s v5 upgrade missing environment_id comment migration:\n%s", tt.name, joinExecQueries(execs))
+			}
+			if commentIndex < addIndex {
+				t.Fatalf("%s v5 upgrade commented environment_id before adding it: add=%d comment=%d\n%s", tt.name, addIndex, commentIndex, joinExecQueries(execs))
+			}
+			if commentCount != 1 {
+				t.Fatalf("%s v5 upgrade applied environment_id comment %d times, want 1:\n%s", tt.name, commentCount, joinExecQueries(execs))
+			}
+		})
+	}
+}
+
+func joinExecQueries(execs []fakeSQLCall) string {
+	var joined strings.Builder
+	for _, exec := range execs {
+		joined.WriteString(exec.query)
+		joined.WriteByte('\n')
+	}
+	return joined.String()
 }
 
 func TestSchemaStatusAndUpgradeSchemaUseSharedDatabaseSQLMigrations(t *testing.T) {
