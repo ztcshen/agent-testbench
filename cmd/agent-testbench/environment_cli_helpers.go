@@ -66,15 +66,6 @@ func closeCLIStore(runtime store.Store) {
 	}
 }
 
-func loadEnvironmentForCLI(ctx context.Context, storeRef string, legacyStoreURL string, id string) (store.Environment, error) {
-	runtime, cleanup, err := openRequiredCLIStore(ctx, storeRef, legacyStoreURL)
-	if err != nil {
-		return store.Environment{}, err
-	}
-	defer cleanup()
-	return runtime.GetEnvironment(ctx, id)
-}
-
 func loadEnvironmentAndComponentGraphForCLI(ctx context.Context, storeRef string, legacyStoreURL string, id string) (store.Environment, store.EnvironmentComponentGraph, error) {
 	runtime, cleanup, err := openRequiredCLIStore(ctx, storeRef, legacyStoreURL)
 	if err != nil {

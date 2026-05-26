@@ -404,6 +404,6 @@ func testKitCaseIDs(value any) []string {
 }
 
 func boolValue(value any) bool {
-	typed, _ := value.(bool)
-	return typed
+	typed, ok := value.(bool)
+	return ok && typed
 }

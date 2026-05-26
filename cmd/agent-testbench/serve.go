@@ -26,7 +26,11 @@ func runServe(args []string) error {
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	defer func() {
+		if closeErr := cleanup(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: close serve store: %v\n", closeErr)
+		}
+	}()
 
 	addr := cfg.host + ":" + strconv.Itoa(cfg.port)
 	fmt.Printf("AgentTestBench listening on http://%s\n", addr)
@@ -82,20 +86,27 @@ func serveHandler(cfg serveConfig) (http.Handler, func() error, error) {
 	if strings.TrimSpace(cfg.profilePath) != "" {
 		profilePath, err := resolveProfileReference(cfg.profilePath, cfg.profileHome)
 		if err != nil {
-			_ = runtime.Close()
-			return nil, nil, err
+			return nil, nil, closeServeRuntime(runtime, err)
 		}
 		if _, err := publishProfileBundleToStore(ctx, runtime, profilePath, storeLabel, false, false); err != nil {
-			_ = runtime.Close()
-			return nil, nil, err
+			return nil, nil, closeServeRuntime(runtime, err)
 		}
 	}
 	bundle, err := serveBundle(ctx, runtime)
 	if err != nil {
-		_ = runtime.Close()
-		return nil, nil, err
+		return nil, nil, closeServeRuntime(runtime, err)
 	}
 	return controlplane.NewWithOptions(bundle, controlplane.Options{Runtime: runtime, TraceGraphQLURL: cfg.traceGraphQLURL, ProfileHome: cfg.profileHome, StoreInfo: storeInfo}), runtime.Close, nil
+}
+
+func closeServeRuntime(runtime store.Store, primaryErr error) error {
+	if runtime == nil {
+		return primaryErr
+	}
+	if closeErr := runtime.Close(); closeErr != nil {
+		return fmt.Errorf("%w; close store: %v", primaryErr, closeErr)
+	}
+	return primaryErr
 }
 
 func serveBundle(ctx context.Context, runtime store.Store) (profile.Bundle, error) {
@@ -119,7 +130,10 @@ func serveBundle(ctx context.Context, runtime store.Store) (profile.Bundle, erro
 }
 
 func serveStoreInfo(cfg serveConfig, resolvedStoreURL string) controlplane.StoreInfo {
-	backend, _ := storeBackendFromURL(resolvedStoreURL)
+	backend, err := storeBackendFromURL(resolvedStoreURL)
+	if err != nil {
+		backend = ""
+	}
 	info := controlplane.StoreInfo{
 		Configured: true,
 		Backend:    backend,

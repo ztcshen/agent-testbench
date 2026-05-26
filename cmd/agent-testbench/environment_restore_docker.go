@@ -122,59 +122,13 @@ func environmentRestorePreflightReport(packageSpec environmentRestorePackageSpec
 			"Heavy Docker image and container validation should be reviewed before deleting or rebuilding existing local Docker state.",
 		},
 	}
-	requiresGit := false
-	if strings.TrimSpace(packageSpec.URL) != "" || strings.TrimSpace(packageSpec.Ref) != "" {
-		requiresGit = true
-	}
-	for _, spec := range specs {
-		if strings.TrimSpace(spec.URL) != "" || strings.TrimSpace(spec.Ref) != "" {
-			requiresGit = true
-			break
-		}
-	}
-	if requiresGit {
+	if environmentRestorePreflightRequiresGit(packageSpec, specs) {
 		report.Tools = append(report.Tools, environmentRestoreTool("git", true))
 	}
 	composeFile := strings.TrimSpace(valueString(compose["composeFile"]))
-	composeFiles := environmentRestoreComposeFiles(compose)
 	startCommand := strings.TrimSpace(valueString(compose["startCommand"]))
 	if composeFile != "" {
-		report.Tools = append(report.Tools, environmentRestoreTool("docker", true))
-		report.Tools = append(report.Tools, environmentRestoreCommandTool("docker compose", true, "docker", "compose", "version"))
-		if !boolFromReportAny(compose["skipPull"]) {
-			report.HeavySteps = append(report.HeavySteps, "docker compose pull may download images")
-		}
-		if !boolFromReportAny(compose["skipBuild"]) {
-			report.HeavySteps = append(report.HeavySteps, "docker compose build may build images from local checkouts")
-		}
-		report.HeavySteps = append(report.HeavySteps, "docker compose up -d may create or replace containers")
-		if cleanupOptions.Requested {
-			report.HeavySteps = append(report.HeavySteps, "docker compose down may remove existing containers and orphan containers")
-			if cleanupOptions.IncludeImages {
-				report.HeavySteps = append(report.HeavySteps, "docker compose down --rmi all may remove local images")
-			}
-		} else if cleanupOptions.AssumeCleanDocker {
-			report.Notes = append(report.Notes, "Clean-machine dry-run assumes target Docker containers do not exist on the colleague machine; current local container names are not treated as blockers.")
-		} else if !prepareReposOnly && !cleanupOptions.UseExistingContainers {
-			conflicts := environmentRestoreContainerNameConflicts(compose, workspace)
-			if len(conflicts) > 0 {
-				report.ContainerConflicts = conflicts
-				report.OK = false
-			}
-		}
-		if !prepareReposOnly && !cleanupOptions.UseExistingContainers {
-			report.StartupAssets = environmentRestoreStartupAssets(compose, specs, workspace)
-			for _, asset := range report.StartupAssets {
-				if !asset.OK {
-					report.OK = false
-				}
-			}
-		}
-		for _, file := range composeFiles {
-			if resolved := restoreWorkspacePath(workspace, file); strings.TrimSpace(resolved) != "" {
-				report.Notes = append(report.Notes, "compose file must exist before Docker execution: "+resolved)
-			}
-		}
+		environmentRestoreAddComposePreflight(&report, compose, specs, workspace, cleanupOptions, prepareReposOnly)
 	} else if startCommand != "" {
 		report.HeavySteps = append(report.HeavySteps, "start command may create local runtime processes or containers")
 	}
@@ -184,6 +138,77 @@ func environmentRestorePreflightReport(packageSpec environmentRestorePackageSpec
 		}
 	}
 	return report
+}
+
+func environmentRestorePreflightRequiresGit(packageSpec environmentRestorePackageSpec, specs []environmentRestoreRepoSpec) bool {
+	if strings.TrimSpace(packageSpec.URL) != "" || strings.TrimSpace(packageSpec.Ref) != "" {
+		return true
+	}
+	for _, spec := range specs {
+		if strings.TrimSpace(spec.URL) != "" || strings.TrimSpace(spec.Ref) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func environmentRestoreAddComposePreflight(report *environmentRestorePreflight, compose map[string]any, specs []environmentRestoreRepoSpec, workspace string, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool) {
+	report.Tools = append(report.Tools, environmentRestoreTool("docker", true))
+	report.Tools = append(report.Tools, environmentRestoreCommandTool("docker compose", true, "docker", "compose", "version"))
+	report.HeavySteps = append(report.HeavySteps, environmentRestoreComposeHeavySteps(compose, cleanupOptions)...)
+	environmentRestoreCheckContainerConflicts(report, compose, workspace, cleanupOptions, prepareReposOnly)
+	environmentRestoreCheckStartupAssets(report, compose, specs, workspace, cleanupOptions, prepareReposOnly)
+	for _, file := range environmentRestoreComposeFiles(compose) {
+		if resolved := restoreWorkspacePath(workspace, file); strings.TrimSpace(resolved) != "" {
+			report.Notes = append(report.Notes, "compose file must exist before Docker execution: "+resolved)
+		}
+	}
+}
+
+func environmentRestoreComposeHeavySteps(compose map[string]any, cleanupOptions environmentRestoreDockerCleanupOptions) []string {
+	steps := []string{}
+	if !boolFromReportAny(compose["skipPull"]) {
+		steps = append(steps, "docker compose pull may download images")
+	}
+	if !boolFromReportAny(compose["skipBuild"]) {
+		steps = append(steps, "docker compose build may build images from local checkouts")
+	}
+	steps = append(steps, "docker compose up -d may create or replace containers")
+	if cleanupOptions.Requested {
+		steps = append(steps, "docker compose down may remove existing containers and orphan containers")
+		if cleanupOptions.IncludeImages {
+			steps = append(steps, "docker compose down --rmi all may remove local images")
+		}
+	}
+	return steps
+}
+
+func environmentRestoreCheckContainerConflicts(report *environmentRestorePreflight, compose map[string]any, workspace string, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool) {
+	switch {
+	case cleanupOptions.Requested:
+		return
+	case cleanupOptions.AssumeCleanDocker:
+		report.Notes = append(report.Notes, "Clean-machine dry-run assumes target Docker containers do not exist on the colleague machine; current local container names are not treated as blockers.")
+	case prepareReposOnly || cleanupOptions.UseExistingContainers:
+		return
+	default:
+		report.ContainerConflicts = environmentRestoreContainerNameConflicts(compose, workspace)
+		if len(report.ContainerConflicts) > 0 {
+			report.OK = false
+		}
+	}
+}
+
+func environmentRestoreCheckStartupAssets(report *environmentRestorePreflight, compose map[string]any, specs []environmentRestoreRepoSpec, workspace string, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool) {
+	if prepareReposOnly || cleanupOptions.UseExistingContainers {
+		return
+	}
+	report.StartupAssets = environmentRestoreStartupAssets(compose, specs, workspace)
+	for _, asset := range report.StartupAssets {
+		if !asset.OK {
+			report.OK = false
+		}
+	}
 }
 
 func environmentRestoreTool(name string, required bool) environmentRestorePreflightTool {
@@ -225,7 +250,7 @@ func environmentRestoreCommandTool(name string, required bool, command string, a
 	return tool
 }
 
-func environmentRestoreUseExistingContainers(ctx context.Context, envID string, graph store.EnvironmentComponentGraph, compose map[string]any, healthChecks []any, workspace string, execute bool, healthTimeout time.Duration) environmentRestoreDockerReport {
+func environmentRestoreUseExistingContainers(ctx context.Context, graph store.EnvironmentComponentGraph, compose map[string]any, healthChecks []any, workspace string, execute bool, healthTimeout time.Duration) environmentRestoreDockerReport {
 	report := environmentRestoreDockerReport{
 		OK:          true,
 		Action:      "plan-use-existing-containers",
@@ -263,7 +288,7 @@ func environmentRestoreUseExistingContainers(ctx context.Context, envID string, 
 		report.Output = append(report.Output, "generated compose env file: "+envFile)
 	}
 	report.Action = "use-existing-containers"
-	report.AppliedAssets = environmentRestoreApplyEdgeAssets(ctx, envID, graph, compose, workspace, execute, composeBaseArgs)
+	report.AppliedAssets = environmentRestoreApplyEdgeAssets(ctx, graph, compose, workspace, execute, composeBaseArgs)
 	for _, asset := range report.AppliedAssets {
 		if !asset.OK {
 			report.OK = false
@@ -306,150 +331,29 @@ func environmentRestoreAdoptedContainerHealthChecks(checks []any, compose map[st
 	return out
 }
 
-func environmentRestoreDocker(ctx context.Context, envID string, graph store.EnvironmentComponentGraph, compose map[string]any, healthChecks []any, workspace string, execute bool, healthTimeout time.Duration, cleanupOptions environmentRestoreDockerCleanupOptions) environmentRestoreDockerReport {
-	report := environmentRestoreDockerReport{
-		OK:      true,
-		Workdir: workspace,
-	}
-	composeFile := strings.TrimSpace(valueString(compose["composeFile"]))
-	composeFiles := environmentRestoreComposeFiles(compose)
-	startCommand := strings.TrimSpace(valueString(compose["startCommand"]))
-	composeBaseArgs := []string{}
-	switch {
-	case composeFile != "":
-		report.Action = "plan-docker-compose"
-		resolvedComposeFiles := environmentRestoreResolvedComposeFiles(workspace, composeFiles)
-		report.ComposeFile = strings.Join(resolvedComposeFiles, ",")
-		baseArgs := environmentRestoreComposeBaseArgs(compose, workspace, resolvedComposeFiles)
-		composeBaseArgs = baseArgs
-		services := stringSliceFromAny(compose["services"])
-		report.Cleanup = environmentRestoreDockerCleanupPlan(baseArgs, cleanupOptions)
-		imageServices, buildServices := environmentRestoreComposeCommandServices(compose, workspace, composeFiles, services)
-		if !boolFromReportAny(compose["skipPull"]) {
-			if len(imageServices) > 0 {
-				report.Commands = append(report.Commands, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"pull"}, imageServices...)...))
-			}
-		}
-		if !boolFromReportAny(compose["skipBuild"]) {
-			if len(buildServices) > 0 {
-				report.Commands = append(report.Commands, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"build"}, buildServices...)...))
-			}
-		}
-		report.Commands = append(report.Commands, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"up", "-d"}, services...)...))
-	case startCommand != "":
-		report.Action = "plan-start-command"
-		report.Commands = [][]string{{"/bin/sh", "-c", startCommand}}
-		if cleanupOptions.Requested {
-			report.OK = false
-			report.Cleanup = environmentRestoreDockerCleanupReport{
-				Requested:     true,
-				Allowed:       cleanupOptions.Allowed,
-				IncludeImages: cleanupOptions.IncludeImages,
-				Action:        "unsupported-cleanup",
-				Error:         "Docker cleanup requires a recorded composeFile",
-			}
-			report.Error = report.Cleanup.Error
-			return report
-		}
-	default:
-		report.OK = false
-		report.Action = "missing-docker-plan"
-		report.Error = "composeFile or startCommand is required to restore Docker services"
+func environmentRestoreDocker(ctx context.Context, graph store.EnvironmentComponentGraph, compose map[string]any, healthChecks []any, workspace string, execute bool, healthTimeout time.Duration, cleanupOptions environmentRestoreDockerCleanupOptions) environmentRestoreDockerReport {
+	report, composeBaseArgs := environmentRestoreDockerPlan(compose, workspace, cleanupOptions)
+	if !report.OK {
 		return report
 	}
-	report.Generated = prepareEnvironmentRestoreGeneratedFiles(compose, workspace, false)
-	for _, item := range report.Generated {
-		if !item.OK {
-			report.OK = false
-			report.Action = "prepare-generated-files"
-			report.Error = item.Error
-			return report
-		}
-	}
+	environmentRestoreCheckGeneratedFiles(&report, compose, workspace, false)
 	if !execute {
 		return report
 	}
-	if err := os.MkdirAll(workspace, 0o755); err != nil {
-		report.OK = false
-		report.Action = "prepare-workspace"
-		report.Error = err.Error()
+	if !environmentRestorePrepareDockerExecution(&report, compose, workspace) {
 		return report
 	}
-	report.Generated = prepareEnvironmentRestoreGeneratedFiles(compose, workspace, true)
-	for _, item := range report.Generated {
-		if !item.OK {
-			report.OK = false
-			report.Action = "prepare-generated-files"
-			report.Error = item.Error
-			return report
-		}
-	}
-	if envFile, err := writeEnvironmentRestoreGeneratedEnvFile(workspace, compose); err != nil {
-		report.OK = false
-		report.Action = "prepare-compose-env"
-		report.Error = err.Error()
+	if !environmentRestoreValidateComposeFiles(&report) {
 		return report
-	} else if envFile != "" {
-		report.Output = append(report.Output, "generated compose env file: "+envFile)
 	}
-	if report.ComposeFile != "" {
-		for _, composeFile := range strings.Split(report.ComposeFile, ",") {
-			composeFile = strings.TrimSpace(composeFile)
-			if composeFile == "" {
-				continue
-			}
-			if stat, err := os.Stat(composeFile); err != nil {
-				report.OK = false
-				report.Action = "missing-compose-file"
-				report.Error = fmt.Sprintf("compose file is required before Docker execution: %s", composeFile)
-				return report
-			} else if stat.IsDir() {
-				report.OK = false
-				report.Action = "invalid-compose-file"
-				report.Error = fmt.Sprintf("compose file path is a directory: %s", composeFile)
-				return report
-			}
-		}
-		if report.Cleanup.Requested {
-			if !report.Cleanup.Allowed {
-				report.OK = false
-				report.Cleanup.Action = "cleanup-blocked"
-				report.Cleanup.Error = "Docker cleanup requested during --execute; rerun with --allow-destructive-docker-cleanup after reviewing cleanup commands"
-				report.Error = report.Cleanup.Error
-				return report
-			}
-			report.Cleanup.Action = "run-cleanup"
-			for _, command := range append(report.Cleanup.BackupCommands, report.Cleanup.Commands...) {
-				output, errText := runRestoreCommand(ctx, workspace, command)
-				if strings.TrimSpace(output) != "" {
-					report.Cleanup.Output = append(report.Cleanup.Output, output)
-				}
-				if errText != "" {
-					report.OK = false
-					report.Cleanup.Error = errText
-					report.Error = errText
-					return report
-				}
-			}
-		}
+	if !environmentRestoreRunCleanup(ctx, &report, workspace) {
+		return report
 	}
-	if report.Action == "plan-docker-compose" {
-		report.Action = "run-docker-compose"
-	} else {
-		report.Action = "run-start-command"
+	environmentRestoreMarkDockerExecuting(&report)
+	if !environmentRestoreRunCommands(ctx, &report, workspace) {
+		return report
 	}
-	for _, command := range report.Commands {
-		output, errText := runRestoreCommand(ctx, workspace, command)
-		if strings.TrimSpace(output) != "" {
-			report.Output = append(report.Output, output)
-		}
-		if errText != "" {
-			report.OK = false
-			report.Error = errText
-			return report
-		}
-	}
-	report.AppliedAssets = environmentRestoreApplyEdgeAssets(ctx, envID, graph, compose, workspace, execute, composeBaseArgs)
+	report.AppliedAssets = environmentRestoreApplyEdgeAssets(ctx, graph, compose, workspace, execute, composeBaseArgs)
 	for _, asset := range report.AppliedAssets {
 		if !asset.OK {
 			report.OK = false
@@ -464,6 +368,172 @@ func environmentRestoreDocker(ctx context.Context, envID string, graph store.Env
 		}
 	}
 	return report
+}
+
+func environmentRestoreDockerPlan(compose map[string]any, workspace string, cleanupOptions environmentRestoreDockerCleanupOptions) (environmentRestoreDockerReport, []string) {
+	report := environmentRestoreDockerReport{OK: true, Workdir: workspace}
+	composeFiles := environmentRestoreComposeFiles(compose)
+	startCommand := strings.TrimSpace(valueString(compose["startCommand"]))
+	if strings.TrimSpace(valueString(compose["composeFile"])) != "" {
+		baseArgs := environmentRestorePlanComposeCommands(&report, compose, workspace, composeFiles, cleanupOptions)
+		return report, baseArgs
+	}
+	if startCommand != "" {
+		return environmentRestorePlanStartCommand(workspace, startCommand, cleanupOptions), nil
+	}
+	report.OK = false
+	report.Action = "missing-docker-plan"
+	report.Error = "composeFile or startCommand is required to restore Docker services"
+	return report, nil
+}
+
+func environmentRestorePlanComposeCommands(report *environmentRestoreDockerReport, compose map[string]any, workspace string, composeFiles []string, cleanupOptions environmentRestoreDockerCleanupOptions) []string {
+	report.Action = "plan-docker-compose"
+	resolvedComposeFiles := environmentRestoreResolvedComposeFiles(workspace, composeFiles)
+	report.ComposeFile = strings.Join(resolvedComposeFiles, ",")
+	baseArgs := environmentRestoreComposeBaseArgs(compose, workspace, resolvedComposeFiles)
+	services := stringSliceFromAny(compose["services"])
+	report.Cleanup = environmentRestoreDockerCleanupPlan(baseArgs, cleanupOptions)
+	imageServices, buildServices := environmentRestoreComposeCommandServices(compose, workspace, composeFiles, services)
+	if !boolFromReportAny(compose["skipPull"]) && len(imageServices) > 0 {
+		report.Commands = append(report.Commands, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"pull"}, imageServices...)...))
+	}
+	if !boolFromReportAny(compose["skipBuild"]) && len(buildServices) > 0 {
+		report.Commands = append(report.Commands, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"build"}, buildServices...)...))
+	}
+	report.Commands = append(report.Commands, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"up", "-d"}, services...)...))
+	return baseArgs
+}
+
+func environmentRestorePlanStartCommand(workspace string, startCommand string, cleanupOptions environmentRestoreDockerCleanupOptions) environmentRestoreDockerReport {
+	report := environmentRestoreDockerReport{
+		OK:       true,
+		Workdir:  workspace,
+		Action:   "plan-start-command",
+		Commands: [][]string{{"/bin/sh", "-c", startCommand}},
+	}
+	if cleanupOptions.Requested {
+		report.OK = false
+		report.Cleanup = environmentRestoreDockerCleanupReport{
+			Requested:     true,
+			Allowed:       cleanupOptions.Allowed,
+			IncludeImages: cleanupOptions.IncludeImages,
+			Action:        "unsupported-cleanup",
+			Error:         "Docker cleanup requires a recorded composeFile",
+		}
+		report.Error = report.Cleanup.Error
+	}
+	return report
+}
+
+func environmentRestoreCheckGeneratedFiles(report *environmentRestoreDockerReport, compose map[string]any, workspace string, execute bool) bool {
+	report.Generated = prepareEnvironmentRestoreGeneratedFiles(compose, workspace, execute)
+	for _, item := range report.Generated {
+		if !item.OK {
+			report.OK = false
+			report.Action = "prepare-generated-files"
+			report.Error = item.Error
+			return false
+		}
+	}
+	return true
+}
+
+func environmentRestorePrepareDockerExecution(report *environmentRestoreDockerReport, compose map[string]any, workspace string) bool {
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		report.OK = false
+		report.Action = "prepare-workspace"
+		report.Error = err.Error()
+		return false
+	}
+	if !environmentRestoreCheckGeneratedFiles(report, compose, workspace, true) {
+		return false
+	}
+	envFile, err := writeEnvironmentRestoreGeneratedEnvFile(workspace, compose)
+	if err != nil {
+		report.OK = false
+		report.Action = "prepare-compose-env"
+		report.Error = err.Error()
+		return false
+	}
+	if envFile != "" {
+		report.Output = append(report.Output, "generated compose env file: "+envFile)
+	}
+	return true
+}
+
+func environmentRestoreValidateComposeFiles(report *environmentRestoreDockerReport) bool {
+	if report.ComposeFile == "" {
+		return true
+	}
+	for _, composeFile := range strings.Split(report.ComposeFile, ",") {
+		composeFile = strings.TrimSpace(composeFile)
+		if composeFile == "" {
+			continue
+		}
+		if stat, err := os.Stat(composeFile); err != nil {
+			report.OK = false
+			report.Action = "missing-compose-file"
+			report.Error = fmt.Sprintf("compose file is required before Docker execution: %s", composeFile)
+			return false
+		} else if stat.IsDir() {
+			report.OK = false
+			report.Action = "invalid-compose-file"
+			report.Error = fmt.Sprintf("compose file path is a directory: %s", composeFile)
+			return false
+		}
+	}
+	return true
+}
+
+func environmentRestoreRunCleanup(ctx context.Context, report *environmentRestoreDockerReport, workspace string) bool {
+	if report.ComposeFile == "" || !report.Cleanup.Requested {
+		return true
+	}
+	if !report.Cleanup.Allowed {
+		report.OK = false
+		report.Cleanup.Action = "cleanup-blocked"
+		report.Cleanup.Error = "Docker cleanup requested during --execute; rerun with --allow-destructive-docker-cleanup after reviewing cleanup commands"
+		report.Error = report.Cleanup.Error
+		return false
+	}
+	report.Cleanup.Action = "run-cleanup"
+	for _, command := range append(report.Cleanup.BackupCommands, report.Cleanup.Commands...) {
+		output, errText := runRestoreCommand(ctx, workspace, command)
+		if strings.TrimSpace(output) != "" {
+			report.Cleanup.Output = append(report.Cleanup.Output, output)
+		}
+		if errText != "" {
+			report.OK = false
+			report.Cleanup.Error = errText
+			report.Error = errText
+			return false
+		}
+	}
+	return true
+}
+
+func environmentRestoreMarkDockerExecuting(report *environmentRestoreDockerReport) {
+	if report.Action == "plan-docker-compose" {
+		report.Action = "run-docker-compose"
+		return
+	}
+	report.Action = "run-start-command"
+}
+
+func environmentRestoreRunCommands(ctx context.Context, report *environmentRestoreDockerReport, workspace string) bool {
+	for _, command := range report.Commands {
+		output, errText := runRestoreCommand(ctx, workspace, command)
+		if strings.TrimSpace(output) != "" {
+			report.Output = append(report.Output, output)
+		}
+		if errText != "" {
+			report.OK = false
+			report.Error = errText
+			return false
+		}
+	}
+	return true
 }
 
 func environmentRestoreDockerCleanupPlan(baseArgs []string, options environmentRestoreDockerCleanupOptions) environmentRestoreDockerCleanupReport {

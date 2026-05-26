@@ -497,7 +497,6 @@ func TestServerScopesInterfaceNodeRunsToWorkflowStepContext(t *testing.T) {
 	if len(runs) != 1 || runs[0].(map[string]any)["runId"] != "run.alpha" {
 		t.Fatalf("scoped interface node runs = %#v", runs)
 	}
-
 }
 
 func TestServerEvaluatesInterfaceNodeRunTimeoutFromCatalog(t *testing.T) {

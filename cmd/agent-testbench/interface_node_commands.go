@@ -359,12 +359,16 @@ func nextCaseSortOrder(cases []profile.APICase) int {
 }
 
 func safeCaseFileName(caseID string) string {
-	caseID = strings.TrimSpace(caseID)
-	if caseID == "" {
-		return "case"
+	return safeProfileAssetFileName(caseID, "case")
+}
+
+func safeProfileAssetFileName(value string, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
 	}
 	var builder strings.Builder
-	for _, r := range caseID {
+	for _, r := range value {
 		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.' {
 			builder.WriteRune(r)
 			continue
@@ -372,7 +376,7 @@ func safeCaseFileName(caseID string) string {
 		builder.WriteByte('-')
 	}
 	if builder.Len() == 0 {
-		return "case"
+		return fallback
 	}
 	return builder.String()
 }
@@ -547,51 +551,44 @@ func readCatalogCaseAssets(path string) (map[string]json.RawMessage, []profile.T
 }
 
 func mergeTemplateConfigs(existing []profile.TemplateConfig, updates []profile.TemplateConfig) []profile.TemplateConfig {
-	positions := map[string]int{}
-	out := make([]profile.TemplateConfig, 0, len(existing)+len(updates))
-	for _, item := range existing {
-		positions[item.ID] = len(out)
-		out = append(out, item)
-	}
-	for _, item := range updates {
-		if index, ok := positions[item.ID]; ok {
-			out[index] = item
-			continue
-		}
-		positions[item.ID] = len(out)
-		out = append(out, item)
-	}
-	sort.SliceStable(out, func(i, j int) bool {
-		left, right := out[i], out[j]
-		if left.SortOrder != right.SortOrder {
-			return left.SortOrder < right.SortOrder
-		}
-		return left.ID < right.ID
+	return mergeProfileCatalogItems(existing, updates, func(item profile.TemplateConfig) string {
+		return item.ID
+	}, func(item profile.TemplateConfig) int {
+		return item.SortOrder
 	})
-	return out
 }
 
 func mergeProfileAPICases(existing []profile.APICase, updates []profile.APICase) []profile.APICase {
+	return mergeProfileCatalogItems(existing, updates, func(item profile.APICase) string {
+		return item.ID
+	}, func(item profile.APICase) int {
+		return item.SortOrder
+	})
+}
+
+func mergeProfileCatalogItems[T any](existing []T, updates []T, itemID func(T) string, itemSortOrder func(T) int) []T {
 	positions := map[string]int{}
-	out := make([]profile.APICase, 0, len(existing)+len(updates))
+	out := make([]T, 0, len(existing)+len(updates))
 	for _, item := range existing {
-		positions[item.ID] = len(out)
+		id := itemID(item)
+		positions[id] = len(out)
 		out = append(out, item)
 	}
 	for _, item := range updates {
-		if index, ok := positions[item.ID]; ok {
+		id := itemID(item)
+		if index, ok := positions[id]; ok {
 			out[index] = item
 			continue
 		}
-		positions[item.ID] = len(out)
+		positions[id] = len(out)
 		out = append(out, item)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		left, right := out[i], out[j]
-		if left.SortOrder != right.SortOrder {
-			return left.SortOrder < right.SortOrder
+		leftOrder, rightOrder := itemSortOrder(out[i]), itemSortOrder(out[j])
+		if leftOrder != rightOrder {
+			return leftOrder < rightOrder
 		}
-		return left.ID < right.ID
+		return itemID(out[i]) < itemID(out[j])
 	})
 	return out
 }

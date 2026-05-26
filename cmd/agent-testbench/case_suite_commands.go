@@ -269,25 +269,7 @@ func printCaseSuiteBrief(report casesuite.BriefReport) {
 }
 
 func runCaseSuiteQuality(ctx context.Context, args []string) error {
-	selection := newCaseSelectionCLIFlags("case suite quality", "active")
-	jsonOutput := selection.flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := selection.parse(args); err != nil {
-		return err
-	}
-	selected, err := loadSelectedCaseSuite(ctx, selection)
-	if err != nil {
-		return err
-	}
-	defer selected.Close()
-	report, err := casesuite.Quality(ctx, selected.Bundle, selected.Store, caseSuiteFilter(selected.Filters), selected.Cases)
-	if err != nil {
-		return err
-	}
-	if *jsonOutput {
-		return writeIndentedJSON(report)
-	}
-	printCaseSuiteQuality(report)
-	return nil
+	return runCaseSuiteAssessment(ctx, args, "case suite quality", casesuite.Quality, printCaseSuiteQuality)
 }
 
 func printCaseSuiteQuality(report casesuite.QualityReport) {
@@ -318,25 +300,7 @@ func printCaseSuiteQuality(report casesuite.QualityReport) {
 }
 
 func runCaseSuiteQualityPlan(ctx context.Context, args []string) error {
-	selection := newCaseSelectionCLIFlags("case suite quality-plan", "active")
-	jsonOutput := selection.flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := selection.parse(args); err != nil {
-		return err
-	}
-	selected, err := loadSelectedCaseSuite(ctx, selection)
-	if err != nil {
-		return err
-	}
-	defer selected.Close()
-	report, err := casesuite.QualityPlan(ctx, selected.Bundle, selected.Store, caseSuiteFilter(selected.Filters), selected.Cases)
-	if err != nil {
-		return err
-	}
-	if *jsonOutput {
-		return writeIndentedJSON(report)
-	}
-	printCaseSuiteQualityPlan(report)
-	return nil
+	return runCaseSuiteAssessment(ctx, args, "case suite quality-plan", casesuite.QualityPlan, printCaseSuiteQualityPlan)
 }
 
 func printCaseSuiteQualityPlan(report casesuite.QualityPlanReport) {
@@ -365,7 +329,11 @@ func printCaseSuiteQualityPlan(report casesuite.QualityPlanReport) {
 }
 
 func runCaseSuiteInspect(ctx context.Context, args []string) error {
-	selection := newCaseSelectionCLIFlags("case suite inspect", "active")
+	return runCaseSuiteAssessment(ctx, args, "case suite inspect", casesuite.Inspect, printCaseSuiteInspection)
+}
+
+func runCaseSuiteAssessment[T any](ctx context.Context, args []string, commandName string, assess func(context.Context, profile.Bundle, casesuite.RecordStore, casesuite.Filter, []profile.APICase) (T, error), printReport func(T)) error {
+	selection := newCaseSelectionCLIFlags(commandName, "active")
 	jsonOutput := selection.flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := selection.parse(args); err != nil {
 		return err
@@ -375,14 +343,14 @@ func runCaseSuiteInspect(ctx context.Context, args []string) error {
 		return err
 	}
 	defer selected.Close()
-	report, err := casesuite.Inspect(ctx, selected.Bundle, selected.Store, caseSuiteFilter(selected.Filters), selected.Cases)
+	report, err := assess(ctx, selected.Bundle, selected.Store, caseSuiteFilter(selected.Filters), selected.Cases)
 	if err != nil {
 		return err
 	}
 	if *jsonOutput {
 		return writeIndentedJSON(report)
 	}
-	printCaseSuiteInspection(report)
+	printReport(report)
 	return nil
 }
 

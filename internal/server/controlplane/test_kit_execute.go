@@ -57,8 +57,14 @@ func executeTestKitCase(ctx context.Context, bundle profile.Bundle, runtime stor
 	if err != nil {
 		return failedCaseExecution(item.Case.ID, err.Error())
 	}
-	defer response.Body.Close()
-	responseBody, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	responseBody, readErr := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	closeErr := response.Body.Close()
+	if readErr != nil {
+		return failedCaseExecution(item.Case.ID, readErr.Error())
+	}
+	if closeErr != nil {
+		return failedCaseExecution(item.Case.ID, closeErr.Error())
+	}
 	responseSummary := map[string]any{
 		"statusCode": response.StatusCode,
 		"headers":    responseHeaders(response.Header),

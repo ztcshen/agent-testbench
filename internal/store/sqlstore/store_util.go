@@ -1,9 +1,14 @@
 package sqlstore
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
+
+	"agent-testbench/internal/store"
 )
 
 func utcNow() time.Time {
@@ -63,6 +68,22 @@ func decodeDBTime(value any) time.Time {
 	}
 }
 
+func scanStoreRowError(err error) error {
+	if err == sql.ErrNoRows {
+		return store.ErrNotFound
+	}
+	return err
+}
+
+func rollbackTxOnError(tx *sql.Tx, errp *error) {
+	if *errp == nil {
+		return
+	}
+	if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
+		*errp = errors.Join(*errp, rollbackErr)
+	}
+}
+
 func normalizeJSONText(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -77,4 +98,32 @@ func normalizeJSONText(value string) string {
 		return value
 	}
 	return string(encoded)
+}
+
+func closeRows(rows *sql.Rows, errp *error) {
+	if rows == nil {
+		return
+	}
+	if closeErr := rows.Close(); closeErr != nil && *errp == nil {
+		*errp = closeErr
+	}
+}
+
+func queryStoreRows[T any](ctx context.Context, db *sql.DB, query string, scan func(scanner) (T, error), args ...any) (out []T, err error) {
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRows(rows, &err)
+	for rows.Next() {
+		item, err := scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

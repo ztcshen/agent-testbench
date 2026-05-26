@@ -376,10 +376,10 @@ func TestServerStartsEnvironmentAcceptanceRunWithHealthSummary(t *testing.T) {
 	server := httptest.NewServer(controlplane.NewWithOptions(bundle, controlplane.Options{Runtime: s, TraceGraphQLURL: provider.URL}))
 	defer server.Close()
 
-	registered := postJSONResponse(t, server.URL+"/api/environments", fmt.Sprintf(`{
+	registered := postJSONResponse(t, server.URL+"/api/environments", `{
   "id": "env.acceptance",
   "verificationWorkflowId": "workflow.env.acceptance"
-}`), http.StatusOK)
+}`, http.StatusOK)
 	if registered["ok"] != true {
 		t.Fatalf("register environment = %#v", registered)
 	}

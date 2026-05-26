@@ -2,7 +2,6 @@ package controlplane
 
 import (
 	"net/url"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -104,13 +103,6 @@ func compactUniqueStringListPreserveOrder(values []string) []string {
 		out = append(out, value)
 	}
 	return out
-}
-
-func resolveBundleFilePath(baseDir string, value string) string {
-	if filepath.IsAbs(value) || strings.TrimSpace(baseDir) == "" {
-		return value
-	}
-	return filepath.Join(baseDir, value)
 }
 
 func firstPositive(values ...int) int {

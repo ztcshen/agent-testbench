@@ -108,7 +108,7 @@ func runSandboxServiceRegister(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer runtime.Close()
+	defer closeCLIStore(runtime)
 	response, err := controlplane.RegisterSandboxService(ctx, runtime, controlplane.SandboxServiceRegistrationRequest{
 		ID:             *id,
 		DisplayName:    *displayName,
@@ -164,7 +164,7 @@ func runSandboxInterfaceRegister(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer runtime.Close()
+	defer closeCLIStore(runtime)
 	response, err := controlplane.RegisterSandboxInterface(ctx, runtime, controlplane.SandboxInterfaceRegistrationRequest{
 		ID:          *id,
 		DisplayName: *displayName,
@@ -218,7 +218,7 @@ func runSandboxStart(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer runtime.Close()
+	defer closeCLIStore(runtime)
 	catalog, err := runtime.GetProfileCatalog(ctx)
 	if err != nil {
 		return err

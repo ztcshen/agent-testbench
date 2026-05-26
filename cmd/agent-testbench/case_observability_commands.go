@@ -53,7 +53,11 @@ func printCaseTiming(payload map[string]any) {
 }
 
 func runCaseEvidence(ctx context.Context, args []string) error {
-	selection := newCaseEvidenceCLIFlags("case evidence")
+	return runCaseEvidenceReport(ctx, args, "case evidence", readCaseEvidence, printCaseEvidence)
+}
+
+func runCaseEvidenceReport[T any](ctx context.Context, args []string, commandName string, load func(context.Context, store.Store, string, string, string, string) (T, error), printReport func(T)) error {
+	selection := newCaseEvidenceCLIFlags(commandName)
 	if err := selection.parse(args); err != nil {
 		return err
 	}
@@ -62,14 +66,14 @@ func runCaseEvidence(ctx context.Context, args []string) error {
 		return err
 	}
 	defer cleanup()
-	payload, err := readCaseEvidence(ctx, runtime, *selection.caseRunID, *selection.runID, *selection.caseID, *selection.stepID)
+	report, err := load(ctx, runtime, *selection.caseRunID, *selection.runID, *selection.caseID, *selection.stepID)
 	if err != nil {
 		return err
 	}
 	if *selection.json {
-		return writeIndentedJSON(payload)
+		return writeIndentedJSON(report)
 	}
-	printCaseEvidence(payload)
+	printReport(report)
 	return nil
 }
 

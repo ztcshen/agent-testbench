@@ -19,15 +19,6 @@ func mustJSON(t *testing.T, value any) string {
 	return string(raw)
 }
 
-func stringSliceContains(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
-}
-
 func extractJSONObject(t *testing.T, output string) string {
 	t.Helper()
 	start := strings.Index(output, "{")
@@ -70,21 +61,6 @@ func hasReadModels(readModels []string, required ...string) bool {
 		}
 	}
 	return true
-}
-
-func firstJSONObject(t *testing.T, out string) string {
-	t.Helper()
-	start := strings.Index(out, "{")
-	end := strings.LastIndex(out, "\n}")
-	if end < 0 {
-		end = strings.LastIndex(out, "}")
-	} else {
-		end++
-	}
-	if start < 0 || end < start {
-		t.Fatalf("output does not contain a JSON object:\n%s", out)
-	}
-	return out[start : end+1]
 }
 
 func containsString(items []string, want string) bool {

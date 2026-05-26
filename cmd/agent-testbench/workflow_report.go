@@ -131,7 +131,7 @@ func executeWorkflowCaseReport(ctx context.Context, bundle profile.Bundle, sourc
 	}
 	bindingCaseIDs := workflowBindingCaseIDs(bundle.WorkflowBindings, workflowID)
 	contextValues := map[string]any{}
-	rawSteps, _ := workflow["steps"].([]any)
+	rawSteps := listFromReportAny(workflow["steps"])
 	steps := make([]map[string]any, 0, len(rawSteps))
 	stepReports := make([]workflowCaseReportStep, 0, len(rawSteps))
 	for _, rawStep := range rawSteps {
@@ -245,7 +245,11 @@ func fetchReportMap(endpoint string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer response.Body.Close()
+	defer func() {
+		if closeErr := response.Body.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: close report response body: %v\n", closeErr)
+		}
+	}()
 	var payload map[string]any
 	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
 		return nil, err
@@ -265,7 +269,11 @@ func postReportMap(endpoint string, payload map[string]any) (map[string]any, err
 	if err != nil {
 		return nil, err
 	}
-	defer response.Body.Close()
+	defer func() {
+		if closeErr := response.Body.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: close report response body: %v\n", closeErr)
+		}
+	}()
 	var result map[string]any
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 		return nil, err
@@ -275,9 +283,8 @@ func postReportMap(endpoint string, payload map[string]any) (map[string]any, err
 }
 
 func findWorkflowByIDFromCatalog(catalog map[string]any, id string) (map[string]any, error) {
-	rawWorkflows, _ := catalog["workflows"].([]any)
 	id = strings.TrimSpace(id)
-	for _, raw := range rawWorkflows {
+	for _, raw := range listFromReportAny(catalog["workflows"]) {
 		workflow := mapFromReportAny(raw)
 		if valueString(workflow["id"]) == id {
 			return workflow, nil
@@ -341,8 +348,7 @@ func workflowReportStepItem(step map[string]any, result map[string]any) workflow
 
 func workflowExportedValues(step map[string]any, result map[string]any) map[string]any {
 	out := map[string]any{}
-	rawExports, _ := step["exports"].([]any)
-	for _, rawExport := range rawExports {
+	for _, rawExport := range listFromReportAny(step["exports"]) {
 		item := mapFromReportAny(rawExport)
 		name := valueString(item["name"])
 		if name == "" {
@@ -495,7 +501,9 @@ func runWorkflowAudit(ctx context.Context, args []string) error {
 			if err != nil {
 				return err
 			}
-			cleanup = func() { _ = runtime.Close() }
+			cleanup = func() {
+				closeCLIStore(runtime)
+			}
 		}
 	} else {
 		if strings.TrimSpace(*profilePath) != "" {
@@ -509,7 +517,9 @@ func runWorkflowAudit(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		cleanup = func() { _ = runtime.Close() }
+		cleanup = func() {
+			closeCLIStore(runtime)
+		}
 		bundle, err = serveBundle(ctx, runtime)
 		if err != nil {
 			cleanup()

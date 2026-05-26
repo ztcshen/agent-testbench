@@ -153,10 +153,7 @@ func scanProfileIndex(row scanner) (store.ProfileIndex, error) {
 	var r store.ProfileIndex
 	var importedAt, updatedAt any
 	if err := row.Scan(&r.ProfileID, &r.BundlePath, &r.BundleDigest, &r.SummaryJSON, &importedAt, &updatedAt); err != nil {
-		if err == sql.ErrNoRows {
-			return store.ProfileIndex{}, store.ErrNotFound
-		}
-		return store.ProfileIndex{}, err
+		return store.ProfileIndex{}, scanStoreRowError(err)
 	}
 	r.SummaryJSON = normalizeJSONText(r.SummaryJSON)
 	r.ImportedAt = decodeDBTime(importedAt)
@@ -183,10 +180,7 @@ func scanReadModel(row scanner) (store.ReadModel, error) {
 	var r store.ReadModel
 	var generatedAt, updatedAt any
 	if err := row.Scan(&r.ProfileID, &r.Key, &r.ConfigVersionID, &r.PayloadJSON, &generatedAt, &updatedAt); err != nil {
-		if err == sql.ErrNoRows {
-			return store.ReadModel{}, store.ErrNotFound
-		}
-		return store.ReadModel{}, err
+		return store.ReadModel{}, scanStoreRowError(err)
 	}
 	r.PayloadJSON = normalizeJSONText(r.PayloadJSON)
 	r.GeneratedAt = decodeDBTime(generatedAt)

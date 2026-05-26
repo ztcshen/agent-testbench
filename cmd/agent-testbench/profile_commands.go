@@ -120,24 +120,14 @@ type profilePackReport = profilehome.PackReport
 
 type profileListReport = profilehome.ListReport
 
-type profileListItem = profilehome.ListItem
-
 func initProfileBundle(outputPath string, profileID string, displayName string, force bool) (profileInitReport, error) {
-	outputPath = strings.TrimSpace(outputPath)
-	profileID = strings.TrimSpace(profileID)
-	displayName = strings.TrimSpace(displayName)
-	if outputPath == "" {
-		return profileInitReport{}, errors.New("--output is required")
+	request, err := profileInitRequest(outputPath, profileID, displayName)
+	if err != nil {
+		return profileInitReport{}, err
 	}
-	if profileID == "" {
-		return profileInitReport{}, errors.New("--id must not be empty")
-	}
-	if displayName == "" {
-		return profileInitReport{}, errors.New("--display-name must not be empty")
-	}
-	if isCoreProfilesPath(outputPath) {
-		return profileInitReport{}, errors.New("profile bundles must be initialized outside this core repository")
-	}
+	outputPath = request.outputPath
+	profileID = request.profileID
+	displayName = request.displayName
 	if err := os.MkdirAll(outputPath, 0o755); err != nil {
 		return profileInitReport{}, err
 	}
@@ -207,6 +197,32 @@ func initProfileBundle(outputPath string, profileID string, displayName string, 
 	return profileInitReport{ID: profileID, Path: absPath}, nil
 }
 
+type profileInitOptions struct {
+	outputPath  string
+	profileID   string
+	displayName string
+}
+
+func profileInitRequest(outputPath string, profileID string, displayName string) (profileInitOptions, error) {
+	options := profileInitOptions{
+		outputPath:  strings.TrimSpace(outputPath),
+		profileID:   strings.TrimSpace(profileID),
+		displayName: strings.TrimSpace(displayName),
+	}
+	switch {
+	case options.outputPath == "":
+		return profileInitOptions{}, errors.New("--output is required")
+	case options.profileID == "":
+		return profileInitOptions{}, errors.New("--id must not be empty")
+	case options.displayName == "":
+		return profileInitOptions{}, errors.New("--display-name must not be empty")
+	case isCoreProfilesPath(options.outputPath):
+		return profileInitOptions{}, errors.New("profile bundles must be initialized outside this core repository")
+	default:
+		return options, nil
+	}
+}
+
 func runProfileExport(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("profile export", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
@@ -226,7 +242,7 @@ func runProfileExport(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer s.Close()
+	defer closeCLIStore(s)
 	report, err := exportProfileCatalogFromStore(ctx, s, *outputPath, *force)
 	if err != nil {
 		return err
@@ -388,10 +404,6 @@ func packProfileBundle(profileRef string, profileHome string, outputPath string,
 
 func listInstalledProfiles(profileHome string) (profileListReport, error) {
 	return profilehome.List(profileHome)
-}
-
-func resolveProfileHome(value string) (string, error) {
-	return profilehome.ResolveHome(value)
 }
 
 func resolveProfileReference(value string, profileHome string) (string, error) {

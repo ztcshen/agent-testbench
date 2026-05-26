@@ -6,118 +6,61 @@ func registerTemplatePackageRoutes(mux *http.ServeMux, deps routeDeps) {
 	runtime := deps.runtime
 	profiles := deps.profiles
 	profileHome := deps.profileHome
-	mux.HandleFunc("/api/template-packages/import-plan/openapi", func(w http.ResponseWriter, r *http.Request) {
-		if !requireMethod(w, r, http.MethodPost) {
-			return
-		}
+	handleMethod(mux, "/api/template-packages/import-plan/openapi", http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
 		handleOpenAPIImportPlan(w, r)
 	})
-	mux.HandleFunc("/api/template-packages/import-plan/http-capture", func(w http.ResponseWriter, r *http.Request) {
-		if !requireMethod(w, r, http.MethodPost) {
-			return
-		}
+	handleMethod(mux, "/api/template-packages/import-plan/http-capture", http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
 		handleHTTPCaptureImportPlan(w, r)
 	})
-	mux.HandleFunc("/api/template-packages/generation-plan/openapi", func(w http.ResponseWriter, r *http.Request) {
-		if !requireMethod(w, r, http.MethodPost) {
-			return
-		}
+	handleMethod(mux, "/api/template-packages/generation-plan/openapi", http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
 		handleOpenAPIGenerationPlan(w, r)
 	})
-	mux.HandleFunc("/api/template-packages/import", func(w http.ResponseWriter, r *http.Request) {
-		if !requireMethod(w, r, http.MethodPost) {
-			return
-		}
+	handleMethod(mux, "/api/template-packages/import", http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
 		handleProfileImport(w, r, runtime, profiles.Replace, profileHome)
 	})
-	mux.HandleFunc("/api/template-packages/verify", func(w http.ResponseWriter, r *http.Request) {
-		if !requireMethod(w, r, http.MethodPost) {
-			return
-		}
+	handleMethod(mux, "/api/template-packages/verify", http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
 		handleProfileVerify(w, r, runtime, profiles.Replace, profileHome)
 	})
-	mux.HandleFunc("/api/template-packages/audit-plan", func(w http.ResponseWriter, r *http.Request) {
-		if !requireMethod(w, r, http.MethodPost) {
-			return
-		}
+	handleMethod(mux, "/api/template-packages/audit-plan", http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
 		handleProfileAuditPlan(w, r, runtime, profileHome)
 	})
-	mux.HandleFunc("/api/template-packages/install", func(w http.ResponseWriter, r *http.Request) {
-		if !requireMethod(w, r, http.MethodPost) {
-			return
-		}
+	handleMethod(mux, "/api/template-packages/install", http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
 		handleProfileInstall(w, r, profileHome)
 	})
-	mux.HandleFunc("/api/template-packages/installed", func(w http.ResponseWriter, r *http.Request) {
-		if !requireMethod(w, r, http.MethodGet) {
-			return
-		}
+	handleMethod(mux, "/api/template-packages/installed", http.MethodGet, func(w http.ResponseWriter, r *http.Request) {
 		handleInstalledProfiles(w, r, profileHome)
 	})
-	mux.HandleFunc("/api/template-packages/catalog-index", func(w http.ResponseWriter, r *http.Request) {
-		if !requireMethod(w, r, http.MethodGet) {
-			return
-		}
+	handleMethod(mux, "/api/template-packages/catalog-index", http.MethodGet, func(w http.ResponseWriter, r *http.Request) {
 		handleProfileCatalogIndex(w, r, runtime)
 	})
-	mux.HandleFunc("/api/template-packages/current", func(w http.ResponseWriter, r *http.Request) {
-		if !requireMethod(w, r, http.MethodGet) {
-			return
-		}
+	handleMethod(mux, "/api/template-packages/current", http.MethodGet, func(w http.ResponseWriter, r *http.Request) {
 		writeProfileSummary(w, profiles.Current())
 	})
-	mux.HandleFunc("/api/template-packages/assets", func(w http.ResponseWriter, r *http.Request) {
-		if !requireMethod(w, r, http.MethodGet) {
-			return
-		}
+	handleMethod(mux, "/api/template-packages/assets", http.MethodGet, func(w http.ResponseWriter, r *http.Request) {
 		writeProfileAssets(w, profiles.Current())
 	})
-	mux.HandleFunc("/api/profile/import", func(w http.ResponseWriter, r *http.Request) {
-		if !requireMethod(w, r, http.MethodPost) {
-			return
-		}
+	handleMethod(mux, "/api/profile/import", http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
 		handleProfileImport(w, r, runtime, profiles.Replace, profileHome)
 	})
-	mux.HandleFunc("/api/profile/verify", func(w http.ResponseWriter, r *http.Request) {
-		if !requireMethod(w, r, http.MethodPost) {
-			return
-		}
+	handleMethod(mux, "/api/profile/verify", http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
 		handleProfileVerify(w, r, runtime, profiles.Replace, profileHome)
 	})
-	mux.HandleFunc("/api/profile/audit-plan", func(w http.ResponseWriter, r *http.Request) {
-		if !requireMethod(w, r, http.MethodPost) {
-			return
-		}
+	handleMethod(mux, "/api/profile/audit-plan", http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
 		handleProfileAuditPlan(w, r, runtime, profileHome)
 	})
-	mux.HandleFunc("/api/profile/install", func(w http.ResponseWriter, r *http.Request) {
-		if !requireMethod(w, r, http.MethodPost) {
-			return
-		}
+	handleMethod(mux, "/api/profile/install", http.MethodPost, func(w http.ResponseWriter, r *http.Request) {
 		handleProfileInstall(w, r, profileHome)
 	})
-	mux.HandleFunc("/api/profile/installed", func(w http.ResponseWriter, r *http.Request) {
-		if !requireMethod(w, r, http.MethodGet) {
-			return
-		}
+	handleMethod(mux, "/api/profile/installed", http.MethodGet, func(w http.ResponseWriter, r *http.Request) {
 		handleInstalledProfiles(w, r, profileHome)
 	})
-	mux.HandleFunc("/api/profile", func(w http.ResponseWriter, r *http.Request) {
-		if !requireMethod(w, r, http.MethodGet) {
-			return
-		}
+	handleMethod(mux, "/api/profile", http.MethodGet, func(w http.ResponseWriter, r *http.Request) {
 		writeProfileSummary(w, profiles.Current())
 	})
-	mux.HandleFunc("/api/profile/assets", func(w http.ResponseWriter, r *http.Request) {
-		if !requireMethod(w, r, http.MethodGet) {
-			return
-		}
+	handleMethod(mux, "/api/profile/assets", http.MethodGet, func(w http.ResponseWriter, r *http.Request) {
 		writeProfileAssets(w, profiles.Current())
 	})
-	mux.HandleFunc("/api/profile/catalog-index", func(w http.ResponseWriter, r *http.Request) {
-		if !requireMethod(w, r, http.MethodGet) {
-			return
-		}
+	handleMethod(mux, "/api/profile/catalog-index", http.MethodGet, func(w http.ResponseWriter, r *http.Request) {
 		handleProfileCatalogIndex(w, r, runtime)
 	})
 }

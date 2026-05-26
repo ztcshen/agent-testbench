@@ -79,7 +79,7 @@ func executorPlanReport(ctx context.Context, profileRef string, profileHomeRef s
 	if err != nil {
 		return executor.PlanReport{}, err
 	}
-	defer runtime.Close()
+	defer closeCLIStore(runtime)
 	catalog, err := runtime.GetProfileCatalog(ctx)
 	if err != nil {
 		return executor.PlanReport{}, err
@@ -166,7 +166,7 @@ func runTraceTopologyCollect(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer runtime.Close()
+	defer closeCLIStore(runtime)
 	payload := map[string]any{
 		"runId":      *runID,
 		"stepId":     *stepID,

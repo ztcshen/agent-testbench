@@ -38,24 +38,7 @@ type caseDiagnosisArtifacts struct {
 }
 
 func runCaseDiagnose(ctx context.Context, args []string) error {
-	selection := newCaseEvidenceCLIFlags("case diagnose")
-	if err := selection.parse(args); err != nil {
-		return err
-	}
-	runtime, cleanup, err := selection.openStore(ctx)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
-	report, err := diagnoseCaseEvidence(ctx, runtime, *selection.caseRunID, *selection.runID, *selection.caseID, *selection.stepID)
-	if err != nil {
-		return err
-	}
-	if *selection.json {
-		return writeIndentedJSON(report)
-	}
-	printCaseDiagnosis(report)
-	return nil
+	return runCaseEvidenceReport(ctx, args, "case diagnose", diagnoseCaseEvidence, printCaseDiagnosis)
 }
 
 func diagnoseCaseEvidence(ctx context.Context, runtime store.Store, caseRunID string, runID string, caseID string, stepID string) (caseDiagnosisReport, error) {

@@ -31,23 +31,7 @@ func (s *Store) ListEvidence(ctx context.Context, runID string) ([]store.Evidenc
 	query := fmt.Sprintf(`
 select id, run_id, case_run_id, step_id, kind, uri, media_type, sha256, size_bytes, summary, category, visibility, labels_json, created_at
 from evidence_records where run_id = %s order by created_at, id;`, s.dialect.BindVar(1))
-	rows, err := s.db.QueryContext(ctx, query, runID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []store.EvidenceRecord
-	for rows.Next() {
-		r, err := scanEvidenceRecord(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return queryStoreRows(ctx, s.db, query, scanEvidenceRecord, runID)
 }
 
 func (s *Store) SaveTraceTopology(ctx context.Context, r store.TraceTopology) (store.TraceTopology, error) {
@@ -73,23 +57,7 @@ func (s *Store) ListTraceTopologies(ctx context.Context, workflowRunID string) (
 	query := fmt.Sprintf(`
 select id, workflow_run_id, workflow_id, step_id, case_id, request_id, trace_id, status, topology_json, text_topology, created_at
 from trace_topologies where workflow_run_id = %s order by created_at, id;`, s.dialect.BindVar(1))
-	rows, err := s.db.QueryContext(ctx, query, workflowRunID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []store.TraceTopology
-	for rows.Next() {
-		r, err := scanTraceTopology(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return queryStoreRows(ctx, s.db, query, scanTraceTopology, workflowRunID)
 }
 
 func (s *Store) RecordPostProcessTask(ctx context.Context, r store.PostProcessTask) (store.PostProcessTask, error) {
@@ -124,23 +92,7 @@ func (s *Store) ListPostProcessTasks(ctx context.Context, runID string) ([]store
 	query := fmt.Sprintf(`
 select id, run_id, workflow_id, step_id, case_id, kind, status, started_at, finished_at, duration_ms, error, summary_json, created_at
 from post_process_tasks where run_id = %s order by created_at, id;`, s.dialect.BindVar(1))
-	rows, err := s.db.QueryContext(ctx, query, runID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []store.PostProcessTask
-	for rows.Next() {
-		r, err := scanPostProcessTask(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return queryStoreRows(ctx, s.db, query, scanPostProcessTask, runID)
 }
 
 func scanEvidenceRecord(row scanner) (store.EvidenceRecord, error) {

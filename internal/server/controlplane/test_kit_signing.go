@@ -122,18 +122,25 @@ func requestSigningKeyPath(auth map[string]string) (string, error) {
 			return "", err
 		}
 		if err := pkcs12.Start(); err != nil {
-			_ = pkey.Wait()
+			pkeyWaitErr := pkey.Wait()
+			if pkeyWaitErr != nil {
+				return "", fmt.Errorf("start openssl pkcs12: %w; wait pkey: %v", err, pkeyWaitErr)
+			}
 			return "", err
 		}
 		pkcs12WaitErr := pkcs12.Wait()
 		pkeyWaitErr := pkey.Wait()
 		if pkcs12WaitErr == nil && pkeyWaitErr == nil {
-			_ = os.Chmod(keyPath, 0o600)
+			if err := os.Chmod(keyPath, 0o600); err != nil {
+				return "", err
+			}
 			return keyPath, nil
 		}
 		lastErr = fmt.Errorf("extract key failed legacy=%v pkcs12=%v pkey=%v pkcs12_err=%s pkey_err=%s", legacy, pkcs12WaitErr, pkeyWaitErr, strings.TrimSpace(pkcs12Err.String()), strings.TrimSpace(pkeyErr.String()))
 	}
-	_ = os.Remove(keyPath)
+	if err := os.Remove(keyPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
 	return "", lastErr
 }
 

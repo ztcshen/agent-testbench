@@ -228,7 +228,8 @@ func applyAPICaseJSONPatchOperation(root any, segments []apiCaseJSONPathSegment,
 			if len(segments) == 1 {
 				return array, nil
 			}
-			return root, assignAPICaseJSONPathChild(root, segments[:len(segments)-1], array)
+			assignAPICaseJSONPathChild(root, segments[:len(segments)-1], array)
+			return root, nil
 		default:
 			return root, fmt.Errorf("unsupported patch op %q", operation.Op)
 		}
@@ -265,15 +266,15 @@ func apiCaseJSONPathChild(parent any, segment apiCaseJSONPathSegment) (any, bool
 	return value, ok
 }
 
-func assignAPICaseJSONPathChild(root any, segments []apiCaseJSONPathSegment, value any) error {
+func assignAPICaseJSONPathChild(root any, segments []apiCaseJSONPathSegment, value any) {
 	if len(segments) == 0 {
-		return nil
+		return
 	}
 	parent := root
 	for _, segment := range segments[:len(segments)-1] {
 		next, ok := apiCaseJSONPathChild(parent, segment)
 		if !ok {
-			return nil
+			return
 		}
 		parent = next
 	}
@@ -281,13 +282,12 @@ func assignAPICaseJSONPathChild(root any, segments []apiCaseJSONPathSegment, val
 	if last.Index != nil {
 		array, ok := parent.([]any)
 		if !ok || *last.Index < 0 || *last.Index >= len(array) {
-			return nil
+			return
 		}
 		array[*last.Index] = value
-		return nil
+		return
 	}
 	if object, ok := parent.(map[string]any); ok {
 		object[last.Key] = value
 	}
-	return nil
 }

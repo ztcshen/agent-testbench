@@ -2,7 +2,9 @@ package controlplane
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
 )
 
 func writeJSON(w http.ResponseWriter, value any) {
@@ -14,7 +16,9 @@ func writeJSONStatus(w http.ResponseWriter, status int, value any) {
 	w.WriteHeader(status)
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
-	_ = encoder.Encode(value)
+	if err := encoder.Encode(value); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: write json response: %v\n", err)
+	}
 }
 
 func requireMethod(w http.ResponseWriter, r *http.Request, method string) bool {

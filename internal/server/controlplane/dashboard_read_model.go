@@ -51,15 +51,8 @@ func dashboardPayloadFromBundleWithStore(ctx context.Context, bundle profile.Bun
 }
 
 func dashboardPayloadFromReadModel(ctx context.Context, runtime store.Store, profileID string) (dashboardPayload, bool, error) {
-	model, err := runtime.GetReadModel(ctx, profileID, ReadModelDashboard)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return dashboardPayload{}, false, nil
-		}
-		return dashboardPayload{}, false, err
-	}
-	var payload dashboardPayload
-	if err := json.Unmarshal([]byte(model.PayloadJSON), &payload); err != nil {
+	payload, ok, err := readModelPayload[dashboardPayload](ctx, runtime, profileID, ReadModelDashboard)
+	if err != nil || !ok {
 		return dashboardPayload{}, false, err
 	}
 	payload.Source = map[string]string{"kind": "read-model", "id": profileID}

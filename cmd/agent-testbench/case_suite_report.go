@@ -335,7 +335,8 @@ func printCaseSuiteReport(report caseSuiteReport) {
 
 func caseSuiteFilterSlug(filters caseListFilter) string {
 	filters = normalizeCaseListFilter(filters)
-	parts := []string{filters.Filter, filters.NodeID, filters.Status, filters.Owner, filters.Priority}
+	parts := make([]string, 0, 5+len(filters.Tags))
+	parts = append(parts, filters.Filter, filters.NodeID, filters.Status, filters.Owner, filters.Priority)
 	parts = append(parts, filters.Tags...)
 	for _, part := range parts {
 		if strings.TrimSpace(part) != "" {

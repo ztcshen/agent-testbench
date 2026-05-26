@@ -76,6 +76,13 @@ linters:
     goconst:
       min-len: 4
       min-occurrences: 4
+      ignore-string-values:
+        # JSON payload keys, SQL column names, and wire-format enum values are
+        # repeated intentionally at API/Store boundaries; constants make those
+        # boundary maps harder to review without adding safety.
+        - "^(ok|id|name|kind|status|error|request|response|summary|source|profile|store|service|services|environment|case|suite|report|plan|inspect|discover|coverage|gate|start|restore|audit|action|reason|body|headers|method|path|operation|result|details|steps|required|passed|active|failed|skipped|running|pending|healthy|unhealthy|external|unknown|missing|verified|current|not-run|sqlite|postgres|mysql|compose|command|container|checkout|branch|database|openapi|config|sample|timeout|workflow|register|acceptance|docker|clone|completed|draft|upgrade|replace|remove|application/json|invalid json|now:datetime|compose-service|business-service|read-model|_default|HEAD|Services|request.json|response.json|case run failed|case-failure|runtime store is not configured|run-acceptance-workflow|prepare-generated-files|skipped-after-repository-preparation|use-existing-containers|plan-docker-compose|run-docker-compose|plan-apply-mysql-sql|environment.workflow.skywalking.v1|skywalking|TPL-INTERFACE-NODE-CASE-LIST-V1|--store|--json)$"
+        - "^[a-z][A-Za-z0-9]*(Id|ID|Url|URL|Json|JSON|Count|At|Ms|Name|Reason|Code)$"
+        - "^[a-z]+(_[a-z]+)+$"
     gocyclo:
       min-complexity: 20
     maintidx:

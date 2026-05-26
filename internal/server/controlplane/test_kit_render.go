@@ -33,10 +33,7 @@ func renderCaseString(value string, overrides map[string]any) string {
 	rendered := strings.ReplaceAll(value, "${AUTO_SERIAL}", serialValue("GEN"))
 	rendered = strings.ReplaceAll(rendered, "${AUTO_RT_ORDER_ID}", serialValue("RT"))
 	cursor := 0
-	for {
-		if cursor >= len(rendered) {
-			break
-		}
+	for cursor < len(rendered) {
 		start := strings.Index(rendered[cursor:], "{{")
 		if start >= 0 {
 			start += cursor

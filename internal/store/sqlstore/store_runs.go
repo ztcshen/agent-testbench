@@ -40,25 +40,9 @@ from runs where id = %s;`, s.dialect.BindVar(1))
 }
 
 func (s *Store) ListRuns(ctx context.Context) ([]store.Run, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	return queryStoreRows(ctx, s.db, `
 select id, profile_id, environment_id, workflow_id, status, evidence_root, summary_json, started_at, finished_at, created_at, updated_at
-from runs order by created_at, id;`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []store.Run
-	for rows.Next() {
-		r, err := scanRun(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
+from runs order by created_at, id;`, scanRun)
 }
 
 func scanRun(row scanner) (store.Run, error) {

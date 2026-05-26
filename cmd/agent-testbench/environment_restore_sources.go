@@ -353,67 +353,87 @@ func environmentRestoreRepo(ctx context.Context, spec environmentRestoreRepoSpec
 		OK:        true,
 	}
 	if stat, err := os.Stat(spec.Checkout); err == nil && stat.IsDir() {
-		report.Exists = true
-		if strings.TrimSpace(spec.URL) != "" && environmentRestoreDirIsEmpty(spec.Checkout) {
-			if !execute {
-				report.Exists = false
-				report.Action = "clone"
-				args := restoreGitCloneArgs(spec)
-				report.Command = append([]string{"git"}, args...)
-				return report
-			}
-			return environmentRestoreCloneIntoCheckout(ctx, spec, report)
-		}
-		if strings.TrimSpace(spec.URL) != "" || strings.TrimSpace(spec.Ref) != "" {
-			if ok, errText := environmentRestoreValidateCheckout(ctx, spec); !ok {
-				report.OK = false
-				report.Action = "invalid-existing-checkout"
-				report.Error = errText
-				return report
-			}
-		}
-		if strings.TrimSpace(spec.Ref) != "" {
-			if atRef, _ := environmentRestoreCheckoutDetachedAtRef(ctx, spec); atRef {
-				report.Action = "use-existing-checkout"
-				return report
-			}
-			checkoutCommands := environmentRestoreExistingRefCommands(spec)
-			report.Action = "checkout-existing-ref"
-			report.Command = flattenRestoreCommands(checkoutCommands)
-			if !execute {
-				return report
-			}
-			outputs := make([]string, 0, len(checkoutCommands))
-			for _, command := range checkoutCommands {
-				if len(command) == 0 {
-					continue
-				}
-				output, errText := runRestoreGitCommand(ctx, command[1:]...)
-				if strings.TrimSpace(output) != "" {
-					outputs = append(outputs, output)
-				}
-				if errText != "" {
-					report.OK = false
-					report.Output = strings.Join(outputs, "\n")
-					report.Error = errText
-					return report
-				}
-			}
-			report.Output = strings.Join(outputs, "\n")
-			report.OK = true
+		return environmentRestoreExistingRepo(ctx, spec, report, execute, pull)
+	}
+	return environmentRestoreMissingRepo(ctx, spec, report, execute)
+}
+
+func environmentRestoreExistingRepo(ctx context.Context, spec environmentRestoreRepoSpec, report environmentRestoreRepoReport, execute bool, pull bool) environmentRestoreRepoReport {
+	report.Exists = true
+	if strings.TrimSpace(spec.URL) != "" && environmentRestoreDirIsEmpty(spec.Checkout) {
+		return environmentRestoreEmptyCheckout(ctx, spec, report, execute)
+	}
+	if strings.TrimSpace(spec.URL) != "" || strings.TrimSpace(spec.Ref) != "" {
+		if ok, errText := environmentRestoreValidateCheckout(ctx, spec); !ok {
+			report.OK = false
+			report.Action = "invalid-existing-checkout"
+			report.Error = errText
 			return report
 		}
-		if strings.TrimSpace(spec.URL) == "" || !execute || !pull {
-			report.Action = "use-existing-checkout"
-			return report
-		}
-		args := []string{"-C", spec.Checkout, "pull", "--ff-only"}
-		report.Action = "pull-existing-checkout"
-		report.Command = append([]string{"git"}, args...)
-		report.Output, report.Error = runRestoreGitCommand(ctx, args...)
-		report.OK = report.Error == ""
+	}
+	if strings.TrimSpace(spec.Ref) != "" {
+		return environmentRestoreExistingRef(ctx, spec, report, execute)
+	}
+	if strings.TrimSpace(spec.URL) == "" || !execute || !pull {
+		report.Action = "use-existing-checkout"
 		return report
 	}
+	return environmentRestorePullExisting(ctx, spec, report)
+}
+
+func environmentRestoreEmptyCheckout(ctx context.Context, spec environmentRestoreRepoSpec, report environmentRestoreRepoReport, execute bool) environmentRestoreRepoReport {
+	if !execute {
+		report.Exists = false
+		report.Action = "clone"
+		args := restoreGitCloneArgs(spec)
+		report.Command = append([]string{"git"}, args...)
+		return report
+	}
+	return environmentRestoreCloneIntoCheckout(ctx, spec, report)
+}
+
+func environmentRestoreExistingRef(ctx context.Context, spec environmentRestoreRepoSpec, report environmentRestoreRepoReport, execute bool) environmentRestoreRepoReport {
+	if atRef, _ := environmentRestoreCheckoutDetachedAtRef(ctx, spec); atRef {
+		report.Action = "use-existing-checkout"
+		return report
+	}
+	checkoutCommands := environmentRestoreExistingRefCommands(spec)
+	report.Action = "checkout-existing-ref"
+	report.Command = flattenRestoreCommands(checkoutCommands)
+	if !execute {
+		return report
+	}
+	outputs := make([]string, 0, len(checkoutCommands))
+	for _, command := range checkoutCommands {
+		if len(command) == 0 {
+			continue
+		}
+		output, errText := runRestoreGitCommand(ctx, command[1:]...)
+		if strings.TrimSpace(output) != "" {
+			outputs = append(outputs, output)
+		}
+		if errText != "" {
+			report.OK = false
+			report.Output = strings.Join(outputs, "\n")
+			report.Error = errText
+			return report
+		}
+	}
+	report.Output = strings.Join(outputs, "\n")
+	report.OK = true
+	return report
+}
+
+func environmentRestorePullExisting(ctx context.Context, spec environmentRestoreRepoSpec, report environmentRestoreRepoReport) environmentRestoreRepoReport {
+	args := []string{"-C", spec.Checkout, "pull", "--ff-only"}
+	report.Action = "pull-existing-checkout"
+	report.Command = append([]string{"git"}, args...)
+	report.Output, report.Error = runRestoreGitCommand(ctx, args...)
+	report.OK = report.Error == ""
+	return report
+}
+
+func environmentRestoreMissingRepo(ctx context.Context, spec environmentRestoreRepoSpec, report environmentRestoreRepoReport, execute bool) environmentRestoreRepoReport {
 	if strings.TrimSpace(spec.URL) == "" {
 		report.OK = false
 		report.Action = "missing-repo-url"

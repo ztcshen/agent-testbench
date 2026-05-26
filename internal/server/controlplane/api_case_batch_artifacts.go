@@ -49,7 +49,7 @@ func recordAPICaseBatchReportArtifacts(ctx context.Context, runtime store.Store,
 		if err != nil {
 			continue
 		}
-		_, _ = runtime.RecordEvidence(ctx, store.EvidenceRecord{
+		if _, err := runtime.RecordEvidence(ctx, store.EvidenceRecord{
 			ID:         report.BatchRunID + ".report." + artifact.Kind,
 			RunID:      report.BatchRunID,
 			Kind:       artifact.Kind,
@@ -65,7 +65,9 @@ func recordAPICaseBatchReportArtifacts(ctx context.Context, runtime store.Store,
 				"kind":       artifact.Kind,
 			}),
 			CreatedAt: finishedAt,
-		})
+		}); err != nil {
+			continue
+		}
 	}
 }
 

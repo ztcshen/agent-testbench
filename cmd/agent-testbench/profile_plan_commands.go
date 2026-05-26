@@ -181,57 +181,58 @@ func runProfileImportPlan(args []string) error {
 }
 
 func runProfileOpenAPIImportPlan(args []string) error {
-	flags := flag.NewFlagSet("profile import-plan openapi", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	sourcePath := flags.String("from", "", "OpenAPI JSON document path")
-	serviceID := flags.String("service-id", "", "Service ID for generated draft assets")
-	evidenceDir := flags.String("evidence-dir", "", "Evidence directory for generated draft API cases")
-	outputDir := flags.String("output-dir", "", "Write a reviewable import plan file tree")
-	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	if strings.TrimSpace(*sourcePath) == "" {
-		return errors.New("missing --from")
-	}
-	raw, err := os.ReadFile(*sourcePath)
-	if err != nil {
-		return fmt.Errorf("read openapi document: %w", err)
-	}
-	plan, err := profileimportopenapi.Plan(raw, profileimportopenapi.Options{
-		ServiceID:   *serviceID,
-		EvidenceDir: *evidenceDir,
-	})
-	if err != nil {
-		return err
-	}
-	report := profileImportPlanReport{
+	return runProfileImportPlanKind(args, profileImportPlanKind{
+		Command:    "profile import-plan openapi",
 		Kind:       "openapi",
-		SourcePath: *sourcePath,
-		Plan:       importPlanAssetsFromOpenAPI(plan),
-	}
-	if strings.TrimSpace(*outputDir) != "" {
-		report.OutputDir = *outputDir
-		writtenFiles, err := writeProfileImportPlanOutput(*outputDir, report)
-		if err != nil {
-			return err
-		}
-		report.WrittenFiles = writtenFiles
-		if err := writeProfileImportPlanManifest(*outputDir, report); err != nil {
-			return err
-		}
-	}
-	if *jsonOutput {
-		return writeIndentedJSON(report)
-	}
-	printProfileImportPlan("OpenAPI Import Plan", report)
-	return nil
+		SourceHelp: "OpenAPI JSON document path",
+		ReadLabel:  "openapi document",
+		Title:      "OpenAPI Import Plan",
+		Build: func(raw []byte, serviceID string, evidenceDir string) (profileImportPlanAssets, error) {
+			plan, err := profileimportopenapi.Plan(raw, profileimportopenapi.Options{
+				ServiceID:   serviceID,
+				EvidenceDir: evidenceDir,
+			})
+			if err != nil {
+				return profileImportPlanAssets{}, err
+			}
+			return importPlanAssetsFromOpenAPI(plan), nil
+		},
+	})
 }
 
 func runProfileHTTPCaptureImportPlan(args []string) error {
-	flags := flag.NewFlagSet("profile import-plan http-capture", flag.ContinueOnError)
+	return runProfileImportPlanKind(args, profileImportPlanKind{
+		Command:    "profile import-plan http-capture",
+		Kind:       "http-capture",
+		SourceHelp: "HTTP capture JSON document path",
+		ReadLabel:  "http capture document",
+		Title:      "HTTP Capture Import Plan",
+		Build: func(raw []byte, serviceID string, evidenceDir string) (profileImportPlanAssets, error) {
+			plan, err := profileimporthttpcapture.Plan(raw, profileimporthttpcapture.Options{
+				ServiceID:   serviceID,
+				EvidenceDir: evidenceDir,
+			})
+			if err != nil {
+				return profileImportPlanAssets{}, err
+			}
+			return importPlanAssetsFromHTTPCapture(plan), nil
+		},
+	})
+}
+
+type profileImportPlanKind struct {
+	Command    string
+	Kind       string
+	SourceHelp string
+	ReadLabel  string
+	Title      string
+	Build      func(raw []byte, serviceID string, evidenceDir string) (profileImportPlanAssets, error)
+}
+
+func runProfileImportPlanKind(args []string, kind profileImportPlanKind) error {
+	flags := flag.NewFlagSet(kind.Command, flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	sourcePath := flags.String("from", "", "HTTP capture JSON document path")
+	sourcePath := flags.String("from", "", kind.SourceHelp)
 	serviceID := flags.String("service-id", "", "Service ID for generated draft assets")
 	evidenceDir := flags.String("evidence-dir", "", "Evidence directory for generated draft API cases")
 	outputDir := flags.String("output-dir", "", "Write a reviewable import plan file tree")
@@ -244,19 +245,16 @@ func runProfileHTTPCaptureImportPlan(args []string) error {
 	}
 	raw, err := os.ReadFile(*sourcePath)
 	if err != nil {
-		return fmt.Errorf("read http capture document: %w", err)
+		return fmt.Errorf("read %s: %w", kind.ReadLabel, err)
 	}
-	plan, err := profileimporthttpcapture.Plan(raw, profileimporthttpcapture.Options{
-		ServiceID:   *serviceID,
-		EvidenceDir: *evidenceDir,
-	})
+	plan, err := kind.Build(raw, *serviceID, *evidenceDir)
 	if err != nil {
 		return err
 	}
 	report := profileImportPlanReport{
-		Kind:       "http-capture",
+		Kind:       kind.Kind,
 		SourcePath: *sourcePath,
-		Plan:       importPlanAssetsFromHTTPCapture(plan),
+		Plan:       plan,
 	}
 	if strings.TrimSpace(*outputDir) != "" {
 		report.OutputDir = *outputDir
@@ -272,7 +270,7 @@ func runProfileHTTPCaptureImportPlan(args []string) error {
 	if *jsonOutput {
 		return writeIndentedJSON(report)
 	}
-	printProfileImportPlan("HTTP Capture Import Plan", report)
+	printProfileImportPlan(kind.Title, report)
 	return nil
 }
 
@@ -393,20 +391,5 @@ func writeImportPlanRawJSON(outputDir string, relative string, raw []byte) error
 }
 
 func safeImportPlanFileName(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "asset"
-	}
-	var builder strings.Builder
-	for _, r := range value {
-		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.' {
-			builder.WriteRune(r)
-			continue
-		}
-		builder.WriteByte('-')
-	}
-	if builder.Len() == 0 {
-		return "asset"
-	}
-	return builder.String()
+	return safeProfileAssetFileName(value, "asset")
 }

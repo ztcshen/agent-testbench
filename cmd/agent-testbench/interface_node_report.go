@@ -159,18 +159,6 @@ func loadInterfaceNodeReportBundle(ctx context.Context, profileRef string, profi
 	return bundle, sourceStore, cleanup, nil
 }
 
-func loadInterfaceNodeReportBundleFromStoreFlags(ctx context.Context, profileRef string, profileHomeRef string, storeRef string, legacyStoreURL string) (profile.Bundle, store.Store, string, func(), error) {
-	resolvedStoreURL, err := resolveOptionalBundleStoreReference(profileRef, storeRef, legacyStoreURL)
-	if err != nil {
-		return profile.Bundle{}, nil, "", func() {}, err
-	}
-	bundle, runtime, cleanup, err := loadInterfaceNodeReportBundle(ctx, profileRef, profileHomeRef, resolvedStoreURL)
-	if err != nil {
-		return profile.Bundle{}, nil, resolvedStoreURL, cleanup, err
-	}
-	return bundle, runtime, resolvedStoreURL, cleanup, nil
-}
-
 func loadRequiredInterfaceNodeReportBundleFromStoreFlags(ctx context.Context, profileRef string, profileHomeRef string, storeRef string, legacyStoreURL string) (profile.Bundle, store.Store, string, func(), error) {
 	resolvedStoreURL, err := resolveRequiredDailyStoreReference(storeRef, legacyStoreURL)
 	if err != nil {

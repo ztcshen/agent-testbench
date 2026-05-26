@@ -29,10 +29,7 @@ func (r *apiCaseBatchRunner) updateCase(batchRunID string, index int, item apiCa
 		report.Cases[index] = item
 	}
 	refreshAPICaseBatchCounts(&report)
-	_ = writeAPICaseBatchHTMLReport(report)
-	_ = writeAPICaseBatchJUnitReport(report)
-	_ = writeAPICaseBatchArtifactManifest(report)
-	_ = writeAPICaseBatchFailureSummary(report)
+	writeAPICaseBatchReports(&report)
 	r.runs[batchRunID] = report
 }
 
@@ -51,10 +48,7 @@ func (r *apiCaseBatchRunner) finish(ctx context.Context, batchRunID string, prof
 	if strings.TrimSpace(report.WorkflowID) != "" {
 		report.Acceptance = buildWorkflowAcceptanceReport(ctx, runtime, report)
 	}
-	_ = writeAPICaseBatchHTMLReport(report)
-	_ = writeAPICaseBatchJUnitReport(report)
-	_ = writeAPICaseBatchArtifactManifest(report)
-	_ = writeAPICaseBatchFailureSummary(report)
+	writeAPICaseBatchReports(&report)
 	recordAPICaseBatchReportArtifacts(ctx, runtime, profileID, workflowID, report)
 	if strings.TrimSpace(report.WorkflowID) != "" {
 		copyAPICaseBatchTraceTopologies(ctx, runtime, report)
@@ -62,6 +56,23 @@ func (r *apiCaseBatchRunner) finish(ctx context.Context, batchRunID string, prof
 	finalizeEnvironmentAcceptanceRun(ctx, runtime, report)
 	r.runs[batchRunID] = report
 	r.mu.Unlock()
+}
+
+func writeAPICaseBatchReports(report *apiCaseBatchRunReport) {
+	for _, writeReport := range []func(apiCaseBatchRunReport) error{
+		writeAPICaseBatchHTMLReport,
+		writeAPICaseBatchJUnitReport,
+		writeAPICaseBatchArtifactManifest,
+		writeAPICaseBatchFailureSummary,
+	} {
+		if err := writeReport(*report); err != nil {
+			if report.Error == "" {
+				report.Error = err.Error()
+			} else if !strings.Contains(report.Error, err.Error()) {
+				report.Error += "; " + err.Error()
+			}
+		}
+	}
 }
 
 func refreshAPICaseBatchCounts(report *apiCaseBatchRunReport) {

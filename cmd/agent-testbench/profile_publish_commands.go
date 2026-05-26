@@ -178,7 +178,7 @@ func runProfileVerify(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer s.Close()
+	defer closeCLIStore(s)
 	resolvedProfilePath, err := materializeProfileReference(templatePackageReference(*templatePackagePath, *profilePath), *profileHome, *force)
 	if err != nil {
 		return err
@@ -241,7 +241,7 @@ func runConfigPublishWithFlags(ctx context.Context, flags *flag.FlagSet, args []
 	if err != nil {
 		return err
 	}
-	defer s.Close()
+	defer closeCLIStore(s)
 
 	resolvedFrom, err := materializeProfileReference(*from, *profileHome, *force)
 	if err != nil {
@@ -761,7 +761,7 @@ func readProfileCatalogIndex(ctx context.Context, storeURL string) (profileCatal
 	if err != nil {
 		return profileCatalogIndexReport{}, err
 	}
-	defer runtime.Close()
+	defer closeCLIStore(runtime)
 	index, err := runtime.GetProfileCatalogIndex(ctx)
 	if err != nil {
 		return profileCatalogIndexReport{}, err
@@ -877,7 +877,7 @@ func runProfileAudit(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		defer s.Close()
+		defer closeCLIStore(s)
 		options.Store = s
 	}
 
@@ -944,7 +944,7 @@ func profileAuditRepairPlan(ctx context.Context, profilePath string, profileHome
 		if err != nil {
 			return profileaudit.RepairPlanReport{}, err
 		}
-		defer s.Close()
+		defer closeCLIStore(s)
 		options.Store = s
 	}
 	audit, err := profileaudit.Audit(ctx, options)

@@ -224,7 +224,7 @@ func TestEnvironmentRestoreEdgeAssetsAvoidNonSQLMySQLAndDuplicateApply(t *testin
 			{OwnerComponentID: "app", AssetID: "shared.schema", AssetKind: "mysql-ddl", TargetComponentID: "mysql", TargetPath: "compose/mysql/init/shared.sql", ContentInline: "create database if not exists app;\n"},
 		},
 	}
-	items := environmentRestoreApplyEdgeAssets(context.Background(), "env.edge.dedupe", graph, map[string]any{
+	items := environmentRestoreApplyEdgeAssets(context.Background(), graph, map[string]any{
 		"generatedFiles": map[string]any{
 			"compose/mysql/config.cnf": "[mysqld]\n",
 		},
@@ -268,7 +268,7 @@ func TestEnvironmentRestoreEdgeAssetsRequireMySQLProviderSignal(t *testing.T) {
 			{OwnerComponentID: "app", AssetID: "shared.schema", AssetKind: "schema", TargetPath: "shared.sql", ContentInline: "create database if not exists shared;\n"},
 		},
 	}
-	items := environmentRestoreApplyEdgeAssets(context.Background(), "env.edge.mysql-signal", graph, nil, workspace, false, []string{"-f", "compose.yml"})
+	items := environmentRestoreApplyEdgeAssets(context.Background(), graph, nil, workspace, false, []string{"-f", "compose.yml"})
 	if len(items) != 3 {
 		t.Fatalf("shared asset should be applied once per effective target, got %#v", items)
 	}
@@ -305,7 +305,7 @@ func TestEnvironmentRestoreEdgeAssetContentRejectsParentPath(t *testing.T) {
 func TestEnvironmentRestoreRetriesMySQLAssetUntilServiceReady(t *testing.T) {
 	workspace := t.TempDir()
 	command, callsPath := fakeMySQLApplyCommandWithFirstFailure(t)
-	_, attempts, errText := runRestoreMySQLCommandWithInputRetry(context.Background(), workspace, command, "create database if not exists app;\n")
+	attempts, errText := runRestoreMySQLCommandWithInputRetry(context.Background(), workspace, command, "create database if not exists app;\n")
 	if errText != "" {
 		t.Fatalf("mysql retry command failed: %s", errText)
 	}

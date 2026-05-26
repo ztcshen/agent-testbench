@@ -374,18 +374,6 @@ type latestCaseState struct {
 	ObservedAt time.Time
 }
 
-func latestCaseStatuses(ctx context.Context, runtime store.Store) (map[string]string, error) {
-	states, err := latestCaseStates(ctx, runtime)
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]string{}
-	for caseID, state := range states {
-		out[caseID] = state.Status
-	}
-	return out, nil
-}
-
 func latestCaseStates(ctx context.Context, runtime store.Store) (map[string]latestCaseState, error) {
 	out := map[string]latestCaseState{}
 	if runtime == nil {

@@ -46,23 +46,7 @@ order by created_at, id;`)
 }
 
 func (s *Store) queryAPICaseRuns(ctx context.Context, query string, args ...any) ([]store.APICaseRun, error) {
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []store.APICaseRun
-	for rows.Next() {
-		r, err := scanAPICaseRun(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return queryStoreRows(ctx, s.db, query, scanAPICaseRun, args...)
 }
 
 func scanAPICaseRun(row scanner) (store.APICaseRun, error) {

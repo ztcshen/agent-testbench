@@ -323,11 +323,11 @@ func runDailyWorkflowCommandsUseNamedActiveStore(t *testing.T, runLabel string, 
 		"--trace-id", traceID,
 		"--json",
 	)
-	if !(strings.Contains(traceOut, `"provider":"skywalking"`) || strings.Contains(traceOut, `"provider": "skywalking"`)) || !(strings.Contains(traceOut, `"status":"complete"`) || strings.Contains(traceOut, `"status": "complete"`)) || !strings.Contains(traceOut, traceID) {
+	if !strings.Contains(traceOut, `"provider":"skywalking"`) && !strings.Contains(traceOut, `"provider": "skywalking"`) || !strings.Contains(traceOut, `"status":"complete"`) && !strings.Contains(traceOut, `"status": "complete"`) || !strings.Contains(traceOut, traceID) {
 		t.Fatalf("%s trace topology via active SQL Store = %s", label, traceOut)
 	}
 	evidenceOut := runCLI(t, "case", "evidence", "--run", report.RunID, "--case-id", "case.first", "--step-id", "first", "--json")
-	if !(strings.Contains(evidenceOut, `"provider":"skywalking"`) || strings.Contains(evidenceOut, `"provider": "skywalking"`)) || !strings.Contains(evidenceOut, traceID) {
+	if !strings.Contains(evidenceOut, `"provider":"skywalking"`) && !strings.Contains(evidenceOut, `"provider": "skywalking"`) || !strings.Contains(evidenceOut, traceID) {
 		t.Fatalf("%s case evidence via active SQL Store = %s", label, evidenceOut)
 	}
 }

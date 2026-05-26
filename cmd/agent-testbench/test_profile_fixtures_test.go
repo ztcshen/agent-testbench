@@ -348,37 +348,6 @@ func writeUniqueInterfaceNodeBatchReportProfile(t *testing.T) interfaceNodeBatch
 	return fixture
 }
 
-func writeCaseSuiteCoverageProfile(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "profile.json"), `{
-  "id": "sample",
-  "displayName": "Sample Profile",
-  "services": [{"id":"service.alpha","displayName":"Service Alpha"}],
-  "workflows": [],
-  "interfaceNodes": [{"id":"node.alpha","displayName":"Node Alpha","serviceId":"service.alpha","operation":"Alpha","method":"GET","path":"/alpha"}],
-  "apiCases": [
-    {"id":"case.default","displayName":"Default Case","nodeId":"node.alpha","sortOrder":1,"tags":["regression","smoke"],"priority":"p0","owner":"team-a","description":"Default maintained case.","casePath":"cases/default.json"},
-    {"id":"case.variant","displayName":"Variant Case","nodeId":"node.alpha","sortOrder":2,"tags":["regression"],"priority":"p1","owner":"team-a","description":"Variant maintained case."},
-    {"id":"case.unrun","displayName":"Unrun Case","nodeId":"node.alpha","sortOrder":3,"tags":["regression"],"priority":"p2","owner":"team-b","description":"Unrun maintained case."}
-  ],
-  "requestTemplates": [],
-  "templateConfigs": [
-    {
-      "id": "config.case.variant",
-      "scopeType": "case",
-      "scopeId": "case.variant",
-      "status": "active",
-      "configJson": "{\"caseId\":\"case.variant\",\"caseExecution\":{\"method\":\"GET\",\"nodeId\":\"node.alpha\",\"path\":\"/alpha\",\"expectedHttpCodes\":[200]}}"
-    }
-  ],
-  "caseDependencies": [],
-  "workflowBindings": [],
-  "fixtures": []
-}`)
-	return dir
-}
-
 type caseSuiteQualityFixture struct {
 	profileDir           string
 	profileID            string

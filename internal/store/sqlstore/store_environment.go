@@ -48,30 +48,14 @@ from environments where id = %s;`, s.dialect.BindVar(1))
 }
 
 func (s *Store) ListEnvironments(ctx context.Context) ([]store.Environment, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	return queryStoreRows(ctx, s.db, `
 select id, display_name, description, status, verified, services_json, repos_json, compose_json,
   health_checks_json, verification_workflow_id, last_verification_run_id, last_verification_status,
   evidence_complete, topology_complete, last_verified_at, summary_json, created_at, updated_at
-from environments order by verified desc, updated_at desc, id;`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []store.Environment
-	for rows.Next() {
-		item, err := scanEnvironment(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
+from environments order by verified desc, updated_at desc, id;`, scanEnvironment)
 }
 
-func (s *Store) ReplaceEnvironmentComponentGraph(ctx context.Context, envID string, graph store.EnvironmentComponentGraph) error {
+func (s *Store) ReplaceEnvironmentComponentGraph(ctx context.Context, envID string, graph store.EnvironmentComponentGraph) (err error) {
 	if err := store.ValidateEnvironmentComponentGraph(envID, graph); err != nil {
 		return err
 	}
@@ -79,7 +63,7 @@ func (s *Store) ReplaceEnvironmentComponentGraph(ctx context.Context, envID stri
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTxOnError(tx, &err)
 	for _, table := range []string{"component_config_assets", "component_dependencies", "environment_components"} {
 		query := fmt.Sprintf(`delete from %s where env_id = %s;`, table, s.dialect.BindVar(1))
 		if _, err := tx.ExecContext(ctx, query, envID); err != nil {
@@ -150,11 +134,14 @@ insert into component_config_assets (
 			return fmt.Errorf("insert component config asset %q: %w", asset.AssetID, err)
 		}
 	}
-	return tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	return nil
 }
 
-func (s *Store) GetEnvironmentComponentGraph(ctx context.Context, envID string) (store.EnvironmentComponentGraph, error) {
-	graph := store.EnvironmentComponentGraph{
+func (s *Store) GetEnvironmentComponentGraph(ctx context.Context, envID string) (graph store.EnvironmentComponentGraph, err error) {
+	graph = store.EnvironmentComponentGraph{
 		Components:   []store.EnvironmentComponent{},
 		Dependencies: []store.ComponentDependency{},
 		Assets:       []store.ComponentConfigAsset{},
@@ -168,7 +155,7 @@ order by component_id;`, s.dialect.BindVar(1)), envID)
 	if err != nil {
 		return store.EnvironmentComponentGraph{}, err
 	}
-	defer componentRows.Close()
+	defer closeRows(componentRows, &err)
 	for componentRows.Next() {
 		item, err := scanEnvironmentComponent(componentRows)
 		if err != nil {
@@ -188,7 +175,7 @@ order by consumer_component_id, provider_component_id, phase, capability;`, s.di
 	if err != nil {
 		return store.EnvironmentComponentGraph{}, err
 	}
-	defer depRows.Close()
+	defer closeRows(depRows, &err)
 	for depRows.Next() {
 		item, err := scanComponentDependency(depRows)
 		if err != nil {
@@ -209,7 +196,7 @@ order by owner_component_id, apply_order, asset_id;`, s.dialect.QuoteIdent("sens
 	if err != nil {
 		return store.EnvironmentComponentGraph{}, err
 	}
-	defer assetRows.Close()
+	defer closeRows(assetRows, &err)
 	for assetRows.Next() {
 		item, err := scanComponentConfigAsset(assetRows)
 		if err != nil {

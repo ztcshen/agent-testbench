@@ -60,15 +60,8 @@ func catalogPayloadFromBundleWithStore(ctx context.Context, bundle profile.Bundl
 }
 
 func catalogPayloadFromReadModel(ctx context.Context, runtime store.Store, profileID string) (catalogPayload, bool, error) {
-	model, err := runtime.GetReadModel(ctx, profileID, ReadModelCatalog)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return catalogPayload{}, false, nil
-		}
-		return catalogPayload{}, false, err
-	}
-	var payload catalogPayload
-	if err := json.Unmarshal([]byte(model.PayloadJSON), &payload); err != nil {
+	payload, ok, err := readModelPayload[catalogPayload](ctx, runtime, profileID, ReadModelCatalog)
+	if err != nil || !ok {
 		return catalogPayload{}, false, err
 	}
 	payload.Source = map[string]string{"kind": "read-model", "id": profileID}

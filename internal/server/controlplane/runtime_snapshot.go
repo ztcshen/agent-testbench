@@ -357,7 +357,13 @@ func applyHTTPServiceHealth(ctx context.Context, runtime serviceRuntime, rawURL 
 		runtime.Message = err.Error()
 		return runtime
 	}
-	defer resp.Body.Close()
+	closeErr := resp.Body.Close()
+	if closeErr != nil {
+		runtime.Health = "unhealthy"
+		runtime.OK = false
+		runtime.Message = closeErr.Error()
+		return runtime
+	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		runtime.Health = "healthy"
 		runtime.OK = true

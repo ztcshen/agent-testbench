@@ -118,7 +118,11 @@ func doWorkflowAcceptanceJSON(req *http.Request) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: close workflow acceptance response body: %v\n", closeErr)
+		}
+	}()
 	var payload map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, err
@@ -146,63 +150,58 @@ func printWorkflowAcceptanceReport(payload map[string]any) {
 }
 
 func runWorkflowStep(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("workflow step", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	runID := flags.String("run", "", "Workflow run id")
-	stepID := flags.String("step", "", "Workflow step id")
-	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	if strings.TrimSpace(*runID) == "" || strings.TrimSpace(*stepID) == "" {
-		return errors.New("--run and --step are required")
-	}
-	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
-	payload, ok, err := controlplane.WorkflowStepRunPayload(ctx, runtime, *runID, *stepID)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("workflow run step not found: %s %s", strings.TrimSpace(*runID), strings.TrimSpace(*stepID))
-	}
-	if *jsonOutput {
-		return writeIndentedJSON(payload)
-	}
-	printWorkflowStep(payload)
-	return nil
+	return runWorkflowStepLookup(ctx, args, workflowStepLookupOptions{
+		Command:       "workflow step",
+		ScopeFlag:     "run",
+		ScopeHelp:     "Workflow run id",
+		RequiredError: "--run and --step are required",
+		Lookup:        controlplane.WorkflowStepRunPayload,
+	})
 }
 
 func runWorkflowLatestStep(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("workflow latest-step", flag.ContinueOnError)
+	return runWorkflowStepLookup(ctx, args, workflowStepLookupOptions{
+		Command:       "workflow latest-step",
+		ScopeFlag:     "workflow",
+		ScopeHelp:     "Workflow id",
+		RequiredError: "--workflow and --step are required",
+		Lookup:        controlplane.LatestWorkflowStepRunPayload,
+	})
+}
+
+type workflowStepLookupOptions struct {
+	Command       string
+	ScopeFlag     string
+	ScopeHelp     string
+	RequiredError string
+	Lookup        func(context.Context, store.Store, string, string) (map[string]any, bool, error)
+}
+
+func runWorkflowStepLookup(ctx context.Context, args []string, options workflowStepLookupOptions) error {
+	flags := flag.NewFlagSet(options.Command, flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	workflowID := flags.String("workflow", "", "Workflow id")
+	scopeID := flags.String(options.ScopeFlag, "", options.ScopeHelp)
 	stepID := flags.String("step", "", "Workflow step id")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if strings.TrimSpace(*workflowID) == "" || strings.TrimSpace(*stepID) == "" {
-		return errors.New("--workflow and --step are required")
+	if strings.TrimSpace(*scopeID) == "" || strings.TrimSpace(*stepID) == "" {
+		return errors.New(options.RequiredError)
 	}
 	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
-	payload, ok, err := controlplane.LatestWorkflowStepRunPayload(ctx, runtime, *workflowID, *stepID)
+	payload, ok, err := options.Lookup(ctx, runtime, *scopeID, *stepID)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("workflow run step not found: %s %s", strings.TrimSpace(*workflowID), strings.TrimSpace(*stepID))
+		return fmt.Errorf("workflow run step not found: %s %s", strings.TrimSpace(*scopeID), strings.TrimSpace(*stepID))
 	}
 	if *jsonOutput {
 		return writeIndentedJSON(payload)
@@ -217,7 +216,7 @@ func printWorkflowStep(payload map[string]any) {
 	fmt.Println("Workflow Step")
 	fmt.Printf("Run: %s\n", valueString(run["id"]))
 	fmt.Printf("Workflow: %s\n", valueString(run["workflowId"]))
-	steps, _ := summary["steps"].([]any)
+	steps := listFromReportAny(summary["steps"])
 	if len(steps) > 0 {
 		step := mapFromReportAny(steps[0])
 		fmt.Printf("Step: %s\n", valueString(step["stepId"]))
@@ -284,14 +283,11 @@ func runWorkflowRun(ctx context.Context, args []string) error {
 }
 
 func printWorkflowRuns(payload map[string]any) {
-	items, _ := payload["workflowRuns"].([]map[string]any)
-	if items == nil {
-		if rawItems, ok := payload["workflowRuns"].([]any); ok {
-			for _, raw := range rawItems {
-				if item := mapFromReportAny(raw); len(item) > 0 {
-					items = append(items, item)
-				}
-			}
+	rawItems := listFromReportAny(payload["workflowRuns"])
+	items := make([]map[string]any, 0, len(rawItems))
+	for _, raw := range rawItems {
+		if item := mapFromReportAny(raw); len(item) > 0 {
+			items = append(items, item)
 		}
 	}
 	fmt.Println("Workflow Runs")
@@ -310,7 +306,7 @@ func printWorkflowRun(payload map[string]any) {
 	fmt.Printf("Status: %s\n", valueString(run["status"]))
 	if count := valueString(run["stepCount"]); count != "" {
 		fmt.Printf("Steps: %s\n", count)
-	} else if steps, ok := summary["steps"].([]any); ok {
+	} else if steps := listFromReportAny(summary["steps"]); len(steps) > 0 {
 		fmt.Printf("Steps: %d\n", len(steps))
 	}
 }

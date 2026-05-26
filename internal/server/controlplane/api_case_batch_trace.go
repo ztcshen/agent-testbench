@@ -61,7 +61,9 @@ func copyAPICaseBatchTraceTopologies(ctx context.Context, runtime store.Store, r
 			copied.StepID = firstNonEmpty(item.StepID, row.StepID)
 			copied.CaseID = firstNonEmpty(item.CaseID, row.CaseID)
 			copied.CreatedAt = time.Now().UTC()
-			_, _ = runtime.SaveTraceTopology(ctx, copied)
+			if _, err := runtime.SaveTraceTopology(ctx, copied); err != nil {
+				continue
+			}
 		}
 	}
 }

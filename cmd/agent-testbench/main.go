@@ -519,22 +519,8 @@ func buildWorkflowGateReport(ctx context.Context, runtime store.Store, options w
 	if err != nil {
 		return workflowGateReport{}, err
 	}
-	caseRunByID := map[string]store.APICaseRun{}
-	caseRunsByCase := map[string][]store.APICaseRun{}
-	caseRunsByStep := map[string][]store.APICaseRun{}
-	for _, item := range caseRuns {
-		caseRunByID[item.ID] = item
-		caseRunsByCase[item.CaseID] = append(caseRunsByCase[item.CaseID], item)
-		if stepID := apiCaseRunStepID(item); stepID != "" {
-			caseRunsByStep[stepID] = append(caseRunsByStep[stepID], item)
-		}
-	}
-	evidenceCountByCaseRun := map[string]int{}
-	for _, record := range evidence {
-		if strings.TrimSpace(record.CaseRunID) != "" {
-			evidenceCountByCaseRun[record.CaseRunID]++
-		}
-	}
+	caseRunIndex := indexWorkflowGateCaseRuns(caseRuns)
+	evidenceCountByCaseRun := indexWorkflowGateEvidence(evidence)
 
 	report := workflowGateReport{
 		RunID:           run.ID,
@@ -549,22 +535,8 @@ func buildWorkflowGateReport(ctx context.Context, runtime store.Store, options w
 	report.Counts.Steps = len(steps)
 	report.Counts.CaseRuns = len(caseRuns)
 	for _, rawStep := range steps {
-		step := workflowGateStepFrom(rawStep, caseRunByID, caseRunsByStep, caseRunsByCase, evidenceCountByCaseRun)
-		switch {
-		case strings.EqualFold(step.Status, store.StatusPassed):
-			report.Counts.PassedSteps++
-		case strings.EqualFold(step.Status, store.StatusFailed):
-			report.Counts.FailedSteps++
-			report.FailedSteps = append(report.FailedSteps, step)
-		default:
-			report.Counts.OtherSteps++
-			report.FailedSteps = append(report.FailedSteps, step)
-		}
-		if step.EvidenceCount > 0 {
-			report.Counts.EvidenceComplete++
-		} else {
-			report.MissingEvidence = append(report.MissingEvidence, step)
-		}
+		step := workflowGateStepFrom(rawStep, caseRunIndex.byID, caseRunIndex.byStep, caseRunIndex.byCase, evidenceCountByCaseRun)
+		addWorkflowGateStep(&report, step)
 	}
 	report.Gates = workflowGateGates{
 		RunPassed:        strings.EqualFold(run.Status, store.StatusPassed),
@@ -577,6 +549,56 @@ func buildWorkflowGateReport(ctx context.Context, runtime store.Store, options w
 		(!options.RequireEvidence || report.Gates.EvidenceComplete)
 	report.NextActions = workflowGateNextActions(report, options)
 	return report, nil
+}
+
+type workflowGateCaseRunIndex struct {
+	byID   map[string]store.APICaseRun
+	byCase map[string][]store.APICaseRun
+	byStep map[string][]store.APICaseRun
+}
+
+func indexWorkflowGateCaseRuns(caseRuns []store.APICaseRun) workflowGateCaseRunIndex {
+	index := workflowGateCaseRunIndex{
+		byID:   map[string]store.APICaseRun{},
+		byCase: map[string][]store.APICaseRun{},
+		byStep: map[string][]store.APICaseRun{},
+	}
+	for _, item := range caseRuns {
+		index.byID[item.ID] = item
+		index.byCase[item.CaseID] = append(index.byCase[item.CaseID], item)
+		if stepID := apiCaseRunStepID(item); stepID != "" {
+			index.byStep[stepID] = append(index.byStep[stepID], item)
+		}
+	}
+	return index
+}
+
+func indexWorkflowGateEvidence(evidence []store.EvidenceRecord) map[string]int {
+	out := map[string]int{}
+	for _, record := range evidence {
+		if strings.TrimSpace(record.CaseRunID) != "" {
+			out[record.CaseRunID]++
+		}
+	}
+	return out
+}
+
+func addWorkflowGateStep(report *workflowGateReport, step workflowGateStep) {
+	switch {
+	case strings.EqualFold(step.Status, store.StatusPassed):
+		report.Counts.PassedSteps++
+	case strings.EqualFold(step.Status, store.StatusFailed):
+		report.Counts.FailedSteps++
+		report.FailedSteps = append(report.FailedSteps, step)
+	default:
+		report.Counts.OtherSteps++
+		report.FailedSteps = append(report.FailedSteps, step)
+	}
+	if step.EvidenceCount > 0 {
+		report.Counts.EvidenceComplete++
+		return
+	}
+	report.MissingEvidence = append(report.MissingEvidence, step)
 }
 
 func postProcessTaskMatches(row store.PostProcessTask, filter evidenceTaskFilter) bool {

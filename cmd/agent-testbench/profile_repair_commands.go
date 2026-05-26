@@ -189,40 +189,101 @@ func runProfileRepair(args []string) error {
 }
 
 func profileRepair(manifestPath string, profileRef string, profileHome string, apply bool) (profileRepairReport, error) {
+	context, err := newProfileRepairContext(manifestPath, profileRef, profileHome, apply)
+	if err != nil {
+		return profileRepairReport{}, err
+	}
+	report := profileRepairReport{OK: true, Applied: apply, ProfilePath: context.profilePath, ManifestPath: context.manifestPath}
+	cases := profileRepairCatalogCases(context.catalog, context.manifest, &report)
+	if err := profileRepairCaseFileItems(context, &report); err != nil {
+		return profileRepairReport{}, err
+	}
+	if err := profileRepairWriteCatalog(context, cases, &report); err != nil {
+		return profileRepairReport{}, err
+	}
+	profileRepairFinalizeSummary(&report)
+	return report, nil
+}
+
+type profileRepairContext struct {
+	manifestPath string
+	profilePath  string
+	catalogPath  string
+	apply        bool
+	manifest     profileRepairManifest
+	catalog      map[string]any
+}
+
+func newProfileRepairContext(manifestPath string, profileRef string, profileHome string, apply bool) (profileRepairContext, error) {
 	manifestPath = strings.TrimSpace(manifestPath)
 	if manifestPath == "" {
-		return profileRepairReport{}, errors.New("--from-manifest is required")
+		return profileRepairContext{}, errors.New("--from-manifest is required")
 	}
+	manifest, err := readProfileRepairManifest(manifestPath)
+	if err != nil {
+		return profileRepairContext{}, err
+	}
+	resolvedProfilePath, err := resolveProfileRepairPath(profileRef, profileHome, manifest)
+	if err != nil {
+		return profileRepairContext{}, err
+	}
+	catalogPath := profileRepairCatalogPath(resolvedProfilePath, manifest)
+	catalog, err := readProfileRepairCatalog(catalogPath)
+	if err != nil {
+		return profileRepairContext{}, err
+	}
+	return profileRepairContext{
+		manifestPath: manifestPath,
+		profilePath:  resolvedProfilePath,
+		catalogPath:  catalogPath,
+		apply:        apply,
+		manifest:     manifest,
+		catalog:      catalog,
+	}, nil
+}
+
+func readProfileRepairManifest(manifestPath string) (profileRepairManifest, error) {
 	raw, err := os.ReadFile(manifestPath)
 	if err != nil {
-		return profileRepairReport{}, fmt.Errorf("read repair manifest: %w", err)
+		return profileRepairManifest{}, fmt.Errorf("read repair manifest: %w", err)
 	}
 	var manifest profileRepairManifest
 	if err := json.Unmarshal(raw, &manifest); err != nil {
-		return profileRepairReport{}, fmt.Errorf("decode repair manifest: %w", err)
+		return profileRepairManifest{}, fmt.Errorf("decode repair manifest: %w", err)
 	}
+	return manifest, nil
+}
+
+func resolveProfileRepairPath(profileRef string, profileHome string, manifest profileRepairManifest) (string, error) {
 	resolvedProfilePath := strings.TrimSpace(profileRef)
 	if resolvedProfilePath != "" {
+		var err error
 		resolvedProfilePath, err = resolveProfileReference(resolvedProfilePath, profileHome)
 		if err != nil {
-			return profileRepairReport{}, err
+			return "", err
 		}
 	} else {
 		resolvedProfilePath = strings.TrimSpace(manifest.ProfilePath)
 	}
 	if resolvedProfilePath == "" {
-		return profileRepairReport{}, errors.New("profile repair needs --profile or manifest profilePath")
+		return "", errors.New("profile repair needs --profile or manifest profilePath")
 	}
-	catalogPath := profileRepairCatalogPath(resolvedProfilePath, manifest)
-	report := profileRepairReport{OK: true, Applied: apply, ProfilePath: resolvedProfilePath, ManifestPath: manifestPath}
+	return resolvedProfilePath, nil
+}
+
+func readProfileRepairCatalog(catalogPath string) (map[string]any, error) {
 	catalogRaw, err := os.ReadFile(catalogPath)
 	if err != nil {
-		return profileRepairReport{}, fmt.Errorf("read profile catalog: %w", err)
+		return nil, fmt.Errorf("read profile catalog: %w", err)
 	}
 	var catalog map[string]any
 	if err := json.Unmarshal(catalogRaw, &catalog); err != nil {
-		return profileRepairReport{}, fmt.Errorf("decode profile catalog: %w", err)
+		return nil, fmt.Errorf("decode profile catalog: %w", err)
 	}
+	return catalog, nil
+}
+
+func profileRepairCatalogCases(catalog map[string]any, manifest profileRepairManifest, report *profileRepairReport) []json.RawMessage {
 	cases := rawJSONListFromAny(catalog["interfaceNodeCases"])
 	byID := map[string]json.RawMessage{}
 	for _, rawCase := range cases {
@@ -248,20 +309,24 @@ func profileRepair(manifestPath string, profileRef string, profileHome string, a
 		}
 		report.Items = append(report.Items, profileRepairItem{Kind: "catalog-case", ID: id, Action: action})
 	}
-	fileContents := profileRepairCaseFiles(manifest)
+	return cases
+}
+
+func profileRepairCaseFileItems(context profileRepairContext, report *profileRepairReport) error {
+	fileContents := profileRepairCaseFiles(context.manifest)
 	for sourcePath, content := range fileContents {
-		targetPath := profileRepairCaseFilePath(resolvedProfilePath, manifest.ProfilePath, sourcePath)
+		targetPath := profileRepairCaseFilePath(context.profilePath, context.manifest.ProfilePath, sourcePath)
 		action := "already-present"
 		current, err := os.ReadFile(targetPath)
 		if err != nil || string(current) != content {
 			action = "restore"
 			report.Summary.CaseFilesRestored++
-			if apply {
+			if context.apply {
 				if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-					return profileRepairReport{}, err
+					return err
 				}
 				if err := os.WriteFile(targetPath, []byte(ensureTrailingNewline(content)), 0o644); err != nil {
-					return profileRepairReport{}, err
+					return err
 				}
 			}
 		} else {
@@ -269,31 +334,38 @@ func profileRepair(manifestPath string, profileRef string, profileHome string, a
 		}
 		report.Items = append(report.Items, profileRepairItem{Kind: "case-file", Path: targetPath, Action: action})
 	}
-	if apply && report.Summary.CatalogCasesRestored > 0 {
+	return nil
+}
+
+func profileRepairWriteCatalog(context profileRepairContext, cases []json.RawMessage, report *profileRepairReport) error {
+	if context.apply && report.Summary.CatalogCasesRestored > 0 {
 		nextCases := make([]any, 0, len(cases))
 		for _, rawCase := range cases {
 			var value any
 			if err := json.Unmarshal(rawCase, &value); err != nil {
-				return profileRepairReport{}, err
+				return err
 			}
 			nextCases = append(nextCases, value)
 		}
-		catalog["interfaceNodeCases"] = nextCases
-		out, err := json.MarshalIndent(catalog, "", "  ")
+		context.catalog["interfaceNodeCases"] = nextCases
+		out, err := json.MarshalIndent(context.catalog, "", "  ")
 		if err != nil {
-			return profileRepairReport{}, err
+			return err
 		}
-		if err := os.WriteFile(catalogPath, append(out, '\n'), 0o644); err != nil {
-			return profileRepairReport{}, err
+		if err := os.WriteFile(context.catalogPath, append(out, '\n'), 0o644); err != nil {
+			return err
 		}
 	}
-	if report.Summary.CatalogCasesRestored > 0 && apply {
+	return nil
+}
+
+func profileRepairFinalizeSummary(report *profileRepairReport) {
+	if report.Summary.CatalogCasesRestored > 0 && report.Applied {
 		report.Summary.ChangedFiles++
 	}
-	if report.Summary.CaseFilesRestored > 0 && apply {
+	if report.Summary.CaseFilesRestored > 0 && report.Applied {
 		report.Summary.ChangedFiles += report.Summary.CaseFilesRestored
 	}
-	return report, nil
 }
 
 func printProfileRepair(report profileRepairReport) {

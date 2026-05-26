@@ -154,13 +154,47 @@ func (s *Store) GetProfileCatalog(ctx context.Context) (store.ProfileCatalog, er
 		ProfileID: index.ProfileID,
 		IndexedAt: index.IndexedAt,
 	}
-
-	var services []catalogServiceRow
-	if err := s.query(ctx, `select id, display_name, role, attached_template_ids, git_url, git_branch, repo_env, source_path, container_name, image, docker_service, service_port, management_port, memory_mb, cpu_milli, startup_command, health_url, log_path, status, sort_order from node_config order by sort_order, id;`, &services); err != nil {
+	if catalog.Services, err = s.profileCatalogServices(ctx); err != nil {
 		return store.ProfileCatalog{}, err
 	}
+	if catalog.Workflows, err = s.profileCatalogWorkflows(ctx); err != nil {
+		return store.ProfileCatalog{}, err
+	}
+	if catalog.InterfaceNodes, err = s.profileCatalogInterfaceNodes(ctx); err != nil {
+		return store.ProfileCatalog{}, err
+	}
+	if catalog.InterfaceFields, err = s.profileCatalogInterfaceFields(ctx); err != nil {
+		return store.ProfileCatalog{}, err
+	}
+	if catalog.RequestTemplates, err = s.profileCatalogRequestTemplates(ctx, catalog.InterfaceNodes); err != nil {
+		return store.ProfileCatalog{}, err
+	}
+	if catalog.APICases, err = s.profileCatalogAPICases(ctx); err != nil {
+		return store.ProfileCatalog{}, err
+	}
+	if catalog.CaseDependencies, err = s.profileCatalogCaseDependencies(ctx); err != nil {
+		return store.ProfileCatalog{}, err
+	}
+	if catalog.Fixtures, err = s.profileCatalogFixtures(ctx); err != nil {
+		return store.ProfileCatalog{}, err
+	}
+	if catalog.WorkflowBindings, err = s.profileCatalogWorkflowBindings(ctx); err != nil {
+		return store.ProfileCatalog{}, err
+	}
+	if catalog.TemplateConfigs, err = s.profileCatalogTemplateConfigs(ctx); err != nil {
+		return store.ProfileCatalog{}, err
+	}
+	return catalog, nil
+}
+
+func (s *Store) profileCatalogServices(ctx context.Context) ([]store.CatalogService, error) {
+	var services []catalogServiceRow
+	if err := s.query(ctx, `select id, display_name, role, attached_template_ids, git_url, git_branch, repo_env, source_path, container_name, image, docker_service, service_port, management_port, memory_mb, cpu_milli, startup_command, health_url, log_path, status, sort_order from node_config order by sort_order, id;`, &services); err != nil {
+		return nil, err
+	}
+	out := make([]store.CatalogService, 0, len(services))
 	for _, row := range services {
-		catalog.Services = append(catalog.Services, store.CatalogService{
+		out = append(out, store.CatalogService{
 			ID: row.ID, DisplayName: row.DisplayName, Kind: row.Role, AttachedTemplateIDs: stringSliceFromJSON(row.AttachedTemplateIDs),
 			GitURL: row.GitURL, GitBranch: row.GitBranch, RepoEnv: row.RepoEnv, SourcePath: row.SourcePath, ContainerName: row.ContainerName,
 			Image: row.Image, DockerService: row.DockerService, ServicePort: row.ServicePort, ManagementPort: row.ManagementPort,
@@ -168,62 +202,82 @@ func (s *Store) GetProfileCatalog(ctx context.Context) (store.ProfileCatalog, er
 			LogPath: row.LogPath, Status: row.Status, SortOrder: row.SortOrder,
 		})
 	}
+	return out, nil
+}
 
+func (s *Store) profileCatalogWorkflows(ctx context.Context) ([]store.CatalogWorkflow, error) {
 	var workflows []catalogWorkflowRow
 	if err := s.query(ctx, `select id, name, description, base_step_timeout_ms, timeout_offset_ms from workflow order by sort_order, id;`, &workflows); err != nil {
-		return store.ProfileCatalog{}, err
+		return nil, err
 	}
+	out := make([]store.CatalogWorkflow, 0, len(workflows))
 	for _, row := range workflows {
-		catalog.Workflows = append(catalog.Workflows, store.CatalogWorkflow{ID: row.ID, DisplayName: row.Name, Description: row.Description, BaseStepTimeoutMs: row.BaseStepTimeoutMs, TimeoutOffsetMs: row.TimeoutOffsetMs})
+		out = append(out, store.CatalogWorkflow{ID: row.ID, DisplayName: row.Name, Description: row.Description, BaseStepTimeoutMs: row.BaseStepTimeoutMs, TimeoutOffsetMs: row.TimeoutOffsetMs})
 	}
+	return out, nil
+}
 
+func (s *Store) profileCatalogInterfaceNodes(ctx context.Context) ([]store.CatalogInterfaceNode, error) {
 	var nodes []catalogInterfaceNodeRow
 	if err := s.query(ctx, `select id, display_name, service_id, operation, method, path, template_id, version, status, tags_json, description, timeout_ms, sort_order, created_at, updated_at from interface_node order by sort_order, id;`, &nodes); err != nil {
-		return store.ProfileCatalog{}, err
+		return nil, err
 	}
+	out := make([]store.CatalogInterfaceNode, 0, len(nodes))
 	for _, row := range nodes {
-		catalog.InterfaceNodes = append(catalog.InterfaceNodes, store.CatalogInterfaceNode{
+		out = append(out, store.CatalogInterfaceNode{
 			ID: row.ID, DisplayName: row.DisplayName, ServiceID: row.ServiceID, Operation: row.Operation,
 			Method: row.Method, Path: row.Path, TemplateID: row.TemplateID, Version: row.Version, Status: row.Status,
 			Tags: stringSliceFromJSON(row.TagsJSON), Description: row.Description, SortOrder: row.SortOrder,
 			TimeoutMs: row.TimeoutMs, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 		})
 	}
+	return out, nil
+}
 
+func (s *Store) profileCatalogInterfaceFields(ctx context.Context) ([]store.CatalogInterfaceNodeField, error) {
 	var fields []catalogInterfaceNodeFieldRow
 	if err := s.query(ctx, `select id, node_id, direction, field_path, display_name, data_type, required, bindable, port_type, status, sort_order from interface_node_field order by node_id, direction, sort_order, id;`, &fields); err != nil {
-		return store.ProfileCatalog{}, err
+		return nil, err
 	}
+	out := make([]store.CatalogInterfaceNodeField, 0, len(fields))
 	for _, row := range fields {
-		catalog.InterfaceFields = append(catalog.InterfaceFields, store.CatalogInterfaceNodeField{
+		out = append(out, store.CatalogInterfaceNodeField{
 			ID: row.ID, NodeID: row.NodeID, Direction: row.Direction, FieldPath: row.FieldPath, DisplayName: row.DisplayName,
 			DataType: row.DataType, Required: row.Required != 0, Bindable: row.Bindable != 0, PortType: row.PortType,
 			Status: row.Status, SortOrder: row.SortOrder,
 		})
 	}
+	return out, nil
+}
 
+func (s *Store) profileCatalogRequestTemplates(ctx context.Context, nodes []store.CatalogInterfaceNode) ([]store.CatalogRequestTemplate, error) {
 	var templates []catalogRequestTemplateRow
 	if err := s.query(ctx, `select id, node_id, name, template_json, version, status, sort_order from interface_node_request_template order by node_id, sort_order, id;`, &templates); err != nil {
-		return store.ProfileCatalog{}, err
+		return nil, err
 	}
 	nodeByID := map[string]store.CatalogInterfaceNode{}
-	for _, node := range catalog.InterfaceNodes {
+	for _, node := range nodes {
 		nodeByID[node.ID] = node
 	}
+	out := make([]store.CatalogRequestTemplate, 0, len(templates))
 	for _, row := range templates {
 		node := nodeByID[row.NodeID]
-		catalog.RequestTemplates = append(catalog.RequestTemplates, store.CatalogRequestTemplate{
+		out = append(out, store.CatalogRequestTemplate{
 			ID: row.ID, DisplayName: row.Name, NodeID: row.NodeID, Method: node.Method, Path: node.Path,
 			TemplateJSON: row.TemplateJSON, Version: row.Version, Status: row.Status, SortOrder: row.SortOrder,
 		})
 	}
+	return out, nil
+}
 
+func (s *Store) profileCatalogAPICases(ctx context.Context) ([]store.CatalogAPICase, error) {
 	var cases []catalogAPICaseRow
 	if err := s.query(ctx, `select id, node_id, title, description, case_type, scenario, tags_json, priority, owner, payload_template_json, request_template_id, patch_json, render_mode, expected_json, required_for_admission, status, sort_order, case_path, source_kind, source_path, executor_id, base_url, evidence_dir, timeout_seconds, default_overrides_json from interface_node_case order by node_id, sort_order, id;`, &cases); err != nil {
-		return store.ProfileCatalog{}, err
+		return nil, err
 	}
+	out := make([]store.CatalogAPICase, 0, len(cases))
 	for _, row := range cases {
-		catalog.APICases = append(catalog.APICases, store.CatalogAPICase{
+		out = append(out, store.CatalogAPICase{
 			ID: row.ID, DisplayName: row.Title, Description: row.Description, NodeID: row.NodeID, CaseType: row.CaseType, Scenario: row.Scenario,
 			Tags: stringSliceFromJSON(row.TagsJSON), Priority: row.Priority, Owner: row.Owner,
 			PayloadTemplateJSON: row.PayloadTemplateJSON, RequestTemplateID: row.RequestTemplateID, PatchJSON: row.PatchJSON,
@@ -233,54 +287,69 @@ func (s *Store) GetProfileCatalog(ctx context.Context) (store.ProfileCatalog, er
 			DefaultOverridesJSON: row.DefaultOverridesJSON,
 		})
 	}
+	return out, nil
+}
 
+func (s *Store) profileCatalogCaseDependencies(ctx context.Context) ([]store.CatalogCaseDependency, error) {
 	var dependencies []catalogCaseDependencyRow
 	if err := s.query(ctx, `select id, case_id, fixture_profile_id, required, mappings_json, status, sort_order from interface_node_case_dependency order by case_id, sort_order, id;`, &dependencies); err != nil {
-		return store.ProfileCatalog{}, err
+		return nil, err
 	}
+	out := make([]store.CatalogCaseDependency, 0, len(dependencies))
 	for _, row := range dependencies {
-		catalog.CaseDependencies = append(catalog.CaseDependencies, store.CatalogCaseDependency{
+		out = append(out, store.CatalogCaseDependency{
 			ID: row.ID, CaseID: row.CaseID, FixtureID: row.FixtureProfileID, Required: row.Required != 0,
 			MappingsJSON: row.MappingsJSON, Status: row.Status, SortOrder: row.SortOrder,
 		})
 	}
+	return out, nil
+}
 
+func (s *Store) profileCatalogFixtures(ctx context.Context) ([]store.CatalogFixture, error) {
 	var fixtures []catalogFixtureRow
 	if err := s.query(ctx, `select id, name, source_type, source_workflow_id, source_until_step, ttl_seconds, status, description, sort_order from fixture_profile order by sort_order, id;`, &fixtures); err != nil {
-		return store.ProfileCatalog{}, err
+		return nil, err
 	}
+	out := make([]store.CatalogFixture, 0, len(fixtures))
 	for _, row := range fixtures {
-		catalog.Fixtures = append(catalog.Fixtures, store.CatalogFixture{
+		out = append(out, store.CatalogFixture{
 			ID: row.ID, DisplayName: row.Name, Kind: row.SourceType, DataJSON: row.Description,
 			SourceWorkflowID: row.SourceWorkflowID, SourceUntilStep: row.SourceUntilStep, TTLSeconds: row.TTLSeconds,
 			Status: row.Status, SortOrder: row.SortOrder,
 		})
 	}
+	return out, nil
+}
 
+func (s *Store) profileCatalogWorkflowBindings(ctx context.Context) ([]store.CatalogWorkflowBinding, error) {
 	var bindings []catalogWorkflowBindingRow
 	if err := s.query(ctx, `select workflow_id, step_id, node_id, case_id, required, sort_order from workflow_interface_node order by workflow_id, sort_order, step_id;`, &bindings); err != nil {
-		return store.ProfileCatalog{}, err
+		return nil, err
 	}
+	out := make([]store.CatalogWorkflowBinding, 0, len(bindings))
 	for _, row := range bindings {
-		catalog.WorkflowBindings = append(catalog.WorkflowBindings, store.CatalogWorkflowBinding{
+		out = append(out, store.CatalogWorkflowBinding{
 			WorkflowID: row.WorkflowID, StepID: row.StepID, NodeID: row.NodeID, CaseID: row.CaseID, Required: row.Required != 0,
 			SortOrder: row.SortOrder,
 		})
 	}
+	return out, nil
+}
 
+func (s *Store) profileCatalogTemplateConfigs(ctx context.Context) ([]store.CatalogTemplateConfig, error) {
 	var configs []catalogTemplateConfigRow
 	if err := s.query(ctx, `select id, template_id, node_id, workflow_id, scope_type, scope_id, title, description, config_json, status, sort_order from template_config order by workflow_id, scope_type, sort_order, id;`, &configs); err != nil {
-		return store.ProfileCatalog{}, err
+		return nil, err
 	}
+	out := make([]store.CatalogTemplateConfig, 0, len(configs))
 	for _, row := range configs {
-		catalog.TemplateConfigs = append(catalog.TemplateConfigs, store.CatalogTemplateConfig{
+		out = append(out, store.CatalogTemplateConfig{
 			ID: row.ID, TemplateID: row.TemplateID, NodeID: row.NodeID, WorkflowID: row.WorkflowID, ScopeType: row.ScopeType,
 			ScopeID: row.ScopeID, Title: row.Title, Description: row.Description, ConfigJSON: row.ConfigJSON,
 			Status: row.Status, SortOrder: row.SortOrder,
 		})
 	}
-
-	return catalog, nil
+	return out, nil
 }
 
 func (s *Store) GetProfileCatalogIndex(ctx context.Context) (store.ProfileCatalogIndex, error) {

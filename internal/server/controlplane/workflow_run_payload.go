@@ -10,19 +10,6 @@ import (
 	"agent-testbench/internal/store"
 )
 
-func writeWorkflowRunPayload(w http.ResponseWriter, ctx context.Context, runtime store.Store, run store.Run) {
-	payload, err := WorkflowRunPayloadForRun(ctx, runtime, run)
-	if err != nil {
-		if strings.HasPrefix(err.Error(), "invalid workflow summary JSON") {
-			writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
-			return
-		}
-		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
-		return
-	}
-	writeJSON(w, payload)
-}
-
 func WorkflowRunPayloadForRun(ctx context.Context, runtime store.Store, run store.Run) (map[string]any, error) {
 	summary, err := workflowRunSummary(run.SummaryJSON)
 	if err != nil {

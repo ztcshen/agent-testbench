@@ -14,84 +14,124 @@ import (
 )
 
 func environmentRestoreEffectiveHealthChecks(checks []any, compose map[string]any, graph store.EnvironmentComponentGraph) []any {
-	out := []any{}
-	covered := map[string]bool{}
-	seen := map[string]bool{}
-	startedServices := map[string]bool{}
-	for _, service := range stringSliceFromAny(compose["services"]) {
-		service = strings.TrimSpace(service)
-		if service != "" {
-			startedServices[service] = true
-		}
+	set := environmentRestoreHealthCheckSet{
+		covered: map[string]bool{},
+		seen:    map[string]bool{},
 	}
+	startedServices := environmentRestoreStartedServices(compose)
 	hasServiceAllowList := len(startedServices) > 0
-	addCheck := func(raw any) {
-		item, ok := raw.(map[string]any)
-		if !ok {
-			out = append(out, raw)
-			return
-		}
-		if signature := environmentRestoreHealthCheckSignature(item); signature != "" {
-			if seen[signature] {
-				return
-			}
-			seen[signature] = true
-		}
-		if strings.TrimSpace(valueString(item["kind"])) == "compose-service" || strings.TrimSpace(valueString(item["type"])) == "compose-service" {
-			if service := strings.TrimSpace(valueString(item["service"])); service != "" {
-				covered[service] = true
-			}
-		}
-		if strings.TrimSpace(valueString(item["kind"])) == "url" || strings.TrimSpace(valueString(item["type"])) == "url" {
-			if service := strings.TrimSpace(valueString(item["service"])); service != "" {
-				covered[service] = true
-			}
-		}
-		out = append(out, raw)
-	}
 	for _, raw := range checks {
-		addCheck(raw)
+		set.add(raw)
 	}
 	for _, component := range graph.Components {
-		if hasServiceAllowList && strings.TrimSpace(component.ComposeService) != "" && !startedServices[strings.TrimSpace(component.ComposeService)] {
+		if !environmentRestoreShouldAddComponentHealth(component, startedServices, hasServiceAllowList) {
 			continue
 		}
 		item, errText := environmentRestoreNormalizeComponentHealthCheck(component)
-		if errText != "" {
-			continue
+		if errText == "" {
+			set.add(item)
 		}
-		addCheck(item)
 	}
 	for _, service := range stringSliceFromAny(compose["services"]) {
-		if covered[service] {
+		if set.covered[service] {
 			continue
 		}
-		out = append(out, map[string]any{
+		set.out = append(set.out, map[string]any{
 			"id":      "compose-service-" + safeReportID(service),
 			"kind":    "compose-service",
 			"service": service,
 		})
-		covered[service] = true
+		set.covered[service] = true
+	}
+	return set.out
+}
+
+type environmentRestoreHealthCheckSet struct {
+	out     []any
+	covered map[string]bool
+	seen    map[string]bool
+}
+
+func (s *environmentRestoreHealthCheckSet) add(raw any) {
+	item, ok := raw.(map[string]any)
+	if !ok {
+		s.out = append(s.out, raw)
+		return
+	}
+	if signature := environmentRestoreHealthCheckSignature(item); signature != "" {
+		if s.seen[signature] {
+			return
+		}
+		s.seen[signature] = true
+	}
+	if environmentRestoreHealthCheckCoversService(item) {
+		if service := strings.TrimSpace(valueString(item["service"])); service != "" {
+			s.covered[service] = true
+		}
+	}
+	s.out = append(s.out, raw)
+}
+
+func environmentRestoreStartedServices(compose map[string]any) map[string]bool {
+	out := map[string]bool{}
+	for _, service := range stringSliceFromAny(compose["services"]) {
+		if service = strings.TrimSpace(service); service != "" {
+			out[service] = true
+		}
 	}
 	return out
 }
 
+func environmentRestoreShouldAddComponentHealth(component store.EnvironmentComponent, startedServices map[string]bool, hasServiceAllowList bool) bool {
+	service := strings.TrimSpace(component.ComposeService)
+	return !hasServiceAllowList || service == "" || startedServices[service]
+}
+
+func environmentRestoreHealthCheckCoversService(item map[string]any) bool {
+	kind := strings.TrimSpace(valueString(item["kind"]))
+	if kind == "" {
+		kind = strings.TrimSpace(valueString(item["type"]))
+	}
+	return kind == "compose-service" || kind == "url"
+}
+
 func environmentRestoreNormalizeComponentHealthCheck(component store.EnvironmentComponent) (map[string]any, string) {
 	raw := strings.TrimSpace(component.HealthCheckJSON)
+	normalized, errText := environmentRestoreDecodeHealthCheck(raw)
+	if errText != "" {
+		return nil, errText
+	}
+	environmentRestoreApplyComponentHealthDefaults(normalized, component)
+	kind := environmentRestoreHealthCheckKind(normalized)
+	normalized["kind"] = kind
+	if environmentRestoreComponentRequiresURLHealth(component) && kind != "url" {
+		return nil, strings.TrimSpace(component.Role) + " health check requires url"
+	}
+	if errText := environmentRestoreValidateHealthCheckKind(normalized, kind, component); errText != "" {
+		return nil, errText
+	}
+	return normalized, ""
+}
+
+func environmentRestoreDecodeHealthCheck(raw string) (map[string]any, string) {
 	if raw == "" || raw == "{}" {
 		return nil, "missing health check"
 	}
 	var item map[string]any
-	if err := json.Unmarshal([]byte(raw), &item); err != nil || len(item) == 0 {
-		if err != nil {
-			return nil, "invalid health check JSON: " + err.Error()
-		}
+	if err := json.Unmarshal([]byte(raw), &item); err != nil {
+		return nil, "invalid health check JSON: " + err.Error()
+	}
+	if len(item) == 0 {
 		return nil, "missing health check"
 	}
 	normalized := map[string]any{}
 	for key, value := range item {
 		normalized[key] = value
 	}
+	return normalized, ""
+}
+
+func environmentRestoreApplyComponentHealthDefaults(normalized map[string]any, component store.EnvironmentComponent) {
 	componentID := strings.TrimSpace(component.ComponentID)
 	if strings.TrimSpace(valueString(normalized["id"])) == "" && componentID != "" {
 		normalized["id"] = "component-" + safeReportID(componentID)
@@ -102,48 +142,51 @@ func environmentRestoreNormalizeComponentHealthCheck(component store.Environment
 	if strings.TrimSpace(valueString(normalized["service"])) == "" && strings.TrimSpace(component.ComposeService) != "" {
 		normalized["service"] = strings.TrimSpace(component.ComposeService)
 	}
+}
+
+func environmentRestoreHealthCheckKind(normalized map[string]any) string {
 	kind := strings.TrimSpace(valueString(normalized["kind"]))
 	if kind == "" {
 		kind = strings.TrimSpace(valueString(normalized["type"]))
 	}
 	if kind == "" && strings.TrimSpace(valueString(normalized["url"])) != "" {
-		kind = "url"
+		return "url"
 	}
-	normalized["kind"] = kind
-	if environmentRestoreComponentRequiresURLHealth(component) && kind != "url" {
-		return nil, strings.TrimSpace(component.Role) + " health check requires url"
-	}
+	return kind
+}
+
+func environmentRestoreValidateHealthCheckKind(normalized map[string]any, kind string, component store.EnvironmentComponent) string {
 	switch kind {
 	case "url":
 		if strings.TrimSpace(valueString(normalized["url"])) == "" {
-			return nil, "url health check requires url"
+			return "url health check requires url"
 		}
 	case "tcp":
 		if strings.TrimSpace(valueString(normalized["address"])) == "" {
-			return nil, "tcp health check requires address"
+			return "tcp health check requires address"
 		}
 	case "command":
 		if strings.TrimSpace(valueString(normalized["command"])) == "" {
-			return nil, "command health check requires command"
+			return "command health check requires command"
 		}
 	case "compose-service":
 		if strings.TrimSpace(valueString(normalized["service"])) == "" {
 			normalized["service"] = strings.TrimSpace(component.ComposeService)
 		}
 		if strings.TrimSpace(valueString(normalized["service"])) == "" {
-			return nil, "compose-service health check requires service"
+			return "compose-service health check requires service"
 		}
 	case "container":
 		if strings.TrimSpace(valueString(normalized["container"])) == "" {
-			return nil, "container health check requires container"
+			return "container health check requires container"
 		}
 	default:
 		if kind == "" {
-			return nil, "health check requires kind"
+			return "health check requires kind"
 		}
-		return nil, "unsupported health check kind: " + kind
+		return "unsupported health check kind: " + kind
 	}
-	return normalized, ""
+	return ""
 }
 
 func environmentRestoreComponentRequiresURLHealth(component store.EnvironmentComponent) bool {
@@ -173,7 +216,7 @@ func environmentRestoreHealthCheckSignature(item map[string]any) string {
 	}
 }
 
-func environmentRestoreApplyEdgeAssets(ctx context.Context, envID string, graph store.EnvironmentComponentGraph, compose map[string]any, workspace string, execute bool, composeBaseArgs []string) []environmentRestoreAppliedAsset {
+func environmentRestoreApplyEdgeAssets(ctx context.Context, graph store.EnvironmentComponentGraph, compose map[string]any, workspace string, execute bool, composeBaseArgs []string) []environmentRestoreAppliedAsset {
 	if len(graph.Dependencies) == 0 || len(graph.Assets) == 0 {
 		return nil
 	}
@@ -273,7 +316,7 @@ func environmentRestoreApplyEdgeAsset(ctx context.Context, dep store.ComponentDe
 		}
 		if execute {
 			item.Action = "apply-mysql-sql"
-			_, attempts, errText := runRestoreMySQLCommandWithInputRetry(ctx, workspace, item.Command, content)
+			attempts, errText := runRestoreMySQLCommandWithInputRetry(ctx, workspace, item.Command, content)
 			item.Attempts = attempts
 			if errText != "" {
 				item.OK = false
@@ -401,20 +444,18 @@ fi
 exec mysql "$@"`
 }
 
-func runRestoreMySQLCommandWithInputRetry(ctx context.Context, workdir string, command []string, input string) (string, int, string) {
+func runRestoreMySQLCommandWithInputRetry(ctx context.Context, workdir string, command []string, input string) (int, string) {
 	const maxAttempts = 60
 	const delay = time.Second
-	var lastOutput string
 	var lastErr string
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		output, errText := runRestoreCommandWithInput(ctx, workdir, command, input)
+		_, errText := runRestoreCommandWithInput(ctx, workdir, command, input)
 		if errText == "" {
-			return output, attempt, ""
+			return attempt, ""
 		}
-		lastOutput = output
 		lastErr = errText
 		if !environmentRestoreMySQLApplyErrCanRetry(errText) {
-			return output, attempt, errText
+			return attempt, errText
 		}
 		if attempt == maxAttempts {
 			break
@@ -423,11 +464,11 @@ func runRestoreMySQLCommandWithInputRetry(ctx context.Context, workdir string, c
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return lastOutput, attempt, ctx.Err().Error()
+			return attempt, ctx.Err().Error()
 		case <-timer.C:
 		}
 	}
-	return lastOutput, maxAttempts, lastErr
+	return maxAttempts, lastErr
 }
 
 func environmentRestoreMySQLApplyErrCanRetry(errText string) bool {
@@ -490,9 +531,7 @@ func environmentRestoreStartupAssets(compose map[string]any, specs []environment
 			continue
 		}
 		composeDir := filepath.Dir(cleanCompose)
-		for _, item := range environmentRestoreStartupAssetCandidates(content, cleanCompose, composeDir, compose, workspace) {
-			candidates = append(candidates, item)
-		}
+		candidates = append(candidates, environmentRestoreStartupAssetCandidates(content, cleanCompose, composeDir, compose, workspace)...)
 	}
 	seen := map[string]bool{}
 	out := []environmentRestoreStartupAsset{}

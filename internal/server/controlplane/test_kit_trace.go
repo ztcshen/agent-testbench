@@ -8,20 +8,6 @@ import (
 	"agent-testbench/internal/store"
 )
 
-func attachTestKitTraceTopology(ctx context.Context, runtime store.Store, collector traceCollector, runID string, payload map[string]any, result map[string]any) {
-	collectPayload, ok := testKitTraceTopologyCollectPayload(runID, payload, result)
-	if !ok || runtime == nil || strings.TrimSpace(collector.GraphQLURL) == "" {
-		return
-	}
-	row, topology, err := collectTraceTopologyWithRetry(ctx, runtime, collector, collectPayload)
-	if err != nil {
-		result["traceTopologyError"] = err.Error()
-		return
-	}
-	result["traceTopology"] = topology
-	result["traceTopologyRow"] = traceTopologyPayload(row)
-}
-
 func shouldInlineTestKitTraceTopology(payload map[string]any) bool {
 	return strings.TrimSpace(valueString(payload["workflowId"])) != "" && strings.TrimSpace(valueString(payload["stepId"])) != ""
 }

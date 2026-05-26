@@ -57,120 +57,141 @@ func runStore(ctx context.Context, args []string) error {
 	if strings.TrimSpace(resolvedStoreURL) == "" {
 		return activeStoreRequiredError()
 	}
-	backend, _ := storeBackendFromURL(resolvedStoreURL)
+	backend, err := storeBackendFromURL(resolvedStoreURL)
+	if err != nil {
+		return err
+	}
 	if backend == "postgres" {
-		cfg, err := postgres.ParseConfigFromURL(resolvedStoreURL)
-		if err != nil {
-			return err
-		}
-		switch args[0] {
-		case "status":
-			status, err := postgresSchemaStatus(ctx, cfg)
-			if err != nil {
-				if *jsonOutput {
-					if jsonErr := writeIndentedJSON(postgresStoreStatusErrorReport(cfg.URL, err)); jsonErr != nil {
-						return jsonErr
-					}
-				}
-				return err
-			}
-			if *jsonOutput {
-				return writeIndentedJSON(postgresStoreStatusReport(status))
-			}
-			printPostgresStoreStatus(status)
-		case "upgrade":
-			status, err := postgresUpgradeSchema(ctx, cfg)
-			if err != nil {
-				return err
-			}
-			fmt.Printf("Upgraded store schema to version %d\n", status.CurrentVersion)
-			fmt.Printf("Applied: %d\n", status.AppliedCount)
-			fmt.Printf("URL: %s\n", maskStoreURL(status.URL))
-		default:
-			return fmt.Errorf("unknown store command: %s", args[0])
-		}
-		return nil
+		return runPostgresStoreCommand(ctx, args[0], resolvedStoreURL, *jsonOutput)
 	}
 	if backend == "mysql" {
-		cfg, err := mysql.ParseConfigFromURL(resolvedStoreURL)
+		return runMySQLStoreCommand(ctx, args[0], resolvedStoreURL, *jsonOutput)
+	}
+	return runSQLiteStoreCommand(ctx, args[0], resolvedStoreURL, *jsonOutput)
+}
+
+func runPostgresStoreCommand(ctx context.Context, command string, storeURL string, jsonOutput bool) error {
+	cfg, err := postgres.ParseConfigFromURL(storeURL)
+	if err != nil {
+		return err
+	}
+	switch command {
+	case "status":
+		status, err := postgresSchemaStatus(ctx, cfg)
+		if err != nil {
+			if jsonOutput {
+				if jsonErr := writeIndentedJSON(postgresStoreStatusErrorReport(cfg.URL, err)); jsonErr != nil {
+					return jsonErr
+				}
+			}
+			return err
+		}
+		if jsonOutput {
+			return writeIndentedJSON(postgresStoreStatusReport(status))
+		}
+		printPostgresStoreStatus(status)
+	case "upgrade":
+		status, err := postgresUpgradeSchema(ctx, cfg)
 		if err != nil {
 			return err
 		}
-		switch args[0] {
-		case "status":
-			status, err := mysqlSchemaStatus(ctx, cfg)
-			if err != nil {
-				if *jsonOutput {
-					if jsonErr := writeIndentedJSON(mysqlStoreStatusErrorReport(cfg.URL, err)); jsonErr != nil {
-						return jsonErr
-					}
-				}
-				return err
-			}
-			if *jsonOutput {
-				return writeIndentedJSON(mysqlStoreStatusReport(status))
-			}
-			printMySQLStoreStatus(status)
-		case "provision":
-			result, err := mysqlProvisionDatabase(ctx, cfg)
-			if err != nil {
-				if *jsonOutput {
-					if jsonErr := writeIndentedJSON(map[string]any{
-						"ok":      false,
-						"backend": "mysql",
-						"url":     maskStoreURL(cfg.URL),
-						"error":   err.Error(),
-					}); jsonErr != nil {
-						return jsonErr
-					}
-				}
-				return err
-			}
-			if *jsonOutput {
-				return writeIndentedJSON(map[string]any{
-					"ok":       true,
-					"backend":  "mysql",
-					"url":      maskStoreURL(result.URL),
-					"database": result.Database,
-					"created":  result.Created,
-				})
-			}
-			if result.Created {
-				fmt.Printf("Created MySQL store database %s\n", result.Database)
-			} else {
-				fmt.Printf("MySQL store database already exists: %s\n", result.Database)
-			}
-			fmt.Printf("URL: %s\n", maskStoreURL(result.URL))
-		case "upgrade":
-			status, err := mysqlUpgradeSchema(ctx, cfg)
-			if err != nil {
-				return err
-			}
-			fmt.Printf("Upgraded store schema to version %d\n", status.CurrentVersion)
-			fmt.Printf("Applied: %d\n", status.AppliedCount)
-			fmt.Printf("URL: %s\n", maskStoreURL(status.URL))
-		default:
-			return fmt.Errorf("unknown store command: %s", args[0])
-		}
-		return nil
+		printStoreSchemaUpgrade("URL", maskStoreURL(status.URL), status.CurrentVersion, status.AppliedCount)
+	default:
+		return fmt.Errorf("unknown store command: %s", command)
 	}
-	cfg, err := sqlite.ParseConfigFromURL(resolvedStoreURL)
+	return nil
+}
+
+func runMySQLStoreCommand(ctx context.Context, command string, storeURL string, jsonOutput bool) error {
+	cfg, err := mysql.ParseConfigFromURL(storeURL)
+	if err != nil {
+		return err
+	}
+	switch command {
+	case "status":
+		return runMySQLStoreStatus(ctx, cfg, jsonOutput)
+	case "provision":
+		return runMySQLStoreProvision(ctx, cfg, jsonOutput)
+	case "upgrade":
+		status, err := mysqlUpgradeSchema(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		printStoreSchemaUpgrade("URL", maskStoreURL(status.URL), status.CurrentVersion, status.AppliedCount)
+	default:
+		return fmt.Errorf("unknown store command: %s", command)
+	}
+	return nil
+}
+
+func runMySQLStoreStatus(ctx context.Context, cfg mysql.Config, jsonOutput bool) error {
+	status, err := mysqlSchemaStatus(ctx, cfg)
+	if err != nil {
+		if jsonOutput {
+			if jsonErr := writeIndentedJSON(mysqlStoreStatusErrorReport(cfg.URL, err)); jsonErr != nil {
+				return jsonErr
+			}
+		}
+		return err
+	}
+	if jsonOutput {
+		return writeIndentedJSON(mysqlStoreStatusReport(status))
+	}
+	printMySQLStoreStatus(status)
+	return nil
+}
+
+func runMySQLStoreProvision(ctx context.Context, cfg mysql.Config, jsonOutput bool) error {
+	result, err := mysqlProvisionDatabase(ctx, cfg)
+	if err != nil {
+		if jsonOutput {
+			if jsonErr := writeIndentedJSON(map[string]any{
+				"ok":      false,
+				"backend": "mysql",
+				"url":     maskStoreURL(cfg.URL),
+				"error":   err.Error(),
+			}); jsonErr != nil {
+				return jsonErr
+			}
+		}
+		return err
+	}
+	if jsonOutput {
+		return writeIndentedJSON(map[string]any{
+			"ok":       true,
+			"backend":  "mysql",
+			"url":      maskStoreURL(result.URL),
+			"database": result.Database,
+			"created":  result.Created,
+		})
+	}
+	if result.Created {
+		fmt.Printf("Created MySQL store database %s\n", result.Database)
+	} else {
+		fmt.Printf("MySQL store database already exists: %s\n", result.Database)
+	}
+	fmt.Printf("URL: %s\n", maskStoreURL(result.URL))
+	return nil
+}
+
+func runSQLiteStoreCommand(ctx context.Context, command string, storeURL string, jsonOutput bool) error {
+	cfg, err := sqlite.ParseConfigFromURL(storeURL)
 	if err != nil {
 		return err
 	}
 
-	switch args[0] {
+	switch command {
 	case "status":
 		status, err := sqlite.SchemaStatus(ctx, cfg)
 		if err != nil {
-			if *jsonOutput {
+			if jsonOutput {
 				if jsonErr := writeIndentedJSON(sqliteStoreStatusErrorReport(cfg, err)); jsonErr != nil {
 					return jsonErr
 				}
 			}
 			return err
 		}
-		if *jsonOutput {
+		if jsonOutput {
 			return writeIndentedJSON(sqliteStoreStatusReport(status))
 		}
 		printStoreStatus(status)
@@ -179,13 +200,17 @@ func runStore(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Upgraded store schema to version %d\n", status.CurrentVersion)
-		fmt.Printf("Applied: %d\n", status.AppliedCount)
-		fmt.Printf("Path: %s\n", status.Path)
+		printStoreSchemaUpgrade("Path", status.Path, status.CurrentVersion, status.AppliedCount)
 	default:
-		return fmt.Errorf("unknown store command: %s", args[0])
+		return fmt.Errorf("unknown store command: %s", command)
 	}
 	return nil
+}
+
+func printStoreSchemaUpgrade(locationLabel string, location string, version int, applied int) {
+	fmt.Printf("Upgraded store schema to version %d\n", version)
+	fmt.Printf("Applied: %d\n", applied)
+	fmt.Printf("%s: %s\n", locationLabel, location)
 }
 
 func runStoreDDL(args []string) error {
@@ -371,7 +396,7 @@ func runStoreCatalogCase(ctx context.Context, storeURL string, profileID string,
 	if err != nil {
 		return nil, err
 	}
-	defer runtime.Close()
+	defer closeCLIStore(runtime)
 	handler := controlplane.NewWithStore(profile.Bundle{ID: strings.TrimSpace(profileID)}, runtime)
 	server := httptest.NewServer(handler)
 	defer server.Close()
