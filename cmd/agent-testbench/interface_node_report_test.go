@@ -1,0 +1,268 @@
+package main
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestInterfaceNodeCaseReportRunsAllCasesByTargetName(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("mode") {
+		case "bad":
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprint(w, `{"status":"rejected","password":"variant-secret"}`)
+		default:
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, `{"status":"accepted","token":"report-secret"}`)
+		}
+	}))
+	defer server.Close()
+	profileDir := writeInterfaceNodeBatchReportProfile(t)
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
+	listOut := runCLI(t, "interface-node", "discover", "--store", "sqlite://"+storePath, "--filter", "Result Lookup", "--json")
+	var listReport struct {
+		Items []struct {
+			ID          string `json:"id"`
+			DisplayName string `json:"displayName"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(listOut), &listReport); err != nil {
+		t.Fatalf("decode interface-node discover json: %v\n%s", err, listOut)
+	}
+	if len(listReport.Items) != 1 || listReport.Items[0].ID != "node.alpha" {
+		t.Fatalf("interface-node discover = %#v", listReport.Items)
+	}
+
+	outputDir := filepath.Join(t.TempDir(), "report")
+	out := runCLI(t,
+		"interface-node", "case", "report",
+		"--node", listReport.Items[0].ID,
+		"--store", "sqlite://"+storePath,
+		"--base-url", server.URL,
+		"--output-dir", outputDir,
+		"--timeout-seconds", "1",
+		"--json",
+	)
+
+	var report struct {
+		OK        bool   `json:"ok"`
+		NodeID    string `json:"nodeId"`
+		ReportURL string `json:"reportUrl"`
+		Counts    struct {
+			Total          int `json:"total"`
+			Passed         int `json:"passed"`
+			Failed         int `json:"failed"`
+			DerivedConfigs int `json:"derivedConfigs"`
+		} `json:"counts"`
+		Results []struct {
+			RunID       string `json:"runId"`
+			CaseRunID   string `json:"caseRunId"`
+			DetailURL   string `json:"detailUrl"`
+			BodyPreview string `json:"bodyPreview"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode report json: %v\n%s", err, out)
+	}
+	if !report.OK || report.NodeID != "node.alpha" || report.Counts.Total != 2 || report.Counts.Passed != 2 || report.Counts.Failed != 0 || report.Counts.DerivedConfigs != 1 {
+		t.Fatalf("report = %#v", report)
+	}
+	if len(report.Results) != 2 || report.Results[0].RunID == "" || report.Results[0].CaseRunID != report.Results[0].RunID+".case" || report.Results[0].DetailURL == "" {
+		t.Fatalf("report evidence handles = %#v", report.Results)
+	}
+	for _, item := range report.Results {
+		if strings.Contains(item.BodyPreview, "report-secret") || strings.Contains(item.BodyPreview, "variant-secret") {
+			t.Fatalf("report body preview leaked sensitive value: %#v", item)
+		}
+		if !strings.Contains(item.BodyPreview, "[REDACTED]") {
+			t.Fatalf("report body preview was not redacted: %#v", item)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(outputDir, "report.json")); err != nil {
+		t.Fatalf("json report missing: %v", err)
+	}
+	htmlPath := filepath.Join(outputDir, "report.html")
+	html, err := os.ReadFile(htmlPath)
+	if err != nil {
+		t.Fatalf("html report missing: %v", err)
+	}
+	for _, want := range []string{"Result Lookup", "Case Alpha Default", "Case Alpha Variant", "passed", "caseRunId"} {
+		if !strings.Contains(string(html), want) {
+			t.Fatalf("html report missing %q:\n%s", want, html)
+		}
+	}
+	for _, leaked := range []string{"report-secret", "variant-secret"} {
+		if strings.Contains(string(html), leaked) {
+			t.Fatalf("html report leaked %q:\n%s", leaked, html)
+		}
+	}
+	if report.ReportURL != htmlPath {
+		t.Fatalf("report url = %q want %q", report.ReportURL, htmlPath)
+	}
+	if _, err := os.Stat(filepath.Join(outputDir, "runtime.sqlite")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("report should use selected Store without creating runtime.sqlite, stat err=%v", err)
+	}
+}
+
+func TestCaseExecutionAndInterfaceReportUseNamedPostgreSQLActiveStore(t *testing.T) {
+	configureNamedPostgreSQLActiveStore(t, "daily-case-exec-pg")
+	runCaseExecutionAndInterfaceReportUseNamedActiveStore(t, "pg", "PostgreSQL")
+}
+
+func TestCaseExecutionAndInterfaceReportUseNamedMySQLActiveStore(t *testing.T) {
+	configureNamedMySQLActiveStore(t, "daily-case-exec-mysql")
+	runCaseExecutionAndInterfaceReportUseNamedActiveStore(t, "mysql", "MySQL")
+}
+
+func runCaseExecutionAndInterfaceReportUseNamedActiveStore(t *testing.T, runLabel string, label string) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/items":
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, `{"status":"created"}`)
+		case "/lookup":
+			switch r.URL.Query().Get("mode") {
+			case "bad":
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = fmt.Fprint(w, `{"status":"rejected","password":"variant-secret"}`)
+			default:
+				w.WriteHeader(http.StatusOK)
+				_, _ = fmt.Fprint(w, `{"status":"accepted","token":"report-secret"}`)
+			}
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	suffix := time.Now().UTC().Format("20060102150405.000000000")
+	dir := t.TempDir()
+	casePath := filepath.Join(dir, "case.json")
+	writeAPICaseFile(t, casePath)
+	fileRunID := runLabel + "-file-case-run-" + suffix
+	fileEvidenceDir := filepath.Join(dir, "file-evidence")
+	fileOut := runCLI(t,
+		"case", "run",
+		"--case", casePath,
+		"--base-url", server.URL,
+		"--run-id", fileRunID,
+		"--evidence-dir", fileEvidenceDir,
+		"--profile", "sample",
+	)
+	if !strings.Contains(fileOut, "Case Run: "+fileRunID) || !strings.Contains(fileOut, "Status: passed") {
+		t.Fatalf("%s file case run via active SQL Store = %q", label, fileOut)
+	}
+	caseRunsOut := runCLI(t, "case", "runs", "--run", fileRunID, "--json")
+	if !strings.Contains(caseRunsOut, fileRunID) || !strings.Contains(caseRunsOut, "case.alpha") {
+		t.Fatalf("%s case runs via active SQL Store = %s", label, caseRunsOut)
+	}
+	fileEvidenceOut := runCLI(t, "case", "evidence", "--run", fileRunID, "--case-id", "case.alpha", "--json")
+	for _, want := range []string{fileRunID, "case.alpha", "request", "response"} {
+		if !strings.Contains(fileEvidenceOut, want) {
+			t.Fatalf("%s file case evidence via active SQL Store missing %q:\n%s", label, want, fileEvidenceOut)
+		}
+	}
+	evidenceListOut := runCLI(t, "evidence", "list", "--run", fileRunID, "--json")
+	if !strings.Contains(evidenceListOut, fileRunID) || !strings.Contains(evidenceListOut, "response") {
+		t.Fatalf("%s evidence list via active SQL Store = %s", label, evidenceListOut)
+	}
+
+	profileDir := writeInterfaceNodeBatchReportProfile(t)
+	runCLI(t, "config", "publish", "--from", profileDir)
+	catalogRunID := runLabel + "-catalog-case-run-" + suffix
+	catalogOut := runCLI(t,
+		"case", "run",
+		"--case-id", "case.alpha.default",
+		"--base-url", server.URL,
+		"--run-id", catalogRunID,
+		"--evidence-dir", filepath.Join(dir, "catalog-evidence"),
+		"--profile", "sample",
+		"--json",
+	)
+	var catalogRun struct {
+		RunID  string `json:"runId"`
+		CaseID string `json:"caseId"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(catalogOut), &catalogRun); err != nil {
+		t.Fatalf("decode %s catalog case run json: %v\n%s", label, err, catalogOut)
+	}
+	if catalogRun.RunID != catalogRunID || catalogRun.CaseID != "case.alpha.default" || catalogRun.Status != "passed" {
+		t.Fatalf("%s catalog case run = %#v", label, catalogRun)
+	}
+	catalogEvidenceOut := runCLI(t, "case", "evidence", "--run", catalogRunID, "--case-id", "case.alpha.default", "--json")
+	for _, want := range []string{catalogRunID, "case.alpha.default", "request", "response"} {
+		if !strings.Contains(catalogEvidenceOut, want) {
+			t.Fatalf("%s catalog case evidence via active SQL Store missing %q:\n%s", label, want, catalogEvidenceOut)
+		}
+	}
+
+	listOut := runCLI(t, "interface-node", "discover", "--filter", "Result Lookup", "--json")
+	var listReport struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(listOut), &listReport); err != nil {
+		t.Fatalf("decode %s interface-node discover json: %v\n%s", label, err, listOut)
+	}
+	if len(listReport.Items) != 1 || listReport.Items[0].ID != "node.alpha" {
+		t.Fatalf("%s interface-node discover = %#v", label, listReport.Items)
+	}
+
+	outputDir := filepath.Join(t.TempDir(), runLabel+"-interface-report")
+	reportOut := runCLI(t,
+		"interface-node", "case", "report",
+		"--node", listReport.Items[0].ID,
+		"--base-url", server.URL,
+		"--output-dir", outputDir,
+		"--timeout-seconds", "1",
+		"--json",
+	)
+	var report struct {
+		OK     bool   `json:"ok"`
+		NodeID string `json:"nodeId"`
+		Counts struct {
+			Total          int `json:"total"`
+			Passed         int `json:"passed"`
+			Failed         int `json:"failed"`
+			DerivedConfigs int `json:"derivedConfigs"`
+		} `json:"counts"`
+		Results []struct {
+			RunID       string `json:"runId"`
+			CaseRunID   string `json:"caseRunId"`
+			DetailURL   string `json:"detailUrl"`
+			BodyPreview string `json:"bodyPreview"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal([]byte(reportOut), &report); err != nil {
+		t.Fatalf("decode %s interface-node report json: %v\n%s", label, err, reportOut)
+	}
+	if !report.OK || report.NodeID != "node.alpha" || report.Counts.Total != 2 || report.Counts.Passed != 2 || report.Counts.Failed != 0 || report.Counts.DerivedConfigs != 1 {
+		t.Fatalf("%s interface-node report = %#v", label, report)
+	}
+	if len(report.Results) != 2 || report.Results[0].RunID == "" || report.Results[0].CaseRunID != report.Results[0].RunID+".case" || report.Results[0].DetailURL == "" {
+		t.Fatalf("%s interface-node report handles = %#v", label, report.Results)
+	}
+	for _, item := range report.Results {
+		if strings.Contains(item.BodyPreview, "report-secret") || strings.Contains(item.BodyPreview, "variant-secret") {
+			t.Fatalf("%s interface-node report body preview leaked sensitive value: %#v", label, item)
+		}
+		if !strings.Contains(item.BodyPreview, "[REDACTED]") {
+			t.Fatalf("%s interface-node report body preview was not redacted: %#v", label, item)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(outputDir, "runtime.sqlite")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("%s interface-node report should use active Store without creating runtime.sqlite, stat err=%v", label, err)
+	}
+}
