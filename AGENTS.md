@@ -47,6 +47,10 @@ agent-native, API-operated, Store-first, and local-first.
 - SQLite is retained only for legacy migration, compatibility, and tests.
 - Runtime Evidence, logs, and local databases must not be committed.
 - Prefer small, verifiable slices with tests and a commit per slice.
+- Keep first-party source files below the project line budget. When a
+  production or test file approaches roughly 1,200 lines, split cohesive
+  behavior into package-local files before adding more logic; do not grow
+  already-oversized files except in move-only reduction slices.
 - Use headless/background verification for local browser checks.
 - For any moderately large change, first do web research and ground the design
   in mature open-source projects before editing. This is mandatory when the
