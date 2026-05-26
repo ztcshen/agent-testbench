@@ -18,14 +18,11 @@ import (
 
 func TestTraceTopologyCollectPersistsProviderSpanRefs(t *testing.T) {
 	ctx := context.Background()
-	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
-	if err != nil {
-		t.Fatalf("open sqlite store: %v", err)
-	}
+	s := openTraceCollectSQLiteStore(t, ctx)
 	defer s.Close()
 
 	startedAt := time.Date(2026, 5, 15, 8, 30, 0, 0, time.UTC)
-	_, err = s.CreateRun(ctx, store.Run{
+	createTraceCollectRun(t, ctx, s, store.Run{
 		ID:         "run.alpha",
 		ProfileID:  "sample",
 		WorkflowID: "workflow.alpha",
@@ -33,73 +30,223 @@ func TestTraceTopologyCollectPersistsProviderSpanRefs(t *testing.T) {
 		StartedAt:  startedAt,
 		FinishedAt: startedAt.Add(3 * time.Second),
 	})
-	if err != nil {
-		t.Fatalf("create run: %v", err)
-	}
 
-	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var payload struct {
-			Query string `json:"query"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Fatalf("decode provider request: %v", err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case strings.Contains(payload.Query, "queryBasicTraces"):
-			_, _ = w.Write([]byte(`{"data":{"queryBasicTraces":{"traces":[{"endpointNames":["POST:/alpha"],"duration":120,"start":"2026-05-15 0830","isError":false,"traceIds":["trace.alpha"]}]}}}`))
-		case strings.Contains(payload.Query, "queryTrace"):
-			_, _ = w.Write([]byte(`{"data":{"queryTrace":{"spans":[{"traceId":"trace.alpha","segmentId":"segment.entry","spanId":0,"parentSpanId":-1,"refs":[],"serviceCode":"service.entry","endpointName":"/alpha","type":"Entry","component":"Tomcat"},{"traceId":"trace.alpha","segmentId":"segment.worker","spanId":0,"parentSpanId":-1,"refs":[{"traceId":"trace.alpha","parentSegmentId":"segment.entry","parentSpanId":0,"type":"CrossProcess"}],"serviceCode":"service.worker","endpointName":"POST:/alpha","type":"Entry","component":"Server"}]}}}`))
-		default:
-			t.Fatalf("unexpected provider query: %s", payload.Query)
-		}
-	}))
+	provider := newProviderSpanRefsTraceProvider(t)
 	defer provider.Close()
-
-	server := httptest.NewServer(NewWithOptions(profile.Bundle{ID: "sample"}, Options{
-		Runtime:         s,
-		TraceGraphQLURL: provider.URL,
-	}))
+	server := newTraceCollectRouteServer(s, provider.URL)
 	defer server.Close()
 
-	body := map[string]any{
+	response := traceCollectRouteResponseForTest{}
+	postTraceTopologyCollect(t, server.URL, map[string]any{
 		"runId":     "run.alpha",
 		"stepId":    "step.alpha",
 		"caseId":    "case.alpha",
 		"requestId": "request.alpha",
 		"endpoint":  "/alpha",
 		"startedAt": startedAt.Format(time.RFC3339Nano),
+	}, http.StatusOK, &response)
+
+	requireProviderSpanRefsResponse(t, response)
+	requireStoredProviderSpanRefsTopology(t, ctx, s)
+	requirePassedTraceCollectPostProcessTask(t, ctx, s)
+}
+
+func TestTraceTopologyCollectRecordsFailedPostProcessTaskOnProviderError(t *testing.T) {
+	ctx := context.Background()
+	s := openTraceCollectSQLiteStore(t, ctx)
+	defer s.Close()
+
+	createTraceCollectRun(t, ctx, s, store.Run{
+		ID:         "run.provider-error",
+		ProfileID:  "sample",
+		WorkflowID: "workflow.alpha",
+		Status:     store.StatusFailed,
+		CreatedAt:  time.Now().UTC(),
+		UpdatedAt:  time.Now().UTC(),
+	})
+
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"queryTrace":{"spans":[]}}}`))
+	}))
+	defer provider.Close()
+	server := newTraceCollectRouteServer(s, provider.URL)
+	defer server.Close()
+
+	postTraceTopologyCollect(t, server.URL, map[string]any{
+		"runId":     "run.provider-error",
+		"stepId":    "step.alpha",
+		"caseId":    "case.alpha",
+		"requestId": "request.alpha",
+		"traceId":   "trace.missing",
+	}, http.StatusBadRequest, nil)
+
+	tasks, err := s.ListPostProcessTasks(ctx, "run.provider-error")
+	if err != nil {
+		t.Fatalf("list post-process tasks: %v", err)
 	}
+	if len(tasks) != 1 || tasks[0].Kind != postProcessKindTraceTopology || tasks[0].Status != store.StatusFailed {
+		t.Fatalf("post-process tasks = %#v", tasks)
+	}
+	if tasks[0].WorkflowID != "workflow.alpha" || tasks[0].StepID != "step.alpha" || tasks[0].CaseID != "case.alpha" || tasks[0].Error == "" {
+		t.Fatalf("failed post-process task = %#v", tasks[0])
+	}
+}
+
+func TestTraceTopologyCollectUsesExplicitTraceID(t *testing.T) {
+	ctx := context.Background()
+	s := openTraceCollectSQLiteStore(t, ctx)
+	defer s.Close()
+
+	createTraceCollectRun(t, ctx, s, store.Run{
+		ID:         "run.direct",
+		ProfileID:  "sample",
+		WorkflowID: "workflow.alpha",
+		Status:     store.StatusPassed,
+	})
+
+	provider := newExplicitTraceIDProvider(t, "trace.direct")
+	defer provider.Close()
+	server := newTraceCollectRouteServer(s, provider.URL)
+	defer server.Close()
+
+	postTraceTopologyCollect(t, server.URL, map[string]any{
+		"runId":     "run.direct",
+		"stepId":    "step.direct",
+		"caseId":    "case.direct",
+		"requestId": "request.direct",
+		"traceId":   "trace.direct",
+	}, http.StatusOK, nil)
+
+	rows, err := s.ListTraceTopologies(ctx, "run.direct")
+	if err != nil {
+		t.Fatalf("list trace topologies: %v", err)
+	}
+	if len(rows) != 1 || rows[0].TraceID != "trace.direct" || rows[0].RequestID != "request.direct" || rows[0].Status != "complete" {
+		t.Fatalf("stored direct topology = %#v", rows)
+	}
+}
+
+type traceCollectRouteResponseForTest struct {
+	TraceTopology traceCollectRowResponseForTest      `json:"traceTopology"`
+	Topology      traceCollectTopologyResponseForTest `json:"topology"`
+}
+
+type traceCollectRowResponseForTest struct {
+	WorkflowRunID string `json:"workflowRunId"`
+	TraceID       string `json:"traceId"`
+	Status        string `json:"status"`
+}
+
+type traceCollectTopologyResponseForTest struct {
+	SpanCount      int                               `json:"spanCount"`
+	ConfirmedEdges []traceCollectEdgeResponseForTest `json:"confirmedEdges"`
+}
+
+type traceCollectEdgeResponseForTest struct {
+	Source string `json:"source"`
+	Target string `json:"target"`
+}
+
+func openTraceCollectSQLiteStore(t *testing.T, ctx context.Context) *sqlite.Store {
+	t.Helper()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	return s
+}
+
+func createTraceCollectRun(t *testing.T, ctx context.Context, s store.Store, run store.Run) {
+	t.Helper()
+	if _, err := s.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+}
+
+func newTraceCollectRouteServer(runtime store.Store, providerURL string) *httptest.Server {
+	return httptest.NewServer(NewWithOptions(profile.Bundle{ID: "sample"}, Options{
+		Runtime:         runtime,
+		TraceGraphQLURL: providerURL,
+	}))
+}
+
+func newProviderSpanRefsTraceProvider(t *testing.T) *httptest.Server {
+	return newTraceCollectProviderStub(t, traceCollectProviderStub{
+		candidateResponse: `{"data":{"queryBasicTraces":{"traces":[{"endpointNames":["POST:/alpha"],"duration":120,"start":"2026-05-15 0830","isError":false,"traceIds":["trace.alpha"]}]}}}`,
+		traceResponse:     `{"data":{"queryTrace":{"spans":[{"traceId":"trace.alpha","segmentId":"segment.entry","spanId":0,"parentSpanId":-1,"refs":[],"serviceCode":"service.entry","endpointName":"/alpha","type":"Entry","component":"Tomcat"},{"traceId":"trace.alpha","segmentId":"segment.worker","spanId":0,"parentSpanId":-1,"refs":[{"traceId":"trace.alpha","parentSegmentId":"segment.entry","parentSpanId":0,"type":"CrossProcess"}],"serviceCode":"service.worker","endpointName":"POST:/alpha","type":"Entry","component":"Server"}]}}}`,
+	})
+}
+
+func newExplicitTraceIDProvider(t *testing.T, expectedTraceID string) *httptest.Server {
+	return newTraceCollectProviderStub(t, traceCollectProviderStub{
+		expectedTraceID: expectedTraceID,
+		traceResponse:   `{"data":{"queryTrace":{"spans":[{"traceId":"trace.direct","segmentId":"segment.entry","spanId":0,"parentSpanId":-1,"refs":[],"serviceCode":"service.entry","endpointName":"/direct","type":"Entry","component":"Tomcat"},{"traceId":"trace.direct","segmentId":"segment.worker","spanId":0,"parentSpanId":-1,"refs":[{"traceId":"trace.direct","parentSegmentId":"segment.entry","parentSpanId":0,"type":"CrossProcess"}],"serviceCode":"service.worker","endpointName":"POST:/direct","type":"Entry","component":"Server"}]}}}`,
+	})
+}
+
+type traceCollectProviderStub struct {
+	candidateResponse string
+	traceResponse     string
+	expectedTraceID   string
+}
+
+func newTraceCollectProviderStub(t *testing.T, stub traceCollectProviderStub) *httptest.Server {
+	t.Helper()
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		payload := map[string]any{}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode provider request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		stub.write(t, w, valueString(payload["query"]), mapFromAny(payload["variables"]))
+	}))
+}
+
+func (stub traceCollectProviderStub) write(t *testing.T, w http.ResponseWriter, query string, variables map[string]any) {
+	t.Helper()
+
+	if strings.Contains(query, "queryBasicTraces") {
+		if stub.candidateResponse == "" {
+			t.Fatalf("explicit trace id should not query candidates")
+		}
+		_, _ = w.Write([]byte(stub.candidateResponse))
+		return
+	}
+	if strings.Contains(query, "queryTrace") {
+		if stub.expectedTraceID != "" && variables["traceId"] != stub.expectedTraceID {
+			t.Fatalf("trace id variable = %#v", variables)
+		}
+		_, _ = w.Write([]byte(stub.traceResponse))
+		return
+	}
+	t.Fatalf("unexpected provider query: %s", query)
+}
+
+func postTraceTopologyCollect(t *testing.T, serverURL string, body map[string]any, wantStatus int, out any) {
+	t.Helper()
 	raw, err := json.Marshal(body)
 	if err != nil {
 		t.Fatalf("marshal collect request: %v", err)
 	}
-	resp, err := http.Post(server.URL+"/api/trace-topology/collect", "application/json", bytes.NewReader(raw))
+	resp, err := http.Post(serverURL+"/api/trace-topology/collect", "application/json", bytes.NewReader(raw))
 	if err != nil {
 		t.Fatalf("collect topology: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != wantStatus {
 		t.Fatalf("collect status = %d", resp.StatusCode)
 	}
+	if out != nil {
+		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+			t.Fatalf("decode collect response: %v", err)
+		}
+	}
+}
 
-	var payload struct {
-		TraceTopology struct {
-			WorkflowRunID string `json:"workflowRunId"`
-			TraceID       string `json:"traceId"`
-			Status        string `json:"status"`
-		} `json:"traceTopology"`
-		Topology struct {
-			SpanCount      int `json:"spanCount"`
-			ConfirmedEdges []struct {
-				Source string `json:"source"`
-				Target string `json:"target"`
-			} `json:"confirmedEdges"`
-		} `json:"topology"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode collect response: %v", err)
-	}
+func requireProviderSpanRefsResponse(t *testing.T, payload traceCollectRouteResponseForTest) {
+	t.Helper()
 	if payload.TraceTopology.WorkflowRunID != "run.alpha" || payload.TraceTopology.TraceID != "trace.alpha" || payload.TraceTopology.Status != "complete" {
 		t.Fatalf("trace topology row = %#v", payload.TraceTopology)
 	}
@@ -110,7 +257,10 @@ func TestTraceTopologyCollectPersistsProviderSpanRefs(t *testing.T) {
 	if edge.Source != "service.entry" || edge.Target != "service.worker" {
 		t.Fatalf("confirmed edge = %#v", edge)
 	}
+}
 
+func requireStoredProviderSpanRefsTopology(t *testing.T, ctx context.Context, s store.Store) {
+	t.Helper()
 	rows, err := s.ListTraceTopologies(ctx, "run.alpha")
 	if err != nil {
 		t.Fatalf("list trace topologies: %v", err)
@@ -121,6 +271,10 @@ func TestTraceTopologyCollectPersistsProviderSpanRefs(t *testing.T) {
 	if strings.TrimSpace(rows[0].ID) == "" {
 		t.Fatalf("stored topology id should be generated when payload omits id: %#v", rows[0])
 	}
+}
+
+func requirePassedTraceCollectPostProcessTask(t *testing.T, ctx context.Context, s store.Store) {
+	t.Helper()
 	tasks, err := s.ListPostProcessTasks(ctx, "run.alpha")
 	if err != nil {
 		t.Fatalf("list post-process tasks: %v", err)
@@ -137,139 +291,6 @@ func TestTraceTopologyCollectPersistsProviderSpanRefs(t *testing.T) {
 	}
 	if summary["traceId"] != "trace.alpha" || summary["requestId"] != "request.alpha" || summary["topologyStatus"] != "complete" || summary["spanCount"] != float64(2) {
 		t.Fatalf("post-process task summary = %#v", summary)
-	}
-}
-
-func TestTraceTopologyCollectRecordsFailedPostProcessTaskOnProviderError(t *testing.T) {
-	ctx := context.Background()
-	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
-	if err != nil {
-		t.Fatalf("open sqlite store: %v", err)
-	}
-	defer s.Close()
-
-	_, err = s.CreateRun(ctx, store.Run{
-		ID:         "run.provider-error",
-		ProfileID:  "sample",
-		WorkflowID: "workflow.alpha",
-		Status:     store.StatusFailed,
-		CreatedAt:  time.Now().UTC(),
-		UpdatedAt:  time.Now().UTC(),
-	})
-	if err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-
-	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"queryTrace":{"spans":[]}}}`))
-	}))
-	defer provider.Close()
-
-	server := httptest.NewServer(NewWithOptions(profile.Bundle{ID: "sample"}, Options{
-		Runtime:         s,
-		TraceGraphQLURL: provider.URL,
-	}))
-	defer server.Close()
-
-	raw, err := json.Marshal(map[string]any{
-		"runId":     "run.provider-error",
-		"stepId":    "step.alpha",
-		"caseId":    "case.alpha",
-		"requestId": "request.alpha",
-		"traceId":   "trace.missing",
-	})
-	if err != nil {
-		t.Fatalf("marshal collect request: %v", err)
-	}
-	resp, err := http.Post(server.URL+"/api/trace-topology/collect", "application/json", bytes.NewReader(raw))
-	if err != nil {
-		t.Fatalf("collect topology: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("collect status = %d", resp.StatusCode)
-	}
-	tasks, err := s.ListPostProcessTasks(ctx, "run.provider-error")
-	if err != nil {
-		t.Fatalf("list post-process tasks: %v", err)
-	}
-	if len(tasks) != 1 || tasks[0].Kind != postProcessKindTraceTopology || tasks[0].Status != store.StatusFailed {
-		t.Fatalf("post-process tasks = %#v", tasks)
-	}
-	if tasks[0].WorkflowID != "workflow.alpha" || tasks[0].StepID != "step.alpha" || tasks[0].CaseID != "case.alpha" || tasks[0].Error == "" {
-		t.Fatalf("failed post-process task = %#v", tasks[0])
-	}
-}
-
-func TestTraceTopologyCollectUsesExplicitTraceID(t *testing.T) {
-	ctx := context.Background()
-	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
-	if err != nil {
-		t.Fatalf("open sqlite store: %v", err)
-	}
-	defer s.Close()
-
-	_, err = s.CreateRun(ctx, store.Run{
-		ID:         "run.direct",
-		ProfileID:  "sample",
-		WorkflowID: "workflow.alpha",
-		Status:     store.StatusPassed,
-	})
-	if err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-
-	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var payload struct {
-			Query     string         `json:"query"`
-			Variables map[string]any `json:"variables"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Fatalf("decode provider request: %v", err)
-		}
-		if strings.Contains(payload.Query, "queryBasicTraces") {
-			t.Fatalf("explicit trace id should not query candidates")
-		}
-		if payload.Variables["traceId"] != "trace.direct" {
-			t.Fatalf("trace id variable = %#v", payload.Variables)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"queryTrace":{"spans":[{"traceId":"trace.direct","segmentId":"segment.entry","spanId":0,"parentSpanId":-1,"refs":[],"serviceCode":"service.entry","endpointName":"/direct","type":"Entry","component":"Tomcat"},{"traceId":"trace.direct","segmentId":"segment.worker","spanId":0,"parentSpanId":-1,"refs":[{"traceId":"trace.direct","parentSegmentId":"segment.entry","parentSpanId":0,"type":"CrossProcess"}],"serviceCode":"service.worker","endpointName":"POST:/direct","type":"Entry","component":"Server"}]}}}`))
-	}))
-	defer provider.Close()
-
-	server := httptest.NewServer(NewWithOptions(profile.Bundle{ID: "sample"}, Options{
-		Runtime:         s,
-		TraceGraphQLURL: provider.URL,
-	}))
-	defer server.Close()
-
-	raw, err := json.Marshal(map[string]any{
-		"runId":     "run.direct",
-		"stepId":    "step.direct",
-		"caseId":    "case.direct",
-		"requestId": "request.direct",
-		"traceId":   "trace.direct",
-	})
-	if err != nil {
-		t.Fatalf("marshal collect request: %v", err)
-	}
-	resp, err := http.Post(server.URL+"/api/trace-topology/collect", "application/json", bytes.NewReader(raw))
-	if err != nil {
-		t.Fatalf("collect topology: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("collect status = %d", resp.StatusCode)
-	}
-
-	rows, err := s.ListTraceTopologies(ctx, "run.direct")
-	if err != nil {
-		t.Fatalf("list trace topologies: %v", err)
-	}
-	if len(rows) != 1 || rows[0].TraceID != "trace.direct" || rows[0].RequestID != "request.direct" || rows[0].Status != "complete" {
-		t.Fatalf("stored direct topology = %#v", rows)
 	}
 }
 

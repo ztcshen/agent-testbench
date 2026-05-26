@@ -10,97 +10,89 @@ import (
 	profileimportopenapi "agent-testbench/internal/domain/profileimport/openapi"
 )
 
+type planSourceInput struct {
+	SourcePath  string
+	ServiceID   string
+	EvidenceDir string
+	Raw         []byte
+}
+
 func handleOpenAPIImportPlan(w http.ResponseWriter, r *http.Request) {
-	payload, err := readJSONPayload(r)
-	if err != nil {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json"})
+	input, ok := readPlanSourceInput(w, r)
+	if !ok {
 		return
 	}
-	sourcePath := strings.TrimSpace(valueString(payload["sourcePath"]))
-	if sourcePath == "" {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "sourcePath is required"})
-		return
-	}
-	raw, err := os.ReadFile(sourcePath)
-	if err != nil {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
-		return
-	}
-	plan, err := profileimportopenapi.Plan(raw, profileimportopenapi.Options{
-		ServiceID:   valueString(payload["serviceId"]),
-		EvidenceDir: valueString(payload["evidenceDir"]),
+	plan, err := profileimportopenapi.Plan(input.Raw, profileimportopenapi.Options{
+		ServiceID:   input.ServiceID,
+		EvidenceDir: input.EvidenceDir,
 	})
 	if err != nil {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	writeJSON(w, map[string]any{
-		"ok":         true,
-		"kind":       "openapi",
-		"sourcePath": sourcePath,
-		"plan":       plan,
-	})
+	writePlanSourceResponse(w, "openapi", input.SourcePath, plan)
 }
 
 func handleOpenAPIGenerationPlan(w http.ResponseWriter, r *http.Request) {
-	payload, err := readJSONPayload(r)
-	if err != nil {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json"})
+	input, ok := readPlanSourceInput(w, r)
+	if !ok {
 		return
 	}
-	sourcePath := strings.TrimSpace(valueString(payload["sourcePath"]))
-	if sourcePath == "" {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "sourcePath is required"})
-		return
-	}
-	raw, err := os.ReadFile(sourcePath)
-	if err != nil {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
-		return
-	}
-	plan, err := profilegenerateopenapi.Plan(raw, profilegenerateopenapi.Options{
-		ServiceID:   valueString(payload["serviceId"]),
-		EvidenceDir: valueString(payload["evidenceDir"]),
+	plan, err := profilegenerateopenapi.Plan(input.Raw, profilegenerateopenapi.Options{
+		ServiceID:   input.ServiceID,
+		EvidenceDir: input.EvidenceDir,
 	})
 	if err != nil {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	writeJSON(w, map[string]any{
-		"ok":         true,
-		"kind":       "openapi",
-		"sourcePath": sourcePath,
-		"plan":       plan,
-	})
+	writePlanSourceResponse(w, "openapi", input.SourcePath, plan)
 }
 
 func handleHTTPCaptureImportPlan(w http.ResponseWriter, r *http.Request) {
-	payload, err := readJSONPayload(r)
-	if err != nil {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json"})
+	input, ok := readPlanSourceInput(w, r)
+	if !ok {
 		return
 	}
-	sourcePath := strings.TrimSpace(valueString(payload["sourcePath"]))
-	if sourcePath == "" {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "sourcePath is required"})
-		return
-	}
-	raw, err := os.ReadFile(sourcePath)
-	if err != nil {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
-		return
-	}
-	plan, err := profileimporthttpcapture.Plan(raw, profileimporthttpcapture.Options{
-		ServiceID:   valueString(payload["serviceId"]),
-		EvidenceDir: valueString(payload["evidenceDir"]),
+	plan, err := profileimporthttpcapture.Plan(input.Raw, profileimporthttpcapture.Options{
+		ServiceID:   input.ServiceID,
+		EvidenceDir: input.EvidenceDir,
 	})
 	if err != nil {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
+	writePlanSourceResponse(w, "http-capture", input.SourcePath, plan)
+}
+
+func readPlanSourceInput(w http.ResponseWriter, r *http.Request) (planSourceInput, bool) {
+	payload, err := readJSONPayload(r)
+	if err != nil {
+		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json"})
+		return planSourceInput{}, false
+	}
+	sourcePath := strings.TrimSpace(valueString(payload["sourcePath"]))
+	if sourcePath == "" {
+		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "sourcePath is required"})
+		return planSourceInput{}, false
+	}
+	raw, err := os.ReadFile(sourcePath)
+	if err != nil {
+		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+		return planSourceInput{}, false
+	}
+	return planSourceInput{
+		SourcePath:  sourcePath,
+		ServiceID:   valueString(payload["serviceId"]),
+		EvidenceDir: valueString(payload["evidenceDir"]),
+		Raw:         raw,
+	}, true
+}
+
+func writePlanSourceResponse(w http.ResponseWriter, kind string, sourcePath string, plan any) {
 	writeJSON(w, map[string]any{
 		"ok":         true,
-		"kind":       "http-capture",
+		"kind":       kind,
 		"sourcePath": sourcePath,
 		"plan":       plan,
 	})

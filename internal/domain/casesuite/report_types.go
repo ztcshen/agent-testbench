@@ -3,6 +3,7 @@ package casesuite
 
 import (
 	"context"
+	"strings"
 
 	"agent-testbench/internal/domain/execution"
 )
@@ -119,6 +120,16 @@ type BatchRequest struct {
 	EvidenceDir    string         `json:"evidenceDir,omitempty"`
 	TimeoutSeconds int            `json:"timeoutSeconds,omitempty"`
 	Overrides      map[string]any `json:"overrides,omitempty"`
+}
+
+func newBatchRequest(caseIDs []string, requestID, baseURL, evidenceDir string, timeoutSeconds int) BatchRequest {
+	return BatchRequest{
+		RequestID:      strings.TrimSpace(requestID),
+		CaseIDs:        append([]string(nil), caseIDs...),
+		BaseURL:        strings.TrimSpace(baseURL),
+		EvidenceDir:    strings.TrimSpace(evidenceDir),
+		TimeoutSeconds: timeoutSeconds,
+	}
 }
 
 type PlanReport struct {

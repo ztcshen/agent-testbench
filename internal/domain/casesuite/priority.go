@@ -117,13 +117,7 @@ func priorityFromParts(bundle profile.Bundle, filter Filter, inspection Inspecti
 		Selected: len(report.Selected),
 		Skipped:  len(report.Skipped),
 	}
-	report.BatchRequest = BatchRequest{
-		RequestID:      strings.TrimSpace(options.RequestID),
-		CaseIDs:        append([]string(nil), report.CaseIDs...),
-		BaseURL:        strings.TrimSpace(options.BaseURL),
-		EvidenceDir:    strings.TrimSpace(options.EvidenceDir),
-		TimeoutSeconds: options.TimeoutSeconds,
-	}
+	report.BatchRequest = newBatchRequest(report.CaseIDs, options.RequestID, options.BaseURL, options.EvidenceDir, options.TimeoutSeconds)
 	if len(report.CaseIDs) == 0 {
 		report.OK = false
 		report.Warnings = append(report.Warnings, "no ready cases selected for prioritized execution")

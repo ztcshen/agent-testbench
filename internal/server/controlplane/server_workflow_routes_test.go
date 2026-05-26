@@ -51,14 +51,34 @@ func TestServerExposesEmptyRunListsForReactShell(t *testing.T) {
 
 func TestServerExposesWorkflowRunContracts(t *testing.T) {
 	ctx := context.Background()
+	s := openWorkflowRoutesSQLiteStore(t, ctx)
+	started := time.Date(2026, 5, 15, 8, 0, 0, 0, time.UTC)
+	seedWorkflowRunContracts(t, ctx, s, started)
+
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample", DisplayName: "Sample Profile"}, s))
+	defer server.Close()
+
+	requireWorkflowRunListContract(t, server.URL)
+	requireWorkflowRunDetailContract(t, server.URL)
+	requireWorkflowRunStepContract(t, server.URL)
+	requireLatestWorkflowStepContract(t, server.URL)
+}
+
+func openWorkflowRoutesSQLiteStore(t *testing.T, ctx context.Context) *sqlite.Store {
+	t.Helper()
+
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
 	if err != nil {
 		t.Fatalf("open sqlite store: %v", err)
 	}
-	defer s.Close()
+	t.Cleanup(func() { _ = s.Close() })
+	return s
+}
 
-	started := time.Date(2026, 5, 15, 8, 0, 0, 0, time.UTC)
-	_, err = s.CreateRun(ctx, store.Run{
+func seedWorkflowRunContracts(t *testing.T, ctx context.Context, s *sqlite.Store, started time.Time) {
+	t.Helper()
+
+	recordWorkflowRouteRun(t, ctx, s, store.Run{
 		ID:           "run.alpha",
 		ProfileID:    "sample",
 		WorkflowID:   "workflow.alpha",
@@ -67,10 +87,7 @@ func TestServerExposesWorkflowRunContracts(t *testing.T) {
 		SummaryJSON:  `{"summary":{"expectedStepCount":2,"stepCount":2},"steps":[{"stepId":"step.alpha","ok":true},{"stepId":"step.beta","ok":false,"summary":{"httpCode":200},"result":{"response":{"statusCode":200}}}]}`,
 		CreatedAt:    started,
 	})
-	if err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-	_, err = s.CreateRun(ctx, store.Run{
+	recordWorkflowRouteRun(t, ctx, s, store.Run{
 		ID:          "run.beta",
 		ProfileID:   "sample",
 		WorkflowID:  "workflow.alpha",
@@ -78,10 +95,22 @@ func TestServerExposesWorkflowRunContracts(t *testing.T) {
 		SummaryJSON: `{"kind":"apiCase","summary":{"httpCode":200},"steps":[{"stepId":"step.beta","caseId":"case.beta","ok":true,"summary":{"httpCode":200},"result":{"response":{"statusCode":200,"body":"{}"}}}]}`,
 		CreatedAt:   started.Add(time.Minute),
 	})
-	if err != nil {
-		t.Fatalf("create incomplete run: %v", err)
+	saveWorkflowRouteTraceTopology(t, ctx, s)
+	recordWorkflowRouteRuntimeLogs(t, ctx, s, started)
+}
+
+func recordWorkflowRouteRun(t *testing.T, ctx context.Context, s *sqlite.Store, run store.Run) {
+	t.Helper()
+
+	if _, err := s.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run %s: %v", run.ID, err)
 	}
-	_, err = s.SaveTraceTopology(ctx, store.TraceTopology{
+}
+
+func saveWorkflowRouteTraceTopology(t *testing.T, ctx context.Context, s *sqlite.Store) {
+	t.Helper()
+
+	if _, err := s.SaveTraceTopology(ctx, store.TraceTopology{
 		ID:            "topology.alpha",
 		WorkflowRunID: "run.alpha",
 		WorkflowID:    "workflow.alpha",
@@ -92,15 +121,19 @@ func TestServerExposesWorkflowRunContracts(t *testing.T) {
 		Status:        "complete",
 		TopologyJSON:  `{"provider":"skywalking","status":"complete","confirmedEdges":[{"source":"service.alpha","target":"service.beta"}],"externalExits":[],"unresolvedExits":[],"observedNodes":["service.alpha","service.beta"]}`,
 		TextTopology:  "service.alpha -> service.beta",
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("save topology: %v", err)
 	}
+}
+
+func recordWorkflowRouteRuntimeLogs(t *testing.T, ctx context.Context, s *sqlite.Store, started time.Time) {
+	t.Helper()
+
 	logPath := filepath.Join(t.TempDir(), "runtime-logs.json")
 	if err := os.WriteFile(logPath, []byte(`{"systems":[{"name":"worker","found":true,"coreLogs":["request.beta handled"]}]}`), 0o644); err != nil {
 		t.Fatalf("write runtime logs: %v", err)
 	}
-	_, err = s.RecordEvidence(ctx, store.EvidenceRecord{
+	if _, err := s.RecordEvidence(ctx, store.EvidenceRecord{
 		ID:        "runtime.logs.step.beta",
 		RunID:     "run.alpha",
 		CaseRunID: "step.beta",
@@ -109,15 +142,15 @@ func TestServerExposesWorkflowRunContracts(t *testing.T) {
 		MediaType: "application/json",
 		Summary:   `{"stepId":"step.beta"}`,
 		CreatedAt: started,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("record runtime logs: %v", err)
 	}
+}
 
-	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample", DisplayName: "Sample Profile"}, s))
-	defer server.Close()
+func requireWorkflowRunListContract(t *testing.T, serverURL string) {
+	t.Helper()
 
-	list := decodeJSONResponse(t, server.URL+"/api/runs", http.StatusOK)
+	list := decodeJSONResponse(t, serverURL+"/api/runs", http.StatusOK)
 	workflowRuns := list["workflowRuns"].([]any)
 	if len(workflowRuns) != 2 || workflowRuns[0].(map[string]any)["id"] != "run.beta" || workflowRuns[1].(map[string]any)["id"] != "run.alpha" {
 		t.Fatalf("workflow run list = %#v", list)
@@ -129,8 +162,12 @@ func TestServerExposesWorkflowRunContracts(t *testing.T) {
 	if firstRun["summaryJson"] == "" || firstRun["stepCount"] != float64(2) {
 		t.Fatalf("workflow run list summary fields = %#v", firstRun)
 	}
+}
 
-	detail := decodeJSONResponse(t, server.URL+"/api/workflow-runs/run.alpha", http.StatusOK)
+func requireWorkflowRunDetailContract(t *testing.T, serverURL string) {
+	t.Helper()
+
+	detail := decodeJSONResponse(t, serverURL+"/api/workflow-runs/run.alpha", http.StatusOK)
 	if detail["ok"] != true {
 		t.Fatalf("workflow run detail failed: %#v", detail)
 	}
@@ -145,8 +182,12 @@ func TestServerExposesWorkflowRunContracts(t *testing.T) {
 	if len(summary["steps"].([]any)) != 2 {
 		t.Fatalf("workflow run detail summary = %#v", summary)
 	}
+}
 
-	step := decodeJSONResponse(t, server.URL+"/api/workflow-runs/step?runId=run.alpha&stepId=step.beta", http.StatusOK)
+func requireWorkflowRunStepContract(t *testing.T, serverURL string) {
+	t.Helper()
+
+	step := decodeJSONResponse(t, serverURL+"/api/workflow-runs/step?runId=run.alpha&stepId=step.beta", http.StatusOK)
 	stepSummary := step["summary"].(map[string]any)
 	steps := stepSummary["steps"].([]any)
 	if len(steps) != 1 || steps[0].(map[string]any)["stepId"] != "step.beta" {
@@ -159,8 +200,12 @@ func TestServerExposesWorkflowRunContracts(t *testing.T) {
 	if len(stepTopologies) != 1 || stepTopologies[0].(map[string]any)["stepId"] != "step.beta" {
 		t.Fatalf("workflow run step topology payload = %#v", step)
 	}
+}
 
-	latest := decodeJSONResponse(t, server.URL+"/api/workflow-runs/latest-step?workflowId=workflow.alpha&stepId=step.beta", http.StatusOK)
+func requireLatestWorkflowStepContract(t *testing.T, serverURL string) {
+	t.Helper()
+
+	latest := decodeJSONResponse(t, serverURL+"/api/workflow-runs/latest-step?workflowId=workflow.alpha&stepId=step.beta", http.StatusOK)
 	latestRun := latest["run"].(map[string]any)
 	if latestRun["id"] != "run.alpha" {
 		t.Fatalf("latest workflow step should prefer full workflow cache over newer single-step runs: %#v", latest)

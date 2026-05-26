@@ -33,40 +33,37 @@ func WorkflowDiscoveryPayload(ctx context.Context, bundle profile.Bundle, filter
 	return workflowDiscoveryPayloadFromBundle(bundle, filter), nil
 }
 
+type workflowDiscoverySource struct {
+	ID          string
+	DisplayName string
+	Description string
+}
+
 func workflowDiscoveryPayloadFromBundle(bundle profile.Bundle, filter string) map[string]any {
-	stepCounts := make(map[string]int, len(bundle.WorkflowBindings))
-	for _, binding := range bundle.WorkflowBindings {
-		if strings.TrimSpace(binding.WorkflowID) != "" {
-			stepCounts[binding.WorkflowID]++
-		}
-	}
-	workflows := append([]profile.Workflow(nil), bundle.Workflows...)
-	sort.SliceStable(workflows, func(i, j int) bool {
-		return workflows[i].ID < workflows[j].ID
-	})
-	items := make([]map[string]any, 0, len(workflows))
-	for _, workflow := range workflows {
-		if !matchesControlplaneDiscoveryFilter(filter, workflow.ID, workflow.DisplayName, workflow.Description) {
-			continue
-		}
-		items = append(items, map[string]any{
-			"id":          workflow.ID,
-			"displayName": workflow.DisplayName,
-			"description": workflow.Description,
-			"stepCount":   stepCounts[workflow.ID],
+	workflows := make([]workflowDiscoverySource, 0, len(bundle.Workflows))
+	for _, workflow := range bundle.Workflows {
+		workflows = append(workflows, workflowDiscoverySource{
+			ID:          workflow.ID,
+			DisplayName: workflow.DisplayName,
+			Description: workflow.Description,
 		})
 	}
-	return workflowDiscoveryPayload(bundle.ID, items, "profile")
+	return workflowDiscoveryPayload(bundle.ID, workflowDiscoveryItems(workflows, workflowStepCounts(bundle.WorkflowBindings), filter), "profile")
 }
 
 func workflowDiscoveryPayloadFromCatalog(catalog store.ProfileCatalog, filter string) map[string]any {
-	stepCounts := make(map[string]int, len(catalog.WorkflowBindings))
-	for _, binding := range catalog.WorkflowBindings {
-		if strings.TrimSpace(binding.WorkflowID) != "" {
-			stepCounts[binding.WorkflowID]++
-		}
+	workflows := make([]workflowDiscoverySource, 0, len(catalog.Workflows))
+	for _, workflow := range catalog.Workflows {
+		workflows = append(workflows, workflowDiscoverySource{
+			ID:          workflow.ID,
+			DisplayName: workflow.DisplayName,
+			Description: workflow.Description,
+		})
 	}
-	workflows := append([]store.CatalogWorkflow(nil), catalog.Workflows...)
+	return workflowDiscoveryPayload(catalog.ProfileID, workflowDiscoveryItems(workflows, catalogWorkflowStepCounts(catalog.WorkflowBindings), filter), "store")
+}
+
+func workflowDiscoveryItems(workflows []workflowDiscoverySource, stepCounts map[string]int, filter string) []map[string]any {
 	sort.SliceStable(workflows, func(i, j int) bool {
 		return workflows[i].ID < workflows[j].ID
 	})
@@ -82,7 +79,29 @@ func workflowDiscoveryPayloadFromCatalog(catalog store.ProfileCatalog, filter st
 			"stepCount":   stepCounts[workflow.ID],
 		})
 	}
-	return workflowDiscoveryPayload(catalog.ProfileID, items, "store")
+	return items
+}
+
+func workflowStepCounts(bindings []profile.WorkflowBinding) map[string]int {
+	stepCounts := make(map[string]int, len(bindings))
+	for _, binding := range bindings {
+		addWorkflowStepCount(stepCounts, binding.WorkflowID)
+	}
+	return stepCounts
+}
+
+func catalogWorkflowStepCounts(bindings []store.CatalogWorkflowBinding) map[string]int {
+	stepCounts := make(map[string]int, len(bindings))
+	for _, binding := range bindings {
+		addWorkflowStepCount(stepCounts, binding.WorkflowID)
+	}
+	return stepCounts
+}
+
+func addWorkflowStepCount(stepCounts map[string]int, workflowID string) {
+	if strings.TrimSpace(workflowID) != "" {
+		stepCounts[workflowID]++
+	}
 }
 
 func workflowDiscoveryPayload(profileID string, items []map[string]any, sourceKind string) map[string]any {

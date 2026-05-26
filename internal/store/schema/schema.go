@@ -8,12 +8,11 @@ type Change struct {
 
 const CurrentVersion = 18
 
-func All() []Change {
-	return []Change{
-		{
-			Version: 1,
-			Name:    "create runtime store tables",
-			SQL: `
+var changes = []Change{
+	{
+		Version: 1,
+		Name:    "create runtime store tables",
+		SQL: `
 create table if not exists runs (
   id text primary key,
   profile_id text not null,
@@ -79,11 +78,11 @@ create table if not exists profile_indexes (
   imported_at text,
   updated_at text not null
 );`,
-		},
-		{
-			Version: 2,
-			Name:    "add template config catalog tables",
-			SQL: `
+	},
+	{
+		Version: 2,
+		Name:    "add template config catalog tables",
+		SQL: `
 create table if not exists kv (
   key text primary key,
   value text not null,
@@ -317,11 +316,11 @@ create index if not exists idx_interface_node_case_dependency_case
 
 create index if not exists idx_interface_node_case_dependency_fixture
   on interface_node_case_dependency(fixture_profile_id, status);`,
-		},
-		{
-			Version: 3,
-			Name:    "add trace topology evidence",
-			SQL: `
+	},
+	{
+		Version: 3,
+		Name:    "add trace topology evidence",
+		SQL: `
 create table if not exists trace_topologies (
   id text primary key,
   workflow_run_id text not null,
@@ -342,19 +341,19 @@ create index if not exists idx_trace_topologies_workflow_run
 
 create index if not exists idx_trace_topologies_case
   on trace_topologies(workflow_run_id, case_id, step_id);`,
-		},
-		{
-			Version: 4,
-			Name:    "add execution budgets",
-			SQL: `
+	},
+	{
+		Version: 4,
+		Name:    "add execution budgets",
+		SQL: `
 alter table workflow add column base_step_timeout_ms integer not null default 0;
 alter table workflow add column timeout_offset_ms integer not null default 0;
 alter table interface_node add column timeout_ms integer not null default 0;`,
-		},
-		{
-			Version: 5,
-			Name:    "add post process task records",
-			SQL: `
+	},
+	{
+		Version: 5,
+		Name:    "add post process task records",
+		SQL: `
 create table if not exists post_process_tasks (
   id text primary key,
   run_id text not null,
@@ -377,24 +376,24 @@ create index if not exists idx_post_process_tasks_run_created
 
 create index if not exists idx_post_process_tasks_kind_status
   on post_process_tasks(kind, status, created_at);`,
-		},
-		{
-			Version: 6,
-			Name:    "add latest api case run lookup index",
-			SQL: `
+	},
+	{
+		Version: 6,
+		Name:    "add latest api case run lookup index",
+		SQL: `
 create index if not exists idx_api_case_runs_case_created
   on api_case_runs(case_id, created_at, id);`,
-		},
-		{
-			Version: 7,
-			Name:    "add service source path config",
-			SQL: `
+	},
+	{
+		Version: 7,
+		Name:    "add service source path config",
+		SQL: `
 alter table node_config add column source_path text not null default '';`,
-		},
-		{
-			Version: 8,
-			Name:    "add config version catalog",
-			SQL: `
+	},
+	{
+		Version: 8,
+		Name:    "add config version catalog",
+		SQL: `
 create table if not exists config_versions (
   id text primary key,
   profile_id text not null,
@@ -411,11 +410,11 @@ create index if not exists idx_config_versions_active
 
 create index if not exists idx_config_versions_profile_published
   on config_versions(profile_id, published_at, id);`,
-		},
-		{
-			Version: 9,
-			Name:    "add configuration read models",
-			SQL: `
+	},
+	{
+		Version: 9,
+		Name:    "add configuration read models",
+		SQL: `
 create table if not exists config_read_model (
   profile_id text not null,
   model_key text not null,
@@ -428,21 +427,21 @@ create table if not exists config_read_model (
 
 create index if not exists idx_config_read_model_version
   on config_read_model(config_version_id, model_key);`,
-		},
-		{
-			Version: 10,
-			Name:    "add api case execution config",
-			SQL: `
+	},
+	{
+		Version: 10,
+		Name:    "add api case execution config",
+		SQL: `
 alter table interface_node_case add column case_path text not null default '';
 alter table interface_node_case add column base_url text not null default '';
 alter table interface_node_case add column evidence_dir text not null default '';
 alter table interface_node_case add column timeout_seconds integer not null default 0;
 alter table interface_node_case add column default_overrides_json text not null default '{}';`,
-		},
-		{
-			Version: 11,
-			Name:    "add api case maintenance metadata",
-			SQL: `
+	},
+	{
+		Version: 11,
+		Name:    "add api case maintenance metadata",
+		SQL: `
 alter table interface_node_case add column description text not null default '';
 alter table interface_node_case add column tags_json text not null default '[]';
 alter table interface_node_case add column priority text not null default '';
@@ -450,42 +449,42 @@ alter table interface_node_case add column owner text not null default '';
 
 create index if not exists idx_interface_node_case_status_owner
   on interface_node_case(status, owner, priority, sort_order, id);`,
-		},
-		{
-			Version: 12,
-			Name:    "add evidence attachment metadata",
-			SQL: `
+	},
+	{
+		Version: 12,
+		Name:    "add evidence attachment metadata",
+		SQL: `
 alter table evidence_records add column category text not null default '';
 alter table evidence_records add column visibility text not null default '';
 alter table evidence_records add column labels_json text not null default '{}';
 
 create index if not exists idx_evidence_records_category
   on evidence_records(category, visibility, created_at, id);`,
-		},
-		{
-			Version: 13,
-			Name:    "add api case external source refs",
-			SQL: `
+	},
+	{
+		Version: 13,
+		Name:    "add api case external source refs",
+		SQL: `
 alter table interface_node_case add column source_kind text not null default '';
 alter table interface_node_case add column source_path text not null default '';
 alter table interface_node_case add column executor_id text not null default '';
 
 create index if not exists idx_interface_node_case_executor
   on interface_node_case(executor_id, source_kind, status, sort_order, id);`,
-		},
-		{
-			Version: 14,
-			Name:    "add evidence step relation",
-			SQL: `
+	},
+	{
+		Version: 14,
+		Name:    "add evidence step relation",
+		SQL: `
 alter table evidence_records add column step_id text not null default '';
 
 create index if not exists idx_evidence_records_step
   on evidence_records(run_id, step_id, case_run_id, created_at, id);`,
-		},
-		{
-			Version: 15,
-			Name:    "add environment catalog",
-			SQL: `
+	},
+	{
+		Version: 15,
+		Name:    "add environment catalog",
+		SQL: `
 create table if not exists environments (
   id text primary key,
   display_name text not null default '',
@@ -512,11 +511,11 @@ create index if not exists idx_environments_verified_status
 
 create index if not exists idx_environments_verification
   on environments(verification_workflow_id, last_verification_status, updated_at, id);`,
-		},
-		{
-			Version: 16,
-			Name:    "add environment component assets",
-			SQL: `
+	},
+	{
+		Version: 16,
+		Name:    "add environment component assets",
+		SQL: `
 create table if not exists environment_components (
   env_id text not null,
   component_id text not null,
@@ -581,11 +580,11 @@ create index if not exists idx_service_config_assets_target
 
 create index if not exists idx_service_config_assets_service_order
   on service_config_assets(env_id, service_id, apply_order, asset_id);`,
-		},
-		{
-			Version: 17,
-			Name:    "generalize environment component graph",
-			SQL: `
+	},
+	{
+		Version: 17,
+		Name:    "generalize environment component graph",
+		SQL: `
 create table if not exists component_dependencies (
   env_id text not null,
   consumer_component_id text not null,
@@ -633,12 +632,15 @@ create index if not exists idx_component_config_assets_target
 
 create index if not exists idx_component_config_assets_owner_order
   on component_config_assets(env_id, owner_component_id, apply_order, asset_id);`,
-		},
-		{
-			Version: 18,
-			Name:    "link workflow runs to environments",
-			SQL: `
+	},
+	{
+		Version: 18,
+		Name:    "link workflow runs to environments",
+		SQL: `
 alter table runs add column environment_id text not null default '';`,
-		},
-	}
+	},
+}
+
+func All() []Change {
+	return append([]Change(nil), changes...)
 }

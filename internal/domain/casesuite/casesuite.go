@@ -95,88 +95,6 @@ func Coverage(ctx context.Context, bundle profile.Bundle, runtime RecordStore, f
 	return report, nil
 }
 
-func Inspect(ctx context.Context, bundle profile.Bundle, runtime RecordStore, filter Filter, cases []profile.APICase) (InspectionReport, error) {
-	coverage, err := Coverage(ctx, bundle, runtime, filter, cases)
-	if err != nil {
-		return InspectionReport{}, err
-	}
-	configs := ExecutionConfigSet(ctx, bundle, runtime)
-	coverageByCase := map[string]Item{}
-	for _, item := range coverage.Items {
-		coverageByCase[item.CaseID] = item
-	}
-	report := InspectionReport{
-		OK:          true,
-		ProfileID:   bundle.ID,
-		GeneratedAt: coverage.GeneratedAt,
-		Filters:     coverage.Filters,
-		Counts:      InspectionCounts{Total: len(cases)},
-		Items:       []InspectionItem{},
-		Warnings:    append([]string(nil), coverage.Warnings...),
-	}
-	if len(cases) == 0 {
-		report.OK = false
-		report.Warnings = append(report.Warnings, "no cases matched selector")
-	}
-	for _, item := range cases {
-		coverageItem := coverageByCase[item.ID]
-		status := CaseStatus(item)
-		row := InspectionItem{
-			CaseID:             item.ID,
-			Title:              firstNonEmpty(item.DisplayName, item.ID),
-			Description:        item.Description,
-			NodeID:             item.NodeID,
-			NodeName:           coverageItem.NodeName,
-			Tags:               append([]string(nil), item.Tags...),
-			Priority:           item.Priority,
-			Owner:              item.Owner,
-			Status:             status,
-			HasRunnableFile:    strings.TrimSpace(item.CasePath) != "",
-			HasExecutionConfig: configs[item.ID],
-			LatestStatus:       coverageItem.LatestStatus,
-			LatestRunID:        coverageItem.LatestRunID,
-			CaseRunID:          coverageItem.CaseRunID,
-			DetailURL:          coverageItem.DetailURL,
-			ElapsedMs:          coverageItem.ElapsedMs,
-			HasPassed:          coverageItem.HasPassed,
-		}
-		if row.LatestStatus == "" {
-			row.LatestStatus = "not-run"
-		}
-		if !IsExecutableCaseLifecycle(status) {
-			row.Issues = append(row.Issues, "case status is "+status)
-			report.Counts.Inactive++
-		}
-		if !row.HasRunnableFile {
-			report.Counts.MissingRunnable++
-		}
-		if !row.HasExecutionConfig {
-			report.Counts.MissingExecution++
-		}
-		if !row.HasRunnableFile && !row.HasExecutionConfig {
-			row.Issues = append(row.Issues, "missing runnable case file or execution config")
-		}
-		row.Ready = len(row.Issues) == 0
-		if row.Ready {
-			report.Counts.Ready++
-		} else {
-			report.OK = false
-			report.Counts.Blocked++
-		}
-		switch NormalizeRunState(row.LatestStatus) {
-		case execution.StatusPassed:
-			report.Counts.Passed++
-		case execution.StatusFailed:
-			report.Counts.Failed++
-		default:
-			report.Counts.NotRun++
-		}
-		row.SuggestedAction = SuggestedAction(row)
-		report.Items = append(report.Items, row)
-	}
-	return report, nil
-}
-
 func Plan(ctx context.Context, bundle profile.Bundle, runtime RecordStore, filter Filter, cases []profile.APICase, options PlanOptions) (PlanReport, error) {
 	inspection, err := Inspect(ctx, bundle, runtime, filter, cases)
 	if err != nil {
@@ -214,13 +132,7 @@ func Plan(ctx context.Context, bundle profile.Bundle, runtime RecordStore, filte
 	}
 	report.Counts.Selected = len(report.Selected)
 	report.Counts.Skipped = len(report.Skipped)
-	report.BatchRequest = BatchRequest{
-		RequestID:      strings.TrimSpace(options.RequestID),
-		CaseIDs:        append([]string(nil), report.CaseIDs...),
-		BaseURL:        strings.TrimSpace(options.BaseURL),
-		EvidenceDir:    strings.TrimSpace(options.EvidenceDir),
-		TimeoutSeconds: options.TimeoutSeconds,
-	}
+	report.BatchRequest = newBatchRequest(report.CaseIDs, options.RequestID, options.BaseURL, options.EvidenceDir, options.TimeoutSeconds)
 	if len(report.CaseIDs) == 0 {
 		report.OK = false
 		report.Warnings = append(report.Warnings, "no ready cases selected for execution")

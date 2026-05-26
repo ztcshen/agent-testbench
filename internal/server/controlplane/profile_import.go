@@ -105,6 +105,13 @@ type profileVerifySummary = profileverify.Summary
 type profileVerifyCheck = profileverify.Check
 type profileVerifyOptions = profileverify.Options
 
+type templatePackagePathRequest interface {
+	requestTemplatePackagePath() string
+	requestPath() string
+	requestForce() bool
+	setRequestPath(string)
+}
+
 func templatePackageRequestPath(templatePackagePath string, legacyPath string) string {
 	if value := strings.TrimSpace(templatePackagePath); value != "" {
 		return value
@@ -112,31 +119,74 @@ func templatePackageRequestPath(templatePackagePath string, legacyPath string) s
 	return strings.TrimSpace(legacyPath)
 }
 
-func handleProfileImport(w http.ResponseWriter, r *http.Request, runtime store.Store, activate func(profile.Bundle), profileHome string) {
-	if runtime == nil {
-		writeJSONStatus(w, http.StatusNotImplemented, map[string]any{"ok": false, "error": "runtime store is not configured"})
-		return
-	}
-	var req profileImportRequest
+func (r *profileImportRequest) requestTemplatePackagePath() string { return r.TemplatePackagePath }
+func (r *profileImportRequest) requestPath() string                { return r.Path }
+func (r *profileImportRequest) requestForce() bool                 { return r.Force }
+func (r *profileImportRequest) setRequestPath(path string)         { r.Path = path }
+
+func (r *profileInstallRequest) requestTemplatePackagePath() string { return r.TemplatePackagePath }
+func (r *profileInstallRequest) requestPath() string                { return r.Path }
+func (r *profileInstallRequest) requestForce() bool                 { return r.Force }
+func (r *profileInstallRequest) setRequestPath(path string)         { r.Path = path }
+
+func (r *profileAuditPlanRequest) requestTemplatePackagePath() string { return r.TemplatePackagePath }
+func (r *profileAuditPlanRequest) requestPath() string                { return r.Path }
+func (r *profileAuditPlanRequest) requestForce() bool                 { return r.Force }
+func (r *profileAuditPlanRequest) setRequestPath(path string)         { r.Path = path }
+
+func decodeTemplatePackageJSON(w http.ResponseWriter, r *http.Request, target any) bool {
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&req); err != nil {
+	if err := decoder.Decode(target); err != nil {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json"})
-		return
+		return false
 	}
-	req.Path = templatePackageRequestPath(req.TemplatePackagePath, req.Path)
-	if req.Path == "" {
+	return true
+}
+
+func normalizeTemplatePackageRequestPath(w http.ResponseWriter, req templatePackagePathRequest) bool {
+	path := templatePackageRequestPath(req.requestTemplatePackagePath(), req.requestPath())
+	if path == "" {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "path is required"})
-		return
+		return false
 	}
-	resolvedPath, err := profilehome.ResolveReference(req.Path, profileHome)
+	req.setRequestPath(path)
+	return true
+}
+
+func resolveImportProfileRequestPath(w http.ResponseWriter, req templatePackagePathRequest, profileHome string) bool {
+	if !normalizeTemplatePackageRequestPath(w, req) {
+		return false
+	}
+	resolvedPath, err := profilehome.ResolveReference(req.requestPath(), profileHome)
 	if err != nil {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
-		return
+		return false
 	}
-	req.Path, err = materializeImportProfilePath(resolvedPath, profileHome, req.Force)
+	resolvedPath, err = materializeImportProfilePath(resolvedPath, profileHome, req.requestForce())
 	if err != nil {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+		return false
+	}
+	req.setRequestPath(resolvedPath)
+	return true
+}
+
+func readProfileImportRequest(w http.ResponseWriter, r *http.Request, runtime store.Store, profileHome string) (profileImportRequest, bool) {
+	if runtime == nil {
+		writeJSONStatus(w, http.StatusNotImplemented, map[string]any{"ok": false, "error": "runtime store is not configured"})
+		return profileImportRequest{}, false
+	}
+	var req profileImportRequest
+	if !decodeTemplatePackageJSON(w, r, &req) || !resolveImportProfileRequestPath(w, &req, profileHome) {
+		return profileImportRequest{}, false
+	}
+	return req, true
+}
+
+func handleProfileImport(w http.ResponseWriter, r *http.Request, runtime store.Store, activate func(profile.Bundle), profileHome string) {
+	req, ok := readProfileImportRequest(w, r, runtime, profileHome)
+	if !ok {
 		return
 	}
 	bundle, report, err := importProfileBundle(r.Context(), runtime, req)
@@ -155,30 +205,8 @@ func handleProfileImport(w http.ResponseWriter, r *http.Request, runtime store.S
 }
 
 func handleProfileVerify(w http.ResponseWriter, r *http.Request, runtime store.Store, activate func(profile.Bundle), profileHome string) {
-	if runtime == nil {
-		writeJSONStatus(w, http.StatusNotImplemented, map[string]any{"ok": false, "error": "runtime store is not configured"})
-		return
-	}
-	var req profileImportRequest
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&req); err != nil {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json"})
-		return
-	}
-	req.Path = templatePackageRequestPath(req.TemplatePackagePath, req.Path)
-	if req.Path == "" {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "path is required"})
-		return
-	}
-	resolvedPath, err := profilehome.ResolveReference(req.Path, profileHome)
-	if err != nil {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
-		return
-	}
-	req.Path, err = materializeImportProfilePath(resolvedPath, profileHome, req.Force)
-	if err != nil {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+	req, ok := readProfileImportRequest(w, r, runtime, profileHome)
+	if !ok {
 		return
 	}
 	bundle, report, err := verifyProfileBundle(r.Context(), runtime, req.Path, profileVerifyOptions{
@@ -208,35 +236,17 @@ func handleProfileVerify(w http.ResponseWriter, r *http.Request, runtime store.S
 
 func handleProfileAuditPlan(w http.ResponseWriter, r *http.Request, runtime store.Store, profileHome string) {
 	var req profileAuditPlanRequest
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&req); err != nil {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json"})
+	if !decodeTemplatePackageJSON(w, r, &req) || !resolveImportProfileRequestPath(w, &req, profileHome) {
 		return
 	}
-	req.Path = templatePackageRequestPath(req.TemplatePackagePath, req.Path)
-	if req.Path == "" {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "path is required"})
-		return
-	}
-	resolvedPath, err := profilehome.ResolveReference(req.Path, profileHome)
-	if err != nil {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
-		return
-	}
-	resolvedPath, err = materializeImportProfilePath(resolvedPath, profileHome, req.Force)
-	if err != nil {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
-		return
-	}
-	bundle, err := profile.Load(resolvedPath)
+	bundle, err := profile.Load(req.Path)
 	if err != nil {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
 	audit, err := profileaudit.Audit(r.Context(), profileaudit.Options{
 		Bundle:     bundle,
-		BundlePath: resolvedPath,
+		BundlePath: req.Path,
 		Store:      runtime,
 	})
 	if err != nil {
@@ -268,15 +278,7 @@ func handleInstalledProfiles(w http.ResponseWriter, _ *http.Request, profileHome
 
 func handleProfileInstall(w http.ResponseWriter, r *http.Request, profileHome string) {
 	var req profileInstallRequest
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&req); err != nil {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json"})
-		return
-	}
-	req.Path = templatePackageRequestPath(req.TemplatePackagePath, req.Path)
-	if req.Path == "" {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "path is required"})
+	if !decodeTemplatePackageJSON(w, r, &req) || !normalizeTemplatePackageRequestPath(w, &req) {
 		return
 	}
 	report, err := profilehome.Install(req.Path, profileHome, req.Force)
