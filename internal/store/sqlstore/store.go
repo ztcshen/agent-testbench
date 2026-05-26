@@ -470,15 +470,10 @@ limit 1;`)
 }
 
 func (s *Store) UpsertEnvironment(ctx context.Context, e store.Environment) (store.Environment, error) {
-	if err := store.ValidateEnvironmentDefinitionSize(e); err != nil {
+	var err error
+	e, err = store.PrepareEnvironmentForUpsert(e, utcNow())
+	if err != nil {
 		return store.Environment{}, err
-	}
-	now := utcNow()
-	if e.CreatedAt.IsZero() {
-		e.CreatedAt = now
-	}
-	if e.UpdatedAt.IsZero() {
-		e.UpdatedAt = now
 	}
 	query := fmt.Sprintf(`
 insert into environments (

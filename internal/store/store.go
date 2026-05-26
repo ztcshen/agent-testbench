@@ -200,6 +200,19 @@ const (
 	ComponentGraphMaxBytes        = StoreMetadataMaxBytes
 )
 
+func PrepareEnvironmentForUpsert(e Environment, now time.Time) (Environment, error) {
+	if err := ValidateEnvironmentDefinitionSize(e); err != nil {
+		return Environment{}, err
+	}
+	if e.CreatedAt.IsZero() {
+		e.CreatedAt = now
+	}
+	if e.UpdatedAt.IsZero() {
+		e.UpdatedAt = now
+	}
+	return e, nil
+}
+
 func ValidateEnvironmentDefinitionSize(e Environment) error {
 	definitionFields := []namedSize{
 		{name: "id", size: len(e.ID)},
