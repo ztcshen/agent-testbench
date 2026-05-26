@@ -25,6 +25,7 @@ function releaseCheckEnv(overrides = {}) {
   return {
     ...env,
     AGENT_TESTBENCH_SMOKE_STORE_DSN: "postgres://user:pass@127.0.0.1:5432/agent_testbench_smoke?sslmode=disable",
+    AGENT_TESTBENCH_SKIP_GO_LINT: "1",
     ...overrides,
   };
 }
@@ -115,6 +116,15 @@ test("release-check requires an explicit scope or full sign-off mode", () => {
   assert.match(result.stderr, /npm run release-check -- --full/);
   assert.doesNotMatch(result.stdout, /checking SQL smoke Store/);
   assert.doesNotMatch(result.stdout, /running Go tests/);
+});
+
+test("release-check runs repository Go lint gate", () => {
+  const script = readFileSync(path.join(rootDir, "tools", "release-check.sh"), "utf8");
+
+  assert.match(script, /step "running Go lint"/);
+  assert.match(script, /tools\/go-lint\.sh/);
+  assert.match(script, /tools\/go-lint\.sh --full/);
+  assert.match(script, /AGENT_TESTBENCH_SKIP_GO_LINT/);
 });
 
 test("release-check rejects mixed full and scoped modes", () => {

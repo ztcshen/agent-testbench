@@ -106,8 +106,8 @@ func statusText(ok bool) string {
 }
 
 func mapFromReportAny(value any) map[string]any {
-	typed, _ := value.(map[string]any)
-	if typed == nil {
+	typed, ok := value.(map[string]any)
+	if !ok || typed == nil {
 		return map[string]any{}
 	}
 	return typed
@@ -136,7 +136,9 @@ func rawJSONObject(value string) map[string]any {
 	if strings.TrimSpace(value) == "" {
 		return out
 	}
-	_ = json.Unmarshal([]byte(value), &out)
+	if err := json.Unmarshal([]byte(value), &out); err != nil {
+		return map[string]any{}
+	}
 	return out
 }
 
@@ -198,7 +200,10 @@ func intFromReportAny(value any) int {
 	case float64:
 		return int(typed)
 	case json.Number:
-		out, _ := typed.Int64()
+		out, err := typed.Int64()
+		if err != nil {
+			return 0
+		}
 		return int(out)
 	default:
 		return 0
@@ -217,8 +222,8 @@ func valueString(value any) string {
 }
 
 func boolFromReportAny(value any) bool {
-	typed, _ := value.(bool)
-	return typed
+	typed, ok := value.(bool)
+	return ok && typed
 }
 
 func firstPositiveInt(values ...int) int {

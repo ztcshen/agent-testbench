@@ -365,7 +365,7 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = runtime.Close() }()
+	defer closeCLIStore(runtime)
 	env, err := runtime.GetEnvironment(ctx, id)
 	if err != nil {
 		return err
@@ -697,7 +697,7 @@ func environmentRestorePersistEnvironment(ctx context.Context, storeURL string, 
 	if err != nil {
 		return env, err
 	}
-	defer func() { _ = runtime.Close() }()
+	defer closeCLIStore(runtime)
 	return runtime.UpsertEnvironment(ctx, env)
 }
 

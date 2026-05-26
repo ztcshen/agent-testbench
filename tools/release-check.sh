@@ -185,13 +185,24 @@ if [[ "${AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING:-}" == "1" ]]; then
   node tools/smoke/skywalking-release-guard.mjs "AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1"
   echo "Real SkyWalking validation required; using configured GraphQL endpoint and smoke trace ids." >&2
 elif [[ -z "${AGENT_TESTBENCH_TRACE_GRAPHQL_URL:-}" ]]; then
-  echo "AGENT_TESTBENCH_TRACE_GRAPHQL_URL is not set; smoke will use the deterministic synthetic SkyWalking GraphQL provider." >&2
-  echo "Set AGENT_TESTBENCH_TRACE_GRAPHQL_URL, AGENT_TESTBENCH_SMOKE_TRACE_IDS, and AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1 for final live SkyWalking validation; synthetic smoke is not live topology proof." >&2
+	echo "AGENT_TESTBENCH_TRACE_GRAPHQL_URL is not set; smoke will use the deterministic synthetic SkyWalking GraphQL provider." >&2
+	echo "Set AGENT_TESTBENCH_TRACE_GRAPHQL_URL, AGENT_TESTBENCH_SMOKE_TRACE_IDS, and AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1 for final live SkyWalking validation; synthetic smoke is not live topology proof." >&2
+fi
+
+if [[ "${AGENT_TESTBENCH_SKIP_GO_LINT:-0}" == "1" ]]; then
+	step "skipping Go lint"
+else
+	step "running Go lint"
+	if [[ "$scoped_release_check" -eq 1 ]]; then
+		tools/go-lint.sh
+	else
+		tools/go-lint.sh --full
+	fi
 fi
 
 step "checking generated state is not tracked"
 if [[ -d team-configs ]]; then
-  echo "root team-configs directory is not allowed in the core repository" >&2
+	echo "root team-configs directory is not allowed in the core repository" >&2
   exit 1
 fi
 

@@ -47,8 +47,11 @@ test("Go lint entrypoints use the PR-diff lint gate", () => {
   const packageJSON = readFileSync(join(rootDir, "package.json"), "utf8");
   const makefile = readFileSync(join(rootDir, "Makefile"), "utf8");
 
-  assert.match(workflow, /golangci\/golangci-lint-action@v8/);
-  assert.match(workflow, /only-new-issues:\s*true/);
+  assert.match(workflow, /go install github\.com\/golangci\/golangci-lint\/v2\/cmd\/golangci-lint@v2\.12\.2/);
+  assert.match(workflow, /make lint/);
+  assert.match(workflow, /make lint-full/);
+  assert.doesNotMatch(workflow, /golangci\/golangci-lint-action/);
+  assert.match(workflow, /AGENT_TESTBENCH_SKIP_GO_LINT:\s*"1"/);
   assert.match(packageJSON, /"lint:go": "bash tools\/go-lint\.sh"/);
   assert.match(makefile, /lint:\n\ttools\/go-lint\.sh/);
 });

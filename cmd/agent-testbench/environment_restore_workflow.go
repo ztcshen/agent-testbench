@@ -111,7 +111,7 @@ func waitEnvironmentAcceptanceReport(ctx context.Context, serverURL string, envi
 }
 
 func environmentRestoreAcceptanceFromPayload(value any) environmentRestoreWorkflowAcceptance {
-	payload, _ := value.(map[string]any)
+	payload := mapFromReportAny(value)
 	return environmentRestoreWorkflowAcceptance{
 		OK:               boolFromReportAny(payload["ok"]),
 		TemplateID:       strings.TrimSpace(valueString(payload["templateId"])),

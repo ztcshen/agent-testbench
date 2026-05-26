@@ -898,7 +898,11 @@ func waitEnvironmentRestoreURLHealthCheck(ctx context.Context, check environment
 		resp, err := client.Do(req)
 		if err == nil {
 			check.StatusCode = resp.StatusCode
-			_ = resp.Body.Close()
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				lastErr = closeErr.Error()
+				check.Error = lastErr
+				return check
+			}
 			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 				check.OK = true
 				check.Error = ""
@@ -928,7 +932,10 @@ func waitEnvironmentRestoreTCPHealthCheck(ctx context.Context, check environment
 		dialer := net.Dialer{Timeout: 2 * time.Second}
 		conn, err := dialer.DialContext(ctx, "tcp", check.Address)
 		if err == nil {
-			_ = conn.Close()
+			if closeErr := conn.Close(); closeErr != nil {
+				check.Error = closeErr.Error()
+				return check
+			}
 			check.OK = true
 			check.Error = ""
 			return check

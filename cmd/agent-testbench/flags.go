@@ -61,7 +61,10 @@ func (m *mapFlag) String() string {
 	if m == nil || len(*m) == 0 {
 		return ""
 	}
-	raw, _ := json.Marshal(*m)
+	raw, err := json.Marshal(*m)
+	if err != nil {
+		return ""
+	}
 	return string(raw)
 }
 

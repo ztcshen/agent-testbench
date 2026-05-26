@@ -133,7 +133,7 @@ func loadInterfaceNodeReportBundle(ctx context.Context, profileRef string, profi
 			return profile.Bundle{}, nil, cleanup, err
 		}
 		sourceStore = opened
-		cleanup = func() { _ = opened.Close() }
+		cleanup = cleanupCLIStore(opened)
 	}
 	if strings.TrimSpace(profileRef) != "" {
 		resolvedProfilePath, err := resolveProfileReference(profileRef, profileHomeRef)
@@ -436,7 +436,7 @@ func requiredReportStore(sourceStore store.Store) (store.Store, error) {
 }
 
 func interfaceNodeCaseReportItems(value any) []interfaceNodeCaseReportItem {
-	values, _ := value.([]any)
+	values := listFromReportAny(value)
 	out := make([]interfaceNodeCaseReportItem, 0, len(values))
 	for _, raw := range values {
 		item := mapFromReportAny(raw)
