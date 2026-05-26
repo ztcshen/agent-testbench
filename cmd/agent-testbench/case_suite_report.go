@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"html"
 	"net/http"
@@ -65,46 +64,27 @@ type caseSuiteReportItem struct {
 }
 
 func runCaseSuiteReport(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("case suite report", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
-	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	filter := flags.String("filter", "", "Filter by id, display name, scenario, description, tag, owner, or priority")
-	nodeID := flags.String("node", "", "Only include cases attached to this interface node id")
-	status := flags.String("status", "active", "Only include cases with this status")
-	owner := flags.String("owner", "", "Only include cases owned by this value")
-	priority := flags.String("priority", "", "Only include cases with this priority")
-	baseURL := flags.String("base-url", "", "Base URL for live request execution")
-	outputDir := flags.String("output-dir", "", "Report output directory")
-	timeoutSeconds := flags.Int("timeout-seconds", 3, "Timeout per API Case")
-	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	var tags stringListFlag
-	flags.Var(&tags, "tag", "Only include cases with this tag; repeat for multiple tags")
-	if err := flags.Parse(args); err != nil {
+	selection := newCaseSelectionCLIFlags("case suite report", "active")
+	baseURL := selection.flags.String("base-url", "", "Base URL for live request execution")
+	outputDir := selection.flags.String("output-dir", "", "Report output directory")
+	timeoutSeconds := selection.flags.Int("timeout-seconds", 3, "Timeout per API Case")
+	jsonOutput := selection.flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := selection.parse(args); err != nil {
 		return err
 	}
 	if *timeoutSeconds <= 0 {
 		return errors.New("--timeout-seconds must be greater than zero")
 	}
-	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*selection.storeRef, *selection.storeURL)
 	if err != nil {
 		return err
 	}
-	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *profilePath, *profileHome, resolvedStoreURL)
+	bundle, sourceStore, cleanup, err := loadInterfaceNodeReportBundle(ctx, *selection.profilePath, *selection.profileHome, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
-	filters := caseListFilter{
-		Filter:   *filter,
-		NodeID:   *nodeID,
-		Tags:     tags.Values(),
-		Status:   *status,
-		Owner:    *owner,
-		Priority: *priority,
-	}
+	filters := selection.caseListFilter()
 	cases := selectedCaseSuiteCases(bundle, filters)
 	if len(cases) == 0 {
 		return errors.New("no API cases matched selector")

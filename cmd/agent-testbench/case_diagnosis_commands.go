@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 
@@ -40,28 +38,20 @@ type caseDiagnosisArtifacts struct {
 }
 
 func runCaseDiagnose(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("case diagnose", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	caseRunID := flags.String("case-run", "", "Case run id")
-	runID := flags.String("run", "", "Run id")
-	caseID := flags.String("case-id", "", "Case id within the run")
-	stepID := flags.String("step-id", "", "Workflow step id within the run")
-	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := flags.Parse(args); err != nil {
+	selection := newCaseEvidenceCLIFlags("case diagnose")
+	if err := selection.parse(args); err != nil {
 		return err
 	}
-	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	runtime, cleanup, err := selection.openStore(ctx)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
-	report, err := diagnoseCaseEvidence(ctx, runtime, *caseRunID, *runID, *caseID, *stepID)
+	report, err := diagnoseCaseEvidence(ctx, runtime, *selection.caseRunID, *selection.runID, *selection.caseID, *selection.stepID)
 	if err != nil {
 		return err
 	}
-	if *jsonOutput {
+	if *selection.json {
 		return writeIndentedJSON(report)
 	}
 	printCaseDiagnosis(report)

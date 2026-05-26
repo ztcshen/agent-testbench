@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -81,47 +80,12 @@ func runWorkflowAcceptanceStart(ctx context.Context, args []string) error {
 		"requestId":  strings.TrimSpace(*requestID),
 		"workflowId": strings.TrimSpace(*workflowID),
 	}
-	if strings.TrimSpace(*baseURL) != "" {
-		payload["baseUrl"] = strings.TrimSpace(*baseURL)
-	}
-	if strings.TrimSpace(*evidenceDir) != "" {
-		payload["evidenceDir"] = strings.TrimSpace(*evidenceDir)
-	}
-	if *timeoutSeconds > 0 {
-		payload["timeoutSeconds"] = *timeoutSeconds
-	}
-	result, err := postWorkflowAcceptanceJSON(ctx, workflowAcceptanceURL(*serverURL, "/api/cases/batch-runs"), payload)
-	if err != nil {
-		return err
-	}
-	if *jsonOutput {
-		return writeIndentedJSON(result)
-	}
-	printWorkflowAcceptanceStart(result)
-	return nil
+	addWorkflowAcceptanceOptionalPayloadFields(payload, *baseURL, *evidenceDir, *timeoutSeconds)
+	return postWorkflowAcceptanceRunResult(ctx, *serverURL, payload, *jsonOutput, printWorkflowAcceptanceStart)
 }
 
 func runWorkflowAcceptanceReport(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("workflow acceptance report", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	serverURL := flags.String("server-url", "", "Running control plane base URL")
-	runID := flags.String("run", "", "Acceptance batch run id")
-	jsonOutput := flags.Bool("json", false, "Emit machine-readable JSON")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	if strings.TrimSpace(*serverURL) == "" || strings.TrimSpace(*runID) == "" {
-		return errors.New("--server-url and --run are required")
-	}
-	result, err := fetchWorkflowAcceptanceJSON(ctx, workflowAcceptanceURL(*serverURL, "/api/cases/batch-runs/"+url.PathEscape(strings.TrimSpace(*runID))))
-	if err != nil {
-		return err
-	}
-	if *jsonOutput {
-		return writeIndentedJSON(result)
-	}
-	printWorkflowAcceptanceReport(result)
-	return nil
+	return runWorkflowAcceptanceReportCommand(ctx, args, "workflow acceptance report", "Acceptance batch run id", printWorkflowAcceptanceReport)
 }
 
 func workflowAcceptanceURL(serverURL string, apiPath string) string {
