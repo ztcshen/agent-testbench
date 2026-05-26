@@ -1,0 +1,446 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/domain/profilecatalog"
+	"agent-testbench/internal/domain/profilehome"
+	"agent-testbench/internal/store"
+)
+
+func runProfile(args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing profile command")
+	}
+
+	switch args[0] {
+	case "init":
+		return runProfileInit(args[1:])
+	case "install":
+		return runProfileInstall(args[1:])
+	case "pack":
+		return runProfilePack(args[1:])
+	case "list":
+		return runProfileList(args[1:])
+	case "inspect":
+		return runProfileInspect(args[1:])
+	case "export":
+		return runProfileExport(context.Background(), args[1:])
+	case "audit":
+		return runProfileAudit(context.Background(), args[1:])
+	case "audit-plan":
+		return runProfileAuditPlan(context.Background(), args[1:])
+	case "doctor":
+		return runProfileDoctor(args[1:])
+	case "repair":
+		return runProfileRepair(args[1:])
+	case "generation-plan":
+		return runProfileGenerationPlan(args[1:])
+	case "import-plan":
+		return runProfileImportPlan(args[1:])
+	case "catalog-index":
+		return runProfileCatalogIndex(context.Background(), args[1:])
+	case "import":
+		return runProfileImport(context.Background(), args[1:])
+	case "verify":
+		return runProfileVerify(context.Background(), args[1:])
+	default:
+		return fmt.Errorf("unknown profile command: %s", args[0])
+	}
+}
+
+func runTemplatePackage(args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing template-package command")
+	}
+	if err := runProfile(args); err != nil {
+		if strings.HasPrefix(err.Error(), "unknown profile command:") {
+			return fmt.Errorf("unknown template-package command: %s", args[0])
+		}
+		return err
+	}
+	return nil
+}
+
+func runProfileInit(args []string) error {
+	flags := flag.NewFlagSet("profile init", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	outputPath := flags.String("output", "", "External profile bundle output path")
+	profileID := flags.String("id", "local", "Profile id")
+	displayName := flags.String("display-name", "Local Profile", "Profile display name")
+	force := flags.Bool("force", false, "Overwrite generated files when they already exist")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	report, err := initProfileBundle(*outputPath, *profileID, *displayName, *force)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Initialized external profile bundle: %s\n", report.ID)
+	fmt.Printf("Path: %s\n", report.Path)
+	fmt.Printf("Manifest: %s\n", filepath.Join(report.Path, "profile.json"))
+	return nil
+}
+
+type profileInitReport struct {
+	ID   string
+	Path string
+}
+
+type profileExportReport struct {
+	OK        bool                `json:"ok"`
+	ProfileID string              `json:"profileId"`
+	Output    string              `json:"output"`
+	Counts    profileExportCounts `json:"counts"`
+}
+
+type profileExportCounts struct {
+	Services         int `json:"services"`
+	Workflows        int `json:"workflows"`
+	InterfaceNodes   int `json:"interfaceNodes"`
+	APICases         int `json:"apiCases"`
+	RequestTemplates int `json:"requestTemplates"`
+	CaseDependencies int `json:"caseDependencies"`
+	WorkflowBindings int `json:"workflowBindings"`
+	Fixtures         int `json:"fixtures"`
+	TemplateConfigs  int `json:"templateConfigs"`
+}
+
+type profileInstallReport = profilehome.InstallReport
+
+type profilePackReport = profilehome.PackReport
+
+type profileListReport = profilehome.ListReport
+
+type profileListItem = profilehome.ListItem
+
+func initProfileBundle(outputPath string, profileID string, displayName string, force bool) (profileInitReport, error) {
+	outputPath = strings.TrimSpace(outputPath)
+	profileID = strings.TrimSpace(profileID)
+	displayName = strings.TrimSpace(displayName)
+	if outputPath == "" {
+		return profileInitReport{}, errors.New("--output is required")
+	}
+	if profileID == "" {
+		return profileInitReport{}, errors.New("--id must not be empty")
+	}
+	if displayName == "" {
+		return profileInitReport{}, errors.New("--display-name must not be empty")
+	}
+	if isCoreProfilesPath(outputPath) {
+		return profileInitReport{}, errors.New("profile bundles must be initialized outside this core repository")
+	}
+	if err := os.MkdirAll(outputPath, 0o755); err != nil {
+		return profileInitReport{}, err
+	}
+	for _, dir := range []string{
+		"services",
+		"workflows",
+		"interface-nodes",
+		"cases",
+		"executors",
+		"request-templates",
+		"case-dependencies",
+		"workflow-bindings",
+		"fixtures",
+	} {
+		if err := os.MkdirAll(filepath.Join(outputPath, dir), 0o755); err != nil {
+			return profileInitReport{}, err
+		}
+	}
+	manifestPath := filepath.Join(outputPath, "profile.json")
+	if _, err := os.Stat(manifestPath); err == nil && !force {
+		return profileInitReport{}, fmt.Errorf("%s already exists; pass --force to overwrite generated files", manifestPath)
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return profileInitReport{}, err
+	}
+	manifest := profile.Bundle{
+		ID:               profileID,
+		DisplayName:      displayName,
+		Description:      "External profile bundle generated by AgentTestBench.",
+		Services:         []profile.Service{},
+		Workflows:        []profile.Workflow{},
+		InterfaceNodes:   []profile.InterfaceNode{},
+		APICases:         []profile.APICase{},
+		RequestTemplates: []profile.RequestTemplate{},
+		CaseDependencies: []profile.CaseDependency{},
+		WorkflowBindings: []profile.WorkflowBinding{},
+		Fixtures:         []profile.Fixture{},
+	}
+	raw, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return profileInitReport{}, err
+	}
+	if err := os.WriteFile(manifestPath, append(raw, '\n'), 0o644); err != nil {
+		return profileInitReport{}, err
+	}
+	readmePath := filepath.Join(outputPath, "README.md")
+	if _, err := os.Stat(readmePath); errors.Is(err, os.ErrNotExist) || force {
+		body := "# External Profile Bundle\n\nPublish this bundle into the selected SQL Store before serving it through AgentTestBench:\n\n```sh\nagent-testbench store use local-personal\nagent-testbench config publish --from . --store local-personal\nagent-testbench serve --profile . --store local-personal\n```\n"
+		if err := os.WriteFile(readmePath, []byte(body), 0o644); err != nil {
+			return profileInitReport{}, err
+		}
+	} else if err != nil {
+		return profileInitReport{}, err
+	}
+	ignorePath := filepath.Join(outputPath, ".gitignore")
+	if _, err := os.Stat(ignorePath); errors.Is(err, os.ErrNotExist) || force {
+		body := ".runtime/\n*.sqlite\n*.sqlite-*\n*.db\n*.db-*\n*.log\n"
+		if err := os.WriteFile(ignorePath, []byte(body), 0o644); err != nil {
+			return profileInitReport{}, err
+		}
+	} else if err != nil {
+		return profileInitReport{}, err
+	}
+	absPath, err := filepath.Abs(outputPath)
+	if err != nil {
+		return profileInitReport{}, err
+	}
+	return profileInitReport{ID: profileID, Path: absPath}, nil
+}
+
+func runProfileExport(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("profile export", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
+	outputPath := flags.String("output", "", "Profile bundle output path")
+	force := flags.Bool("force", false, "Overwrite generated profile manifest when it already exists")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	s, err := openStore(ctx, resolvedStoreURL)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	report, err := exportProfileCatalogFromStore(ctx, s, *outputPath, *force)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	fmt.Printf("Exported profile: %s\n", report.ProfileID)
+	fmt.Printf("Path: %s\n", report.Output)
+	fmt.Printf("Services: %d\n", report.Counts.Services)
+	fmt.Printf("API Cases: %d\n", report.Counts.APICases)
+	fmt.Printf("Template Configs: %d\n", report.Counts.TemplateConfigs)
+	return nil
+}
+
+func exportProfileCatalogFromStore(ctx context.Context, s store.Store, outputPath string, force bool) (profileExportReport, error) {
+	outputPath = strings.TrimSpace(outputPath)
+	if outputPath == "" {
+		return profileExportReport{}, errors.New("--output is required")
+	}
+	if isCoreProfilesPath(outputPath) {
+		return profileExportReport{}, errors.New("profile bundles must be exported outside this core repository")
+	}
+	catalog, err := s.GetProfileCatalog(ctx)
+	if err != nil {
+		return profileExportReport{}, err
+	}
+	bundle := profilecatalog.ToBundle(catalog)
+	if strings.TrimSpace(bundle.DisplayName) == "" {
+		bundle.DisplayName = bundle.ID
+	}
+	if err := os.MkdirAll(outputPath, 0o755); err != nil {
+		return profileExportReport{}, err
+	}
+	manifestPath := filepath.Join(outputPath, "profile.json")
+	if _, err := os.Stat(manifestPath); err == nil && !force {
+		return profileExportReport{}, fmt.Errorf("%s already exists; pass --force to overwrite generated files", manifestPath)
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return profileExportReport{}, err
+	}
+	raw, err := json.MarshalIndent(bundle, "", "  ")
+	if err != nil {
+		return profileExportReport{}, err
+	}
+	if err := os.WriteFile(manifestPath, append(raw, '\n'), 0o644); err != nil {
+		return profileExportReport{}, fmt.Errorf("write profile manifest %s: %w", manifestPath, err)
+	}
+	if _, err := profile.Load(outputPath); err != nil {
+		return profileExportReport{}, fmt.Errorf("exported profile is invalid: %w", err)
+	}
+	return profileExportReport{
+		OK:        true,
+		ProfileID: bundle.ID,
+		Output:    outputPath,
+		Counts:    profileExportAssetCounts(bundle),
+	}, nil
+}
+
+func profileExportAssetCounts(bundle profile.Bundle) profileExportCounts {
+	return profileExportCounts{
+		Services:         len(bundle.Services),
+		Workflows:        len(bundle.Workflows),
+		InterfaceNodes:   len(bundle.InterfaceNodes),
+		APICases:         len(bundle.APICases),
+		RequestTemplates: len(bundle.RequestTemplates),
+		CaseDependencies: len(bundle.CaseDependencies),
+		WorkflowBindings: len(bundle.WorkflowBindings),
+		Fixtures:         len(bundle.Fixtures),
+		TemplateConfigs:  len(bundle.TemplateConfigs),
+	}
+}
+
+func runProfileInstall(args []string) error {
+	flags := flag.NewFlagSet("profile install", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	from := flags.String("from", "", "External profile bundle path")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	force := flags.Bool("force", false, "Replace an already installed profile")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	report, err := installProfileBundle(*from, *profileHome, *force)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	fmt.Printf("Installed profile: %s\n", report.ID)
+	fmt.Printf("Path: %s\n", report.TargetPath)
+	fmt.Printf("Digest: %s\n", report.BundleDigest)
+	return nil
+}
+
+func runProfilePack(args []string) error {
+	flags := flag.NewFlagSet("profile pack", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profileRef := flags.String("profile", "", "Profile bundle path or installed profile id")
+	templatePackageRef := flags.String("template-package", "", "Template package path or installed template package id")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	outputPath := flags.String("output", "", "Archive output path")
+	force := flags.Bool("force", false, "Replace an existing archive")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	report, err := packProfileBundle(templatePackageReference(*templatePackageRef, *profileRef), *profileHome, *outputPath, *force)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	fmt.Printf("Packed profile: %s\n", report.ID)
+	fmt.Printf("Archive: %s\n", report.OutputPath)
+	fmt.Printf("Files: %d\n", report.FileCount)
+	fmt.Printf("Digest: %s\n", report.BundleDigest)
+	return nil
+}
+
+func runProfileList(args []string) error {
+	flags := flag.NewFlagSet("profile list", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	report, err := listInstalledProfiles(*profileHome)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	fmt.Printf("Profile Home: %s\n", report.ProfileHome)
+	if len(report.Profiles) == 0 {
+		fmt.Println("Profiles: 0")
+		return nil
+	}
+	for _, item := range report.Profiles {
+		if !item.Valid {
+			fmt.Printf("- %s (invalid) %s: %s\n", item.ID, item.Path, item.Error)
+			continue
+		}
+		fmt.Printf("- %s (%s) %s\n", item.ID, item.DisplayName, item.Path)
+	}
+	return nil
+}
+
+func installProfileBundle(from string, profileHome string, force bool) (profileInstallReport, error) {
+	return profilehome.Install(from, profileHome, force)
+}
+
+func packProfileBundle(profileRef string, profileHome string, outputPath string, force bool) (profilePackReport, error) {
+	return profilehome.Pack(profileRef, profileHome, outputPath, force)
+}
+
+func listInstalledProfiles(profileHome string) (profileListReport, error) {
+	return profilehome.List(profileHome)
+}
+
+func resolveProfileHome(value string) (string, error) {
+	return profilehome.ResolveHome(value)
+}
+
+func resolveProfileReference(value string, profileHome string) (string, error) {
+	return profilehome.ResolveReference(value, profileHome)
+}
+
+func templatePackageReference(storeFirst string, legacy string) string {
+	if value := strings.TrimSpace(storeFirst); value != "" {
+		return value
+	}
+	return legacy
+}
+
+func materializeProfileReference(value string, profileHome string, force bool) (string, error) {
+	resolved, err := resolveProfileReference(value, profileHome)
+	if err != nil {
+		return "", err
+	}
+	if !profilehome.IsArchivePath(resolved) {
+		return resolved, nil
+	}
+	report, err := installProfileBundle(resolved, profileHome, force)
+	if err != nil {
+		return "", err
+	}
+	return report.TargetPath, nil
+}
+
+func isCoreProfilesPath(path string) bool {
+	return profilehome.IsCoreProfilesPath(path)
+}
+
+func runProfileInspect(args []string) error {
+	flags := flag.NewFlagSet("profile inspect", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	profilePath := flags.String("profile", "", "Profile bundle path")
+	templatePackagePath := flags.String("template-package", "", "Template package path or installed template package id")
+	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	resolvedProfilePath, err := resolveProfileReference(templatePackageReference(*templatePackagePath, *profilePath), *profileHome)
+	if err != nil {
+		return err
+	}
+	bundle, err := profile.Load(resolvedProfilePath)
+	if err != nil {
+		return err
+	}
+	printProfile(bundle)
+	return nil
+}
