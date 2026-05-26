@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"agent-testbench/internal/domain/execution"
 	"agent-testbench/internal/domain/profile"
-	"agent-testbench/internal/store"
 )
 
 func TestSelectCasesFiltersByMaintenanceMetadata(t *testing.T) {
@@ -44,10 +44,10 @@ func TestCoverageReportsLatestStatusAndHasPassed(t *testing.T) {
 			{ID: "case.unrun", DisplayName: "Unrun Case", NodeID: "node.alpha", Tags: []string{"regression"}, SortOrder: 3},
 		},
 	}
-	records := []store.APICaseRunRecord{
-		record("run.failed.old", "case.failed", store.StatusPassed, base),
-		record("run.passed.latest", "case.passed", store.StatusPassed, base.Add(time.Minute)),
-		record("run.failed.latest", "case.failed", store.StatusFailed, base.Add(2*time.Minute)),
+	records := []execution.APICaseRunRecord{
+		record("run.failed.old", "case.failed", execution.StatusPassed, base),
+		record("run.passed.latest", "case.passed", execution.StatusPassed, base.Add(time.Minute)),
+		record("run.failed.latest", "case.failed", execution.StatusFailed, base.Add(2*time.Minute)),
 	}
 	cases := SelectCases(bundle, Filter{Tags: []string{"regression"}, Status: "active"})
 
@@ -62,7 +62,7 @@ func TestCoverageReportsLatestStatusAndHasPassed(t *testing.T) {
 	for _, item := range report.Items {
 		byCase[item.CaseID] = item
 	}
-	if !byCase["case.failed"].HasPassed || byCase["case.failed"].LatestStatus != store.StatusFailed || byCase["case.failed"].LatestRunID != "run.failed.latest" {
+	if !byCase["case.failed"].HasPassed || byCase["case.failed"].LatestStatus != execution.StatusFailed || byCase["case.failed"].LatestRunID != "run.failed.latest" {
 		t.Fatalf("failed case item = %#v", byCase["case.failed"])
 	}
 	if byCase["case.unrun"].LatestStatus != "not-run" || byCase["case.unrun"].Reason != "no run recorded in Store" {
@@ -72,9 +72,9 @@ func TestCoverageReportsLatestStatusAndHasPassed(t *testing.T) {
 
 func TestNormalizeRunStateAliases(t *testing.T) {
 	for input, want := range map[string]string{
-		"fail":      store.StatusFailed,
-		"failed":    store.StatusFailed,
-		"PASS":      store.StatusPassed,
+		"fail":      execution.StatusFailed,
+		"failed":    execution.StatusFailed,
+		"PASS":      execution.StatusPassed,
 		"never-run": "not-run",
 		"missing":   "not-run",
 	} {
@@ -101,9 +101,9 @@ func TestInspectReportsReadinessAndLatestState(t *testing.T) {
 			{ID: "config.case.config", ScopeType: "case", ScopeID: "case.config", Status: "active", ConfigJSON: `{"caseId":"case.config","caseExecution":{"method":"POST","path":"/items"}}`},
 		},
 	}
-	records := []store.APICaseRunRecord{
-		record("run.file", "case.file", store.StatusPassed, base),
-		record("run.config", "case.config", store.StatusFailed, base.Add(time.Minute)),
+	records := []execution.APICaseRunRecord{
+		record("run.file", "case.file", execution.StatusPassed, base),
+		record("run.config", "case.config", execution.StatusFailed, base.Add(time.Minute)),
 	}
 	cases := SelectCases(bundle, Filter{Tags: []string{"regression"}})
 
@@ -118,10 +118,10 @@ func TestInspectReportsReadinessAndLatestState(t *testing.T) {
 	for _, item := range report.Items {
 		byCase[item.CaseID] = item
 	}
-	if !byCase["case.file"].Ready || !byCase["case.file"].HasRunnableFile || byCase["case.file"].LatestStatus != store.StatusPassed {
+	if !byCase["case.file"].Ready || !byCase["case.file"].HasRunnableFile || byCase["case.file"].LatestStatus != execution.StatusPassed {
 		t.Fatalf("file case = %#v", byCase["case.file"])
 	}
-	if !byCase["case.config"].Ready || !byCase["case.config"].HasExecutionConfig || byCase["case.config"].LatestStatus != store.StatusFailed || byCase["case.config"].SuggestedAction != "rerun" {
+	if !byCase["case.config"].Ready || !byCase["case.config"].HasExecutionConfig || byCase["case.config"].LatestStatus != execution.StatusFailed || byCase["case.config"].SuggestedAction != "rerun" {
 		t.Fatalf("config case = %#v", byCase["case.config"])
 	}
 	if byCase["case.missing"].Ready || len(byCase["case.missing"].Issues) != 1 || byCase["case.missing"].SuggestedAction != "add-runnable-source" {
@@ -146,9 +146,9 @@ func TestPlanSelectsReadyCasesAndBuildsBatchRequest(t *testing.T) {
 			{ID: "case.blocked", DisplayName: "Blocked Case", NodeID: "node.alpha", Tags: []string{"regression"}, SortOrder: 4},
 		},
 	}
-	records := []store.APICaseRunRecord{
-		record("run.passed", "case.passed", store.StatusPassed, base),
-		record("run.failed", "case.failed", store.StatusFailed, base.Add(time.Minute)),
+	records := []execution.APICaseRunRecord{
+		record("run.passed", "case.passed", execution.StatusPassed, base),
+		record("run.failed", "case.failed", execution.StatusFailed, base.Add(time.Minute)),
 	}
 	cases := SelectCases(bundle, Filter{Tags: []string{"regression"}, Status: "active"})
 
@@ -243,12 +243,12 @@ func TestStabilityReportsRecentStatusTransitions(t *testing.T) {
 			{ID: "case.unrun", DisplayName: "Unrun Case", NodeID: "node.alpha", Tags: []string{"regression"}, SortOrder: 3},
 		},
 	}
-	records := []store.APICaseRunRecord{
-		record("run.flaky.1", "case.flaky", store.StatusPassed, base),
-		record("run.flaky.2", "case.flaky", store.StatusFailed, base.Add(time.Minute)),
-		record("run.flaky.3", "case.flaky", store.StatusPassed, base.Add(2*time.Minute)),
-		record("run.stable.1", "case.stable", store.StatusFailed, base.Add(3*time.Minute)),
-		record("run.stable.2", "case.stable", store.StatusFailed, base.Add(4*time.Minute)),
+	records := []execution.APICaseRunRecord{
+		record("run.flaky.1", "case.flaky", execution.StatusPassed, base),
+		record("run.flaky.2", "case.flaky", execution.StatusFailed, base.Add(time.Minute)),
+		record("run.flaky.3", "case.flaky", execution.StatusPassed, base.Add(2*time.Minute)),
+		record("run.stable.1", "case.stable", execution.StatusFailed, base.Add(3*time.Minute)),
+		record("run.stable.2", "case.stable", execution.StatusFailed, base.Add(4*time.Minute)),
 	}
 	cases := SelectCases(bundle, Filter{Tags: []string{"regression"}, Status: "active"})
 
@@ -263,13 +263,13 @@ func TestStabilityReportsRecentStatusTransitions(t *testing.T) {
 	for _, item := range report.Items {
 		byCase[item.CaseID] = item
 	}
-	if !byCase["case.flaky"].Unstable || byCase["case.flaky"].Transitions != 2 || byCase["case.flaky"].Passed != 2 || byCase["case.flaky"].Failed != 1 || byCase["case.flaky"].LatestStatus != store.StatusPassed {
+	if !byCase["case.flaky"].Unstable || byCase["case.flaky"].Transitions != 2 || byCase["case.flaky"].Passed != 2 || byCase["case.flaky"].Failed != 1 || byCase["case.flaky"].LatestStatus != execution.StatusPassed {
 		t.Fatalf("flaky item = %#v", byCase["case.flaky"])
 	}
 	if len(byCase["case.flaky"].Recent) != 3 || byCase["case.flaky"].Recent[0].RunID != "run.flaky.3" || byCase["case.flaky"].Recent[0].DetailURL == "" {
 		t.Fatalf("flaky recent = %#v", byCase["case.flaky"].Recent)
 	}
-	if byCase["case.stable"].Unstable || byCase["case.stable"].Transitions != 0 || byCase["case.stable"].LatestStatus != store.StatusFailed {
+	if byCase["case.stable"].Unstable || byCase["case.stable"].Transitions != 0 || byCase["case.stable"].LatestStatus != execution.StatusFailed {
 		t.Fatalf("stable item = %#v", byCase["case.stable"])
 	}
 	if byCase["case.unrun"].LatestStatus != "not-run" || byCase["case.unrun"].Reason != "no run recorded in Store" {
@@ -292,12 +292,12 @@ func TestPriorityRanksImpactedUnstableAndFailedCases(t *testing.T) {
 			{ID: "case.low", DisplayName: "Low Case", NodeID: "node.beta", CasePath: "cases/low.json", Tags: []string{"regression"}, Priority: "p2", SortOrder: 4},
 		},
 	}
-	records := []store.APICaseRunRecord{
-		record("run.impacted.1", "case.impacted", store.StatusPassed, base),
-		record("run.impacted.2", "case.impacted", store.StatusFailed, base.Add(time.Minute)),
-		record("run.impacted.3", "case.impacted", store.StatusPassed, base.Add(2*time.Minute)),
-		record("run.failed.1", "case.failed", store.StatusFailed, base.Add(3*time.Minute)),
-		record("run.low.1", "case.low", store.StatusPassed, base.Add(4*time.Minute)),
+	records := []execution.APICaseRunRecord{
+		record("run.impacted.1", "case.impacted", execution.StatusPassed, base),
+		record("run.impacted.2", "case.impacted", execution.StatusFailed, base.Add(time.Minute)),
+		record("run.impacted.3", "case.impacted", execution.StatusPassed, base.Add(2*time.Minute)),
+		record("run.failed.1", "case.failed", execution.StatusFailed, base.Add(3*time.Minute)),
+		record("run.low.1", "case.low", execution.StatusPassed, base.Add(4*time.Minute)),
 	}
 	cases := SelectCases(bundle, Filter{Tags: []string{"regression"}, Status: "active"})
 
@@ -345,11 +345,11 @@ func TestBriefCombinesCoverageReadinessStabilityAndPriority(t *testing.T) {
 			{ID: "case.blocked", DisplayName: "Blocked Case", NodeID: "node.beta", Tags: []string{"regression"}, Priority: "p0", SortOrder: 3},
 		},
 	}
-	records := []store.APICaseRunRecord{
-		record("run.impacted.1", "case.impacted", store.StatusPassed, base),
-		record("run.impacted.2", "case.impacted", store.StatusFailed, base.Add(time.Minute)),
-		record("run.impacted.3", "case.impacted", store.StatusPassed, base.Add(2*time.Minute)),
-		record("run.failed.1", "case.failed", store.StatusFailed, base.Add(3*time.Minute)),
+	records := []execution.APICaseRunRecord{
+		record("run.impacted.1", "case.impacted", execution.StatusPassed, base),
+		record("run.impacted.2", "case.impacted", execution.StatusFailed, base.Add(time.Minute)),
+		record("run.impacted.3", "case.impacted", execution.StatusPassed, base.Add(2*time.Minute)),
+		record("run.failed.1", "case.failed", execution.StatusFailed, base.Add(3*time.Minute)),
 	}
 	cases := SelectCases(bundle, Filter{Tags: []string{"regression"}, Status: "active"})
 
@@ -596,31 +596,31 @@ func containsString(values []string, want string) bool {
 }
 
 type recordStore struct {
-	records []store.APICaseRunRecord
+	records []execution.APICaseRunRecord
 }
 
-func (s recordStore) ListAPICaseRunRecordsForCaseIDs(context.Context, []string) ([]store.APICaseRunRecord, error) {
+func (s recordStore) ListAPICaseRunRecordsForCaseIDs(context.Context, []string) ([]execution.APICaseRunRecord, error) {
 	return s.records, nil
 }
 
-func (s recordStore) ListRuns(context.Context) ([]store.Run, error) {
+func (s recordStore) ListRuns(context.Context) ([]execution.Run, error) {
 	return nil, nil
 }
 
-func (s recordStore) ListAPICaseRuns(context.Context, string) ([]store.APICaseRun, error) {
+func (s recordStore) ListAPICaseRuns(context.Context, string) ([]execution.APICaseRun, error) {
 	return nil, nil
 }
 
-func record(runID string, caseID string, status string, at time.Time) store.APICaseRunRecord {
-	return store.APICaseRunRecord{
-		Run: store.Run{
+func record(runID string, caseID string, status string, at time.Time) execution.APICaseRunRecord {
+	return execution.APICaseRunRecord{
+		Run: execution.Run{
 			ID:        runID,
 			ProfileID: "sample",
 			Status:    status,
 			CreatedAt: at,
 			UpdatedAt: at.Add(time.Second),
 		},
-		CaseRun: store.APICaseRun{
+		CaseRun: execution.APICaseRun{
 			ID:         runID + ".case",
 			RunID:      runID,
 			CaseID:     caseID,

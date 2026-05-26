@@ -9,152 +9,10 @@ import (
 	"strings"
 	"time"
 
+	domaincatalog "agent-testbench/internal/domain/catalog"
+	"agent-testbench/internal/domain/execution"
 	"agent-testbench/internal/domain/profile"
-	"agent-testbench/internal/store"
 )
-
-type Filter struct {
-	Filter   string   `json:"filter,omitempty"`
-	NodeID   string   `json:"nodeId,omitempty"`
-	Tags     []string `json:"tags,omitempty"`
-	Status   string   `json:"status,omitempty"`
-	Owner    string   `json:"owner,omitempty"`
-	Priority string   `json:"priority,omitempty"`
-}
-
-type Counts struct {
-	Total  int `json:"total"`
-	Passed int `json:"passed"`
-	Failed int `json:"failed"`
-	NotRun int `json:"notRun"`
-}
-
-type Item struct {
-	CaseID       string   `json:"caseId"`
-	Title        string   `json:"title"`
-	Description  string   `json:"description,omitempty"`
-	NodeID       string   `json:"nodeId,omitempty"`
-	NodeName     string   `json:"nodeName,omitempty"`
-	Tags         []string `json:"tags,omitempty"`
-	Priority     string   `json:"priority,omitempty"`
-	Owner        string   `json:"owner,omitempty"`
-	LatestStatus string   `json:"latestStatus"`
-	LatestRunID  string   `json:"latestRunId,omitempty"`
-	CaseRunID    string   `json:"caseRunId,omitempty"`
-	DetailURL    string   `json:"detailUrl,omitempty"`
-	ElapsedMs    int64    `json:"elapsedMs,omitempty"`
-	HasPassed    bool     `json:"hasPassed"`
-	Reason       string   `json:"reason,omitempty"`
-}
-
-type Report struct {
-	OK          bool     `json:"ok"`
-	ProfileID   string   `json:"profileId"`
-	GeneratedAt string   `json:"generatedAt"`
-	Filters     Filter   `json:"filters"`
-	Counts      Counts   `json:"counts"`
-	Items       []Item   `json:"items"`
-	Warnings    []string `json:"warnings,omitempty"`
-}
-
-type InspectionCounts struct {
-	Total            int `json:"total"`
-	Ready            int `json:"ready"`
-	Blocked          int `json:"blocked"`
-	Passed           int `json:"passed"`
-	Failed           int `json:"failed"`
-	NotRun           int `json:"notRun"`
-	MissingRunnable  int `json:"missingRunnable"`
-	MissingExecution int `json:"missingExecution"`
-	Inactive         int `json:"inactive"`
-}
-
-type InspectionItem struct {
-	CaseID             string   `json:"caseId"`
-	Title              string   `json:"title"`
-	Description        string   `json:"description,omitempty"`
-	NodeID             string   `json:"nodeId,omitempty"`
-	NodeName           string   `json:"nodeName,omitempty"`
-	Tags               []string `json:"tags,omitempty"`
-	Priority           string   `json:"priority,omitempty"`
-	Owner              string   `json:"owner,omitempty"`
-	Status             string   `json:"status"`
-	Ready              bool     `json:"ready"`
-	HasRunnableFile    bool     `json:"hasRunnableFile"`
-	HasExecutionConfig bool     `json:"hasExecutionConfig"`
-	LatestStatus       string   `json:"latestStatus"`
-	LatestRunID        string   `json:"latestRunId,omitempty"`
-	CaseRunID          string   `json:"caseRunId,omitempty"`
-	DetailURL          string   `json:"detailUrl,omitempty"`
-	ElapsedMs          int64    `json:"elapsedMs,omitempty"`
-	HasPassed          bool     `json:"hasPassed"`
-	Issues             []string `json:"issues,omitempty"`
-	SuggestedAction    string   `json:"suggestedAction,omitempty"`
-}
-
-type InspectionReport struct {
-	OK          bool             `json:"ok"`
-	ProfileID   string           `json:"profileId"`
-	GeneratedAt string           `json:"generatedAt"`
-	Filters     Filter           `json:"filters"`
-	Counts      InspectionCounts `json:"counts"`
-	Items       []InspectionItem `json:"items"`
-	Warnings    []string         `json:"warnings,omitempty"`
-}
-
-type PlanOptions struct {
-	RequestID      string   `json:"requestId,omitempty"`
-	Actions        []string `json:"actions,omitempty"`
-	BaseURL        string   `json:"baseUrl,omitempty"`
-	EvidenceDir    string   `json:"evidenceDir,omitempty"`
-	TimeoutSeconds int      `json:"timeoutSeconds,omitempty"`
-}
-
-type PlanCounts struct {
-	Total    int `json:"total"`
-	Ready    int `json:"ready"`
-	Blocked  int `json:"blocked"`
-	Selected int `json:"selected"`
-	Skipped  int `json:"skipped"`
-}
-
-type BatchRequest struct {
-	RequestID      string         `json:"requestId,omitempty"`
-	CaseIDs        []string       `json:"caseIds"`
-	BaseURL        string         `json:"baseUrl,omitempty"`
-	EvidenceDir    string         `json:"evidenceDir,omitempty"`
-	TimeoutSeconds int            `json:"timeoutSeconds,omitempty"`
-	Overrides      map[string]any `json:"overrides,omitempty"`
-}
-
-type PlanReport struct {
-	OK           bool             `json:"ok"`
-	ProfileID    string           `json:"profileId"`
-	GeneratedAt  string           `json:"generatedAt"`
-	Filters      Filter           `json:"filters"`
-	Options      PlanOptions      `json:"options"`
-	Counts       PlanCounts       `json:"counts"`
-	CaseIDs      []string         `json:"caseIds"`
-	Selected     []InspectionItem `json:"selected"`
-	Blocked      []InspectionItem `json:"blocked"`
-	Skipped      []InspectionItem `json:"skipped"`
-	BatchRequest BatchRequest     `json:"batchRequest"`
-	Warnings     []string         `json:"warnings,omitempty"`
-}
-
-const (
-	CaseLifecycleDraft       = "draft"
-	CaseLifecycleReview      = "review"
-	CaseLifecycleActive      = "active"
-	CaseLifecycleQuarantined = "quarantined"
-	CaseLifecycleDeprecated  = "deprecated"
-	CaseLifecycleInvalid     = "invalid"
-)
-
-type RecordStore interface {
-	ListRuns(context.Context) ([]store.Run, error)
-	ListAPICaseRuns(context.Context, string) ([]store.APICaseRun, error)
-}
 
 func SelectCases(bundle profile.Bundle, filter Filter) []profile.APICase {
 	filter = NormalizeFilter(filter)
@@ -306,9 +164,9 @@ func Inspect(ctx context.Context, bundle profile.Bundle, runtime RecordStore, fi
 			report.Counts.Blocked++
 		}
 		switch NormalizeRunState(row.LatestStatus) {
-		case store.StatusPassed:
+		case execution.StatusPassed:
 			report.Counts.Passed++
-		case store.StatusFailed:
+		case execution.StatusFailed:
 			report.Counts.Failed++
 		default:
 			report.Counts.NotRun++
@@ -371,11 +229,11 @@ func Plan(ctx context.Context, bundle profile.Bundle, runtime RecordStore, filte
 }
 
 type State struct {
-	Latest    store.APICaseRunRecord
+	Latest    execution.APICaseRunRecord
 	HasPassed bool
 }
 
-func StateByCase(records []store.APICaseRunRecord) map[string]State {
+func StateByCase(records []execution.APICaseRunRecord) map[string]State {
 	out := map[string]State{}
 	for _, record := range records {
 		caseID := record.CaseRun.CaseID
@@ -391,19 +249,19 @@ func StateByCase(records []store.APICaseRunRecord) map[string]State {
 	return out
 }
 
-func RecordNewer(left store.APICaseRunRecord, right store.APICaseRunRecord) bool {
+func RecordNewer(left execution.APICaseRunRecord, right execution.APICaseRunRecord) bool {
 	if left.CaseRun.CreatedAt.After(right.CaseRun.CreatedAt) {
 		return true
 	}
 	return left.CaseRun.CreatedAt.Equal(right.CaseRun.CreatedAt) && left.CaseRun.ID > right.CaseRun.ID
 }
 
-func RecordsForCaseIDs(ctx context.Context, runtime RecordStore, caseIDs []string) ([]store.APICaseRunRecord, error) {
+func RecordsForCaseIDs(ctx context.Context, runtime RecordStore, caseIDs []string) ([]execution.APICaseRunRecord, error) {
 	if runtime == nil || len(caseIDs) == 0 {
-		return []store.APICaseRunRecord{}, nil
+		return []execution.APICaseRunRecord{}, nil
 	}
 	if fast, ok := runtime.(interface {
-		ListAPICaseRunRecordsForCaseIDs(context.Context, []string) ([]store.APICaseRunRecord, error)
+		ListAPICaseRunRecordsForCaseIDs(context.Context, []string) ([]execution.APICaseRunRecord, error)
 	}); ok {
 		return fast.ListAPICaseRunRecordsForCaseIDs(ctx, caseIDs)
 	}
@@ -415,7 +273,7 @@ func RecordsForCaseIDs(ctx context.Context, runtime RecordStore, caseIDs []strin
 	if err != nil {
 		return nil, err
 	}
-	out := make([]store.APICaseRunRecord, 0)
+	out := make([]execution.APICaseRunRecord, 0)
 	for _, run := range runs {
 		caseRuns, err := runtime.ListAPICaseRuns(ctx, run.ID)
 		if err != nil {
@@ -423,7 +281,7 @@ func RecordsForCaseIDs(ctx context.Context, runtime RecordStore, caseIDs []strin
 		}
 		for _, caseRun := range caseRuns {
 			if caseSet[caseRun.CaseID] {
-				out = append(out, store.APICaseRunRecord{Run: run, CaseRun: caseRun})
+				out = append(out, execution.APICaseRunRecord{Run: run, CaseRun: caseRun})
 			}
 		}
 	}
@@ -434,7 +292,7 @@ func ExecutionConfigSet(ctx context.Context, bundle profile.Bundle, runtime Reco
 	out := map[string]bool{}
 	addProfileTemplateConfigs(out, bundle.TemplateConfigs)
 	if catalogRuntime, ok := runtime.(interface {
-		GetProfileCatalog(context.Context) (store.ProfileCatalog, error)
+		GetProfileCatalog(context.Context) (domaincatalog.ProfileCatalog, error)
 	}); ok {
 		if catalog, err := catalogRuntime.GetProfileCatalog(ctx); err == nil {
 			addCatalogTemplateConfigs(out, catalog.TemplateConfigs)
@@ -445,31 +303,26 @@ func ExecutionConfigSet(ctx context.Context, bundle profile.Bundle, runtime Reco
 
 func addProfileTemplateConfigs(out map[string]bool, configs []profile.TemplateConfig) {
 	for _, config := range configs {
-		if !activeStatus(config.Status) {
-			continue
-		}
-		if config.ScopeType == "case" && strings.TrimSpace(config.ScopeID) != "" {
-			out[strings.TrimSpace(config.ScopeID)] = true
-			continue
-		}
-		if caseID := executionConfigCaseID(config.ConfigJSON); caseID != "" {
-			out[caseID] = true
-		}
+		addExecutionTemplateConfig(out, config.Status, config.ScopeType, config.ScopeID, config.ConfigJSON)
 	}
 }
 
-func addCatalogTemplateConfigs(out map[string]bool, configs []store.CatalogTemplateConfig) {
+func addCatalogTemplateConfigs(out map[string]bool, configs []domaincatalog.TemplateConfig) {
 	for _, config := range configs {
-		if !activeStatus(config.Status) {
-			continue
-		}
-		if config.ScopeType == "case" && strings.TrimSpace(config.ScopeID) != "" {
-			out[strings.TrimSpace(config.ScopeID)] = true
-			continue
-		}
-		if caseID := executionConfigCaseID(config.ConfigJSON); caseID != "" {
-			out[caseID] = true
-		}
+		addExecutionTemplateConfig(out, config.Status, config.ScopeType, config.ScopeID, config.ConfigJSON)
+	}
+}
+
+func addExecutionTemplateConfig(out map[string]bool, status string, scopeType string, scopeID string, configJSON string) {
+	if !activeStatus(status) {
+		return
+	}
+	if scopeType == "case" && strings.TrimSpace(scopeID) != "" {
+		out[strings.TrimSpace(scopeID)] = true
+		return
+	}
+	if caseID := executionConfigCaseID(configJSON); caseID != "" {
+		out[caseID] = true
 	}
 }
 
@@ -498,7 +351,7 @@ func SuggestedAction(item InspectionItem) string {
 	if !item.HasRunnableFile && !item.HasExecutionConfig {
 		return "add-runnable-source"
 	}
-	if NormalizeRunState(item.LatestStatus) == store.StatusFailed {
+	if NormalizeRunState(item.LatestStatus) == execution.StatusFailed {
 		return "rerun"
 	}
 	if NormalizeRunState(item.LatestStatus) == "not-run" {
@@ -678,9 +531,9 @@ func NormalizeRunState(value string) string {
 	case "notrun", "not-run", "missing", "never-run":
 		return "not-run"
 	case "pass", "passed", "success", "ok":
-		return store.StatusPassed
+		return execution.StatusPassed
 	case "fail", "failed", "error":
-		return store.StatusFailed
+		return execution.StatusFailed
 	default:
 		return value
 	}

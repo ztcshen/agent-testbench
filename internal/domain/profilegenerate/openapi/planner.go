@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
 
+	"agent-testbench/internal/domain/apicasespec"
 	"agent-testbench/internal/domain/profile"
-	"agent-testbench/internal/runner/apicase"
+	"agent-testbench/internal/domain/profiledraft"
 )
 
 type Options struct {
@@ -101,7 +101,7 @@ func Plan(raw []byte, options Options) (PlanResult, error) {
 	}
 	serviceID := strings.TrimSpace(options.ServiceID)
 	if serviceID == "" {
-		serviceID = "service." + slug(title)
+		serviceID = "service." + profiledraft.Slug(title)
 	}
 	result := PlanResult{
 		OK: true,
@@ -113,7 +113,7 @@ func Plan(raw []byte, options Options) (PlanResult, error) {
 		},
 		Warnings: []string{"generated cases are draft candidates and must be reviewed before activation"},
 	}
-	for _, path := range sortedKeys(doc.Paths) {
+	for _, path := range profiledraft.SortedKeys(doc.Paths) {
 		ops := doc.Paths[path]
 		for _, method := range sortedHTTPMethods(ops) {
 			op := ops[method]
@@ -132,19 +132,19 @@ func Plan(raw []byte, options Options) (PlanResult, error) {
 				if !nodeAdded {
 					result.InterfaceNodes = append(result.InterfaceNodes, profile.InterfaceNode{
 						ID:          nodeID,
-						DisplayName: firstNonEmpty(op.Summary, op.OperationID, strings.ToUpper(method)+" "+path),
+						DisplayName: profiledraft.FirstNonEmpty(op.Summary, op.OperationID, strings.ToUpper(method)+" "+path),
 						ServiceID:   serviceID,
-						Operation:   firstNonEmpty(op.OperationID, strings.ToUpper(method)+" "+path),
+						Operation:   profiledraft.FirstNonEmpty(op.OperationID, strings.ToUpper(method)+" "+path),
 						Method:      strings.ToUpper(method),
 						Path:        path,
 						Status:      "draft",
-						Tags:        compactTags(append([]string{"generated", "schema"}, op.Tags...)),
+						Tags:        profiledraft.CompactTags(append([]string{"generated", "schema"}, op.Tags...)),
 						Description: "Draft interface for schema-generated candidate cases.",
 						SortOrder:   len(result.InterfaceNodes) + 1,
 					})
 					nodeAdded = true
 				}
-				caseSlug := opSlug + ".missing-" + slug(field)
+				caseSlug := opSlug + ".missing-" + profiledraft.Slug(field)
 				caseID := "case." + serviceID + "." + caseSlug
 				candidateID := "candidate." + serviceID + "." + caseSlug
 				casePath := "api-cases/" + caseID + ".json"
@@ -153,7 +153,7 @@ func Plan(raw []byte, options Options) (PlanResult, error) {
 				if statusCode == 0 {
 					statusCode = 400
 				}
-				tags := compactTags(append([]string{"generated", "schema", "negative"}, op.Tags...))
+				tags := profiledraft.CompactTags(append([]string{"generated", "schema", "negative"}, op.Tags...))
 				result.Candidates = append(result.Candidates, Candidate{
 					ID:     candidateID,
 					Kind:   "missing-required-field",
@@ -164,7 +164,7 @@ func Plan(raw []byte, options Options) (PlanResult, error) {
 				})
 				result.APICases = append(result.APICases, profile.APICase{
 					ID:          caseID,
-					DisplayName: firstNonEmpty(op.Summary, op.OperationID, strings.ToUpper(method)+" "+path) + " missing " + field,
+					DisplayName: profiledraft.FirstNonEmpty(op.Summary, op.OperationID, strings.ToUpper(method)+" "+path) + " missing " + field,
 					Description: "Draft negative case generated from OpenAPI required-field schema.",
 					NodeID:      nodeID,
 					Tags:        tags,
@@ -175,7 +175,7 @@ func Plan(raw []byte, options Options) (PlanResult, error) {
 				})
 				result.CaseFiles = append(result.CaseFiles, GeneratedCaseFile{
 					Path: casePath,
-					Body: runnableCaseBody(caseID, firstNonEmpty(op.Summary, op.OperationID, strings.ToUpper(method)+" "+path)+" missing "+field, method, path, body, statusCode),
+					Body: runnableCaseBody(caseID, profiledraft.FirstNonEmpty(op.Summary, op.OperationID, strings.ToUpper(method)+" "+path)+" missing "+field, method, path, body, statusCode),
 				})
 			}
 		}
@@ -245,33 +245,8 @@ func firstClientErrorStatus(responses map[string]response) int {
 }
 
 func runnableCaseBody(caseID string, title string, method string, path string, body map[string]any, statusCode int) json.RawMessage {
-	item := apicase.Case{
-		ID:    caseID,
-		Title: title,
-		Request: apicase.Request{
-			Method:  strings.ToUpper(method),
-			Path:    path,
-			Headers: map[string]string{"Content-Type": "application/json"},
-			Body:    body,
-		},
-		Assertions: apicase.Assertions{
-			ExpectedStatusCodes: []int{statusCode},
-		},
-	}
-	raw, err := json.MarshalIndent(item, "", "  ")
-	if err != nil {
-		return json.RawMessage("{}")
-	}
-	return json.RawMessage(append(raw, '\n'))
-}
-
-func sortedKeys[T any](values map[string]T) []string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
+	item := apicasespec.NewHTTPCase(caseID, title, strings.ToUpper(method), path, map[string]string{"Content-Type": "application/json"}, body, statusCode)
+	return apicasespec.JSON(item)
 }
 
 func sortedHTTPMethods(values pathOperations) []string {
@@ -289,56 +264,7 @@ func sortedHTTPMethods(values pathOperations) []string {
 
 func operationSlug(method string, path string, op operation) string {
 	if strings.TrimSpace(op.OperationID) != "" {
-		return slug(op.OperationID)
+		return profiledraft.Slug(op.OperationID)
 	}
-	return slug(strings.ToLower(method) + "-" + path)
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
-}
-
-func compactTags(values []string) []string {
-	seen := map[string]bool{}
-	out := []string{}
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" || seen[value] {
-			continue
-		}
-		seen[value] = true
-		out = append(out, value)
-	}
-	return out
-}
-
-var slugPattern = regexp.MustCompile(`[^a-z0-9]+`)
-
-func slug(value string) string {
-	value = splitCamelCase(value)
-	value = strings.ToLower(strings.TrimSpace(value))
-	value = slugPattern.ReplaceAllString(value, "-")
-	value = strings.Trim(value, "-")
-	if value == "" {
-		return "item"
-	}
-	return value
-}
-
-func splitCamelCase(value string) string {
-	var builder strings.Builder
-	var previous rune
-	for index, ch := range value {
-		if index > 0 && previous >= 'a' && previous <= 'z' && ch >= 'A' && ch <= 'Z' {
-			builder.WriteByte('-')
-		}
-		builder.WriteRune(ch)
-		previous = ch
-	}
-	return builder.String()
+	return profiledraft.Slug(strings.ToLower(method) + "-" + path)
 }

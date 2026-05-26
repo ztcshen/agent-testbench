@@ -18,33 +18,60 @@ type SQLiteImportOptions struct {
 }
 
 func ImportLegacyRuntimeSQLite(ctx context.Context, options SQLiteImportOptions) (ImportResult, error) {
-	if strings.TrimSpace(options.SourcePath) == "" {
-		return ImportResult{}, errors.New("source path is required")
-	}
-	if strings.TrimSpace(options.TargetPath) == "" {
-		return ImportResult{}, errors.New("target path is required")
-	}
-	if strings.TrimSpace(options.ProfileID) == "" {
-		return ImportResult{}, errors.New("profile id is required")
-	}
-	if _, err := os.Stat(options.SourcePath); err != nil {
-		return ImportResult{}, fmt.Errorf("stat source runtime store: %w", err)
-	}
-	target, err := sqlite.Open(ctx, sqlite.Config{Path: options.TargetPath})
-	if err != nil {
+	if err := validateSQLiteImportOptions(options); err != nil {
 		return ImportResult{}, err
 	}
-	_ = target.Close()
-
 	result, err := countLegacyRuntimeRows(ctx, options.SourcePath)
 	if err != nil {
 		return ImportResult{}, err
 	}
+	if err := prepareSQLiteImportTarget(ctx, options.TargetPath); err != nil {
+		return ImportResult{}, err
+	}
+	if err := runSQLiteImportScript(ctx, options); err != nil {
+		return ImportResult{}, err
+	}
+	return result, nil
+}
 
-	script := fmt.Sprintf(`
-PRAGMA foreign_keys = ON;
-PRAGMA busy_timeout = 5000;
-ATTACH DATABASE %s AS source_runtime;
+func validateSQLiteImportOptions(options SQLiteImportOptions) error {
+	if strings.TrimSpace(options.SourcePath) == "" {
+		return errors.New("source path is required")
+	}
+	if strings.TrimSpace(options.TargetPath) == "" {
+		return errors.New("target path is required")
+	}
+	if strings.TrimSpace(options.ProfileID) == "" {
+		return errors.New("profile id is required")
+	}
+	if _, err := os.Stat(options.SourcePath); err != nil {
+		return fmt.Errorf("stat source runtime store: %w", err)
+	}
+	return nil
+}
+
+func prepareSQLiteImportTarget(ctx context.Context, targetPath string) error {
+	target, err := sqlite.Open(ctx, sqlite.Config{Path: targetPath})
+	if err != nil {
+		return err
+	}
+	_ = target.Close()
+	return nil
+}
+
+func runSQLiteImportScript(ctx context.Context, options SQLiteImportOptions) error {
+	cmd := exec.CommandContext(ctx, "sqlite3", options.TargetPath, sqliteImportScript(options))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("import legacy runtime rows: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func sqliteImportScript(options SQLiteImportOptions) string {
+	return fmt.Sprintf(`
+	PRAGMA foreign_keys = ON;
+	PRAGMA busy_timeout = 5000;
+	ATTACH DATABASE %s AS source_runtime;
 BEGIN;
 
 INSERT OR IGNORE INTO runs (id, profile_id, workflow_id, status, evidence_root, summary_json, started_at, finished_at, created_at, updated_at)
@@ -125,15 +152,9 @@ SELECT
 FROM source_runtime.interface_node_case_run
 WHERE trim(evidence_path) != '';
 
-COMMIT;
-DETACH DATABASE source_runtime;
-`, sqlLiteral(options.SourcePath), sqlLiteral(options.ProfileID), sqlLiteral(options.ProfileID))
-
-	cmd := exec.CommandContext(ctx, "sqlite3", options.TargetPath, script)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return ImportResult{}, fmt.Errorf("import legacy runtime rows: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	return result, nil
+	COMMIT;
+	DETACH DATABASE source_runtime;
+	`, sqlLiteral(options.SourcePath), sqlLiteral(options.ProfileID), sqlLiteral(options.ProfileID))
 }
 
 func sqlLiteral(value string) string {

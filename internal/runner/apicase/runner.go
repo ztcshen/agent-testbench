@@ -14,26 +14,13 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"agent-testbench/internal/domain/apicasespec"
 )
 
-type Case struct {
-	ID         string     `json:"id"`
-	Title      string     `json:"title"`
-	Request    Request    `json:"request"`
-	Assertions Assertions `json:"assertions"`
-}
-
-type Request struct {
-	Method  string            `json:"method"`
-	Path    string            `json:"path"`
-	Headers map[string]string `json:"headers,omitempty"`
-	Body    map[string]any    `json:"body,omitempty"`
-}
-
-type Assertions struct {
-	ExpectedStatusCodes []int    `json:"expectedStatusCodes,omitempty"`
-	ResponseContains    []string `json:"responseContains,omitempty"`
-}
+type Case = apicasespec.Case
+type Request = apicasespec.Request
+type Assertions = apicasespec.Assertions
 
 type RunOptions struct {
 	CasePath    string

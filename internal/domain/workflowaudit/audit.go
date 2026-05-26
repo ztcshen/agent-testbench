@@ -8,14 +8,19 @@ import (
 	"strings"
 	"time"
 
+	"agent-testbench/internal/domain/execution"
 	"agent-testbench/internal/domain/profile"
-	"agent-testbench/internal/store"
 )
 
 type Options struct {
 	Bundle     profile.Bundle
 	WorkflowID string
-	Store      store.Store
+	Store      Store
+}
+
+type Store interface {
+	ListRuns(context.Context) ([]execution.Run, error)
+	ListAPICaseRuns(context.Context, string) ([]execution.APICaseRun, error)
 }
 
 type Report struct {
@@ -193,12 +198,12 @@ func (a referenceAuditor) issues(bundle profile.Bundle, bindings []profile.Workf
 	return issues
 }
 
-func auditStore(ctx context.Context, profileID string, workflowID string, bindings []profile.WorkflowBinding, s store.Store) (StoreReport, error) {
+func auditStore(ctx context.Context, profileID string, workflowID string, bindings []profile.WorkflowBinding, s Store) (StoreReport, error) {
 	runs, err := s.ListRuns(ctx)
 	if err != nil {
 		return StoreReport{}, err
 	}
-	workflowRuns := make([]store.Run, 0)
+	workflowRuns := make([]execution.Run, 0)
 	for _, run := range runs {
 		if run.ProfileID == profileID && run.WorkflowID == workflowID {
 			workflowRuns = append(workflowRuns, run)
@@ -229,7 +234,7 @@ func auditStore(ctx context.Context, profileID string, workflowID string, bindin
 				latestStatus[item.CaseID] = item.Status
 				latestRunID[item.CaseID] = run.ID
 			}
-			if strings.EqualFold(item.Status, store.StatusPassed) {
+			if strings.EqualFold(item.Status, execution.StatusPassed) {
 				passed[item.CaseID] = true
 			}
 		}

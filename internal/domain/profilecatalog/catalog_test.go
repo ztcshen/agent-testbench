@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	domaincatalog "agent-testbench/internal/domain/catalog"
 	"agent-testbench/internal/domain/profile"
-	"agent-testbench/internal/store"
 )
 
 func TestFromBundleResolvesServiceSourcePathFromRuntimeConfig(t *testing.T) {
@@ -61,12 +61,12 @@ func TestCatalogRoundTripPreservesExternalAPICaseSource(t *testing.T) {
 }
 
 func TestInterfaceNodesReadModelMaterializesStaticDirectoryPayload(t *testing.T) {
-	catalog := store.ProfileCatalog{
+	catalog := domaincatalog.ProfileCatalog{
 		ProfileID: "sample",
-		InterfaceNodes: []store.CatalogInterfaceNode{
+		InterfaceNodes: []domaincatalog.InterfaceNode{
 			{ID: "node.alpha", DisplayName: "Node Alpha", ServiceID: "service.alpha", Operation: "Create", Method: "POST", Path: "/alpha", Status: "active", TimeoutMs: 2000},
 		},
-		APICases: []store.CatalogAPICase{
+		APICases: []domaincatalog.APICase{
 			{ID: "case.alpha", NodeID: "node.alpha", RequiredForAdmission: true, Status: "active"},
 			{ID: "case.beta", NodeID: "node.alpha", RequiredForAdmission: false, Status: "active"},
 		},

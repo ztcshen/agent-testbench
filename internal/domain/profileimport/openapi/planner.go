@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
+	"agent-testbench/internal/domain/apicasespec"
 	"agent-testbench/internal/domain/profile"
-	"agent-testbench/internal/runner/apicase"
+	"agent-testbench/internal/domain/profiledraft"
 )
 
 type Options struct {
@@ -81,7 +81,7 @@ func Plan(raw []byte, options Options) (PlanResult, error) {
 	}
 	serviceID := strings.TrimSpace(options.ServiceID)
 	if serviceID == "" {
-		serviceID = "service." + slug(title)
+		serviceID = "service." + profiledraft.Slug(title)
 	}
 	result := PlanResult{
 		Service: profile.Service{
@@ -91,7 +91,7 @@ func Plan(raw []byte, options Options) (PlanResult, error) {
 			Status:      "draft",
 		},
 	}
-	for _, path := range sortedKeys(doc.Paths) {
+	for _, path := range profiledraft.SortedKeys(doc.Paths) {
 		ops := doc.Paths[path]
 		for _, method := range sortedHTTPMethods(ops) {
 			op := ops[method]
@@ -99,7 +99,7 @@ func Plan(raw []byte, options Options) (PlanResult, error) {
 			nodeID := "node." + serviceID + "." + opSlug
 			caseID := "case." + serviceID + "." + opSlug
 			templateID := "template." + serviceID + "." + opSlug
-			displayName := firstNonEmpty(op.Summary, op.OperationID, strings.ToUpper(method)+" "+path)
+			displayName := profiledraft.FirstNonEmpty(op.Summary, op.OperationID, strings.ToUpper(method)+" "+path)
 			statusCode := firstSuccessStatus(op.Responses)
 			if statusCode == 0 {
 				statusCode = 200
@@ -110,11 +110,11 @@ func Plan(raw []byte, options Options) (PlanResult, error) {
 				ID:          nodeID,
 				DisplayName: displayName,
 				ServiceID:   serviceID,
-				Operation:   firstNonEmpty(op.OperationID, displayName),
+				Operation:   profiledraft.FirstNonEmpty(op.OperationID, displayName),
 				Method:      strings.ToUpper(method),
 				Path:        path,
 				Status:      "draft",
-				Tags:        compactTags(op.Tags),
+				Tags:        profiledraft.CompactTags(op.Tags),
 				Description: op.Description,
 				SortOrder:   len(result.InterfaceNodes) + 1,
 			})
@@ -124,7 +124,7 @@ func Plan(raw []byte, options Options) (PlanResult, error) {
 				NodeID:       nodeID,
 				Method:       strings.ToUpper(method),
 				Path:         path,
-				TemplateJSON: compactJSON(map[string]any{"method": strings.ToUpper(method), "path": path, "body": body}),
+				TemplateJSON: profiledraft.CompactJSON(map[string]any{"method": strings.ToUpper(method), "path": path, "body": body}),
 			})
 			casePath := "api-cases/" + caseID + ".json"
 			result.APICases = append(result.APICases, profile.APICase{
@@ -133,7 +133,7 @@ func Plan(raw []byte, options Options) (PlanResult, error) {
 				Description:       "Draft case generated from OpenAPI import plan.",
 				NodeID:            nodeID,
 				RequestTemplateID: templateID,
-				Tags:              compactTags(append([]string{"openapi"}, op.Tags...)),
+				Tags:              profiledraft.CompactTags(append([]string{"openapi"}, op.Tags...)),
 				Status:            "draft",
 				CasePath:          casePath,
 				EvidenceDir:       strings.TrimSpace(options.EvidenceDir),
@@ -146,15 +146,6 @@ func Plan(raw []byte, options Options) (PlanResult, error) {
 		}
 	}
 	return result, nil
-}
-
-func sortedKeys[T any](values map[string]T) []string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 func sortedHTTPMethods(values pathOperations) []string {
@@ -182,9 +173,9 @@ func methodRank(method string) int {
 
 func operationSlug(method string, path string, op operation) string {
 	if strings.TrimSpace(op.OperationID) != "" {
-		return slug(op.OperationID)
+		return profiledraft.Slug(op.OperationID)
 	}
-	return slug(strings.ToLower(method) + "-" + path)
+	return profiledraft.Slug(strings.ToLower(method) + "-" + path)
 }
 
 func firstSuccessStatus(responses map[string]response) int {
@@ -217,81 +208,10 @@ func jsonExampleBody(op operation) map[string]any {
 }
 
 func runnableCaseBody(caseID string, title string, method string, path string, body map[string]any, statusCode int) json.RawMessage {
-	item := apicase.Case{
-		ID:    caseID,
-		Title: title,
-		Request: apicase.Request{
-			Method: strings.ToUpper(method),
-			Path:   path,
-		},
-		Assertions: apicase.Assertions{
-			ExpectedStatusCodes: []int{statusCode},
-		},
-	}
+	var headers map[string]string
 	if len(body) > 0 {
-		item.Request.Headers = map[string]string{"Content-Type": "application/json"}
-		item.Request.Body = body
+		headers = map[string]string{"Content-Type": "application/json"}
 	}
-	raw, err := json.MarshalIndent(item, "", "  ")
-	if err != nil {
-		return json.RawMessage("{}")
-	}
-	return json.RawMessage(append(raw, '\n'))
-}
-
-func compactTags(values []string) []string {
-	seen := map[string]bool{}
-	out := []string{}
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" || seen[value] {
-			continue
-		}
-		seen[value] = true
-		out = append(out, value)
-	}
-	return out
-}
-
-func compactJSON(value any) string {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return "{}"
-	}
-	return string(raw)
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
-}
-
-var slugPattern = regexp.MustCompile(`[^a-z0-9]+`)
-
-func slug(value string) string {
-	value = splitCamelCase(value)
-	value = strings.ToLower(strings.TrimSpace(value))
-	value = slugPattern.ReplaceAllString(value, "-")
-	value = strings.Trim(value, "-")
-	if value == "" {
-		return "item"
-	}
-	return value
-}
-
-func splitCamelCase(value string) string {
-	var builder strings.Builder
-	var previous rune
-	for index, ch := range value {
-		if index > 0 && previous >= 'a' && previous <= 'z' && ch >= 'A' && ch <= 'Z' {
-			builder.WriteByte('-')
-		}
-		builder.WriteRune(ch)
-		previous = ch
-	}
-	return builder.String()
+	item := apicasespec.NewHTTPCase(caseID, title, strings.ToUpper(method), path, headers, body, statusCode)
+	return apicasespec.JSON(item)
 }

@@ -4,13 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 
+	"agent-testbench/internal/domain/apicasespec"
 	"agent-testbench/internal/domain/profile"
-	"agent-testbench/internal/runner/apicase"
+	"agent-testbench/internal/domain/profiledraft"
 )
 
 type Options struct {
@@ -70,7 +69,7 @@ func Plan(raw []byte, options Options) (PlanResult, error) {
 	}
 	serviceID := strings.TrimSpace(options.ServiceID)
 	if serviceID == "" {
-		serviceID = "service." + slug(title)
+		serviceID = "service." + profiledraft.Slug(title)
 	}
 	result := PlanResult{
 		Service: profile.Service{
@@ -93,18 +92,18 @@ func Plan(raw []byte, options Options) (PlanResult, error) {
 		nodeID := "node." + serviceID + "." + opSlug
 		caseID := "case." + serviceID + "." + opSlug
 		templateID := "template." + serviceID + "." + opSlug
-		displayName := firstNonEmpty(item.Name, item.ID, method+" "+path)
+		displayName := profiledraft.FirstNonEmpty(item.Name, item.ID, method+" "+path)
 		statusCode := item.Response.Status
 		if statusCode == 0 {
 			statusCode = 200
 		}
-		tags := compactTags(append([]string{"recorded", "replay"}, item.Tags...))
+		tags := profiledraft.CompactTags(append([]string{"recorded", "replay"}, item.Tags...))
 
 		result.InterfaceNodes = append(result.InterfaceNodes, profile.InterfaceNode{
 			ID:          nodeID,
 			DisplayName: displayName,
 			ServiceID:   serviceID,
-			Operation:   firstNonEmpty(item.ID, displayName),
+			Operation:   profiledraft.FirstNonEmpty(item.ID, displayName),
 			Method:      method,
 			Path:        path,
 			Status:      "draft",
@@ -118,7 +117,7 @@ func Plan(raw []byte, options Options) (PlanResult, error) {
 			NodeID:       nodeID,
 			Method:       method,
 			Path:         path,
-			TemplateJSON: compactJSON(map[string]any{"method": method, "path": path, "body": item.Request.Body}),
+			TemplateJSON: profiledraft.CompactJSON(map[string]any{"method": method, "path": path, "body": item.Request.Body}),
 		})
 		casePath := "api-cases/" + caseID + ".json"
 		result.APICases = append(result.APICases, profile.APICase{
@@ -143,36 +142,20 @@ func Plan(raw []byte, options Options) (PlanResult, error) {
 
 func captureSlug(index int, method string, path string, item capture) string {
 	if strings.TrimSpace(item.ID) != "" {
-		return slug(item.ID)
+		return profiledraft.Slug(item.ID)
 	}
 	if strings.TrimSpace(item.Name) != "" {
-		return slug(item.Name)
+		return profiledraft.Slug(item.Name)
 	}
-	return slug(strings.ToLower(method) + "-" + path + "-" + strconv.Itoa(index+1))
+	return profiledraft.Slug(strings.ToLower(method) + "-" + path + "-" + strconv.Itoa(index+1))
 }
 
 func runnableCaseBody(caseID string, title string, method string, path string, headers map[string]string, body any, statusCode int, responseBody any) json.RawMessage {
-	item := apicase.Case{
-		ID:    caseID,
-		Title: title,
-		Request: apicase.Request{
-			Method:  method,
-			Path:    path,
-			Headers: headers,
-			Body:    bodyMap(body),
-		},
-		Assertions: apicase.Assertions{
-			ExpectedStatusCodes: []int{statusCode},
-		},
-	}
-	if responseText := compactJSON(responseBody); responseText != "{}" && responseText != "null" {
+	item := apicasespec.NewHTTPCase(caseID, title, method, path, headers, bodyMap(body), statusCode)
+	if responseText := profiledraft.CompactJSON(responseBody); responseText != "{}" && responseText != "null" {
 		item.Assertions.ResponseContains = []string{responseText}
 	}
-	raw, err := json.MarshalIndent(item, "", "  ")
-	if err != nil {
-		return json.RawMessage("{}")
-	}
-	return json.RawMessage(append(raw, '\n'))
+	return apicasespec.JSON(item)
 }
 
 func bodyMap(value any) map[string]any {
@@ -180,70 +163,4 @@ func bodyMap(value any) map[string]any {
 		return body
 	}
 	return nil
-}
-
-func compactTags(values []string) []string {
-	seen := map[string]bool{}
-	out := []string{}
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" || seen[value] {
-			continue
-		}
-		seen[value] = true
-		out = append(out, value)
-	}
-	return out
-}
-
-func compactJSON(value any) string {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return "{}"
-	}
-	return string(raw)
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
-}
-
-var slugPattern = regexp.MustCompile(`[^a-z0-9]+`)
-
-func slug(value string) string {
-	value = splitCamelCase(value)
-	value = strings.ToLower(strings.TrimSpace(value))
-	value = slugPattern.ReplaceAllString(value, "-")
-	value = strings.Trim(value, "-")
-	if value == "" {
-		return "item"
-	}
-	return value
-}
-
-func splitCamelCase(value string) string {
-	var builder strings.Builder
-	var previous rune
-	for index, ch := range value {
-		if index > 0 && previous >= 'a' && previous <= 'z' && ch >= 'A' && ch <= 'Z' {
-			builder.WriteByte('-')
-		}
-		builder.WriteRune(ch)
-		previous = ch
-	}
-	return builder.String()
-}
-
-func sortedKeys[T any](values map[string]T) []string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }

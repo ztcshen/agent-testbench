@@ -79,7 +79,10 @@ if ! command -v "$lint_bin" >/dev/null 2>&1; then
 fi
 
 if [[ "$mode" == "full" ]]; then
-  exec "$lint_bin" run "${extra_args[@]}"
+  if ((${#extra_args[@]} > 0)); then
+    exec "$lint_bin" run "${extra_args[@]}"
+  fi
+  exec "$lint_bin" run
 fi
 
 if [[ -z "$patch_file" ]]; then
@@ -116,4 +119,7 @@ if [[ ! -s "$patch_file" ]]; then
   exit 0
 fi
 
-exec "$lint_bin" run --new-from-patch "$patch_file" "${extra_args[@]}"
+if ((${#extra_args[@]} > 0)); then
+  exec "$lint_bin" run --new-from-patch "$patch_file" "${extra_args[@]}"
+fi
+exec "$lint_bin" run --new-from-patch "$patch_file"

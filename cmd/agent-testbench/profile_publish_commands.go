@@ -14,6 +14,8 @@ import (
 	"agent-testbench/internal/domain/profile"
 	"agent-testbench/internal/domain/profileaudit"
 	"agent-testbench/internal/domain/profilecatalog"
+	"agent-testbench/internal/profilepublish"
+	"agent-testbench/internal/profileverify"
 	"agent-testbench/internal/server/controlplane"
 	"agent-testbench/internal/store"
 )
@@ -111,25 +113,9 @@ type profileVerifyReport struct {
 	Checks    []profileVerifyCheck `json:"checks"`
 }
 
-type profileVerifySummary struct {
-	TotalChecks          int    `json:"totalChecks"`
-	PassedChecks         int    `json:"passedChecks"`
-	FailedChecks         int    `json:"failedChecks"`
-	RequiredCaseRuns     bool   `json:"requiredCaseRuns"`
-	RequiredWorkflowRuns bool   `json:"requiredWorkflowRuns"`
-	FirstFailed          string `json:"firstFailed,omitempty"`
-}
-
-type profileVerifyCheck struct {
-	Name   string `json:"name"`
-	OK     bool   `json:"ok"`
-	Detail string `json:"detail"`
-}
-
-type profileVerifyOptions struct {
-	RequireCaseRuns     bool
-	RequireWorkflowRuns bool
-}
+type profileVerifySummary = profileverify.Summary
+type profileVerifyCheck = profileverify.Check
+type profileVerifyOptions = profileverify.Options
 
 func runProfileCatalogIndex(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("profile catalog-index", flag.ContinueOnError)
@@ -266,84 +252,29 @@ func runConfigPublishWithFlags(ctx context.Context, flags *flag.FlagSet, args []
 }
 
 func publishProfileBundleToStore(ctx context.Context, s store.Store, from string, storePath string, auditOutput bool, requireAuditOK bool) (profileImportReport, error) {
-	bundle, err := profile.Load(from)
-	if err != nil {
-		return profileImportReport{}, err
-	}
-	if requireAuditOK {
-		auditReport, err := profileaudit.Audit(ctx, profileaudit.Options{
-			Bundle:     bundle,
-			BundlePath: from,
-		})
-		if err != nil {
-			return profileImportReport{}, err
-		}
-		if !auditReport.OK {
-			return profileImportReport{}, fmt.Errorf("profile audit failed for profile %q: %s", bundle.ID, profileaudit.FailureSummary(auditReport))
-		}
-	}
-	digest, err := profile.BundleDigest(from)
-	if err != nil {
-		return profileImportReport{}, err
-	}
-	summary, err := json.Marshal(bundle.Counts())
-	if err != nil {
-		return profileImportReport{}, err
-	}
-	importedAt := time.Now().UTC()
-	if _, err := s.UpsertProfileIndex(ctx, store.ProfileIndex{
-		ProfileID:    bundle.ID,
-		BundlePath:   from,
-		BundleDigest: digest,
-		SummaryJSON:  string(summary),
-		ImportedAt:   importedAt,
-	}); err != nil {
-		return profileImportReport{}, err
-	}
-	catalog := profilecatalog.FromBundle(bundle, importedAt)
-	previousCatalog, hasPreviousCatalog, err := readCurrentProfileCatalog(ctx, s)
-	if err != nil {
-		return profileImportReport{}, err
-	}
-	if err := s.ReplaceProfileCatalog(ctx, catalog); err != nil {
-		return profileImportReport{}, err
-	}
-	configVersion, err := s.UpsertConfigVersion(ctx, store.ConfigVersion{
-		ID:           configVersionID(bundle.ID, importedAt),
-		ProfileID:    bundle.ID,
-		SourcePath:   from,
-		BundleDigest: digest,
-		SummaryJSON:  string(summary),
-		Active:       true,
-		PublishedAt:  importedAt,
-		CreatedAt:    importedAt,
+	result, err := profilepublish.Publish(ctx, s, profilepublish.Options{
+		Path:             from,
+		RequireAuditOK:   requireAuditOK,
+		UpsertReadModels: controlplane.UpsertProfileReadModels,
 	})
 	if err != nil {
 		return profileImportReport{}, err
 	}
-	readModelKeys, err := controlplane.UpsertProfileReadModels(ctx, s, catalog, configVersion.ID, importedAt)
-	if err != nil {
-		return profileImportReport{}, err
-	}
-	catalogIndex, err := s.GetProfileCatalogIndex(ctx)
-	if err != nil {
-		return profileImportReport{}, err
-	}
 	report := profileImportReport{
-		ProfileID:     bundle.ID,
+		ProfileID:     result.Bundle.ID,
 		BundlePath:    from,
-		BundleDigest:  digest,
-		Counts:        profileImportAssetCounts(bundle.Counts()),
-		Diff:          profileImportDiffFromCatalogs(previousCatalog, catalog, hasPreviousCatalog),
+		BundleDigest:  result.Digest,
+		Counts:        profileImportAssetCounts(result.Counts),
+		Diff:          profileImportDiffFromCatalogs(result.PreviousCatalog, result.Catalog, result.HasPreviousCatalog),
 		StorePath:     storePath,
-		CatalogIndex:  profileCatalogIndexFromStore(catalogIndex),
-		ConfigVersion: profileConfigVersionFromStore(configVersion),
-		ReadModels:    readModelKeys,
-		ImportedAt:    importedAt,
+		CatalogIndex:  profileCatalogIndexFromStore(result.CatalogIndex),
+		ConfigVersion: profileConfigVersionFromStore(result.ConfigVersion),
+		ReadModels:    result.ReadModels,
+		ImportedAt:    result.ImportedAt,
 	}
 	if auditOutput {
 		auditReport, err := profileaudit.Audit(ctx, profileaudit.Options{
-			Bundle:     bundle,
+			Bundle:     result.Bundle,
 			BundlePath: from,
 			Store:      s,
 		})
@@ -374,200 +305,35 @@ func verifyProfileBundle(ctx context.Context, s store.Store, profilePath string,
 	if err != nil {
 		return profileVerifyReport{}, err
 	}
-	checks, err := verifyPublishedProfile(ctx, s, bundle, publishReport, options)
+	verifyOptions := profileVerifyOptionsWithReadModels(options)
+	checks, err := profileverify.PublishedChecks(ctx, s, bundle, profileverify.PublishedProfile{
+		ProfileID:       publishReport.ProfileID,
+		BundleDigest:    publishReport.BundleDigest,
+		ConfigVersionID: publishReport.ConfigVersion.ID,
+	}, verifyOptions)
 	if err != nil {
 		return profileVerifyReport{}, err
 	}
 	report := profileVerifyReport{
-		OK:        profileChecksOK(checks),
+		OK:        profileverify.ChecksOK(checks),
 		ProfileID: bundle.ID,
 		Audit:     *publishReport.Audit,
 		Publish:   publishReport,
-		Summary:   summarizeProfileVerification(checks, options),
+		Summary:   profileverify.Summarize(checks, verifyOptions),
 		Checks:    checks,
 	}
 	if !report.OK {
-		report.Error = fmt.Sprintf("profile verification failed for profile %q: %s", bundle.ID, firstFailedProfileCheck(checks))
-		return report, fmt.Errorf("profile verification failed for profile %q: %s", bundle.ID, firstFailedProfileCheck(checks))
+		report.Error = fmt.Sprintf("profile verification failed for profile %q: %s", bundle.ID, profileverify.FirstFailed(checks))
+		return report, fmt.Errorf("profile verification failed for profile %q: %s", bundle.ID, profileverify.FirstFailed(checks))
 	}
 	return report, nil
 }
 
-func summarizeProfileVerification(checks []profileVerifyCheck, options profileVerifyOptions) profileVerifySummary {
-	summary := profileVerifySummary{
-		TotalChecks:          len(checks),
-		RequiredCaseRuns:     options.RequireCaseRuns,
-		RequiredWorkflowRuns: options.RequireWorkflowRuns,
+func profileVerifyOptionsWithReadModels(options profileVerifyOptions) profileVerifyOptions {
+	if len(options.ReadModelKeys) == 0 {
+		options.ReadModelKeys = []string{profilecatalog.ReadModelInterfaceNodes, controlplane.ReadModelCatalog, controlplane.ReadModelDashboard}
 	}
-	for _, check := range checks {
-		if check.OK {
-			summary.PassedChecks++
-			continue
-		}
-		summary.FailedChecks++
-		if summary.FirstFailed == "" {
-			summary.FirstFailed = check.Name
-		}
-	}
-	return summary
-}
-
-func verifyPublishedProfile(ctx context.Context, s store.Store, bundle profile.Bundle, report profileImportReport, options profileVerifyOptions) ([]profileVerifyCheck, error) {
-	checks := make([]profileVerifyCheck, 0, 6)
-	index, err := s.GetProfileIndex(ctx, report.ProfileID)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			checks = appendProfileCheck(checks, "profile-index", false, "profile index was not written")
-			return checks, nil
-		}
-		return nil, err
-	}
-	checks = appendProfileCheck(checks, "profile-index", index.BundleDigest == report.BundleDigest, "profile index digest matches published bundle")
-
-	catalogIndex, err := s.GetProfileCatalogIndex(ctx)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			checks = appendProfileCheck(checks, "catalog-index", false, "catalog index was not written")
-		} else {
-			return nil, err
-		}
-	} else {
-		checks = appendProfileCheck(checks, "catalog-index", catalogIndex.ProfileID == report.ProfileID, "catalog index points to active profile")
-	}
-
-	activeConfig, err := s.GetActiveConfigVersion(ctx)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			checks = appendProfileCheck(checks, "active-config", false, "active config version was not written")
-		} else {
-			return nil, err
-		}
-	} else {
-		ok := activeConfig.ID == report.ConfigVersion.ID && activeConfig.ProfileID == report.ProfileID && activeConfig.BundleDigest == report.BundleDigest
-		checks = appendProfileCheck(checks, "active-config", ok, "active config version matches published bundle")
-	}
-
-	for _, key := range []string{profilecatalog.ReadModelInterfaceNodes, controlplane.ReadModelCatalog, controlplane.ReadModelDashboard} {
-		model, err := s.GetReadModel(ctx, report.ProfileID, key)
-		if err != nil {
-			if errors.Is(err, store.ErrNotFound) {
-				checks = appendProfileCheck(checks, "read-model:"+key, false, "read model was not written")
-				continue
-			}
-			return nil, err
-		}
-		ok := model.ConfigVersionID == report.ConfigVersion.ID && strings.TrimSpace(model.PayloadJSON) != ""
-		checks = appendProfileCheck(checks, "read-model:"+key, ok, "read model exists for published config version")
-	}
-	if options.RequireCaseRuns {
-		caseRunChecks, err := verifyProfileAPICaseRuns(ctx, s, bundle)
-		if err != nil {
-			return nil, err
-		}
-		checks = append(checks, caseRunChecks...)
-	}
-	if options.RequireWorkflowRuns {
-		workflowChecks, err := verifyProfileWorkflowRuns(ctx, s, bundle)
-		if err != nil {
-			return nil, err
-		}
-		checks = append(checks, workflowChecks...)
-	}
-	return checks, nil
-}
-
-func verifyProfileWorkflowRuns(ctx context.Context, s store.Store, bundle profile.Bundle) ([]profileVerifyCheck, error) {
-	if len(bundle.Workflows) == 0 {
-		return []profileVerifyCheck{{Name: "workflow-runs", OK: true, Detail: "profile declares no workflows"}}, nil
-	}
-	runs, err := s.ListRuns(ctx)
-	if err != nil {
-		return nil, err
-	}
-	latestByWorkflow := map[string]store.Run{}
-	for _, item := range runs {
-		if item.WorkflowID == "" {
-			continue
-		}
-		current, ok := latestByWorkflow[item.WorkflowID]
-		if !ok || item.CreatedAt.After(current.CreatedAt) || (item.CreatedAt.Equal(current.CreatedAt) && item.ID > current.ID) {
-			latestByWorkflow[item.WorkflowID] = item
-		}
-	}
-	checks := make([]profileVerifyCheck, 0, len(bundle.Workflows))
-	for _, item := range bundle.Workflows {
-		run, ok := latestByWorkflow[item.ID]
-		if !ok || !isPassedStatus(run.Status) {
-			checks = appendProfileCheck(checks, "workflow-run:"+item.ID, false, "no passed run recorded in Store")
-			continue
-		}
-		checks = appendProfileCheck(checks, "workflow-run:"+item.ID, true, "latest Workflow run passed")
-	}
-	return checks, nil
-}
-
-func verifyProfileAPICaseRuns(ctx context.Context, s store.Store, bundle profile.Bundle) ([]profileVerifyCheck, error) {
-	if len(bundle.APICases) == 0 {
-		return []profileVerifyCheck{{Name: "api-case-runs", OK: true, Detail: "profile declares no API cases"}}, nil
-	}
-	latestStore, ok := s.(interface {
-		ListLatestAPICaseRuns(context.Context) ([]store.APICaseRun, error)
-	})
-	if !ok {
-		return nil, errors.New("runtime store does not support latest API case run lookup")
-	}
-	latestRuns, err := latestStore.ListLatestAPICaseRuns(ctx)
-	if err != nil {
-		return nil, err
-	}
-	latestByCase := map[string]store.APICaseRun{}
-	for _, item := range latestRuns {
-		latestByCase[item.CaseID] = item
-	}
-	checks := make([]profileVerifyCheck, 0, len(bundle.APICases))
-	for _, item := range bundle.APICases {
-		run, ok := latestByCase[item.ID]
-		if !ok || !isPassedStatus(run.Status) {
-			checks = appendProfileCheck(checks, "api-case-run:"+item.ID, false, "no passed run recorded in Store")
-			continue
-		}
-		checks = appendProfileCheck(checks, "api-case-run:"+item.ID, true, "latest API case run passed")
-	}
-	return checks, nil
-}
-
-func isPassedStatus(status string) bool {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "pass", "passed", "success", "ok":
-		return true
-	default:
-		return false
-	}
-}
-
-func appendProfileCheck(checks []profileVerifyCheck, name string, ok bool, detail string) []profileVerifyCheck {
-	return append(checks, profileVerifyCheck{Name: name, OK: ok, Detail: detail})
-}
-
-func profileChecksOK(checks []profileVerifyCheck) bool {
-	if len(checks) == 0 {
-		return false
-	}
-	for _, check := range checks {
-		if !check.OK {
-			return false
-		}
-	}
-	return true
-}
-
-func firstFailedProfileCheck(checks []profileVerifyCheck) string {
-	for _, check := range checks {
-		if !check.OK {
-			return check.Name + ": " + check.Detail
-		}
-	}
-	return "no checks passed"
+	return options
 }
 
 func profileImportAssetCounts(counts profile.Counts) profileImportCounts {
@@ -581,17 +347,6 @@ func profileImportAssetCounts(counts profile.Counts) profileImportCounts {
 		WorkflowBindings: counts.WorkflowBindings,
 		Fixtures:         counts.Fixtures,
 	}
-}
-
-func readCurrentProfileCatalog(ctx context.Context, s store.Store) (store.ProfileCatalog, bool, error) {
-	catalog, err := s.GetProfileCatalog(ctx)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return store.ProfileCatalog{}, false, nil
-		}
-		return store.ProfileCatalog{}, false, err
-	}
-	return catalog, true, nil
 }
 
 func profileImportDiffFromCatalogs(before store.ProfileCatalog, after store.ProfileCatalog, hasBefore bool) profileImportDiff {
@@ -740,14 +495,6 @@ func profileConfigVersionFromStore(item store.ConfigVersion) profileConfigVersio
 	}
 }
 
-func configVersionID(profileID string, publishedAt time.Time) string {
-	safeProfileID := strings.NewReplacer("/", "-", "\\", "-", " ", "-", ":", "-").Replace(strings.TrimSpace(profileID))
-	if safeProfileID == "" {
-		safeProfileID = "profile"
-	}
-	return "config." + safeProfileID + "." + publishedAt.UTC().Format("20060102T150405.000000000Z")
-}
-
 func printProfileImportAudit(report profileaudit.Report) {
 	fmt.Printf("Audit OK: %t\n", report.OK)
 	fmt.Printf("Audit Issues: %d\n", report.IssueCount)
@@ -836,155 +583,4 @@ func printProfile(bundle profile.Bundle) {
 	fmt.Printf("Case Dependencies: %d\n", counts.CaseDependencies)
 	fmt.Printf("Workflow Bindings: %d\n", counts.WorkflowBindings)
 	fmt.Printf("Fixtures: %d\n", counts.Fixtures)
-}
-
-func runProfileAudit(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("profile audit", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path")
-	templatePackagePath := flags.String("template-package", "", "Template package path or installed template package id")
-	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	offlineTemplatePackage := flags.Bool("offline-template-package", false, "Read the template package directly for offline review")
-	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	force := flags.Bool("force", false, "Replace an installed profile when --profile points to a packed archive")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	if !*offlineTemplatePackage {
-		return errors.New("--profile audit reads template packages only for offline review; add --offline-template-package")
-	}
-	resolvedProfilePath, err := materializeProfileReference(templatePackageReference(*templatePackagePath, *profilePath), *profileHome, *force)
-	if err != nil {
-		return err
-	}
-	bundle, err := profile.Load(resolvedProfilePath)
-	if err != nil {
-		return err
-	}
-
-	options := profileaudit.Options{
-		Bundle:     bundle,
-		BundlePath: resolvedProfilePath,
-	}
-	resolvedStoreURL, err := resolveStoreReference(*storeRef, *storeURL)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(resolvedStoreURL) != "" {
-		s, err := openStore(ctx, resolvedStoreURL)
-		if err != nil {
-			return err
-		}
-		defer closeCLIStore(s)
-		options.Store = s
-	}
-
-	report, err := profileaudit.Audit(ctx, options)
-	if err != nil {
-		return err
-	}
-	if *jsonOutput {
-		encoder := json.NewEncoder(os.Stdout)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(report)
-	}
-	printProfileAudit(report)
-	return nil
-}
-
-func runProfileAuditPlan(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("profile audit-plan", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path")
-	templatePackagePath := flags.String("template-package", "", "Template package path or installed template package id")
-	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	offlineTemplatePackage := flags.Bool("offline-template-package", false, "Read the template package directly for offline review")
-	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	force := flags.Bool("force", false, "Replace an installed profile when --profile points to a packed archive")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	if !*offlineTemplatePackage {
-		return errors.New("--profile audit-plan reads template packages only for offline review; add --offline-template-package")
-	}
-	resolvedStoreURL, err := resolveStoreReference(*storeRef, *storeURL)
-	if err != nil {
-		return err
-	}
-	report, err := profileAuditRepairPlan(ctx, templatePackageReference(*templatePackagePath, *profilePath), *profileHome, resolvedStoreURL, *force)
-	if err != nil {
-		return err
-	}
-	if *jsonOutput {
-		return writeIndentedJSON(report)
-	}
-	printProfileAuditRepairPlan(report)
-	return nil
-}
-
-func profileAuditRepairPlan(ctx context.Context, profilePath string, profileHome string, storeURL string, force bool) (profileaudit.RepairPlanReport, error) {
-	resolvedProfilePath, err := materializeProfileReference(profilePath, profileHome, force)
-	if err != nil {
-		return profileaudit.RepairPlanReport{}, err
-	}
-	bundle, err := profile.Load(resolvedProfilePath)
-	if err != nil {
-		return profileaudit.RepairPlanReport{}, err
-	}
-	options := profileaudit.Options{
-		Bundle:     bundle,
-		BundlePath: resolvedProfilePath,
-	}
-	if strings.TrimSpace(storeURL) != "" {
-		s, err := openStore(ctx, storeURL)
-		if err != nil {
-			return profileaudit.RepairPlanReport{}, err
-		}
-		defer closeCLIStore(s)
-		options.Store = s
-	}
-	audit, err := profileaudit.Audit(ctx, options)
-	if err != nil {
-		return profileaudit.RepairPlanReport{}, err
-	}
-	return profileaudit.RepairPlan(audit), nil
-}
-
-func printProfileAudit(report profileaudit.Report) {
-	fmt.Printf("Profile Audit: %s\n", report.ProfileID)
-	fmt.Printf("OK: %t\n", report.OK)
-	fmt.Printf("Issues: %d\n", report.IssueCount)
-	for _, item := range report.Issues {
-		fmt.Printf("- [%s] %s %s %s: %s\n", item.Severity, item.Code, item.SubjectType, item.SubjectID, item.Message)
-	}
-	if report.Store == nil {
-		return
-	}
-	fmt.Printf("Store Profile Indexed: %t\n", report.Store.ProfileIndexed)
-	if report.Store.BundleDigest != "" || report.Store.IndexedDigest != "" {
-		fmt.Printf("Store Digest Matches: %t\n", report.Store.DigestMatches)
-	}
-	for _, item := range report.Store.APICases {
-		status := item.LatestStatus
-		if status == "" {
-			status = "not-run"
-		}
-		fmt.Printf("API Case: %s Status: %s Passed: %t\n", item.CaseID, status, item.HasPassed)
-	}
-}
-
-func printProfileAuditRepairPlan(report profileaudit.RepairPlanReport) {
-	fmt.Printf("Profile Audit Repair Plan: %s\n", report.ProfileID)
-	fmt.Printf("Issues: %d\n", report.IssueCount)
-	fmt.Printf("Actions: %d\n", report.ActionCount)
-	for _, item := range report.Actions {
-		fmt.Printf("- %s %s %s %s: %s\n", item.Type, item.IssueCode, item.SubjectType, item.SubjectID, item.SuggestedChange)
-	}
-	for _, warning := range report.Warnings {
-		fmt.Printf("Warning: %s\n", warning)
-	}
 }

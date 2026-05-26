@@ -7,294 +7,46 @@ import (
 	"strings"
 	"time"
 
+	domaincatalog "agent-testbench/internal/domain/catalog"
 	"agent-testbench/internal/domain/profile"
-	"agent-testbench/internal/store"
 )
 
 const ReadModelInterfaceNodes = "interface-nodes"
 
-func FromBundle(bundle profile.Bundle, indexedAt time.Time) store.ProfileCatalog {
-	catalog := store.ProfileCatalog{
-		ProfileID: bundle.ID,
-		IndexedAt: indexedAt,
-	}
+func FromBundle(bundle profile.Bundle, indexedAt time.Time) domaincatalog.ProfileCatalog {
 	runtimeEnv := runtimeEnvFromBundle(bundle)
-	for _, service := range bundle.Services {
-		catalog.Services = append(catalog.Services, store.CatalogService{
-			ID:                  service.ID,
-			DisplayName:         service.DisplayName,
-			Kind:                service.Kind,
-			AttachedTemplateIDs: service.AttachedTemplateIDs,
-			GitURL:              service.GitURL,
-			GitBranch:           service.GitBranch,
-			RepoEnv:             service.RepoEnv,
-			SourcePath:          serviceSourcePath(runtimeEnv, service),
-			ContainerName:       service.ContainerName,
-			Image:               service.Image,
-			DockerService:       service.DockerService,
-			ServicePort:         service.ServicePort,
-			ManagementPort:      service.ManagementPort,
-			MemoryMb:            service.MemoryMb,
-			CPUMilli:            service.CPUMilli,
-			StartupCommand:      service.StartupCommand,
-			HealthURL:           service.HealthURL,
-			LogPath:             service.LogPath,
-			Status:              service.Status,
-			SortOrder:           service.SortOrder,
-		})
+	return domaincatalog.ProfileCatalog{
+		ProfileID:        bundle.ID,
+		IndexedAt:        indexedAt,
+		Services:         catalogServicesFromProfile(bundle.Services, runtimeEnv),
+		Workflows:        catalogWorkflowsFromProfile(bundle.Workflows),
+		InterfaceNodes:   catalogInterfaceNodesFromProfile(bundle.InterfaceNodes),
+		APICases:         catalogAPICasesFromProfile(bundle.APICases),
+		RequestTemplates: catalogRequestTemplatesFromProfile(bundle.RequestTemplates),
+		WorkflowBindings: catalogWorkflowBindingsFromProfile(bundle.WorkflowBindings),
+		CaseDependencies: catalogCaseDependenciesFromProfile(bundle.CaseDependencies),
+		TemplateConfigs:  catalogTemplateConfigsFromProfile(bundle.TemplateConfigs),
+		Fixtures:         catalogFixturesFromProfile(bundle.Fixtures),
 	}
-	for _, workflow := range bundle.Workflows {
-		catalog.Workflows = append(catalog.Workflows, store.CatalogWorkflow{
-			ID:                workflow.ID,
-			DisplayName:       workflow.DisplayName,
-			Description:       workflow.Description,
-			BaseStepTimeoutMs: workflow.BaseStepTimeoutMs,
-			TimeoutOffsetMs:   workflow.TimeoutOffsetMs,
-		})
-	}
-	for _, node := range bundle.InterfaceNodes {
-		catalog.InterfaceNodes = append(catalog.InterfaceNodes, store.CatalogInterfaceNode{
-			ID:          node.ID,
-			DisplayName: node.DisplayName,
-			ServiceID:   node.ServiceID,
-			Operation:   node.Operation,
-			Method:      node.Method,
-			Path:        node.Path,
-			TemplateID:  node.TemplateID,
-			Version:     node.Version,
-			Status:      node.Status,
-			Tags:        node.Tags,
-			Description: node.Description,
-			TimeoutMs:   node.TimeoutMs,
-			SortOrder:   node.SortOrder,
-			CreatedAt:   node.CreatedAt,
-			UpdatedAt:   node.UpdatedAt,
-		})
-	}
-	for _, item := range bundle.APICases {
-		catalog.APICases = append(catalog.APICases, store.CatalogAPICase{
-			ID:                   item.ID,
-			DisplayName:          item.DisplayName,
-			Description:          item.Description,
-			NodeID:               item.NodeID,
-			CaseType:             item.CaseType,
-			Scenario:             item.Scenario,
-			Tags:                 item.Tags,
-			Priority:             item.Priority,
-			Owner:                item.Owner,
-			PayloadTemplateJSON:  item.PayloadTemplateJSON,
-			RequestTemplateID:    item.RequestTemplateID,
-			PatchJSON:            item.PatchJSON,
-			RenderMode:           item.RenderMode,
-			ExpectedJSON:         item.ExpectedJSON,
-			RequiredForAdmission: item.RequiredForAdmission,
-			Status:               item.Status,
-			SortOrder:            item.SortOrder,
-			CasePath:             item.CasePath,
-			SourceKind:           item.SourceKind,
-			SourcePath:           item.SourcePath,
-			ExecutorID:           item.ExecutorID,
-			BaseURL:              item.BaseURL,
-			EvidenceDir:          item.EvidenceDir,
-			TimeoutSeconds:       item.TimeoutSeconds,
-			DefaultOverridesJSON: jsonStringMap(item.DefaultOverrides),
-		})
-	}
-	for _, template := range bundle.RequestTemplates {
-		catalog.RequestTemplates = append(catalog.RequestTemplates, store.CatalogRequestTemplate{
-			ID:           template.ID,
-			DisplayName:  template.DisplayName,
-			NodeID:       template.NodeID,
-			Method:       template.Method,
-			Path:         template.Path,
-			TemplateJSON: template.TemplateJSON,
-		})
-	}
-	for _, binding := range bundle.WorkflowBindings {
-		catalog.WorkflowBindings = append(catalog.WorkflowBindings, store.CatalogWorkflowBinding{
-			WorkflowID: binding.WorkflowID,
-			StepID:     binding.StepID,
-			NodeID:     binding.NodeID,
-			CaseID:     binding.CaseID,
-			Required:   binding.Required,
-			SortOrder:  binding.SortOrder,
-		})
-	}
-	for _, dependency := range bundle.CaseDependencies {
-		catalog.CaseDependencies = append(catalog.CaseDependencies, store.CatalogCaseDependency{
-			ID:           dependency.ID,
-			CaseID:       dependency.CaseID,
-			FixtureID:    dependency.FixtureID,
-			MappingsJSON: dependency.MappingsJSON,
-		})
-	}
-	for _, config := range bundle.TemplateConfigs {
-		catalog.TemplateConfigs = append(catalog.TemplateConfigs, store.CatalogTemplateConfig{
-			ID:          config.ID,
-			TemplateID:  config.TemplateID,
-			NodeID:      config.NodeID,
-			WorkflowID:  config.WorkflowID,
-			ScopeType:   config.ScopeType,
-			ScopeID:     config.ScopeID,
-			Title:       config.Title,
-			Description: config.Description,
-			ConfigJSON:  config.ConfigJSON,
-			Status:      config.Status,
-			SortOrder:   config.SortOrder,
-		})
-	}
-	for _, fixture := range bundle.Fixtures {
-		catalog.Fixtures = append(catalog.Fixtures, store.CatalogFixture{
-			ID:          fixture.ID,
-			DisplayName: fixture.DisplayName,
-			Kind:        fixture.Kind,
-			DataJSON:    fixture.DataJSON,
-		})
-	}
-	return catalog
 }
 
-func ToBundle(catalog store.ProfileCatalog) profile.Bundle {
-	bundle := profile.Bundle{
-		ID:          catalog.ProfileID,
-		DisplayName: catalog.ProfileID,
+func ToBundle(catalog domaincatalog.ProfileCatalog) profile.Bundle {
+	return profile.Bundle{
+		ID:               catalog.ProfileID,
+		DisplayName:      catalog.ProfileID,
+		Services:         profileServicesFromCatalog(catalog.Services),
+		Workflows:        profileWorkflowsFromCatalog(catalog.Workflows),
+		InterfaceNodes:   profileInterfaceNodesFromCatalog(catalog.InterfaceNodes),
+		APICases:         profileAPICasesFromCatalog(catalog.APICases),
+		RequestTemplates: profileRequestTemplatesFromCatalog(catalog.RequestTemplates),
+		WorkflowBindings: profileWorkflowBindingsFromCatalog(catalog.WorkflowBindings),
+		CaseDependencies: profileCaseDependenciesFromCatalog(catalog.CaseDependencies),
+		Fixtures:         profileFixturesFromCatalog(catalog.Fixtures),
+		TemplateConfigs:  profileTemplateConfigsFromCatalog(catalog.TemplateConfigs),
 	}
-	for _, service := range catalog.Services {
-		bundle.Services = append(bundle.Services, profile.Service{
-			ID:                  service.ID,
-			DisplayName:         service.DisplayName,
-			Kind:                service.Kind,
-			AttachedTemplateIDs: service.AttachedTemplateIDs,
-			GitURL:              service.GitURL,
-			GitBranch:           service.GitBranch,
-			RepoEnv:             service.RepoEnv,
-			SourcePath:          service.SourcePath,
-			ContainerName:       service.ContainerName,
-			Image:               service.Image,
-			DockerService:       service.DockerService,
-			ServicePort:         service.ServicePort,
-			ManagementPort:      service.ManagementPort,
-			MemoryMb:            service.MemoryMb,
-			CPUMilli:            service.CPUMilli,
-			StartupCommand:      service.StartupCommand,
-			HealthURL:           service.HealthURL,
-			LogPath:             service.LogPath,
-			Status:              service.Status,
-			SortOrder:           service.SortOrder,
-		})
-	}
-	for _, workflow := range catalog.Workflows {
-		bundle.Workflows = append(bundle.Workflows, profile.Workflow{
-			ID:                workflow.ID,
-			DisplayName:       workflow.DisplayName,
-			Description:       workflow.Description,
-			BaseStepTimeoutMs: workflow.BaseStepTimeoutMs,
-			TimeoutOffsetMs:   workflow.TimeoutOffsetMs,
-		})
-	}
-	for _, node := range catalog.InterfaceNodes {
-		bundle.InterfaceNodes = append(bundle.InterfaceNodes, profile.InterfaceNode{
-			ID:          node.ID,
-			DisplayName: node.DisplayName,
-			ServiceID:   node.ServiceID,
-			Operation:   node.Operation,
-			Method:      node.Method,
-			Path:        node.Path,
-			TemplateID:  node.TemplateID,
-			Version:     node.Version,
-			Status:      node.Status,
-			Tags:        node.Tags,
-			Description: node.Description,
-			TimeoutMs:   node.TimeoutMs,
-			SortOrder:   node.SortOrder,
-			CreatedAt:   node.CreatedAt,
-			UpdatedAt:   node.UpdatedAt,
-		})
-	}
-	for _, item := range catalog.APICases {
-		bundle.APICases = append(bundle.APICases, profile.APICase{
-			ID:                   item.ID,
-			DisplayName:          item.DisplayName,
-			Description:          item.Description,
-			NodeID:               item.NodeID,
-			CaseType:             item.CaseType,
-			Scenario:             item.Scenario,
-			Tags:                 item.Tags,
-			Priority:             item.Priority,
-			Owner:                item.Owner,
-			PayloadTemplateJSON:  item.PayloadTemplateJSON,
-			RequestTemplateID:    item.RequestTemplateID,
-			PatchJSON:            item.PatchJSON,
-			RenderMode:           item.RenderMode,
-			ExpectedJSON:         item.ExpectedJSON,
-			RequiredForAdmission: item.RequiredForAdmission,
-			Status:               item.Status,
-			SortOrder:            item.SortOrder,
-			CasePath:             item.CasePath,
-			SourceKind:           item.SourceKind,
-			SourcePath:           item.SourcePath,
-			ExecutorID:           item.ExecutorID,
-			BaseURL:              item.BaseURL,
-			EvidenceDir:          item.EvidenceDir,
-			TimeoutSeconds:       item.TimeoutSeconds,
-			DefaultOverrides:     jsonMap(item.DefaultOverridesJSON),
-		})
-	}
-	for _, template := range catalog.RequestTemplates {
-		bundle.RequestTemplates = append(bundle.RequestTemplates, profile.RequestTemplate{
-			ID:           template.ID,
-			DisplayName:  template.DisplayName,
-			NodeID:       template.NodeID,
-			Method:       template.Method,
-			Path:         template.Path,
-			TemplateJSON: template.TemplateJSON,
-		})
-	}
-	for _, binding := range catalog.WorkflowBindings {
-		bundle.WorkflowBindings = append(bundle.WorkflowBindings, profile.WorkflowBinding{
-			WorkflowID: binding.WorkflowID,
-			StepID:     binding.StepID,
-			NodeID:     binding.NodeID,
-			CaseID:     binding.CaseID,
-			Required:   binding.Required,
-			SortOrder:  binding.SortOrder,
-		})
-	}
-	for _, dependency := range catalog.CaseDependencies {
-		bundle.CaseDependencies = append(bundle.CaseDependencies, profile.CaseDependency{
-			ID:           dependency.ID,
-			CaseID:       dependency.CaseID,
-			FixtureID:    dependency.FixtureID,
-			MappingsJSON: dependency.MappingsJSON,
-		})
-	}
-	for _, fixture := range catalog.Fixtures {
-		bundle.Fixtures = append(bundle.Fixtures, profile.Fixture{
-			ID:          fixture.ID,
-			DisplayName: fixture.DisplayName,
-			Kind:        fixture.Kind,
-			DataJSON:    fixture.DataJSON,
-		})
-	}
-	for _, config := range catalog.TemplateConfigs {
-		bundle.TemplateConfigs = append(bundle.TemplateConfigs, profile.TemplateConfig{
-			ID:          config.ID,
-			TemplateID:  config.TemplateID,
-			NodeID:      config.NodeID,
-			WorkflowID:  config.WorkflowID,
-			ScopeType:   config.ScopeType,
-			ScopeID:     config.ScopeID,
-			Title:       config.Title,
-			Description: config.Description,
-			ConfigJSON:  config.ConfigJSON,
-			Status:      config.Status,
-			SortOrder:   config.SortOrder,
-		})
-	}
-	return bundle
 }
 
-func InterfaceNodesReadModel(catalog store.ProfileCatalog, configVersionID string, generatedAt time.Time) (store.ReadModel, error) {
+func InterfaceNodesReadModel(catalog domaincatalog.ProfileCatalog, configVersionID string, generatedAt time.Time) (domaincatalog.ReadModel, error) {
 	payload := interfaceNodesReadModelPayload{
 		OK:           true,
 		TemplateID:   "TPL-INTERFACE-NODE-CASE-LIST-V1",
@@ -305,9 +57,9 @@ func InterfaceNodesReadModel(catalog store.ProfileCatalog, configVersionID strin
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return store.ReadModel{}, err
+		return domaincatalog.ReadModel{}, err
 	}
-	return store.ReadModel{
+	return domaincatalog.ReadModel{
 		ProfileID:       catalog.ProfileID,
 		Key:             ReadModelInterfaceNodes,
 		ConfigVersionID: configVersionID,
@@ -350,7 +102,7 @@ type interfaceNodeReadModel struct {
 	TotalElapsedMs       int64  `json:"totalElapsedMs,omitempty"`
 }
 
-func interfaceNodeReadModelItems(catalog store.ProfileCatalog) []interfaceNodeReadModel {
+func interfaceNodeReadModelItems(catalog domaincatalog.ProfileCatalog) []interfaceNodeReadModel {
 	requiredByNode := map[string]int{}
 	for _, item := range catalog.APICases {
 		if item.NodeID != "" && item.RequiredForAdmission && activeStatus(item.Status) {
@@ -380,7 +132,7 @@ func interfaceNodeReadModelItems(catalog store.ProfileCatalog) []interfaceNodeRe
 	return items
 }
 
-func interfaceNodesPresentationForCatalog(configs []store.CatalogTemplateConfig) interfaceNodesPresentation {
+func interfaceNodesPresentationForCatalog(configs []domaincatalog.TemplateConfig) interfaceNodesPresentation {
 	copy := map[string]string{}
 	for _, config := range configs {
 		if !activeStatus(config.Status) || config.ScopeType != "interface-node-directory" {

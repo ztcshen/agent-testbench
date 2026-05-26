@@ -2,19 +2,21 @@ package store
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"agent-testbench/internal/domain/catalog"
+	"agent-testbench/internal/domain/execution"
 )
 
-var ErrNotFound = errors.New("store record not found")
+var ErrNotFound = execution.ErrNotFound
 
 const (
-	StatusRunning = "running"
-	StatusPassed  = "passed"
-	StatusFailed  = "failed"
-	StatusSkipped = "skipped"
+	StatusRunning = execution.StatusRunning
+	StatusPassed  = execution.StatusPassed
+	StatusFailed  = execution.StatusFailed
+	StatusSkipped = execution.StatusSkipped
 )
 
 type Store interface {
@@ -54,36 +56,9 @@ type Store interface {
 	GetEnvironmentComponentGraph(context.Context, string) (EnvironmentComponentGraph, error)
 }
 
-type Run struct {
-	ID            string
-	ProfileID     string
-	EnvironmentID string
-	WorkflowID    string
-	Status        string
-	EvidenceRoot  string
-	SummaryJSON   string
-	StartedAt     time.Time
-	FinishedAt    time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-}
-
-type APICaseRun struct {
-	ID                   string
-	RunID                string
-	CaseID               string
-	Status               string
-	RequestSummaryJSON   string
-	AssertionSummaryJSON string
-	StartedAt            time.Time
-	FinishedAt           time.Time
-	CreatedAt            time.Time
-}
-
-type APICaseRunRecord struct {
-	Run     Run
-	CaseRun APICaseRun
-}
+type Run = execution.Run
+type APICaseRun = execution.APICaseRun
+type APICaseRunRecord = execution.APICaseRunRecord
 
 type EvidenceRecord struct {
 	ID         string
@@ -142,34 +117,9 @@ type BaselineGate struct {
 	UpdatedAt   time.Time
 }
 
-type ProfileIndex struct {
-	ProfileID    string
-	BundlePath   string
-	BundleDigest string
-	SummaryJSON  string
-	ImportedAt   time.Time
-	UpdatedAt    time.Time
-}
-
-type ConfigVersion struct {
-	ID           string
-	ProfileID    string
-	SourcePath   string
-	BundleDigest string
-	SummaryJSON  string
-	Active       bool
-	PublishedAt  time.Time
-	CreatedAt    time.Time
-}
-
-type ReadModel struct {
-	ProfileID       string
-	Key             string
-	ConfigVersionID string
-	PayloadJSON     string
-	GeneratedAt     time.Time
-	UpdatedAt       time.Time
-}
+type ProfileIndex = catalog.ProfileIndex
+type ConfigVersion = catalog.ConfigVersion
+type ReadModel = catalog.ReadModel
 
 type Environment struct {
 	ID                     string
@@ -369,184 +319,16 @@ func ValidateEnvironmentComponentGraph(envID string, g EnvironmentComponentGraph
 	return nil
 }
 
-type ProfileCatalog struct {
-	ProfileID        string
-	IndexedAt        time.Time
-	Services         []CatalogService
-	Workflows        []CatalogWorkflow
-	InterfaceNodes   []CatalogInterfaceNode
-	InterfaceFields  []CatalogInterfaceNodeField
-	APICases         []CatalogAPICase
-	RequestTemplates []CatalogRequestTemplate
-	WorkflowBindings []CatalogWorkflowBinding
-	CaseDependencies []CatalogCaseDependency
-	Fixtures         []CatalogFixture
-	TemplateConfigs  []CatalogTemplateConfig
-}
-
-type ProfileCatalogIndex struct {
-	ProfileID string
-	IndexedAt time.Time
-	Counts    ProfileCatalogCounts
-}
-
-type ProfileCatalogCounts struct {
-	Services         int
-	Workflows        int
-	InterfaceNodes   int
-	APICases         int
-	RequestTemplates int
-	WorkflowBindings int
-	CaseDependencies int
-	Fixtures         int
-	Templates        int
-	TemplateConfigs  int
-}
-
-type CatalogService struct {
-	ID                  string
-	DisplayName         string
-	Kind                string
-	AttachedTemplateIDs []string
-	GitURL              string
-	GitBranch           string
-	RepoEnv             string
-	SourcePath          string
-	ContainerName       string
-	Image               string
-	DockerService       string
-	ServicePort         int
-	ManagementPort      int
-	MemoryMb            int
-	CPUMilli            int
-	StartupCommand      string
-	HealthURL           string
-	LogPath             string
-	Status              string
-	SortOrder           int
-}
-
-type CatalogWorkflow struct {
-	ID                string
-	DisplayName       string
-	Description       string
-	BaseStepTimeoutMs int
-	TimeoutOffsetMs   int
-}
-
-type CatalogInterfaceNode struct {
-	ID          string
-	DisplayName string
-	ServiceID   string
-	Operation   string
-	Method      string
-	Path        string
-	TemplateID  string
-	Version     string
-	Status      string
-	Tags        []string
-	Description string
-	TimeoutMs   int
-	SortOrder   int
-	CreatedAt   string
-	UpdatedAt   string
-}
-
-type CatalogInterfaceNodeField struct {
-	ID          string
-	NodeID      string
-	Direction   string
-	FieldPath   string
-	DisplayName string
-	DataType    string
-	Required    bool
-	Bindable    bool
-	PortType    string
-	Status      string
-	SortOrder   int
-}
-
-type CatalogAPICase struct {
-	ID                   string
-	DisplayName          string
-	Description          string
-	NodeID               string
-	CaseType             string
-	Scenario             string
-	Tags                 []string
-	Priority             string
-	Owner                string
-	PayloadTemplateJSON  string
-	RequestTemplateID    string
-	PatchJSON            string
-	RenderMode           string
-	ExpectedJSON         string
-	RequiredForAdmission bool
-	Status               string
-	SortOrder            int
-	CasePath             string
-	SourceKind           string
-	SourcePath           string
-	ExecutorID           string
-	BaseURL              string
-	EvidenceDir          string
-	TimeoutSeconds       int
-	DefaultOverridesJSON string
-}
-
-type CatalogRequestTemplate struct {
-	ID           string
-	DisplayName  string
-	NodeID       string
-	Method       string
-	Path         string
-	TemplateJSON string
-	Version      string
-	Status       string
-	SortOrder    int
-}
-
-type CatalogWorkflowBinding struct {
-	WorkflowID string
-	StepID     string
-	NodeID     string
-	CaseID     string
-	Required   bool
-	SortOrder  int
-}
-
-type CatalogCaseDependency struct {
-	ID           string
-	CaseID       string
-	FixtureID    string
-	MappingsJSON string
-	Required     bool
-	Status       string
-	SortOrder    int
-}
-
-type CatalogFixture struct {
-	ID               string
-	DisplayName      string
-	Kind             string
-	DataJSON         string
-	SourceWorkflowID string
-	SourceUntilStep  string
-	TTLSeconds       int
-	Status           string
-	SortOrder        int
-}
-
-type CatalogTemplateConfig struct {
-	ID          string
-	TemplateID  string
-	NodeID      string
-	WorkflowID  string
-	ScopeType   string
-	ScopeID     string
-	Title       string
-	Description string
-	ConfigJSON  string
-	Status      string
-	SortOrder   int
-}
+type ProfileCatalog = catalog.ProfileCatalog
+type ProfileCatalogIndex = catalog.ProfileCatalogIndex
+type ProfileCatalogCounts = catalog.ProfileCatalogCounts
+type CatalogService = catalog.Service
+type CatalogWorkflow = catalog.Workflow
+type CatalogInterfaceNode = catalog.InterfaceNode
+type CatalogInterfaceNodeField = catalog.InterfaceNodeField
+type CatalogAPICase = catalog.APICase
+type CatalogRequestTemplate = catalog.RequestTemplate
+type CatalogWorkflowBinding = catalog.WorkflowBinding
+type CatalogCaseDependency = catalog.CaseDependency
+type CatalogFixture = catalog.Fixture
+type CatalogTemplateConfig = catalog.TemplateConfig

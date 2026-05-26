@@ -17,7 +17,6 @@ import (
 
 	"agent-testbench/internal/domain/profile"
 	"agent-testbench/internal/domain/profilecatalog"
-	"agent-testbench/internal/domain/workflowaudit"
 	"agent-testbench/internal/server/controlplane"
 	"agent-testbench/internal/store"
 )
@@ -56,6 +55,12 @@ type workflowCaseReportStep struct {
 	Method    string `json:"method,omitempty"`
 	FullURL   string `json:"fullUrl,omitempty"`
 	Error     string `json:"error,omitempty"`
+}
+
+type workflowCaseReportExecution struct {
+	RawSteps    []any
+	StepResults []map[string]any
+	StepReports []workflowCaseReportStep
 }
 
 func runWorkflowReport(ctx context.Context, args []string) error {
@@ -129,35 +134,44 @@ func executeWorkflowCaseReport(ctx context.Context, bundle profile.Bundle, sourc
 	if err != nil {
 		return workflowCaseReport{}, err
 	}
+	execution, err := runWorkflowCaseReportSteps(server.URL, bundle, workflowID, workflow, baseURL)
+	if err != nil {
+		return workflowCaseReport{}, err
+	}
+	report := workflowCaseReportFromExecution(bundle, workflowID, workflow, started, execution)
+	if runID := saveWorkflowCaseReportRun(server.URL, workflowID, report, execution); runID != "" {
+		report.RunID = runID
+	}
+	if err := writeWorkflowCaseReportFiles(outputDir, &report); err != nil {
+		return workflowCaseReport{}, err
+	}
+	return report, nil
+}
+
+func runWorkflowCaseReportSteps(serverURL string, bundle profile.Bundle, workflowID string, workflow map[string]any, baseURL string) (workflowCaseReportExecution, error) {
 	bindingCaseIDs := workflowBindingCaseIDs(bundle.WorkflowBindings, workflowID)
 	contextValues := map[string]any{}
 	rawSteps := listFromReportAny(workflow["steps"])
-	steps := make([]map[string]any, 0, len(rawSteps))
-	stepReports := make([]workflowCaseReportStep, 0, len(rawSteps))
-	for _, rawStep := range rawSteps {
+	execution := workflowCaseReportExecution{
+		RawSteps:    rawSteps,
+		StepResults: make([]map[string]any, 0, len(rawSteps)),
+		StepReports: make([]workflowCaseReportStep, 0, len(rawSteps)),
+	}
+	for _, rawStep := range execution.RawSteps {
 		step := mapFromReportAny(rawStep)
 		caseID := runnableWorkflowCaseID(bundle.APICases, valueString(step["caseId"]), bindingCaseIDs[valueString(step["id"])])
 		if caseID == "" {
 			continue
 		}
-		timeoutSeconds := workflowStepTimeoutSeconds(workflow, step)
-		payload := map[string]any{
-			"caseId":         caseID,
-			"workflowId":     workflowID,
-			"stepId":         valueString(step["id"]),
-			"overrides":      contextValues,
-			"timeoutSeconds": timeoutSeconds,
-			"baseUrl":        baseURL,
-		}
-		result, err := postReportMap(server.URL+"/api/test-kit/run", payload)
+		result, err := postReportMap(serverURL+"/api/test-kit/run", workflowStepRunPayload(workflow, workflowID, step, caseID, contextValues, baseURL))
 		if err != nil {
-			return workflowCaseReport{}, err
+			return workflowCaseReportExecution{}, err
 		}
 		result["stepId"] = valueString(step["id"])
 		result["title"] = firstNonEmpty(valueString(step["displayName"]), valueString(step["id"]))
 		result["stepOk"] = boolFromReportAny(result["ok"])
-		steps = append(steps, result)
-		stepReports = append(stepReports, workflowReportStepItem(step, result))
+		execution.StepResults = append(execution.StepResults, result)
+		execution.StepReports = append(execution.StepReports, workflowReportStepItem(step, result))
 		for key, value := range workflowExportedValues(step, result) {
 			contextValues[key] = value
 		}
@@ -165,27 +179,49 @@ func executeWorkflowCaseReport(ctx context.Context, bundle profile.Bundle, sourc
 			break
 		}
 	}
+	return execution, nil
+}
+
+func workflowStepRunPayload(workflow map[string]any, workflowID string, step map[string]any, caseID string, contextValues map[string]any, baseURL string) map[string]any {
+	return map[string]any{
+		"caseId":         caseID,
+		"workflowId":     workflowID,
+		"stepId":         valueString(step["id"]),
+		"overrides":      contextValues,
+		"timeoutSeconds": workflowStepTimeoutSeconds(workflow, step),
+		"baseUrl":        baseURL,
+	}
+}
+
+func workflowCaseReportFromExecution(bundle profile.Bundle, workflowID string, workflow map[string]any, started time.Time, execution workflowCaseReportExecution) workflowCaseReport {
 	report := workflowCaseReport{
-		OK:           len(stepReports) == len(rawSteps),
+		OK:           len(execution.StepReports) == len(execution.RawSteps),
 		ProfileID:    bundle.ID,
 		WorkflowID:   workflowID,
 		WorkflowName: firstNonEmpty(valueString(workflow["displayName"]), workflowID),
 		ElapsedMs:    time.Since(started).Milliseconds(),
 		GeneratedAt:  time.Now().UTC(),
-		Steps:        stepReports,
-		Counts:       workflowCaseReportCounts{Total: len(rawSteps)},
+		Steps:        execution.StepReports,
+		Counts:       workflowCaseReportCounts{Total: len(execution.RawSteps)},
 	}
-	for _, item := range stepReports {
+	for _, item := range execution.StepReports {
 		if item.Status == store.StatusPassed {
 			report.Counts.Passed++
-		} else {
-			report.Counts.Failed++
-			report.OK = false
+			continue
 		}
-	}
-	if len(stepReports) != len(rawSteps) {
-		report.Counts.Failed += len(rawSteps) - len(stepReports)
+		report.Counts.Failed++
 		report.OK = false
+	}
+	if missing := len(execution.RawSteps) - len(execution.StepReports); missing > 0 {
+		report.Counts.Failed += missing
+		report.OK = false
+	}
+	return report
+}
+
+func saveWorkflowCaseReportRun(serverURL string, workflowID string, report workflowCaseReport, execution workflowCaseReportExecution) string {
+	if len(execution.StepResults) == 0 {
+		return ""
 	}
 	snapshot := map[string]any{
 		"workflowId": workflowID,
@@ -193,22 +229,17 @@ func executeWorkflowCaseReport(ctx context.Context, bundle profile.Bundle, sourc
 		"ok":         report.OK,
 		"elapsedMs":  report.ElapsedMs,
 		"summary": map[string]any{
-			"expectedStepCount": len(rawSteps),
-			"stepCount":         len(stepReports),
+			"expectedStepCount": len(execution.RawSteps),
+			"stepCount":         len(execution.StepReports),
 			"passed":            report.Counts.Passed,
 			"elapsedMs":         report.ElapsedMs,
 		},
-		"steps": steps,
+		"steps": execution.StepResults,
 	}
-	if len(steps) > 0 {
-		if saved, err := postReportMap(server.URL+"/api/workflow-runs", snapshot); err == nil {
-			report.RunID = valueString(saved["workflowRunId"])
-		}
+	if saved, err := postReportMap(serverURL+"/api/workflow-runs", snapshot); err == nil {
+		return valueString(saved["workflowRunId"])
 	}
-	if err := writeWorkflowCaseReportFiles(outputDir, &report); err != nil {
-		return workflowCaseReport{}, err
-	}
-	return report, nil
+	return ""
 }
 
 func workflowBindingCaseIDs(bindings []profile.WorkflowBinding, workflowID string) map[string]string {
@@ -460,184 +491,4 @@ func renderWorkflowCaseReportHTML(report workflowCaseReport) string {
 	}
 	b.WriteString(`</tbody></table></main></body></html>`)
 	return b.String()
-}
-
-func runWorkflowAudit(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("workflow audit", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path")
-	workflowID := flags.String("workflow", "", "Workflow id")
-	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	offlineTemplatePackage := flags.Bool("offline-template-package", false, "Read the template package directly for offline review")
-	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	if strings.TrimSpace(*workflowID) == "" {
-		return errors.New("--workflow is required")
-	}
-
-	var (
-		bundle  profile.Bundle
-		runtime store.Store
-		cleanup = func() {}
-		err     error
-	)
-	if *offlineTemplatePackage {
-		if strings.TrimSpace(*profilePath) == "" {
-			return errors.New("--offline-template-package requires --profile")
-		}
-		bundle, err = profile.Load(*profilePath)
-		if err != nil {
-			return err
-		}
-		resolvedStoreURL, err := resolveStoreReference(*storeRef, *storeURL)
-		if err != nil {
-			return err
-		}
-		if strings.TrimSpace(resolvedStoreURL) != "" {
-			runtime, err = openStore(ctx, resolvedStoreURL)
-			if err != nil {
-				return err
-			}
-			cleanup = func() {
-				closeCLIStore(runtime)
-			}
-		}
-	} else {
-		if strings.TrimSpace(*profilePath) != "" {
-			return errors.New("--profile is for offline template package review; add --offline-template-package or use --store NAME_OR_DSN")
-		}
-		resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
-		if err != nil {
-			return err
-		}
-		runtime, err = openStore(ctx, resolvedStoreURL)
-		if err != nil {
-			return err
-		}
-		cleanup = func() {
-			closeCLIStore(runtime)
-		}
-		bundle, err = serveBundle(ctx, runtime)
-		if err != nil {
-			cleanup()
-			return err
-		}
-	}
-	defer cleanup()
-	if _, ok := findWorkflow(bundle, *workflowID); !ok {
-		return fmt.Errorf("workflow not found: %s", *workflowID)
-	}
-
-	options := workflowaudit.Options{
-		Bundle:     bundle,
-		WorkflowID: *workflowID,
-		Store:      runtime,
-	}
-	report, err := workflowaudit.Audit(ctx, options)
-	if err != nil {
-		return err
-	}
-	if *jsonOutput {
-		encoder := json.NewEncoder(os.Stdout)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(report)
-	}
-	printWorkflowAudit(report)
-	return nil
-}
-
-func printWorkflowAudit(report workflowaudit.Report) {
-	fmt.Printf("Workflow Audit: %s\n", report.WorkflowID)
-	fmt.Printf("Profile: %s\n", report.ProfileID)
-	if report.DisplayName != "" {
-		fmt.Printf("Display Name: %s\n", report.DisplayName)
-	}
-	fmt.Printf("OK: %t\n", report.OK)
-	fmt.Printf("Issues: %d\n", report.IssueCount)
-	fmt.Printf("Bindings: %d\n", report.BindingCount)
-	for _, item := range report.Bindings {
-		fmt.Printf("Binding: %s Node: %s", item.StepID, item.NodeID)
-		if item.CaseID != "" {
-			fmt.Printf(" Case: %s", item.CaseID)
-		}
-		fmt.Printf(" Required: %t\n", item.Required)
-	}
-	for _, item := range report.Issues {
-		fmt.Printf("- [%s] %s %s %s: %s\n", item.Severity, item.Code, item.SubjectType, item.SubjectID, item.Message)
-	}
-	if report.Store == nil {
-		return
-	}
-	if report.Store.LatestRun == nil {
-		fmt.Println("Latest Run: not-run")
-	} else {
-		fmt.Printf("Latest Run: %s [%s]\n", report.Store.LatestRun.ID, report.Store.LatestRun.Status)
-	}
-	for _, item := range report.Store.BindingCases {
-		status := item.LatestStatus
-		if status == "" {
-			status = "not-run"
-		}
-		fmt.Printf("Binding Case: %s %s Status: %s Passed: %t\n", item.StepID, item.CaseID, status, item.HasPassed)
-	}
-}
-
-func runWorkflowPlan(args []string) error {
-	flags := flag.NewFlagSet("workflow plan", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
-	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	workflowID := flags.String("workflow", "", "Workflow id")
-	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	if strings.TrimSpace(*workflowID) == "" {
-		return errors.New("--workflow is required")
-	}
-	bundle, runtime, _, cleanup, err := loadRequiredInterfaceNodeReportBundleFromStoreFlags(context.Background(), *profilePath, *profileHome, *storeRef, *storeURL)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
-	var planStore store.Store
-	if runtime != nil {
-		planStore = runtime
-	}
-	payload, ok, err := controlplane.WorkflowPlanPayload(context.Background(), bundle, *workflowID, planStore)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("workflow not found: %s", *workflowID)
-	}
-	if *jsonOutput {
-		return writeIndentedJSON(payload)
-	}
-
-	fmt.Printf("Workflow: %s\n", *workflowID)
-	for _, raw := range listFromReportAny(payload["steps"]) {
-		step := mapFromReportAny(raw)
-		fmt.Printf("Step: %s\n", valueString(step["stepId"]))
-		fmt.Printf("Node: %s\n", valueString(step["nodeId"]))
-		if caseID := valueString(step["caseId"]); caseID != "" {
-			fmt.Printf("Case: %s\n", caseID)
-		}
-		fmt.Printf("Required: %t\n", boolFromReportAny(step["required"]))
-	}
-	return nil
-}
-
-func findWorkflow(bundle profile.Bundle, id string) (profile.Workflow, bool) {
-	for _, workflow := range bundle.Workflows {
-		if workflow.ID == id {
-			return workflow, true
-		}
-	}
-	return profile.Workflow{}, false
 }

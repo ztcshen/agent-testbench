@@ -6,14 +6,21 @@ import (
 	"errors"
 	"strings"
 
+	domaincatalog "agent-testbench/internal/domain/catalog"
+	"agent-testbench/internal/domain/execution"
 	"agent-testbench/internal/domain/profile"
-	"agent-testbench/internal/store"
 )
 
 type Options struct {
 	Bundle     profile.Bundle
 	BundlePath string
-	Store      store.Store
+	Store      Store
+}
+
+type Store interface {
+	GetProfileIndex(context.Context, string) (domaincatalog.ProfileIndex, error)
+	ListRuns(context.Context) ([]execution.Run, error)
+	ListAPICaseRuns(context.Context, string) ([]execution.APICaseRun, error)
 }
 
 type Report struct {
@@ -281,7 +288,7 @@ func (a referenceAuditor) issues(bundle profile.Bundle) []Issue {
 	return issues
 }
 
-func auditStore(ctx context.Context, bundle profile.Bundle, bundlePath string, s store.Store) (StoreReport, error) {
+func auditStore(ctx context.Context, bundle profile.Bundle, bundlePath string, s Store) (StoreReport, error) {
 	report := StoreReport{APICases: make([]APICaseRunState, 0, len(bundle.APICases))}
 	if strings.TrimSpace(bundlePath) != "" {
 		digest, err := profile.BundleDigest(bundlePath)
@@ -292,7 +299,7 @@ func auditStore(ctx context.Context, bundle profile.Bundle, bundlePath string, s
 	}
 	index, err := s.GetProfileIndex(ctx, bundle.ID)
 	if err != nil {
-		if !errors.Is(err, store.ErrNotFound) {
+		if !errors.Is(err, execution.ErrNotFound) {
 			return StoreReport{}, err
 		}
 	} else {
@@ -318,7 +325,7 @@ func auditStore(ctx context.Context, bundle profile.Bundle, bundlePath string, s
 	return report, nil
 }
 
-func apiCaseRunStatusByCase(ctx context.Context, profileID string, s store.Store) (map[string]bool, map[string]string, error) {
+func apiCaseRunStatusByCase(ctx context.Context, profileID string, s Store) (map[string]bool, map[string]string, error) {
 	runs, err := s.ListRuns(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -337,7 +344,7 @@ func apiCaseRunStatusByCase(ctx context.Context, profileID string, s store.Store
 			if latest[item.CaseID] == "" {
 				latest[item.CaseID] = item.Status
 			}
-			if strings.EqualFold(item.Status, store.StatusPassed) {
+			if strings.EqualFold(item.Status, execution.StatusPassed) {
 				passed[item.CaseID] = true
 			}
 		}

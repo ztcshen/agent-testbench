@@ -20,113 +20,67 @@ import (
 )
 
 const version = "0.1.0"
+const interfaceNodeCommand = "interface-node"
+
+type rootCommand func([]string) error
+
+type unknownRootCommandError string
+
+func (e unknownRootCommandError) Error() string {
+	return "unknown command: " + string(e)
+}
+
+var rootCommands = map[string]rootCommand{
+	"commands":           runCommands,
+	"store":              func(args []string) error { return runStore(context.Background(), args) },
+	"sandbox":            func(args []string) error { return runSandbox(context.Background(), args) },
+	"environment":        func(args []string) error { return runEnvironment(context.Background(), args) },
+	"runtime":            func(args []string) error { return runRuntime(context.Background(), args) },
+	"profile":            runProfile,
+	"template-package":   runTemplatePackage,
+	"template-packages":  runTemplatePackage,
+	"config":             func(args []string) error { return runConfig(context.Background(), args) },
+	"evidence":           func(args []string) error { return runEvidence(context.Background(), args) },
+	"trace":              func(args []string) error { return runTrace(context.Background(), args) },
+	"replay":             runReplay,
+	"executor":           func(args []string) error { return runExecutor(context.Background(), args) },
+	"workflow":           runWorkflow,
+	"baseline":           func(args []string) error { return runBaseline(context.Background(), args) },
+	"template":           runTemplate,
+	"case":               func(args []string) error { return runCase(context.Background(), args) },
+	interfaceNodeCommand: runInterfaceNode,
+	"serve":              runServe,
+}
 
 func main() {
-	if len(os.Args) < 2 {
-		printHelp()
-		return
-	}
-
-	switch os.Args[1] {
-	case "version", "--version", "-v":
-		fmt.Printf("AgentTestBench %s\n", version)
-	case "help", "--help", "-h":
-		printHelp()
-	case "commands":
-		if err := runCommands(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
+	if err := runRootCommand(os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		var unknown unknownRootCommandError
+		if errors.As(err, &unknown) {
+			printHelp()
 		}
-	case "store":
-		if err := runStore(context.Background(), os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
-	case "sandbox":
-		if err := runSandbox(context.Background(), os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
-	case "environment":
-		if err := runEnvironment(context.Background(), os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
-	case "runtime":
-		if err := runRuntime(context.Background(), os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
-	case "profile":
-		if err := runProfile(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
-	case "template-package", "template-packages":
-		if err := runTemplatePackage(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
-	case "config":
-		if err := runConfig(context.Background(), os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
-	case "evidence":
-		if err := runEvidence(context.Background(), os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
-	case "trace":
-		if err := runTrace(context.Background(), os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
-	case "replay":
-		if err := runReplay(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
-	case "executor":
-		if err := runExecutor(context.Background(), os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
-	case "workflow":
-		if err := runWorkflow(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
-	case "baseline":
-		if err := runBaseline(context.Background(), os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
-	case "template":
-		if err := runTemplate(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
-	case "case":
-		if err := runCase(context.Background(), os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
-	case "interface-node":
-		if err := runInterfaceNode(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
-	case "serve":
-		if err := runServe(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
-	default:
-		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
-		printHelp()
 		os.Exit(2)
 	}
+}
+
+func runRootCommand(args []string) error {
+	if len(args) < 1 {
+		printHelp()
+		return nil
+	}
+	switch args[0] {
+	case "version", "--version", "-v":
+		fmt.Printf("AgentTestBench %s\n", version)
+		return nil
+	case "help", "--help", "-h":
+		printHelp()
+		return nil
+	}
+	command, ok := rootCommands[args[0]]
+	if !ok {
+		return unknownRootCommandError(args[0])
+	}
+	return command(args[1:])
 }
 
 func printHelp() {
@@ -134,120 +88,7 @@ func printHelp() {
 }
 
 func helpText() string {
-	return `AgentTestBench
-
-Usage:
-  agent-testbench version
-  agent-testbench commands [--filter TEXT] [--json]
-  agent-testbench store config set NAME --url postgres://...
-  agent-testbench store config set NAME --url mysql://...
-  agent-testbench store config set NAME --url sqlite://PATH
-  agent-testbench store config list [--json]
-  agent-testbench store use NAME
-  agent-testbench store current [--json]
-  agent-testbench store status [--store NAME_OR_DSN] [--json]
-  agent-testbench store provision [--store NAME_OR_DSN] [--json]
-  agent-testbench store upgrade [--store NAME_OR_DSN]
-  agent-testbench store ddl [--backend postgres|mysql] [--store NAME_OR_DSN]
-  agent-testbench store copy --from NAME_OR_DSN --to NAME_OR_DSN [--require-environment ENV_ID] [--require-verification-workflow ID] [--require-verified-environment] [--require-min-components N] [--require-min-dependencies N] [--require-min-assets N] [--require-inline-asset-bytes N] [--json]
-  agent-testbench environment register --id ID [--store NAME_OR_DSN] [--display-name NAME] [--service ID] [--repo SERVICE=PATH] [--branch SERVICE=BRANCH] [--checkout SERVICE=PATH] [--package-repo URL] [--package-branch BRANCH] [--package-ref REF] [--compose-file PATH]... [--compose-generated-file TARGET=SOURCE_FILE]... [--compose-env KEY=VALUE]... [--start-command TEXT] [--health-url URL] [--health-tcp HOST:PORT] [--health-command CMD] [--health-compose-service SERVICE] [--verification-workflow ID] [--json]
-  agent-testbench environment discover [--store NAME_OR_DSN] [--all] [--json]
-  agent-testbench environment inspect ENV_ID [--store NAME_OR_DSN] [--json]
-  agent-testbench environment bootstrap ENV_ID [--store NAME_OR_DSN] [--json]
-  agent-testbench environment repo set ENV_ID [--repo SERVICE=URL] [--branch SERVICE=BRANCH] [--repo-ref SERVICE=REF] [--checkout SERVICE=PATH] [--store NAME_OR_DSN] [--json]
-  agent-testbench environment startup-file put ENV_ID --file TARGET=SOURCE_FILE [--store NAME_OR_DSN] [--json]
-  agent-testbench environment components inspect ENV_ID [--store NAME_OR_DSN] [--json]
-  agent-testbench environment components replace ENV_ID --file COMPONENT_GRAPH_JSON [--store NAME_OR_DSN] [--json]
-  agent-testbench environment restore ENV_ID --workspace PATH [--store NAME_OR_DSN] [--execute] [--pull] [--prepare-repos-only] [--assume-clean-docker] [--use-existing-containers] [--clean-docker-state] [--clean-docker-images] [--allow-destructive-docker-cleanup] [--run-workflow --server-url URL] [--base-url URL] [--workflow-output-dir PATH] [--health-timeout-seconds N] [--json]
-  agent-testbench environment acceptance start ENV_ID --server-url URL --request-id ID [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
-  agent-testbench environment acceptance report ENV_ID --server-url URL --run ID [--json]
-  agent-testbench environment verify ENV_ID --run ID --status STATUS [--evidence-complete] [--topology-complete] [--store NAME_OR_DSN] [--json]
-  agent-testbench environment publish-verified ENV_ID [--store NAME_OR_DSN] [--json]
-  agent-testbench runtime mysql endpoints [--include-tables] [--json]
-  agent-testbench sandbox start [--store NAME_OR_DSN] [--service ID] [--kind KIND] [--timeout-seconds N] [--json]
-  agent-testbench sandbox service register --id ID [--store NAME_OR_DSN] [--display-name NAME] [--kind KIND] [--service-port N] [--health-url URL] [--json]
-  agent-testbench sandbox interface register --id ID --service-id ID --path PATH [--store NAME_OR_DSN] [--method METHOD] [--case-id ID] [--case-title TEXT] [--required-for-admission] [--json]
-  agent-testbench template-package install --from PATH [--profile-home PATH] [--force]
-  agent-testbench template-package inspect --template-package PATH_OR_ID [--profile-home PATH]
-  agent-testbench template-package catalog-index [--store NAME_OR_DSN] [--json]
-  agent-testbench template-package verify --template-package PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--require-case-runs] [--require-workflow-runs] [--json] [--force]
-  agent-testbench template-package import --from PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--json] [--audit] [--require-audit-ok] [--force]
-  agent-testbench profile init --output PATH [--id ID] [--display-name NAME] [--force]
-  agent-testbench profile install --from PATH [--profile-home PATH] [--force]
-  agent-testbench profile pack --profile PATH_OR_ID --output PATH [--profile-home PATH] [--force]
-  agent-testbench profile list [--profile-home PATH] [--json]
-  agent-testbench profile inspect --profile PATH_OR_ID [--profile-home PATH]
-  agent-testbench profile export --store NAME_OR_DSN --output PATH [--force] [--json]
-  agent-testbench profile audit --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--store NAME_OR_DSN] [--json] [--force]
-  agent-testbench profile audit-plan --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--store NAME_OR_DSN] [--json] [--force]
-  agent-testbench profile doctor --profile PATH_OR_ID --case-id ID [--profile-home PATH] [--json]
-  agent-testbench profile repair --from-manifest PATH [--profile PATH_OR_ID] [--profile-home PATH] [--apply] [--json]
-  agent-testbench profile generation-plan openapi --from PATH [--service-id ID] [--evidence-dir PATH] [--output-dir PATH] [--json]
-  agent-testbench profile import-plan openapi --from PATH [--service-id ID] [--evidence-dir PATH] [--output-dir PATH] [--json]
-  agent-testbench profile import-plan http-capture --from PATH [--service-id ID] [--evidence-dir PATH] [--output-dir PATH] [--json]
-  agent-testbench profile verify --profile PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--require-case-runs] [--require-workflow-runs] [--json] [--force]
-  agent-testbench profile import --from PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--json] [--audit] [--require-audit-ok] [--force]
-  agent-testbench config publish --from PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--json] [--audit] [--require-audit-ok] [--force]
-  agent-testbench executor plan [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--json]
-  agent-testbench evidence import --from PATH --profile ID [--store NAME_OR_DSN]
-  agent-testbench evidence list [--store NAME_OR_DSN] [--run ID] [--json]
-  agent-testbench evidence tasks [--store NAME_OR_DSN] --run ID [--step ID] [--case ID] [--kind KIND] [--status STATUS] [--json]
-  agent-testbench trace topology collect --run ID [--store NAME_OR_DSN] --trace-graphql-url URL [--step ID] [--case ID] [--request ID] [--endpoint TEXT] [--trace-id ID] [--json]
-  agent-testbench replay evidence --trace-id ID [--json]
-  agent-testbench workflow discover [--store NAME_OR_DSN] [--filter TEXT] [--json]
-  agent-testbench workflow discover --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--filter TEXT] [--json]
-  agent-testbench workflow plan [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] --workflow ID [--json]
-  agent-testbench workflow audit --workflow ID [--store NAME_OR_DSN] [--json]
-  agent-testbench workflow audit --profile PATH --offline-template-package --workflow ID [--store NAME_OR_DSN] [--json]
-  agent-testbench workflow runs [--store NAME_OR_DSN] [--json]
-  agent-testbench workflow run --run ID [--store NAME_OR_DSN] [--json]
-  agent-testbench workflow step --run ID --step ID [--store NAME_OR_DSN] [--json]
-  agent-testbench workflow latest-step --workflow ID --step ID [--store NAME_OR_DSN] [--json]
-  agent-testbench workflow gate --run ID [--store NAME_OR_DSN] [--require-passed] [--require-steps] [--require-evidence] [--json]
-  agent-testbench workflow report --workflow ID [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--base-url URL] [--output-dir PATH] [--json]
-  agent-testbench workflow acceptance start --server-url URL --workflow ID --request-id ID [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
-  agent-testbench workflow acceptance report --server-url URL --run ID [--json]
-  agent-testbench baseline get --profile ID --subject ID [--store NAME_OR_DSN]
-  agent-testbench baseline set --profile ID --subject ID --status STATUS [--required] [--store NAME_OR_DSN]
-  agent-testbench template render [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] --template ID [--fixture ID]
-  agent-testbench interface-node discover [--store NAME_OR_DSN] [--filter TEXT] [--json]
-  agent-testbench interface-node discover --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--filter TEXT] [--json]
-  agent-testbench interface-node coverage [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--workflow ID] [--json]
-  agent-testbench interface-node coverage-gaps [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--workflow ID] [--json]
-  agent-testbench interface-node case audit --profile PATH --node ID [--json]
-  agent-testbench interface-node case draft --profile PATH --node ID --case-id ID [--title TEXT] [--case-path PATH] [--method METHOD] [--path PATH] [--tag TAG] [--priority PRIORITY] [--owner OWNER] [--output PATH] [--json]
-  agent-testbench interface-node case apply --profile PATH --file PATH [--json]
-  agent-testbench interface-node case report --node ID [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
-  agent-testbench case discover [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
-  agent-testbench case discover --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
-  agent-testbench case suite report [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
-  agent-testbench case suite coverage [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
-  agent-testbench case suite stability [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--json]
-  agent-testbench case suite priority [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
-  agent-testbench case suite brief [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--stability-limit N] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
-  agent-testbench case suite quality [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
-  agent-testbench case suite quality-plan [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
-  agent-testbench case suite quality-report [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--output-dir PATH] [--json]
-  agent-testbench case suite inspect [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
-  agent-testbench case suite plan [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
-  agent-testbench case suite impact [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
-  agent-testbench case suite impact-report [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
-  agent-testbench case runs [--store NAME_OR_DSN] [--run ID] [--json]
-  agent-testbench case evidence [--store NAME_OR_DSN] [--case-run ID | --run ID [--case-id ID] [--step-id ID]] [--json]
-  agent-testbench case timing [--store NAME_OR_DSN] [--kind KIND] [--max-age-minutes N] [--json]
-  agent-testbench case batch start --server-url URL [--case ID]... [--node ID]... [--workflow ID] [--suite NAME] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
-  agent-testbench case batch report --server-url URL --run ID [--json]
-  agent-testbench case run --case PATH [--base-url URL] [--override KEY=VALUE] [--evidence-dir PATH] [--run-id ID] [--dry-run] [--json]
-  agent-testbench case run --case-id ID [--base-url URL] [--override KEY=VALUE] [--evidence-dir PATH] [--store NAME_OR_DSN] [--run-id ID] [--json]
-  agent-testbench case incomplete-batches [--profile PATH_OR_ID] [--store NAME_OR_DSN] [--json]
-  agent-testbench case diagnose [--store NAME_OR_DSN] [--case-run ID | --run ID [--case-id ID] [--step-id ID]] [--json]
-  agent-testbench case gate [--store NAME_OR_DSN] [--run ID] [--require-no-failures] [--require-evidence] [--min-passed N] [--json]
-  agent-testbench serve [--profile PATH_OR_ID] [--profile-home PATH] [--host HOST] [--port PORT] [--store NAME_OR_DSN]
-  agent-testbench help
-
-Serve reads profile catalog data from the local Store. When --profile is set,
-the external bundle is first published into the Store/read-model, then served
-from that indexed view.`
+	return helpTextContent
 }
 
 func applyEnvironmentServiceRepoUpdate(item map[string]any, update map[string]string) {

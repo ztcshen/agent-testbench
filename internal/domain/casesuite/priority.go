@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"agent-testbench/internal/domain/execution"
 	"agent-testbench/internal/domain/profile"
-	"agent-testbench/internal/store"
 )
 
 type PriorityOptions struct {
@@ -139,13 +139,13 @@ func priorityScore(item InspectionItem, stability StabilityItem, impactReasons [
 		reasons = append(reasons, "impacted")
 	}
 	switch NormalizeRunState(item.LatestStatus) {
-	case store.StatusFailed:
+	case execution.StatusFailed:
 		score += 60
 		reasons = append(reasons, "latest failed")
 	case "not-run":
 		score += 30
 		reasons = append(reasons, "not run")
-	case store.StatusPassed:
+	case execution.StatusPassed:
 		score += 5
 		reasons = append(reasons, "latest passed")
 	}

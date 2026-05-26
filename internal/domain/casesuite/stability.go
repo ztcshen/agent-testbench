@@ -5,8 +5,8 @@ import (
 	"sort"
 	"time"
 
+	"agent-testbench/internal/domain/execution"
 	"agent-testbench/internal/domain/profile"
-	"agent-testbench/internal/store"
 )
 
 type StabilityOptions struct {
@@ -117,9 +117,9 @@ func Stability(ctx context.Context, bundle profile.Bundle, runtime RecordStore, 
 		for index, record := range caseRecords {
 			status := NormalizeRunState(record.CaseRun.Status)
 			switch status {
-			case store.StatusPassed:
+			case execution.StatusPassed:
 				row.Passed++
-			case store.StatusFailed:
+			case execution.StatusFailed:
 				row.Failed++
 			}
 			if index > 0 && status != NormalizeRunState(caseRecords[index-1].CaseRun.Status) {
@@ -134,10 +134,10 @@ func Stability(ctx context.Context, bundle profile.Bundle, runtime RecordStore, 
 		} else {
 			report.Counts.Stable++
 		}
-		if row.LatestStatus == store.StatusPassed {
+		if row.LatestStatus == execution.StatusPassed {
 			report.Counts.Passed++
 		}
-		if row.LatestStatus == store.StatusFailed {
+		if row.LatestStatus == execution.StatusFailed {
 			report.Counts.Failed++
 		}
 		report.Items = append(report.Items, row)
@@ -145,8 +145,8 @@ func Stability(ctx context.Context, bundle profile.Bundle, runtime RecordStore, 
 	return report, nil
 }
 
-func recordsGroupedByCase(records []store.APICaseRunRecord) map[string][]store.APICaseRunRecord {
-	out := map[string][]store.APICaseRunRecord{}
+func recordsGroupedByCase(records []execution.APICaseRunRecord) map[string][]execution.APICaseRunRecord {
+	out := map[string][]execution.APICaseRunRecord{}
 	for _, record := range records {
 		caseID := record.CaseRun.CaseID
 		out[caseID] = append(out[caseID], record)
@@ -159,7 +159,7 @@ func recordsGroupedByCase(records []store.APICaseRunRecord) map[string][]store.A
 	return out
 }
 
-func stabilityRecentRuns(records []store.APICaseRunRecord) []StabilityRecentRun {
+func stabilityRecentRuns(records []execution.APICaseRunRecord) []StabilityRecentRun {
 	out := make([]StabilityRecentRun, 0, len(records))
 	for _, record := range records {
 		out = append(out, StabilityRecentRun{
