@@ -73,29 +73,13 @@ func Open(ctx context.Context, cfg Config) (*Store, error) {
 }
 
 func SchemaStatus(ctx context.Context, cfg Config) (SchemaStatusResult, error) {
-	db, err := openDB(ctx, cfg)
-	if err != nil {
-		return SchemaStatusResult{}, err
-	}
-	defer db.Close()
-	status, err := sqlstore.SchemaStatus(ctx, db, sqlstore.MySQLDialect{})
-	if err != nil {
-		return SchemaStatusResult{}, err
-	}
-	return SchemaStatusResult{URL: cfg.URL, CurrentVersion: status.CurrentVersion, TargetVersion: status.TargetVersion, AppliedCount: status.AppliedCount}, nil
+	status, err := sqlstore.SchemaStatusForStore(ctx, cfg.URL, dbOpener(cfg), sqlstore.MySQLDialect{})
+	return SchemaStatusResult(status), err
 }
 
 func UpgradeSchema(ctx context.Context, cfg Config) (SchemaStatusResult, error) {
-	db, err := openDB(ctx, cfg)
-	if err != nil {
-		return SchemaStatusResult{}, err
-	}
-	defer db.Close()
-	status, err := sqlstore.UpgradeSchema(ctx, db, sqlstore.MySQLDialect{})
-	if err != nil {
-		return SchemaStatusResult{}, err
-	}
-	return SchemaStatusResult{URL: cfg.URL, CurrentVersion: status.CurrentVersion, TargetVersion: status.TargetVersion, AppliedCount: status.AppliedCount}, nil
+	status, err := sqlstore.UpgradeSchemaForStore(ctx, cfg.URL, dbOpener(cfg), sqlstore.MySQLDialect{})
+	return SchemaStatusResult(status), err
 }
 
 func ProvisionDatabase(ctx context.Context, cfg Config) (ProvisionDatabaseResult, error) {
@@ -154,6 +138,12 @@ func openDB(ctx context.Context, cfg Config) (*sql.DB, error) {
 		return nil, fmt.Errorf("ping mysql store: %w", err)
 	}
 	return db, nil
+}
+
+func dbOpener(cfg Config) sqlstore.DBOpener {
+	return func(ctx context.Context) (*sql.DB, error) {
+		return openDB(ctx, cfg)
+	}
 }
 
 func ensureDriverConfig(cfg Config) (Config, error) {

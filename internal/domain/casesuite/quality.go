@@ -113,7 +113,15 @@ func QualityPlan(ctx context.Context, bundle profile.Bundle, runtime RecordStore
 		Quality:     quality,
 		Warnings:    append([]string(nil), quality.Warnings...),
 	}
-	for _, node := range quality.Nodes {
+	addQualityNodeActions(&report, quality.Nodes)
+	addQualityCaseActions(&report, quality.Cases)
+	sortQualityPlanActions(report.Actions)
+	report.Counts.Total = len(report.Actions)
+	return report, nil
+}
+
+func addQualityNodeActions(report *QualityPlanReport, nodes []QualityNode) {
+	for _, node := range nodes {
 		action := QualityPlanAction{
 			Type:            "draft-case",
 			NodeID:          node.NodeID,
@@ -126,68 +134,91 @@ func QualityPlan(ctx context.Context, bundle profile.Bundle, runtime RecordStore
 		report.Actions = append(report.Actions, action)
 		report.Counts.DraftCase++
 	}
-	for _, item := range quality.Cases {
+}
+
+func addQualityCaseActions(report *QualityPlanReport, cases []QualityCase) {
+	for _, item := range cases {
 		if item.Complete {
 			continue
 		}
-		if lifecycleIssues := caseLifecycleIssues(item.Issues); len(lifecycleIssues) > 0 {
-			report.Actions = append(report.Actions, QualityPlanAction{
-				Type:      "review-case-lifecycle",
-				CaseID:    item.CaseID,
-				CaseTitle: item.Title,
-				NodeID:    item.NodeID,
-				Issues:    lifecycleIssues,
-				Reason:    "case lifecycle status is not executable",
-			})
-			report.Counts.ReviewLifecycle++
-		}
-		fields := missingMetadataFields(item)
-		if len(fields) > 0 {
-			report.Actions = append(report.Actions, QualityPlanAction{
-				Type:      "complete-case-metadata",
-				CaseID:    item.CaseID,
-				CaseTitle: item.Title,
-				NodeID:    item.NodeID,
-				Fields:    fields,
-				Issues:    metadataIssues(item.Issues),
-				Reason:    "case metadata is incomplete",
-			})
-			report.Counts.CompleteMetadata++
-		}
-		if !item.HasRunnableFile {
-			report.Actions = append(report.Actions, QualityPlanAction{
-				Type:      "add-runnable-source",
-				CaseID:    item.CaseID,
-				CaseTitle: item.Title,
-				NodeID:    item.NodeID,
-				Issues:    []string{"missing-runnable-source"},
-				Reason:    "case has no runnable API case file",
-			})
-			report.Counts.AddRunnable++
-		}
-		if !item.HasExecutionConfig {
-			report.Actions = append(report.Actions, QualityPlanAction{
-				Type:      "add-execution-config",
-				CaseID:    item.CaseID,
-				CaseTitle: item.Title,
-				NodeID:    item.NodeID,
-				Issues:    []string{"missing-execution-config"},
-				Reason:    "case has no execution config",
-			})
-			report.Counts.AddExecution++
-		}
+		addLifecycleAction(report, item)
+		addMetadataAction(report, item)
+		addRunnableAction(report, item)
+		addExecutionConfigAction(report, item)
 	}
-	sort.SliceStable(report.Actions, func(i, j int) bool {
-		if actionRank(report.Actions[i].Type) != actionRank(report.Actions[j].Type) {
-			return actionRank(report.Actions[i].Type) < actionRank(report.Actions[j].Type)
+}
+
+func sortQualityPlanActions(actions []QualityPlanAction) {
+	sort.SliceStable(actions, func(i, j int) bool {
+		if actionRank(actions[i].Type) != actionRank(actions[j].Type) {
+			return actionRank(actions[i].Type) < actionRank(actions[j].Type)
 		}
-		if report.Actions[i].NodeID != report.Actions[j].NodeID {
-			return report.Actions[i].NodeID < report.Actions[j].NodeID
+		if actions[i].NodeID != actions[j].NodeID {
+			return actions[i].NodeID < actions[j].NodeID
 		}
-		return report.Actions[i].CaseID < report.Actions[j].CaseID
+		return actions[i].CaseID < actions[j].CaseID
 	})
-	report.Counts.Total = len(report.Actions)
-	return report, nil
+}
+
+func addLifecycleAction(report *QualityPlanReport, item QualityCase) {
+	if lifecycleIssues := caseLifecycleIssues(item.Issues); len(lifecycleIssues) > 0 {
+		report.Actions = append(report.Actions, QualityPlanAction{
+			Type:      "review-case-lifecycle",
+			CaseID:    item.CaseID,
+			CaseTitle: item.Title,
+			NodeID:    item.NodeID,
+			Issues:    lifecycleIssues,
+			Reason:    "case lifecycle status is not executable",
+		})
+		report.Counts.ReviewLifecycle++
+	}
+}
+
+func addMetadataAction(report *QualityPlanReport, item QualityCase) {
+	fields := missingMetadataFields(item)
+	if len(fields) == 0 {
+		return
+	}
+	report.Actions = append(report.Actions, QualityPlanAction{
+		Type:      "complete-case-metadata",
+		CaseID:    item.CaseID,
+		CaseTitle: item.Title,
+		NodeID:    item.NodeID,
+		Fields:    fields,
+		Issues:    metadataIssues(item.Issues),
+		Reason:    "case metadata is incomplete",
+	})
+	report.Counts.CompleteMetadata++
+}
+
+func addRunnableAction(report *QualityPlanReport, item QualityCase) {
+	if item.HasRunnableFile {
+		return
+	}
+	report.Actions = append(report.Actions, QualityPlanAction{
+		Type:      QualityActionAddRunnable,
+		CaseID:    item.CaseID,
+		CaseTitle: item.Title,
+		NodeID:    item.NodeID,
+		Issues:    []string{"missing-runnable-source"},
+		Reason:    "case has no runnable API case file",
+	})
+	report.Counts.AddRunnable++
+}
+
+func addExecutionConfigAction(report *QualityPlanReport, item QualityCase) {
+	if item.HasExecutionConfig {
+		return
+	}
+	report.Actions = append(report.Actions, QualityPlanAction{
+		Type:      "add-execution-config",
+		CaseID:    item.CaseID,
+		CaseTitle: item.Title,
+		NodeID:    item.NodeID,
+		Issues:    []string{"missing-execution-config"},
+		Reason:    "case has no execution config",
+	})
+	report.Counts.AddExecution++
 }
 
 func qualityNodeMatchesFilter(node profile.InterfaceNode, filter Filter) bool {
@@ -308,7 +339,7 @@ func actionRank(actionType string) int {
 		return 1
 	case "review-case-lifecycle":
 		return 2
-	case "add-runnable-source":
+	case QualityActionAddRunnable:
 		return 3
 	case "add-execution-config":
 		return 4

@@ -66,11 +66,7 @@ func priorityFromParts(bundle profile.Bundle, filter Filter, inspection Inspecti
 	filter = NormalizeFilter(filter)
 	options.Signals = NormalizeStringList(options.Signals)
 	impact := collectImpact(bundle, options.Signals)
-	stabilityByCase := map[string]StabilityItem{}
-	for _, item := range stability.Items {
-		stabilityByCase[item.CaseID] = item
-	}
-	scored := make([]PriorityItem, 0, len(inspection.Items))
+	scored, blocked := scoredPriorityItems(inspection.Items, stabilityItemsByCase(stability.Items), impact.caseReasons)
 	report := PriorityReport{
 		OK:          true,
 		ProfileID:   bundle.ID,
@@ -80,31 +76,9 @@ func priorityFromParts(bundle profile.Bundle, filter Filter, inspection Inspecti
 		Warnings:    appendUniqueStrings(nil, inspection.Warnings...),
 	}
 	report.Warnings = appendUniqueStrings(report.Warnings, stability.Warnings...)
-	for _, item := range inspection.Items {
-		row := PriorityItem{InspectionItem: item}
-		row.Score, row.Reasons = priorityScore(item, stabilityByCase[item.CaseID], impact.caseReasons[item.CaseID])
-		if !item.Ready {
-			report.Blocked = append(report.Blocked, row)
-			continue
-		}
-		scored = append(scored, row)
-	}
-	sort.SliceStable(scored, func(i, j int) bool {
-		if scored[i].Score != scored[j].Score {
-			return scored[i].Score > scored[j].Score
-		}
-		if scored[i].Priority != scored[j].Priority {
-			return priorityWeight(scored[i].Priority) > priorityWeight(scored[j].Priority)
-		}
-		if scored[i].NodeID != scored[j].NodeID {
-			return scored[i].NodeID < scored[j].NodeID
-		}
-		return scored[i].CaseID < scored[j].CaseID
-	})
-	limit := options.Limit
-	if limit <= 0 || limit > len(scored) {
-		limit = len(scored)
-	}
+	report.Blocked = blocked
+	sortPriorityItems(scored)
+	limit := priorityLimit(options.Limit, len(scored))
 	report.Selected = append(report.Selected, scored[:limit]...)
 	report.Skipped = append(report.Skipped, scored[limit:]...)
 	for _, item := range report.Selected {
@@ -123,6 +97,51 @@ func priorityFromParts(bundle profile.Bundle, filter Filter, inspection Inspecti
 		report.Warnings = append(report.Warnings, "no ready cases selected for prioritized execution")
 	}
 	return report
+}
+
+func scoredPriorityItems(items []InspectionItem, stabilityByCase map[string]StabilityItem, impactReasons map[string][]string) ([]PriorityItem, []PriorityItem) {
+	scored := make([]PriorityItem, 0, len(items))
+	blocked := []PriorityItem{}
+	for _, item := range items {
+		row := PriorityItem{InspectionItem: item}
+		row.Score, row.Reasons = priorityScore(item, stabilityByCase[item.CaseID], impactReasons[item.CaseID])
+		if item.Ready {
+			scored = append(scored, row)
+		} else {
+			blocked = append(blocked, row)
+		}
+	}
+	return scored, blocked
+}
+
+func stabilityItemsByCase(items []StabilityItem) map[string]StabilityItem {
+	out := map[string]StabilityItem{}
+	for _, item := range items {
+		out[item.CaseID] = item
+	}
+	return out
+}
+
+func sortPriorityItems(items []PriorityItem) {
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Score != items[j].Score {
+			return items[i].Score > items[j].Score
+		}
+		if items[i].Priority != items[j].Priority {
+			return priorityWeight(items[i].Priority) > priorityWeight(items[j].Priority)
+		}
+		if items[i].NodeID != items[j].NodeID {
+			return items[i].NodeID < items[j].NodeID
+		}
+		return items[i].CaseID < items[j].CaseID
+	})
+}
+
+func priorityLimit(requested int, available int) int {
+	if requested <= 0 || requested > available {
+		return available
+	}
+	return requested
 }
 
 func priorityScore(item InspectionItem, stability StabilityItem, impactReasons []string) (int, []string) {

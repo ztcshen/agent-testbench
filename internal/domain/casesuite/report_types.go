@@ -156,6 +156,11 @@ const (
 	CaseLifecycleInvalid     = "invalid"
 )
 
+const (
+	QualityActionAddRunnable = "add-runnable-source"
+	ReasonNoRunRecorded      = "no run recorded in Store"
+)
+
 type RecordStore interface {
 	ListRuns(context.Context) ([]execution.Run, error)
 	ListAPICaseRuns(context.Context, string) ([]execution.APICaseRun, error)

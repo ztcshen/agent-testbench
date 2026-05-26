@@ -2,43 +2,14 @@
 package profilecatalog
 
 import (
-	"reflect"
-
 	domaincatalog "agent-testbench/internal/domain/catalog"
 	"agent-testbench/internal/domain/profile"
 )
 
-var apiCaseSharedFields = []string{
-	"ID", "DisplayName", "Description", "NodeID", "CaseType", "Scenario", "Tags", "Priority", "Owner",
-	"PayloadTemplateJSON", "RequestTemplateID", "PatchJSON", "RenderMode", "ExpectedJSON", "RequiredForAdmission",
-	"Status", "SortOrder", "CasePath", "SourceKind", "SourcePath", "ExecutorID", "BaseURL", "EvidenceDir", "TimeoutSeconds",
-}
-
 func catalogServicesFromProfile(items []profile.Service, runtimeEnv map[string]string) []domaincatalog.Service {
 	out := make([]domaincatalog.Service, 0, len(items))
 	for _, item := range items {
-		out = append(out, domaincatalog.Service{
-			ID:                  item.ID,
-			DisplayName:         item.DisplayName,
-			Kind:                item.Kind,
-			AttachedTemplateIDs: item.AttachedTemplateIDs,
-			GitURL:              item.GitURL,
-			GitBranch:           item.GitBranch,
-			RepoEnv:             item.RepoEnv,
-			SourcePath:          serviceSourcePath(runtimeEnv, item),
-			ContainerName:       item.ContainerName,
-			Image:               item.Image,
-			DockerService:       item.DockerService,
-			ServicePort:         item.ServicePort,
-			ManagementPort:      item.ManagementPort,
-			MemoryMb:            item.MemoryMb,
-			CPUMilli:            item.CPUMilli,
-			StartupCommand:      item.StartupCommand,
-			HealthURL:           item.HealthURL,
-			LogPath:             item.LogPath,
-			Status:              item.Status,
-			SortOrder:           item.SortOrder,
-		})
+		out = append(out, catalogServiceFromProfile(item, runtimeEnv))
 	}
 	return out
 }
@@ -66,12 +37,9 @@ func catalogInterfaceNodesFromProfile(items []profile.InterfaceNode) []domaincat
 }
 
 func catalogInterfaceNodeFromProfile(item profile.InterfaceNode) domaincatalog.InterfaceNode {
-	return domaincatalog.InterfaceNode{
-		ID: item.ID, DisplayName: item.DisplayName, ServiceID: item.ServiceID, Operation: item.Operation,
-		Method: item.Method, Path: item.Path, TemplateID: item.TemplateID, Version: item.Version,
-		Status: item.Status, Tags: item.Tags, Description: item.Description, TimeoutMs: item.TimeoutMs,
-		SortOrder: item.SortOrder, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
-	}
+	var out domaincatalog.InterfaceNode
+	copySharedFields(&out, item, interfaceNodeSharedFields)
+	return out
 }
 
 func catalogAPICasesFromProfile(items []profile.APICase) []domaincatalog.APICase {
@@ -84,7 +52,7 @@ func catalogAPICasesFromProfile(items []profile.APICase) []domaincatalog.APICase
 
 func catalogAPICaseFromProfile(item profile.APICase) domaincatalog.APICase {
 	var out domaincatalog.APICase
-	copyAPICaseSharedFields(&out, item)
+	copySharedFields(&out, item, apiCaseSharedFields)
 	out.DefaultOverridesJSON = jsonStringMap(item.DefaultOverrides)
 	return out
 }
@@ -154,38 +122,15 @@ func catalogTemplateConfigsFromProfile(items []profile.TemplateConfig) []domainc
 }
 
 func catalogTemplateConfigFromProfile(item profile.TemplateConfig) domaincatalog.TemplateConfig {
-	return domaincatalog.TemplateConfig{
-		ID: item.ID, TemplateID: item.TemplateID, NodeID: item.NodeID, WorkflowID: item.WorkflowID,
-		ScopeType: item.ScopeType, ScopeID: item.ScopeID, Title: item.Title,
-		Description: item.Description, ConfigJSON: item.ConfigJSON, Status: item.Status, SortOrder: item.SortOrder,
-	}
+	var out domaincatalog.TemplateConfig
+	copySharedFields(&out, item, templateConfigSharedFields)
+	return out
 }
 
 func profileServicesFromCatalog(items []domaincatalog.Service) []profile.Service {
 	out := make([]profile.Service, 0, len(items))
 	for _, item := range items {
-		out = append(out, profile.Service{
-			ID:                  item.ID,
-			DisplayName:         item.DisplayName,
-			Kind:                item.Kind,
-			AttachedTemplateIDs: item.AttachedTemplateIDs,
-			GitURL:              item.GitURL,
-			GitBranch:           item.GitBranch,
-			RepoEnv:             item.RepoEnv,
-			SourcePath:          item.SourcePath,
-			ContainerName:       item.ContainerName,
-			Image:               item.Image,
-			DockerService:       item.DockerService,
-			ServicePort:         item.ServicePort,
-			ManagementPort:      item.ManagementPort,
-			MemoryMb:            item.MemoryMb,
-			CPUMilli:            item.CPUMilli,
-			StartupCommand:      item.StartupCommand,
-			HealthURL:           item.HealthURL,
-			LogPath:             item.LogPath,
-			Status:              item.Status,
-			SortOrder:           item.SortOrder,
-		})
+		out = append(out, profileServiceFromCatalog(item))
 	}
 	return out
 }
@@ -213,12 +158,9 @@ func profileInterfaceNodesFromCatalog(items []domaincatalog.InterfaceNode) []pro
 }
 
 func profileInterfaceNodeFromCatalog(item domaincatalog.InterfaceNode) profile.InterfaceNode {
-	return profile.InterfaceNode{
-		ID: item.ID, DisplayName: item.DisplayName, ServiceID: item.ServiceID, Operation: item.Operation,
-		Method: item.Method, Path: item.Path, TemplateID: item.TemplateID, Version: item.Version,
-		Status: item.Status, Tags: item.Tags, Description: item.Description, TimeoutMs: item.TimeoutMs,
-		SortOrder: item.SortOrder, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
-	}
+	var out profile.InterfaceNode
+	copySharedFields(&out, item, interfaceNodeSharedFields)
+	return out
 }
 
 func profileAPICasesFromCatalog(items []domaincatalog.APICase) []profile.APICase {
@@ -231,17 +173,9 @@ func profileAPICasesFromCatalog(items []domaincatalog.APICase) []profile.APICase
 
 func profileAPICaseFromCatalog(item domaincatalog.APICase) profile.APICase {
 	var out profile.APICase
-	copyAPICaseSharedFields(&out, item)
+	copySharedFields(&out, item, apiCaseSharedFields)
 	out.DefaultOverrides = jsonMap(item.DefaultOverridesJSON)
 	return out
-}
-
-func copyAPICaseSharedFields(dst any, src any) {
-	dstValue := reflect.ValueOf(dst).Elem()
-	srcValue := reflect.ValueOf(src)
-	for _, fieldName := range apiCaseSharedFields {
-		dstValue.FieldByName(fieldName).Set(srcValue.FieldByName(fieldName))
-	}
 }
 
 func profileRequestTemplatesFromCatalog(items []domaincatalog.RequestTemplate) []profile.RequestTemplate {
@@ -309,9 +243,7 @@ func profileTemplateConfigsFromCatalog(items []domaincatalog.TemplateConfig) []p
 }
 
 func profileTemplateConfigFromCatalog(item domaincatalog.TemplateConfig) profile.TemplateConfig {
-	return profile.TemplateConfig{
-		ID: item.ID, TemplateID: item.TemplateID, NodeID: item.NodeID, WorkflowID: item.WorkflowID,
-		ScopeType: item.ScopeType, ScopeID: item.ScopeID, Title: item.Title,
-		Description: item.Description, ConfigJSON: item.ConfigJSON, Status: item.Status, SortOrder: item.SortOrder,
-	}
+	var out profile.TemplateConfig
+	copySharedFields(&out, item, templateConfigSharedFields)
+	return out
 }

@@ -84,65 +84,80 @@ func Stability(ctx context.Context, bundle profile.Bundle, runtime RecordStore, 
 		return StabilityReport{}, err
 	}
 	recordsByCase := recordsGroupedByCase(records)
-	nodesByID := map[string]profile.InterfaceNode{}
-	for _, node := range bundle.InterfaceNodes {
-		nodesByID[node.ID] = node
-	}
+	nodesByID := interfaceNodesByID(bundle.InterfaceNodes)
 	for _, item := range cases {
-		node := nodesByID[item.NodeID]
-		row := StabilityItem{
-			CaseID:       item.ID,
-			Title:        firstNonEmpty(item.DisplayName, item.ID),
-			Description:  item.Description,
-			NodeID:       item.NodeID,
-			NodeName:     firstNonEmpty(node.DisplayName, item.NodeID),
-			Tags:         append([]string(nil), item.Tags...),
-			Priority:     item.Priority,
-			Owner:        item.Owner,
-			LatestStatus: "not-run",
-		}
-		caseRecords := recordsByCase[item.ID]
-		if len(caseRecords) == 0 {
-			row.Reason = "no run recorded in Store"
-			report.Counts.NotRun++
-			report.OK = false
-			report.Items = append(report.Items, row)
-			continue
-		}
-		if len(caseRecords) > options.Limit {
-			caseRecords = caseRecords[:options.Limit]
-		}
-		row.Recent = stabilityRecentRuns(caseRecords)
-		row.LatestStatus = NormalizeRunState(caseRecords[0].CaseRun.Status)
-		for index, record := range caseRecords {
-			status := NormalizeRunState(record.CaseRun.Status)
-			switch status {
-			case execution.StatusPassed:
-				row.Passed++
-			case execution.StatusFailed:
-				row.Failed++
-			}
-			if index > 0 && status != NormalizeRunState(caseRecords[index-1].CaseRun.Status) {
-				row.Transitions++
-			}
-		}
-		row.Unstable = row.Passed > 0 && row.Failed > 0 && row.Transitions > 0
-		if row.Unstable {
-			row.Reason = "recent runs include both passed and failed results"
-			report.Counts.Unstable++
-			report.OK = false
-		} else {
-			report.Counts.Stable++
-		}
-		if row.LatestStatus == execution.StatusPassed {
-			report.Counts.Passed++
-		}
-		if row.LatestStatus == execution.StatusFailed {
-			report.Counts.Failed++
-		}
+		row := stabilityItemForCase(item, nodesByID[item.NodeID], recordsByCase[item.ID], options.Limit)
+		applyStabilityCounts(&report, row)
 		report.Items = append(report.Items, row)
 	}
 	return report, nil
+}
+
+func stabilityItemForCase(item profile.APICase, node profile.InterfaceNode, records []execution.APICaseRunRecord, limit int) StabilityItem {
+	row := baseStabilityItem(item, node)
+	if len(records) == 0 {
+		row.Reason = ReasonNoRunRecorded
+		return row
+	}
+	if len(records) > limit {
+		records = records[:limit]
+	}
+	row.Recent = stabilityRecentRuns(records)
+	row.LatestStatus = NormalizeRunState(records[0].CaseRun.Status)
+	addStabilityRunStats(&row, records)
+	row.Unstable = row.Passed > 0 && row.Failed > 0 && row.Transitions > 0
+	if row.Unstable {
+		row.Reason = "recent runs include both passed and failed results"
+	}
+	return row
+}
+
+func baseStabilityItem(item profile.APICase, node profile.InterfaceNode) StabilityItem {
+	return StabilityItem{
+		CaseID:       item.ID,
+		Title:        firstNonEmpty(item.DisplayName, item.ID),
+		Description:  item.Description,
+		NodeID:       item.NodeID,
+		NodeName:     firstNonEmpty(node.DisplayName, item.NodeID),
+		Tags:         append([]string(nil), item.Tags...),
+		Priority:     item.Priority,
+		Owner:        item.Owner,
+		LatestStatus: "not-run",
+	}
+}
+
+func addStabilityRunStats(row *StabilityItem, records []execution.APICaseRunRecord) {
+	for index, record := range records {
+		status := NormalizeRunState(record.CaseRun.Status)
+		switch status {
+		case execution.StatusPassed:
+			row.Passed++
+		case execution.StatusFailed:
+			row.Failed++
+		}
+		if index > 0 && status != NormalizeRunState(records[index-1].CaseRun.Status) {
+			row.Transitions++
+		}
+	}
+}
+
+func applyStabilityCounts(report *StabilityReport, row StabilityItem) {
+	switch {
+	case row.Reason == ReasonNoRunRecorded:
+		report.Counts.NotRun++
+		report.OK = false
+	case row.Unstable:
+		report.Counts.Unstable++
+		report.OK = false
+	default:
+		report.Counts.Stable++
+	}
+	if row.LatestStatus == execution.StatusPassed {
+		report.Counts.Passed++
+	}
+	if row.LatestStatus == execution.StatusFailed {
+		report.Counts.Failed++
+	}
 }
 
 func recordsGroupedByCase(records []execution.APICaseRunRecord) map[string][]execution.APICaseRunRecord {

@@ -119,21 +119,26 @@ func BundleDigest(path string) (string, error) {
 }
 
 func loadAssets(baseDir string, bundle *Bundle) error {
-	catalogCases, err := loadCatalogAPICases(baseDir)
+	catalogAssets, err := loadCatalogCompatibilityAssets(baseDir)
 	if err != nil {
 		return err
 	}
+	if err := loadProfileCatalogAssets(baseDir, bundle, catalogAssets); err != nil {
+		return err
+	}
+	if err := loadProfileExecutionAssets(baseDir, bundle); err != nil {
+		return err
+	}
+	return loadProfileAuthoringAssets(baseDir, bundle, catalogAssets)
+}
 
+func loadProfileCatalogAssets(baseDir string, bundle *Bundle, catalog catalogCompatibilityAssets) error {
 	services, err := loadAssetDir[Service](baseDir, "services")
 	if err != nil {
 		return err
 	}
 	bundle.Services = append(bundle.Services, services...)
-	nodeConfigs, err := loadCatalogNodeConfigs(baseDir)
-	if err != nil {
-		return err
-	}
-	bundle.Services = mergeServices(bundle.Services, nodeConfigs)
+	bundle.Services = mergeServices(bundle.Services, catalog.NodeConfigServices)
 
 	workflows, err := loadAssetDir[Workflow](baseDir, "workflows")
 	if err != nil {
@@ -151,8 +156,11 @@ func loadAssets(baseDir string, bundle *Bundle) error {
 	if err != nil {
 		return err
 	}
-	bundle.APICases = mergeAPICases(bundle.APICases, catalogCases, cases)
+	bundle.APICases = mergeAPICases(bundle.APICases, catalog.APICases, cases)
+	return nil
+}
 
+func loadProfileExecutionAssets(baseDir string, bundle *Bundle) error {
 	executors, err := loadAssetDir[ExecutorDescriptor](baseDir, "executors")
 	if err != nil {
 		return err
@@ -182,12 +190,11 @@ func loadAssets(baseDir string, bundle *Bundle) error {
 		return err
 	}
 	bundle.Fixtures = append(bundle.Fixtures, fixtures...)
+	return nil
+}
 
-	templateConfigs, err := loadCatalogTemplateConfigs(baseDir)
-	if err != nil {
-		return err
-	}
-	bundle.TemplateConfigs = append(bundle.TemplateConfigs, templateConfigs...)
+func loadProfileAuthoringAssets(baseDir string, bundle *Bundle, catalog catalogCompatibilityAssets) error {
+	bundle.TemplateConfigs = append(bundle.TemplateConfigs, catalog.TemplateConfigs...)
 
 	agentTestProfiles, err := loadAgentTestProfiles(baseDir)
 	if err != nil {
@@ -201,263 +208,6 @@ func loadAssets(baseDir string, bundle *Bundle) error {
 	}
 	bundle.ConfigAuthoring = configAuthoring
 	return nil
-}
-
-func loadCatalogAPICases(baseDir string) ([]APICase, error) {
-	type fileShape struct {
-		InterfaceNodeCases []json.RawMessage `json:"interfaceNodeCases"`
-	}
-	payload, err := loadCatalogAsset[fileShape](baseDir)
-	if err != nil {
-		return nil, err
-	}
-	path := filepath.Join(baseDir, catalogName)
-	out := make([]APICase, 0, len(payload.InterfaceNodeCases))
-	for _, raw := range payload.InterfaceNodeCases {
-		var apiCase APICase
-		if err := json.Unmarshal(raw, &apiCase); err != nil {
-			return nil, fmt.Errorf("decode profile catalog api case %s: %w", path, err)
-		}
-		var titleCarrier struct {
-			Title string `json:"title,omitempty"`
-		}
-		if err := json.Unmarshal(raw, &titleCarrier); err != nil {
-			return nil, fmt.Errorf("decode profile catalog api case title %s: %w", path, err)
-		}
-		if strings.TrimSpace(apiCase.DisplayName) == "" {
-			apiCase.DisplayName = titleCarrier.Title
-		}
-		out = append(out, apiCase)
-	}
-	return out, nil
-}
-
-func loadCatalogNodeConfigs(baseDir string) ([]Service, error) {
-	type catalogNodeConfig struct {
-		Service
-		Role string `json:"role,omitempty"`
-	}
-	type fileShape struct {
-		NodeConfigs []catalogNodeConfig `json:"nodeConfigs"`
-	}
-	payload, err := loadCatalogAsset[fileShape](baseDir)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]Service, 0, len(payload.NodeConfigs))
-	for _, item := range payload.NodeConfigs {
-		service := item.Service
-		if service.Kind == "" {
-			service.Kind = item.Role
-		}
-		out = append(out, service)
-	}
-	return out, nil
-}
-
-func mergeServices(groups ...[]Service) []Service {
-	merged := map[string]Service{}
-	order := []string{}
-	for _, group := range groups {
-		for _, item := range group {
-			if strings.TrimSpace(item.ID) == "" {
-				continue
-			}
-			current, exists := merged[item.ID]
-			if !exists {
-				order = append(order, item.ID)
-			}
-			merged[item.ID] = mergeService(current, item)
-		}
-	}
-	out := make([]Service, 0, len(order))
-	for _, id := range order {
-		out = append(out, merged[id])
-	}
-	return out
-}
-
-func mergeService(base Service, next Service) Service {
-	if next.ID != "" {
-		base.ID = next.ID
-	}
-	if next.DisplayName != "" {
-		base.DisplayName = next.DisplayName
-	}
-	if next.Kind != "" {
-		base.Kind = next.Kind
-	}
-	if len(next.AttachedTemplateIDs) > 0 {
-		base.AttachedTemplateIDs = next.AttachedTemplateIDs
-	}
-	if next.GitURL != "" {
-		base.GitURL = next.GitURL
-	}
-	if next.GitBranch != "" {
-		base.GitBranch = next.GitBranch
-	}
-	if next.RepoEnv != "" {
-		base.RepoEnv = next.RepoEnv
-	}
-	if next.SourcePath != "" {
-		base.SourcePath = next.SourcePath
-	}
-	if next.ContainerName != "" {
-		base.ContainerName = next.ContainerName
-	}
-	if next.Image != "" {
-		base.Image = next.Image
-	}
-	if next.DockerService != "" {
-		base.DockerService = next.DockerService
-	}
-	if next.ServicePort != 0 {
-		base.ServicePort = next.ServicePort
-	}
-	if next.ManagementPort != 0 {
-		base.ManagementPort = next.ManagementPort
-	}
-	if next.MemoryMb != 0 {
-		base.MemoryMb = next.MemoryMb
-	}
-	if next.CPUMilli != 0 {
-		base.CPUMilli = next.CPUMilli
-	}
-	if next.StartupCommand != "" {
-		base.StartupCommand = next.StartupCommand
-	}
-	if next.HealthURL != "" {
-		base.HealthURL = next.HealthURL
-	}
-	if next.LogPath != "" {
-		base.LogPath = next.LogPath
-	}
-	if next.Status != "" {
-		base.Status = next.Status
-	}
-	if next.SortOrder != 0 {
-		base.SortOrder = next.SortOrder
-	}
-	return base
-}
-
-func mergeAPICases(groups ...[]APICase) []APICase {
-	merged := map[string]APICase{}
-	order := []string{}
-	for _, group := range groups {
-		for _, item := range group {
-			if strings.TrimSpace(item.ID) == "" {
-				continue
-			}
-			current, exists := merged[item.ID]
-			if !exists {
-				order = append(order, item.ID)
-			}
-			merged[item.ID] = mergeAPICase(current, item)
-		}
-	}
-	out := make([]APICase, 0, len(order))
-	for _, id := range order {
-		out = append(out, merged[id])
-	}
-	return out
-}
-
-func mergeAPICase(base APICase, next APICase) APICase {
-	if next.ID != "" {
-		base.ID = next.ID
-	}
-	if next.DisplayName != "" {
-		base.DisplayName = next.DisplayName
-	}
-	if next.Description != "" {
-		base.Description = next.Description
-	}
-	if next.NodeID != "" {
-		base.NodeID = next.NodeID
-	}
-	if next.CaseType != "" {
-		base.CaseType = next.CaseType
-	}
-	if next.Scenario != "" {
-		base.Scenario = next.Scenario
-	}
-	if next.Tags != nil {
-		base.Tags = next.Tags
-	}
-	if next.Priority != "" {
-		base.Priority = next.Priority
-	}
-	if next.Owner != "" {
-		base.Owner = next.Owner
-	}
-	if next.PayloadTemplateJSON != "" {
-		base.PayloadTemplateJSON = next.PayloadTemplateJSON
-	}
-	if next.RequestTemplateID != "" {
-		base.RequestTemplateID = next.RequestTemplateID
-	}
-	if next.PatchJSON != "" {
-		base.PatchJSON = next.PatchJSON
-	}
-	if next.RenderMode != "" {
-		base.RenderMode = next.RenderMode
-	}
-	if next.ExpectedJSON != "" {
-		base.ExpectedJSON = next.ExpectedJSON
-	}
-	if next.requiredForAdmissionSet {
-		base.RequiredForAdmission = next.RequiredForAdmission
-	}
-	if next.Status != "" {
-		base.Status = next.Status
-	}
-	if next.SortOrder != 0 {
-		base.SortOrder = next.SortOrder
-	}
-	if next.CasePath != "" {
-		base.CasePath = next.CasePath
-	}
-	if next.BaseURL != "" {
-		base.BaseURL = next.BaseURL
-	}
-	if next.EvidenceDir != "" {
-		base.EvidenceDir = next.EvidenceDir
-	}
-	if next.TimeoutSeconds != 0 {
-		base.TimeoutSeconds = next.TimeoutSeconds
-	}
-	if next.DefaultOverrides != nil {
-		base.DefaultOverrides = next.DefaultOverrides
-	}
-	return base
-}
-
-func loadCatalogTemplateConfigs(baseDir string) ([]TemplateConfig, error) {
-	type fileShape struct {
-		TemplateConfigs []TemplateConfig `json:"templateConfigs"`
-	}
-	payload, err := loadCatalogAsset[fileShape](baseDir)
-	if err != nil {
-		return nil, err
-	}
-	return payload.TemplateConfigs, nil
-}
-
-func loadCatalogAsset[T any](baseDir string) (T, error) {
-	var out T
-	path := filepath.Join(baseDir, catalogName)
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return out, nil
-	}
-	if err != nil {
-		return out, fmt.Errorf("read profile catalog asset %s: %w", path, err)
-	}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return out, fmt.Errorf("decode profile catalog asset %s: %w", path, err)
-	}
-	return out, nil
 }
 
 func loadAgentTestProfiles(baseDir string) ([]AgentTestProfile, error) {
