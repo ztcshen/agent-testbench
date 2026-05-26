@@ -48,7 +48,22 @@ func openRequiredCLIStore(ctx context.Context, storeRef string, legacyStoreURL s
 	if err != nil {
 		return nil, func() {}, err
 	}
-	return runtime, func() { _ = runtime.Close() }, nil
+	return runtime, cleanupCLIStore(runtime), nil
+}
+
+func cleanupCLIStore(runtime store.Store) func() {
+	return func() {
+		closeCLIStore(runtime)
+	}
+}
+
+func closeCLIStore(runtime store.Store) {
+	if runtime == nil {
+		return
+	}
+	if err := runtime.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: close store: %v\n", err)
+	}
 }
 
 func loadEnvironmentForCLI(ctx context.Context, storeRef string, legacyStoreURL string, id string) (store.Environment, error) {

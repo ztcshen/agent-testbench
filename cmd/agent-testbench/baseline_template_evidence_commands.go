@@ -49,7 +49,7 @@ func runBaselineGet(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer s.Close()
+	defer closeCLIStore(s)
 
 	gate, err := s.GetBaselineGate(ctx, *profileID, *subjectID)
 	if err != nil {
@@ -83,7 +83,7 @@ func runBaselineSet(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer s.Close()
+	defer closeCLIStore(s)
 
 	now := time.Now().UTC()
 	gate, err := s.UpsertBaselineGate(ctx, store.BaselineGate{
@@ -168,7 +168,7 @@ func loadTemplateRenderBundle(ctx context.Context, profileRef string, profileHom
 	}
 	bundle, err := serveBundle(ctx, runtime)
 	if err != nil {
-		_ = runtime.Close()
+		closeCLIStore(runtime)
 		return profile.Bundle{}, func() {}, err
 	}
 	if templateNeedsPublishedProfile(bundle, templateID) {
@@ -180,7 +180,7 @@ func loadTemplateRenderBundle(ctx context.Context, profileRef string, profileHom
 			}
 		}
 	}
-	return bundle, func() { _ = runtime.Close() }, nil
+	return bundle, cleanupCLIStore(runtime), nil
 }
 
 func templateNeedsPublishedProfile(bundle profile.Bundle, templateID string) bool {
@@ -449,7 +449,7 @@ func runEvidenceImport(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer s.Close()
+	defer closeCLIStore(s)
 	result, err := evidence.ImportLegacyRuntime(ctx, evidence.ImportOptions{
 		SourcePath: *from,
 		ProfileID:  *profileID,

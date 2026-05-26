@@ -42,6 +42,17 @@ test("pull request CI passes changed paths into release-check scope", () => {
   assert.match(releaseJob, /npm run release-check -- --full/);
 });
 
+test("Go lint entrypoints use the PR-diff lint gate", () => {
+  const workflow = readFileSync(join(rootDir, ".github", "workflows", "ci.yml"), "utf8");
+  const packageJSON = readFileSync(join(rootDir, "package.json"), "utf8");
+  const makefile = readFileSync(join(rootDir, "Makefile"), "utf8");
+
+  assert.match(workflow, /golangci\/golangci-lint-action@v8/);
+  assert.match(workflow, /only-new-issues:\s*true/);
+  assert.match(packageJSON, /"lint:go": "bash tools\/go-lint\.sh"/);
+  assert.match(makefile, /lint:\n\ttools\/go-lint\.sh/);
+});
+
 test("pull request template asks for scoped release-check evidence", () => {
   const template = readFileSync(join(rootDir, ".github", "PULL_REQUEST_TEMPLATE.md"), "utf8");
 

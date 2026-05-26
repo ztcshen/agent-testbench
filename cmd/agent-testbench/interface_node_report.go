@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"html"
-	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -394,23 +393,9 @@ func executeInterfaceNodeCaseReport(ctx context.Context, bundle profile.Bundle, 
 	handler := controlplane.NewWithOptions(bundle, controlplane.Options{Runtime: runtime})
 	server := httptest.NewServer(handler)
 	defer server.Close()
-	caseIDs := make([]string, 0, len(cases))
-	for _, item := range cases {
-		caseIDs = append(caseIDs, item.ID)
-	}
-	requestPayload := map[string]any{"caseIds": caseIDs, "baseUrl": baseURL, "timeoutSeconds": timeoutSeconds}
-	rawRequest, _ := json.Marshal(requestPayload)
-	response, err := http.Post(server.URL+"/api/test-kit/run-batch", "application/json", strings.NewReader(string(rawRequest)))
+	rawBatch, err := postTestKitRunBatch(server.URL, cases, baseURL, timeoutSeconds, "case batch")
 	if err != nil {
 		return interfaceNodeCaseReport{}, err
-	}
-	defer response.Body.Close()
-	var rawBatch map[string]any
-	if err := json.NewDecoder(response.Body).Decode(&rawBatch); err != nil {
-		return interfaceNodeCaseReport{}, err
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return interfaceNodeCaseReport{}, fmt.Errorf("case batch failed with http status %d", response.StatusCode)
 	}
 	report := interfaceNodeCaseReport{
 		OK:             boolFromReportAny(rawBatch["ok"]),

@@ -140,7 +140,7 @@ func indexCaseRun(ctx context.Context, storeURL string, profileID string, result
 	if err != nil {
 		return err
 	}
-	defer s.Close()
+	defer closeCLIStore(s)
 
 	now := time.Now().UTC()
 	startedAt := runResultTime(result.StartedAt, now)

@@ -32,7 +32,7 @@ func runCaseIncompleteBatches(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer s.Close()
+	defer closeCLIStore(s)
 
 	bundle, err := incompleteCaseBundle(ctx, strings.TrimSpace(*profilePath), s)
 	if err != nil {
