@@ -45,8 +45,8 @@ func collectGitSafety(diff string) GitSafetyMetric {
 	deletedTests := map[string]bool{}
 	publicTouches := map[string]bool{}
 	sensitive := map[string]bool{}
-	errorAdds := map[string]bool{}
-	errorDeletes := map[string]bool{}
+	errorAdds := map[string]int{}
+	errorDeletes := map[string]int{}
 	added := 0
 	deleted := 0
 
@@ -71,7 +71,7 @@ func collectGitSafety(diff string) GitSafetyMetric {
 				publicTouches[currentFile+":"+strings.TrimSpace(content)] = true
 			}
 			if currentFile != "" && deletesErrorHandling(content) {
-				errorAdds[currentFile+":"+strings.TrimSpace(content)] = true
+				errorAdds[currentFile+":"+strings.TrimSpace(content)]++
 			}
 		case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
 			deleted++
@@ -80,13 +80,18 @@ func collectGitSafety(diff string) GitSafetyMetric {
 				publicTouches[currentFile+":"+strings.TrimSpace(content)] = true
 			}
 			if currentFile != "" && deletesErrorHandling(content) {
-				errorDeletes[currentFile+":"+strings.TrimSpace(content)] = true
+				errorDeletes[currentFile+":"+strings.TrimSpace(content)]++
 			}
 		}
 	}
-	for key := range errorDeletes {
-		if errorAdds[key] {
-			delete(errorDeletes, key)
+	for key, addedCount := range errorAdds {
+		if deletedCount := errorDeletes[key]; deletedCount > 0 {
+			remaining := deletedCount - addedCount
+			if remaining > 0 {
+				errorDeletes[key] = remaining
+			} else {
+				delete(errorDeletes, key)
+			}
 		}
 	}
 
@@ -97,7 +102,7 @@ func collectGitSafety(diff string) GitSafetyMetric {
 		DeletedTests:         sortedKeys(deletedTests),
 		PublicAPITouchpoints: sortedKeys(publicTouches),
 		SensitiveFiles:       sortedKeys(sensitive),
-		ErrorHandlingDeletes: sortedKeys(errorDeletes),
+		ErrorHandlingDeletes: sortedCountKeys(errorDeletes),
 	}
 }
 

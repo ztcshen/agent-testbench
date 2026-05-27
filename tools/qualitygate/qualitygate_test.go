@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -109,6 +110,38 @@ func sparseButBlocked() {
 	}
 
 	assertIssueSeverity(t, report, "function-lines", SeverityBlock)
+}
+
+func TestAnalyzeGoFileKeepsLineOnlyFunctionWarning(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "internal", "domain", "sample", "sparse.go")
+	writeFile(t, path, `package sample
+
+func sparseButLong() {
+`+strings.Repeat("\n", 62)+`}
+`)
+
+	report, err := Analyze(Options{Root: root, ReportDir: filepath.Join(root, "reports")})
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+
+	assertIssueSeverity(t, report, "function-lines", SeverityWarning)
+}
+
+func TestAnalyzeGoFileKeepsPackageBudgetWarnings(t *testing.T) {
+	root := t.TempDir()
+	for i := 0; i < 21; i++ {
+		path := filepath.Join(root, "internal", "domain", "sample", "file_"+strconv.Itoa(i)+".go")
+		writeFile(t, path, "package sample\n\nconst Value = 1\n")
+	}
+
+	report, err := Analyze(Options{Root: root, ReportDir: filepath.Join(root, "reports")})
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+
+	assertIssue(t, report, "package-file-count")
 }
 
 func TestAnalyzeGoFileReportsVeryWideStructs(t *testing.T) {
@@ -296,6 +329,28 @@ index 1..2 100644
 -	return err
 -}
 +return nil
+`
+	report := Report{}
+	addGitSafetyIssues(diff, &report, DefaultConfig())
+	assertIssue(t, report, "ai-safety-error-handling-delete")
+}
+
+func TestGitSafetyCountsDuplicateErrorHandlingRemovals(t *testing.T) {
+	diff := `diff --git a/a.go b/a.go
+index 1..2 100644
+--- a/a.go
++++ b/a.go
+@@ -1,10 +1,7 @@
+ package sample
+-if err != nil {
+-	return err
+-}
+-if err != nil {
+-	return err
+-}
++if err != nil {
++	return err
++}
 `
 	report := Report{}
 	addGitSafetyIssues(diff, &report, DefaultConfig())
