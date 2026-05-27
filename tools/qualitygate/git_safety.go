@@ -45,6 +45,7 @@ func collectGitSafety(diff string) GitSafetyMetric {
 	deletedTests := map[string]bool{}
 	publicTouches := map[string]bool{}
 	sensitive := map[string]bool{}
+	errorAdds := map[string]bool{}
 	errorDeletes := map[string]bool{}
 	added := 0
 	deleted := 0
@@ -66,18 +67,26 @@ func collectGitSafety(diff string) GitSafetyMetric {
 		case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
 			added++
 			content := strings.TrimPrefix(line, "+")
-			if currentFile != "" && publicAPIPattern.MatchString(content) {
+			if currentFile != "" && !strings.HasSuffix(currentFile, "_test.go") && publicAPIPattern.MatchString(content) {
 				publicTouches[currentFile+":"+strings.TrimSpace(content)] = true
+			}
+			if currentFile != "" && deletesErrorHandling(content) {
+				errorAdds[currentFile+":"+strings.TrimSpace(content)] = true
 			}
 		case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
 			deleted++
 			content := strings.TrimPrefix(line, "-")
-			if currentFile != "" && publicAPIPattern.MatchString(content) {
+			if currentFile != "" && !strings.HasSuffix(currentFile, "_test.go") && publicAPIPattern.MatchString(content) {
 				publicTouches[currentFile+":"+strings.TrimSpace(content)] = true
 			}
 			if currentFile != "" && deletesErrorHandling(content) {
 				errorDeletes[currentFile+":"+strings.TrimSpace(content)] = true
 			}
+		}
+	}
+	for key := range errorDeletes {
+		if errorAdds[key] {
+			delete(errorDeletes, key)
 		}
 	}
 
@@ -96,19 +105,23 @@ func addGitDeletionIssues(metric GitSafetyMetric, report *Report) {
 	deleted := metric.DeletedLines
 	added := metric.AddedLines
 	if deleted > 100 {
-		severity := SeverityWarning
-		if strings.Contains(strings.ToLower(getenv("QUALITY_GATE_TASK_KIND")), "duplicate") {
+		severity := ""
+		if isDuplicateTaskKind() {
 			severity = SeverityBlock
+		} else if deleted > added {
+			severity = SeverityWarning
 		}
-		report.addIssue(Issue{
-			ID:             "ai-safety-large-deletion",
-			Severity:       severity,
-			Category:       CategoryAISafety,
-			Message:        "large deletion detected; duplicate-fix tasks must not delete broad behavior to pass the gate",
-			Value:          intString(deleted),
-			Threshold:      "blocking when QUALITY_GATE_TASK_KIND contains duplicate and deletions > 100",
-			Recommendation: "List the removed behavior and prove tests still cover it before proceeding.",
-		})
+		if severity != "" {
+			report.addIssue(Issue{
+				ID:             "ai-safety-large-deletion",
+				Severity:       severity,
+				Category:       CategoryAISafety,
+				Message:        "large deletion detected; duplicate-fix tasks must not delete broad behavior to pass the gate",
+				Value:          intString(deleted),
+				Threshold:      "warning when deletions > 100 and exceed additions; blocking when QUALITY_GATE_TASK_KIND contains duplicate and deletions > 100",
+				Recommendation: "List the removed behavior and prove tests still cover it before proceeding.",
+			})
+		}
 	}
 	if deleted > 0 && deleted > added*2 {
 		report.addIssue(Issue{
@@ -132,6 +145,10 @@ func addGitDeletionIssues(metric GitSafetyMetric, report *Report) {
 			Recommendation: "Write or update a refactor plan before continuing with broad changes.",
 		})
 	}
+}
+
+func isDuplicateTaskKind() bool {
+	return strings.Contains(strings.ToLower(getenv("QUALITY_GATE_TASK_KIND")), "duplicate")
 }
 
 func addGitTouchpointIssues(metric GitSafetyMetric, report *Report) {

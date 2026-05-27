@@ -95,6 +95,11 @@ func isConfigOrEnumFile(path string) bool {
 		strings.Contains(base, "schema")
 }
 
+func isRouteRegistrationFile(path string) bool {
+	base := strings.ToLower(filepath.Base(path))
+	return strings.HasPrefix(base, "routes_") || strings.HasSuffix(base, "_routes.go")
+}
+
 func isCorePath(path string) bool {
 	path = normalizePath(path)
 	return strings.HasPrefix(path, "cmd/") ||

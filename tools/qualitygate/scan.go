@@ -136,22 +136,10 @@ func (s *scanState) scanGoFile(root string, rel string, report *Report) error {
 				StartLine:  start,
 				EndLine:    end,
 				Lines:      end - start + 1,
+				Statements: countFunctionStatements(node),
 			}
 			report.Metrics.Functions = append(report.Metrics.Functions, fn)
-			s.addThresholdIssue(report, thresholdIssueInput{
-				ID:             "function-lines",
-				Category:       CategorySize,
-				Message:        "function is longer than the AI-safe line budget",
-				File:           rel,
-				Line:           start,
-				EndLine:        end,
-				Package:        pkgDir,
-				Function:       fn.Name,
-				Value:          fn.Lines,
-				Warn:           s.cfg.FunctionLinesWarn,
-				Block:          s.cfg.FunctionLinesBlock,
-				Recommendation: "Split by business step or policy boundary only when the extracted name has domain meaning.",
-			})
+			s.addFunctionSizeIssue(report, fn)
 		case *ast.GenDecl:
 			s.scanTypes(node, fset, rel, pkgDir, report)
 		}
@@ -230,32 +218,51 @@ func (s *scanState) scanTypes(decl *ast.GenDecl, fset *token.FileSet, rel string
 func (s *scanState) addPackageIssues(report *Report) {
 	for _, metric := range s.packages {
 		report.Metrics.Packages = append(report.Metrics.Packages, *metric)
-		s.addThresholdIssue(report, thresholdIssueInput{
-			ID:             "package-lines",
-			Category:       "package",
-			Message:        "package has grown beyond the local AI-safe line budget",
-			Package:        metric.Dir,
-			File:           metric.Dir,
-			Value:          metric.EffectiveLines,
-			Warn:           s.cfg.PackageLinesWarn,
-			Block:          s.cfg.PackageLinesBlock,
-			Recommendation: "Split packages only around stable semantics, not to appease a line counter.",
-		})
-		s.addThresholdIssue(report, thresholdIssueInput{
-			ID:             "package-file-count",
-			Category:       "package",
-			Message:        "package has too many Go files for reliable AI navigation",
-			Package:        metric.Dir,
-			File:           metric.Dir,
-			Value:          metric.FileCount,
-			Warn:           s.cfg.PackageFileCountWarn,
-			Block:          s.cfg.PackageFileCountBlock,
-			Recommendation: "Check whether the package has multiple concepts before introducing a new package boundary.",
-		})
 	}
 	sort.Slice(report.Metrics.Packages, func(i int, j int) bool {
 		return report.Metrics.Packages[i].Dir < report.Metrics.Packages[j].Dir
 	})
+}
+
+func (s *scanState) addFunctionSizeIssue(report *Report, fn FunctionMetric) {
+	if !s.inScope(fn.File) {
+		return
+	}
+	warnLines, warnStatements := s.functionWarningThreshold(fn.File)
+	severity := ""
+	if fn.Lines > s.cfg.FunctionLinesBlock {
+		severity = SeverityBlock
+	} else if fn.Lines > warnLines && fn.Statements > warnStatements {
+		severity = SeverityWarning
+	}
+	if severity == "" {
+		return
+	}
+	report.addIssue(Issue{
+		ID:             "function-lines",
+		Severity:       scopedSeverity(severity, fn.File, s.inScope),
+		Category:       CategorySize,
+		Message:        "function is longer and denser than the AI-safe budget",
+		File:           fn.File,
+		Line:           fn.StartLine,
+		EndLine:        fn.EndLine,
+		Package:        fn.PackageDir,
+		Function:       fn.Name,
+		Value:          fmt.Sprintf("%d lines, %d statements", fn.Lines, fn.Statements),
+		Threshold:      fmt.Sprintf("warning>%d lines and >%d statements blocking>%d lines", warnLines, warnStatements, s.cfg.FunctionLinesBlock),
+		Recommendation: "Split by business step or policy boundary only when the extracted name has domain meaning.",
+	})
+}
+
+func (s *scanState) functionWarningThreshold(file string) (int, int) {
+	switch {
+	case strings.HasSuffix(file, "_test.go"):
+		return 90, 80
+	case isRouteRegistrationFile(file):
+		return 100, 80
+	default:
+		return s.cfg.FunctionLinesWarn, s.cfg.FunctionStatementsWarn
+	}
 }
 
 func (s *scanState) packageMetric(dir string, name string) *PackageMetric {
@@ -482,6 +489,25 @@ func effectiveLineCount(raw []byte) int {
 			count++
 		}
 	}
+	return count
+}
+
+func countFunctionStatements(fn *ast.FuncDecl) int {
+	if fn.Body == nil {
+		return 0
+	}
+	count := 0
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		switch node.(type) {
+		case nil:
+			return true
+		case *ast.BlockStmt, *ast.CaseClause, *ast.CommClause:
+			return true
+		case ast.Stmt:
+			count++
+		}
+		return true
+	})
 	return count
 }
 
