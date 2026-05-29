@@ -16,15 +16,15 @@ import (
 func TestEnvironmentMigrationAddAndListRegistersVersionedMySQLAsset(t *testing.T) {
 	fixture := writeEnvironmentMigrationStoreFixture(t)
 	sqlPath := filepath.Join(t.TempDir(), "V0011__add_score.sql")
-	writeFile(t, sqlPath, "ALTER TABLE risk_result ADD COLUMN risk_score DECIMAL(10,2) NULL;\n")
+	writeFile(t, sqlPath, "ALTER TABLE app_result ADD COLUMN score DECIMAL(10,2) NULL;\n")
 
 	out := runCLI(t, "environment", "migration", "add", "env.migration",
 		"--store", "sqlite://"+fixture.storePath,
-		"--edge", "scf-risk:mysql",
-		"--database", "scf_risk",
+		"--edge", "app:mysql",
+		"--database", "app_db",
 		"--version", "0011",
-		"--description", "add risk score",
-		"--precondition", "column-not-exists:risk_result.risk_score",
+		"--description", "add score",
+		"--precondition", "column-not-exists:app_result.score",
 		"--file", sqlPath,
 		"--json",
 	)
@@ -38,8 +38,8 @@ func TestEnvironmentMigrationAddAndListRegistersVersionedMySQLAsset(t *testing.T
 
 	listOut := runCLI(t, "environment", "migration", cliCommandList, "env.migration",
 		"--store", "sqlite://"+fixture.storePath,
-		"--edge", "scf-risk:mysql",
-		"--database", "scf_risk",
+		"--edge", "app:mysql",
+		"--database", "app_db",
 		"--json",
 	)
 	var listReport environmentMigrationReport
@@ -67,8 +67,8 @@ func TestEnvironmentMigrationPlanAndApplyDryRunReportCommands(t *testing.T) {
 
 	out := runCLI(t, "environment", "migration", "apply", "env.migration",
 		"--store", "sqlite://"+fixture.storePath,
-		"--edge", "scf-risk:mysql",
-		"--database", "scf_risk",
+		"--edge", "app:mysql",
+		"--database", "app_db",
 		"--workspace", fixture.workspace,
 		"--json",
 	)
@@ -87,22 +87,22 @@ func TestEnvironmentMigrationPlanAndApplyDryRunReportCommands(t *testing.T) {
 func TestEnvironmentMigrationApplySQLUsesHistoryChecksumAndPreconditions(t *testing.T) {
 	item := environmentMigrationItem{
 		EnvironmentID:    "env.migration",
-		AssetID:          "scf-risk.mysql.migration.0011",
-		OwnerComponentID: "scf-risk",
+		AssetID:          "app.mysql.migration.0011",
+		OwnerComponentID: "app",
 		Version:          "0011",
-		Database:         "scf_risk",
+		Database:         "app_db",
 		Checksum:         strings.Repeat("a", 64),
-		Content:          "ALTER TABLE risk_result ADD COLUMN risk_score DECIMAL(10,2) NULL, ALGORITHM=INSTANT, LOCK=NONE;",
+		Content:          "ALTER TABLE app_result ADD COLUMN score DECIMAL(10,2) NULL, ALGORITHM=INSTANT, LOCK=NONE;",
 		Preconditions: []environmentMigrationPrecondition{{
 			Type:   environmentMigrationPreconditionColumnNotExists,
-			Table:  "risk_result",
-			Column: "risk_score",
+			Table:  "app_result",
+			Column: "score",
 		}},
 	}
-	sql := environmentMigrationApplySQL(environmentMigrationEdge{Owner: "scf-risk", Provider: "mysql"}, item)
+	sql := environmentMigrationApplySQL(environmentMigrationEdge{Owner: "app", Provider: "mysql"}, item)
 	ensureSQL := environmentMigrationEnsureSQL(item)
 	preconditionSQL := environmentMigrationPreconditionQuerySQL(item, item.Preconditions[0])
-	for _, want := range []string{"ALTER TABLE risk_result ADD COLUMN risk_score", "ALGORITHM=INSTANT", "LOCK=NONE"} {
+	for _, want := range []string{"ALTER TABLE app_result ADD COLUMN score", "ALGORITHM=INSTANT", "LOCK=NONE"} {
 		if !strings.Contains(sql, want) {
 			t.Fatalf("migration apply sql missing %q:\n%s", want, sql)
 		}
@@ -110,7 +110,7 @@ func TestEnvironmentMigrationApplySQLUsesHistoryChecksumAndPreconditions(t *test
 	if !strings.Contains(ensureSQL, "CREATE TABLE IF NOT EXISTS agent_testbench_schema_history") {
 		t.Fatalf("migration ensure sql missing history table:\n%s", ensureSQL)
 	}
-	if !strings.Contains(preconditionSQL, "information_schema.COLUMNS") || !strings.Contains(preconditionSQL, "risk_score") {
+	if !strings.Contains(preconditionSQL, "information_schema.COLUMNS") || !strings.Contains(preconditionSQL, "score") {
 		t.Fatalf("migration precondition sql = %s", preconditionSQL)
 	}
 }
@@ -135,13 +135,13 @@ func TestEnvironmentRestoreAppliesMySQLMigrationThroughHistoryTable(t *testing.T
 		parts := strings.SplitN(kv, "=", 2)
 		t.Setenv(parts[0], parts[1])
 	}
-	content := "ALTER TABLE risk_result ADD COLUMN risk_score DECIMAL(10,2) NULL;\n"
+	content := "ALTER TABLE app_result ADD COLUMN score DECIMAL(10,2) NULL;\n"
 	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
 		ID: "env.migration",
 		ComposeJSON: `{
 			"composeFile":"compose.yml",
-			"generatedFiles":{"compose.yml":"services:\n  mysql:\n    image: mysql:8\n  scf-risk:\n    image: alpine:3.20\n"},
-			"services":["mysql","scf-risk"],
+			"generatedFiles":{"compose.yml":"services:\n  mysql:\n    image: mysql:8\n  app:\n    image: alpine:3.20\n"},
+			"services":["mysql","app"],
 			"skipPull":true,
 			"skipBuild":true
 		}`,
@@ -150,16 +150,16 @@ func TestEnvironmentRestoreAppliesMySQLMigrationThroughHistoryTable(t *testing.T
 	}, workspace, true, false, false, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{}, store.EnvironmentComponentGraph{
 		Components: []store.EnvironmentComponent{
 			{ComponentID: "mysql", Kind: "middleware", Role: "database", ComposeService: "mysql", Required: true, HealthCheckJSON: `{"kind":"compose-service","service":"mysql"}`},
-			{ComponentID: "scf-risk", Kind: "app", Role: "business-service", ComposeService: "scf-risk", Required: true, HealthCheckJSON: `{"kind":"url","url":"` + healthURL + `"}`},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"kind":"url","url":"` + healthURL + `"}`},
 		},
 		Dependencies: []store.ComponentDependency{
-			{EnvID: "env.migration", ConsumerComponentID: "scf-risk", ProviderComponentID: "mysql", Phase: "startup", Capability: "sql", Required: true, ProfileJSON: `{"assetIds":["scf-risk.mysql.migration.0011"]}`},
+			{EnvID: "env.migration", ConsumerComponentID: "app", ProviderComponentID: "mysql", Phase: "startup", Capability: "sql", Required: true, ProfileJSON: `{"assetIds":["app.mysql.migration.0011"]}`},
 		},
 		Assets: []store.ComponentConfigAsset{
 			{
 				EnvID:             "env.migration",
-				OwnerComponentID:  "scf-risk",
-				AssetID:           "scf-risk.mysql.migration.0011",
+				OwnerComponentID:  "app",
+				AssetID:           "app.mysql.migration.0011",
 				AssetKind:         environmentMigrationAssetKind,
 				TargetComponentID: "mysql",
 				TargetPath:        "migrations/V0011__add_score.sql",
@@ -168,8 +168,8 @@ func TestEnvironmentRestoreAppliesMySQLMigrationThroughHistoryTable(t *testing.T
 				ApplyOrder:        11,
 				SummaryJSON: mustCompactJSON(environmentMigrationSummary{Migration: environmentMigrationMetadata{
 					Version:     "0011",
-					Description: "add risk score",
-					Database:    "scf_risk",
+					Description: "add score",
+					Database:    "app_db",
 					Checksum:    sha256Hex(content),
 				}}),
 			},
@@ -192,7 +192,7 @@ func TestEnvironmentRestoreAppliesMySQLMigrationThroughHistoryTable(t *testing.T
 	if err != nil {
 		t.Fatalf("read mysql stdin: %v", err)
 	}
-	if !strings.Contains(string(stdin), environmentMigrationHistoryTable) || !strings.Contains(string(stdin), "ALTER TABLE risk_result") {
+	if !strings.Contains(string(stdin), environmentMigrationHistoryTable) || !strings.Contains(string(stdin), "ALTER TABLE app_result") {
 		t.Fatalf("mysql migration stdin:\n%s", stdin)
 	}
 }
@@ -218,7 +218,7 @@ func writeEnvironmentMigrationStoreFixture(t *testing.T) environmentMigrationSto
 		ID:                     "env.migration",
 		DisplayName:            "Migration Environment",
 		Status:                 "draft",
-		ComposeJSON:            `{"composeFile":"compose.yml","services":["mysql","scf-risk"],"skipPull":true,"skipBuild":true}`,
+		ComposeJSON:            `{"composeFile":"compose.yml","services":["mysql","app"],"skipPull":true,"skipBuild":true}`,
 		HealthChecksJSON:       `[]`,
 		VerificationWorkflowID: "workflow.migration",
 		SummaryJSON:            `{}`,
@@ -230,10 +230,10 @@ func writeEnvironmentMigrationStoreFixture(t *testing.T) environmentMigrationSto
 	if err := s.ReplaceEnvironmentComponentGraph(ctx, "env.migration", store.EnvironmentComponentGraph{
 		Components: []store.EnvironmentComponent{
 			{ComponentID: "mysql", Kind: "middleware", Role: "database", ComposeService: "mysql", Required: true, HealthCheckJSON: `{"kind":"compose-service","service":"mysql"}`},
-			{ComponentID: "scf-risk", Kind: "app", Role: "business-service", ComposeService: "scf-risk", Required: true, HealthCheckJSON: `{"kind":"url","url":"http://127.0.0.1:18080/health"}`},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true, HealthCheckJSON: `{"kind":"url","url":"http://127.0.0.1:18080/health"}`},
 		},
 		Dependencies: []store.ComponentDependency{
-			{ConsumerComponentID: "scf-risk", ProviderComponentID: "mysql", Phase: "startup", Capability: "sql", Required: true, ProfileJSON: `{}`},
+			{ConsumerComponentID: "app", ProviderComponentID: "mysql", Phase: "startup", Capability: "sql", Required: true, ProfileJSON: `{}`},
 		},
 	}); err != nil {
 		t.Fatalf("seed component graph: %v", err)
@@ -244,13 +244,13 @@ func writeEnvironmentMigrationStoreFixture(t *testing.T) environmentMigrationSto
 func seedEnvironmentMigrationAsset(t *testing.T, storePath string) {
 	t.Helper()
 	sqlPath := filepath.Join(t.TempDir(), "V0011__add_score.sql")
-	writeFile(t, sqlPath, "ALTER TABLE risk_result ADD COLUMN risk_score DECIMAL(10,2) NULL;\n")
+	writeFile(t, sqlPath, "ALTER TABLE app_result ADD COLUMN score DECIMAL(10,2) NULL;\n")
 	runCLI(t, "environment", "migration", "add", "env.migration",
 		"--store", "sqlite://"+storePath,
-		"--edge", "scf-risk:mysql",
-		"--database", "scf_risk",
+		"--edge", "app:mysql",
+		"--database", "app_db",
 		"--version", "0011",
-		"--description", "add risk score",
+		"--description", "add score",
 		"--file", sqlPath,
 		"--json",
 	)
