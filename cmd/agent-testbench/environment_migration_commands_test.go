@@ -36,7 +36,7 @@ func TestEnvironmentMigrationAddAndListRegistersVersionedMySQLAsset(t *testing.T
 		t.Fatalf("migration add report = %#v", addReport)
 	}
 
-	listOut := runCLI(t, "environment", "migration", "list", "env.migration",
+	listOut := runCLI(t, "environment", "migration", cliCommandList, "env.migration",
 		"--store", "sqlite://"+fixture.storePath,
 		"--edge", "scf-risk:mysql",
 		"--database", "scf_risk",
@@ -76,7 +76,7 @@ func TestEnvironmentMigrationPlanAndApplyDryRunReportCommands(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode migration apply dry-run report: %v\n%s", err, out)
 	}
-	if !report.OK || report.Execute || report.Count != 1 || report.Migrations[0].Action != "plan-apply-mysql-migration" {
+	if !report.OK || report.Execute || report.Count != 1 || report.Migrations[0].Action != environmentMigrationActionPlanApplyMySQL {
 		t.Fatalf("migration dry-run report = %#v", report)
 	}
 	if got := strings.Join(report.Migrations[0].Command, " "); !strings.Contains(got, "compose") || !strings.Contains(got, "exec -T mysql") {
@@ -94,7 +94,7 @@ func TestEnvironmentMigrationApplySQLUsesHistoryChecksumAndPreconditions(t *test
 		Checksum:         strings.Repeat("a", 64),
 		Content:          "ALTER TABLE risk_result ADD COLUMN risk_score DECIMAL(10,2) NULL, ALGORITHM=INSTANT, LOCK=NONE;",
 		Preconditions: []environmentMigrationPrecondition{{
-			Type:   "column-not-exists",
+			Type:   environmentMigrationPreconditionColumnNotExists,
 			Table:  "risk_result",
 			Column: "risk_score",
 		}},

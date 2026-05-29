@@ -89,7 +89,7 @@ func runSandboxService(ctx context.Context, args []string) error {
 		return errors.New("missing sandbox service command")
 	}
 	switch args[0] {
-	case "list", "discover":
+	case cliCommandList, "discover":
 		return runSandboxServiceList(ctx, args[1:])
 	case "register":
 		return runSandboxServiceRegister(ctx, args[1:])

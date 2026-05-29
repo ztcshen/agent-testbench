@@ -135,7 +135,7 @@ func environmentRestoreApplyEdgeAsset(ctx context.Context, dep store.ComponentDe
 }
 
 func environmentRestoreApplyMigrationEdgeAsset(ctx context.Context, dep store.ComponentDependency, asset store.ComponentConfigAsset, content string, contentErr error, workspace string, execute bool, composeBaseArgs []string, item environmentRestoreAppliedAsset) environmentRestoreAppliedAsset {
-	item.Action = "plan-apply-mysql-migration"
+	item.Action = environmentMigrationActionPlanApplyMySQL
 	item.Command = environmentRestoreMySQLApplyCommand(composeBaseArgs, item.TargetComposeService)
 	if len(composeBaseArgs) == 0 || item.TargetComposeService == "" {
 		item.OK = false
@@ -161,7 +161,7 @@ func environmentRestoreApplyMigrationEdgeAsset(ctx context.Context, dep store.Co
 	}
 	migration.Content = content
 	if execute {
-		item.Action = "apply-mysql-migration"
+		item.Action = environmentMigrationActionApplyMySQL
 		edge := environmentMigrationEdge{Owner: dep.ConsumerComponentID, Provider: dep.ProviderComponentID}
 		attempts, _, errText := runEnvironmentMigrationWithHistory(ctx, workspace, item.Command, edge, migration, environmentMigrationApplySQL(edge, migration), false)
 		item.Attempts = attempts

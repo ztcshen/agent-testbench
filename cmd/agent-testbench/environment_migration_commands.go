@@ -11,8 +11,17 @@ import (
 	"agent-testbench/internal/store"
 )
 
-const environmentMigrationAssetKind = "mysql-migration-sql"
-const environmentMigrationHistoryTable = "agent_testbench_schema_history"
+const cliCommandList = "list"
+
+const (
+	environmentMigrationAssetKind                   = "mysql-migration-sql"
+	environmentMigrationHistoryTable                = "agent_testbench_schema_history"
+	environmentMigrationPreconditionColumnNotExists = "column-not-exists"
+	environmentMigrationActionPlanApplyMySQL        = "plan-apply-mysql-migration"
+	environmentMigrationActionPlanBaselineMySQL     = "plan-baseline-mysql-migration"
+	environmentMigrationActionApplyMySQL            = "apply-mysql-migration"
+	environmentMigrationActionBaselineMySQL         = "baseline-mysql-migration"
+)
 
 type environmentMigrationEdge struct {
 	Owner    string `json:"owner"`
@@ -107,7 +116,7 @@ func runEnvironmentMigration(ctx context.Context, args []string) error {
 	switch args[0] {
 	case "add":
 		return runEnvironmentMigrationAdd(ctx, args[1:])
-	case "list":
+	case cliCommandList:
 		return runEnvironmentMigrationList(ctx, args[1:])
 	case "plan":
 		return runEnvironmentMigrationPlan(ctx, args[1:])
@@ -152,7 +161,7 @@ func parseEnvironmentMigrationAddOptions(args []string) (environmentMigrationAdd
 	force := flags.Bool("force", false, "Replace an existing migration asset with the same owner and id")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	var preconditions stringListFlag
-	flags.Var(&preconditions, "precondition", "Migration precondition such as column-not-exists:TABLE.COLUMN; repeatable")
+	flags.Var(&preconditions, "precondition", "Migration precondition such as "+environmentMigrationPreconditionColumnNotExists+":TABLE.COLUMN; repeatable")
 	if err := parseInterspersedFlags(flags, args); err != nil {
 		return environmentMigrationAddOptions{}, err
 	}
@@ -268,7 +277,7 @@ func runEnvironmentMigrationPlan(ctx context.Context, args []string) error {
 		return err
 	}
 	for index := range report.Migrations {
-		report.Migrations[index].Action = "plan-apply-mysql-migration"
+		report.Migrations[index].Action = environmentMigrationActionPlanApplyMySQL
 	}
 	report.HistoryTable = environmentMigrationHistoryTable
 	if jsonOutput {
@@ -409,9 +418,9 @@ func planEnvironmentMigrationTarget(opts environmentMigrationTargetOptions, base
 		item.EnvironmentID = opts.EnvID
 		item.Command = command
 		if baseline {
-			item.Action = "plan-baseline-mysql-migration"
+			item.Action = environmentMigrationActionPlanBaselineMySQL
 		} else {
-			item.Action = "plan-apply-mysql-migration"
+			item.Action = environmentMigrationActionPlanApplyMySQL
 		}
 		item.Status = "pending"
 		item.OK = true
@@ -422,9 +431,9 @@ func executeEnvironmentMigrationTarget(ctx context.Context, opts environmentMigr
 	for index := range report.Migrations {
 		item := &report.Migrations[index]
 		if baseline {
-			item.Action = "baseline-mysql-migration"
+			item.Action = environmentMigrationActionBaselineMySQL
 		} else {
-			item.Action = "apply-mysql-migration"
+			item.Action = environmentMigrationActionApplyMySQL
 		}
 		item.Status = "pending"
 		item.OK = true

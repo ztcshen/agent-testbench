@@ -211,7 +211,7 @@ func environmentMigrationHistoryTableSQL() string {
 
 func environmentMigrationPreconditionQuerySQL(item environmentMigrationItem, precondition environmentMigrationPrecondition) string {
 	switch precondition.Type {
-	case "column-not-exists":
+	case environmentMigrationPreconditionColumnNotExists:
 		return "USE " + mysqlQuoteIdentifier(item.Database) + ";\n" +
 			"SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = " + mysqlQuoteLiteral(precondition.Table) + " AND COLUMN_NAME = " + mysqlQuoteLiteral(precondition.Column) + ";\n"
 	default:

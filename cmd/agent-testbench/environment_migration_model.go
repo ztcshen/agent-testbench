@@ -85,18 +85,25 @@ func environmentMigrationItems(graph store.EnvironmentComponentGraph, filter env
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].ProviderComponent != out[j].ProviderComponent {
-			return out[i].ProviderComponent < out[j].ProviderComponent
-		}
-		if out[i].OwnerComponentID != out[j].OwnerComponentID {
-			return out[i].OwnerComponentID < out[j].OwnerComponentID
-		}
-		if out[i].ApplyOrder != out[j].ApplyOrder {
-			return out[i].ApplyOrder < out[j].ApplyOrder
-		}
-		return out[i].Version < out[j].Version
+		return compareEnvironmentMigrationItems(out[i], out[j]) < 0
 	})
 	return out
+}
+
+func compareEnvironmentMigrationItems(left environmentMigrationItem, right environmentMigrationItem) int {
+	if cmp := strings.Compare(left.ProviderComponent, right.ProviderComponent); cmp != 0 {
+		return cmp
+	}
+	if cmp := strings.Compare(left.OwnerComponentID, right.OwnerComponentID); cmp != 0 {
+		return cmp
+	}
+	if left.ApplyOrder != right.ApplyOrder {
+		if left.ApplyOrder < right.ApplyOrder {
+			return -1
+		}
+		return 1
+	}
+	return strings.Compare(left.Version, right.Version)
 }
 
 func environmentMigrationItemFromAsset(asset store.ComponentConfigAsset, provider string) (environmentMigrationItem, bool) {
@@ -174,10 +181,10 @@ func parseEnvironmentMigrationPreconditions(values []string) []environmentMigrat
 			continue
 		}
 		switch strings.TrimSpace(kind) {
-		case "column-not-exists":
+		case environmentMigrationPreconditionColumnNotExists:
 			table, column, ok := strings.Cut(strings.TrimSpace(body), ".")
 			if ok && strings.TrimSpace(table) != "" && strings.TrimSpace(column) != "" {
-				out = append(out, environmentMigrationPrecondition{Type: "column-not-exists", Table: strings.TrimSpace(table), Column: strings.TrimSpace(column)})
+				out = append(out, environmentMigrationPrecondition{Type: environmentMigrationPreconditionColumnNotExists, Table: strings.TrimSpace(table), Column: strings.TrimSpace(column)})
 			}
 		}
 	}
