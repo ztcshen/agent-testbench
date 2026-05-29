@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"agent-testbench/internal/store"
@@ -41,7 +42,18 @@ func environmentRestoreDocker(ctx context.Context, graph store.EnvironmentCompon
 	for _, check := range report.HealthChecks {
 		if !check.OK {
 			report.OK = false
+			if report.Error == "" {
+				report.Error = environmentRestoreHealthFailureError(check)
+			}
 		}
 	}
 	return report
+}
+
+func environmentRestoreHealthFailureError(check environmentRestoreHealthCheckReport) string {
+	target := environmentRestoreHealthProgressTarget(check)
+	if strings.TrimSpace(check.Error) != "" {
+		return target + ": " + check.Error
+	}
+	return target + ": health check did not pass"
 }

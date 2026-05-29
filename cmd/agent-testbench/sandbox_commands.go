@@ -16,6 +16,7 @@ import (
 
 type sandboxStartReport struct {
 	OK        bool                        `json:"ok"`
+	DryRun    bool                        `json:"dryRun,omitempty"`
 	StorePath string                      `json:"storePath"`
 	Services  []sandboxStartServiceResult `json:"services"`
 	Counts    sandboxStartReportCounts    `json:"counts"`
@@ -24,6 +25,7 @@ type sandboxStartReport struct {
 type sandboxStartReportCounts struct {
 	Total   int `json:"total"`
 	Started int `json:"started"`
+	Planned int `json:"planned,omitempty"`
 	Skipped int `json:"skipped"`
 	Failed  int `json:"failed"`
 }
@@ -37,10 +39,33 @@ type sandboxStartServiceResult struct {
 	ManagementPort int    `json:"managementPort,omitempty"`
 	Command        string `json:"command,omitempty"`
 	Skipped        bool   `json:"skipped"`
+	Planned        bool   `json:"planned,omitempty"`
 	SkipReason     string `json:"skipReason,omitempty"`
 	ExitCode       int    `json:"exitCode"`
 	Output         string `json:"output,omitempty"`
 	Error          string `json:"error,omitempty"`
+}
+
+type sandboxServiceListReport struct {
+	OK        bool                     `json:"ok"`
+	StorePath string                   `json:"storePath"`
+	Count     int                      `json:"count"`
+	Services  []sandboxServiceListItem `json:"services"`
+}
+
+type sandboxServiceListItem struct {
+	ID                string `json:"id"`
+	DisplayName       string `json:"displayName,omitempty"`
+	Kind              string `json:"kind,omitempty"`
+	ContainerName     string `json:"containerName,omitempty"`
+	Image             string `json:"image,omitempty"`
+	DockerService     string `json:"dockerService,omitempty"`
+	ServicePort       int    `json:"servicePort,omitempty"`
+	ManagementPort    int    `json:"managementPort,omitempty"`
+	StartupCommand    string `json:"startupCommand,omitempty"`
+	HasStartupCommand bool   `json:"hasStartupCommand"`
+	HealthURL         string `json:"healthUrl,omitempty"`
+	Status            string `json:"status,omitempty"`
 }
 
 func runSandbox(ctx context.Context, args []string) error {
@@ -64,6 +89,8 @@ func runSandboxService(ctx context.Context, args []string) error {
 		return errors.New("missing sandbox service command")
 	}
 	switch args[0] {
+	case "list", "discover":
+		return runSandboxServiceList(ctx, args[1:])
 	case "register":
 		return runSandboxServiceRegister(ctx, args[1:])
 	default:
@@ -81,6 +108,71 @@ func runSandboxInterface(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown sandbox interface command: %s", args[0])
 	}
+}
+
+func runSandboxServiceList(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("sandbox service list", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
+	serviceID := flags.String("service", "", "Only show one registered service")
+	serviceKind := flags.String("kind", "", "Only show services of this kind")
+	status := flags.String("status", "", "Only show services with this status")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	runtime, err := openStore(ctx, resolvedStoreURL)
+	if err != nil {
+		return err
+	}
+	defer closeCLIStore(runtime)
+	catalog, err := runtime.GetProfileCatalog(ctx)
+	if err != nil {
+		return err
+	}
+	report := sandboxServiceListReport{
+		OK:        true,
+		StorePath: maskStoreURL(resolvedStoreURL),
+	}
+	idFilter := strings.TrimSpace(*serviceID)
+	kindFilter := strings.TrimSpace(*serviceKind)
+	statusFilter := strings.TrimSpace(*status)
+	for _, service := range catalog.Services {
+		if idFilter != "" && service.ID != idFilter {
+			continue
+		}
+		if kindFilter != "" && strings.TrimSpace(service.Kind) != kindFilter {
+			continue
+		}
+		if statusFilter != "" && strings.TrimSpace(service.Status) != statusFilter {
+			continue
+		}
+		report.Services = append(report.Services, sandboxServiceListItem{
+			ID:                service.ID,
+			DisplayName:       service.DisplayName,
+			Kind:              service.Kind,
+			ContainerName:     service.ContainerName,
+			Image:             service.Image,
+			DockerService:     service.DockerService,
+			ServicePort:       service.ServicePort,
+			ManagementPort:    service.ManagementPort,
+			StartupCommand:    strings.TrimSpace(service.StartupCommand),
+			HasStartupCommand: strings.TrimSpace(service.StartupCommand) != "",
+			HealthURL:         service.HealthURL,
+			Status:            service.Status,
+		})
+	}
+	report.Count = len(report.Services)
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printSandboxServiceListReport(report)
+	return nil
 }
 
 func runSandboxServiceRegister(ctx context.Context, args []string) error {
@@ -203,6 +295,7 @@ func runSandboxStart(ctx context.Context, args []string) error {
 	serviceID := flags.String("service", "", "Only start one registered service")
 	serviceKind := flags.String("kind", "", "Only start services of this kind; default includes all kinds")
 	timeoutSeconds := flags.Int("timeout-seconds", 300, "Per-service startup command timeout")
+	dryRun := flags.Bool("dry-run", false, "Plan service startup without running startup commands")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -225,6 +318,7 @@ func runSandboxStart(ctx context.Context, args []string) error {
 	}
 	report := sandboxStartReport{
 		OK:        true,
+		DryRun:    *dryRun,
 		StorePath: maskStoreURL(resolvedStoreURL),
 	}
 	kindFilter := strings.TrimSpace(*serviceKind)
@@ -235,12 +329,14 @@ func runSandboxStart(ctx context.Context, args []string) error {
 		if kindFilter != "" && strings.TrimSpace(service.Kind) != kindFilter {
 			continue
 		}
-		result := runSandboxServiceStartup(ctx, service, time.Duration(*timeoutSeconds)*time.Second)
+		result := runSandboxServiceStartup(ctx, service, time.Duration(*timeoutSeconds)*time.Second, *dryRun)
 		report.Services = append(report.Services, result)
 		report.Counts.Total++
 		switch {
 		case result.Skipped:
 			report.Counts.Skipped++
+		case result.Planned:
+			report.Counts.Planned++
 		case result.ExitCode == 0:
 			report.Counts.Started++
 		default:
@@ -264,7 +360,7 @@ func runSandboxStart(ctx context.Context, args []string) error {
 	return nil
 }
 
-func runSandboxServiceStartup(ctx context.Context, service store.CatalogService, timeout time.Duration) sandboxStartServiceResult {
+func runSandboxServiceStartup(ctx context.Context, service store.CatalogService, timeout time.Duration, dryRun bool) sandboxStartServiceResult {
 	command := strings.TrimSpace(service.StartupCommand)
 	result := sandboxStartServiceResult{
 		ID:             service.ID,
@@ -284,6 +380,10 @@ func runSandboxServiceStartup(ctx context.Context, service store.CatalogService,
 	if command == "" {
 		result.Skipped = true
 		result.SkipReason = "startup command is empty"
+		return result
+	}
+	if dryRun {
+		result.Planned = true
 		return result
 	}
 	commandCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -311,9 +411,17 @@ func printSandboxStartReport(report sandboxStartReport) {
 	fmt.Println("Sandbox Start")
 	fmt.Printf("OK: %t\n", report.OK)
 	fmt.Printf("Store: %s\n", report.StorePath)
-	fmt.Printf("Total: %d Started: %d Skipped: %d Failed: %d\n", report.Counts.Total, report.Counts.Started, report.Counts.Skipped, report.Counts.Failed)
+	if report.DryRun {
+		fmt.Println("Mode: dry-run")
+		fmt.Printf("Total: %d Planned: %d Skipped: %d Failed: %d\n", report.Counts.Total, report.Counts.Planned, report.Counts.Skipped, report.Counts.Failed)
+	} else {
+		fmt.Printf("Total: %d Started: %d Skipped: %d Failed: %d\n", report.Counts.Total, report.Counts.Started, report.Counts.Skipped, report.Counts.Failed)
+	}
 	for _, service := range report.Services {
 		state := "started"
+		if service.Planned {
+			state = "planned"
+		}
 		if service.Skipped {
 			state = "skipped"
 		}
@@ -332,6 +440,32 @@ func printSandboxStartReport(report sandboxStartReport) {
 		}
 		if service.Output != "" {
 			fmt.Printf("  output: %s\n", service.Output)
+		}
+	}
+}
+
+func printSandboxServiceListReport(report sandboxServiceListReport) {
+	fmt.Println("Sandbox Services")
+	fmt.Printf("OK: %t\n", report.OK)
+	fmt.Printf("Store: %s\n", report.StorePath)
+	fmt.Printf("Count: %d\n", report.Count)
+	for _, service := range report.Services {
+		label := service.ID
+		if service.DisplayName != "" {
+			label = fmt.Sprintf("%s (%s)", service.ID, service.DisplayName)
+		}
+		fmt.Printf("- %s\n", label)
+		if service.Kind != "" {
+			fmt.Printf("  kind: %s\n", service.Kind)
+		}
+		if service.Status != "" {
+			fmt.Printf("  status: %s\n", service.Status)
+		}
+		if service.StartupCommand != "" {
+			fmt.Printf("  startup: %s\n", service.StartupCommand)
+		}
+		if service.HealthURL != "" {
+			fmt.Printf("  health: %s\n", service.HealthURL)
 		}
 	}
 }

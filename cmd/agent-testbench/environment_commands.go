@@ -25,6 +25,8 @@ func runEnvironment(ctx context.Context, args []string) error {
 		return runEnvironmentStartupFile(ctx, args[1:])
 	case "components":
 		return runEnvironmentComponents(ctx, args[1:])
+	case "migration":
+		return runEnvironmentMigration(ctx, args[1:])
 	case "restore":
 		return runEnvironmentRestore(ctx, args[1:])
 	case "acceptance":

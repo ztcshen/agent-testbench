@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,13 +17,18 @@ import (
 
 type sandboxStartCommandReport struct {
 	OK       bool                         `json:"ok"`
+	DryRun   bool                         `json:"dryRun"`
 	Services []sandboxStartCommandService `json:"services"`
+	Counts   struct {
+		Planned int `json:"planned"`
+	} `json:"counts"`
 }
 
 type sandboxStartCommandService struct {
 	ID       string `json:"id"`
 	ExitCode int    `json:"exitCode"`
 	Skipped  bool   `json:"skipped"`
+	Planned  bool   `json:"planned"`
 }
 
 type sandboxStartFixture struct {
@@ -45,6 +51,50 @@ func TestSandboxStartMissingServiceExplainsRegistryBoundary(t *testing.T) {
 	if !strings.Contains(out, "profile service registry") || !strings.Contains(out, "environment restore") {
 		t.Fatalf("missing service error should explain registry boundary, got %q", out)
 	}
+}
+
+func TestSandboxServiceListReportsRegisteredServicesReadOnly(t *testing.T) {
+	fixture := writeSandboxStartStoreFixture(t)
+
+	out := runCLI(t, "sandbox", "service", "list", "--store", "sqlite://"+fixture.storePath, "--json")
+	var report struct {
+		OK       bool `json:"ok"`
+		Count    int  `json:"count"`
+		Services []struct {
+			ID             string `json:"id"`
+			Kind           string `json:"kind"`
+			StartupCommand string `json:"startupCommand"`
+		} `json:"services"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode sandbox service list json: %v\n%s", err, out)
+	}
+	if !report.OK || report.Count != 3 || len(report.Services) != 3 {
+		t.Fatalf("sandbox service list report = %#v", report)
+	}
+	if report.Services[0].ID != "entry-service" || report.Services[0].Kind != "app" || report.Services[0].StartupCommand == "" {
+		t.Fatalf("sandbox service list first service = %#v", report.Services[0])
+	}
+	requireSandboxNoStartupSideEffects(t, fixture)
+}
+
+func TestSandboxStartDryRunDoesNotRunStartupCommands(t *testing.T) {
+	fixture := writeSandboxStartStoreFixture(t)
+
+	report := runSandboxStartJSON(t, "sqlite://"+fixture.storePath, "sandbox start dry-run", "--dry-run")
+	if !report.OK || !report.DryRun || report.Counts.Planned != 2 {
+		t.Fatalf("sandbox start dry-run report = %#v", report)
+	}
+	planned := map[string]bool{}
+	skipped := map[string]bool{}
+	for _, service := range report.Services {
+		planned[service.ID] = service.Planned
+		skipped[service.ID] = service.Skipped
+	}
+	if !planned["entry-service"] || !planned["platform-service"] || !skipped["documented-service"] {
+		t.Fatalf("sandbox start dry-run services = %#v", report.Services)
+	}
+	requireSandboxNoStartupSideEffects(t, fixture)
 }
 
 func writeSandboxStartStoreFixture(t *testing.T) sandboxStartFixture {
@@ -152,6 +202,17 @@ func requireSandboxStartupSideEffects(t *testing.T, fixture sandboxStartFixture)
 	}
 	if string(platformStarted) != "platform-service" {
 		t.Fatalf("platform startup command wrote %q", platformStarted)
+	}
+}
+
+func requireSandboxNoStartupSideEffects(t *testing.T, fixture sandboxStartFixture) {
+	t.Helper()
+	for _, path := range []string{fixture.startedPath, fixture.platformStartedPath} {
+		if _, err := os.Stat(path); err == nil {
+			t.Fatalf("startup side effect should not exist: %s", path)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("stat startup side effect %s: %v", path, err)
+		}
 	}
 }
 

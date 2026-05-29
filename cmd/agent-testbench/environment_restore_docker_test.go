@@ -173,6 +173,25 @@ func TestEnvironmentRestoreHealthWaitReportsProgress(t *testing.T) {
 	}
 }
 
+func TestEnvironmentRestoreCommandHealthTimeoutBoundsSlowProbe(t *testing.T) {
+	started := time.Now()
+	check := waitEnvironmentRestoreCommandHealthCheck(context.Background(), environmentRestoreHealthCheckReport{
+		ID:      "slow-probe",
+		Kind:    "command",
+		Command: "sleep 0.2",
+	}, 20*time.Millisecond, "")
+
+	if check.OK {
+		t.Fatalf("slow probe should fail")
+	}
+	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
+		t.Fatalf("slow probe ignored health timeout: elapsed=%s check=%#v", elapsed, check)
+	}
+	if !strings.Contains(check.Error, "deadline") && !strings.Contains(check.Error, "killed") {
+		t.Fatalf("slow probe error should explain timeout, got %#v", check)
+	}
+}
+
 func TestEnvironmentRestoreHonorsComposeOptionsFromStore(t *testing.T) {
 	fixture := newEnvironmentRestoreDockerCLIFixture(t)
 	fixture.writeWorkspaceFile(t, "compose.yml", "services: {}\n")

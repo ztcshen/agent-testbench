@@ -72,6 +72,17 @@ assets targeted at `mysql`. Likewise, `order-api -> apollo` or
 `order-api -> config-service` is the edge, while `order-api` owns its app id,
 namespace, and key/value assets targeted at that configuration provider.
 
+MySQL assets that change an existing schema should be registered as versioned
+environment migrations (`assetKind=mysql-migration-sql`) instead of editing
+already-applied bootstrap DDL. `environment migration add/list/plan/apply` keeps
+those migration assets in `component_config_assets`, links them from the
+consumer-to-provider edge, and records applied versions in the target MySQL
+database's `agent_testbench_schema_history` table. The history row includes the
+environment id, owner component, provider component, database, version, asset
+id, checksum, and status so repeated restore/apply runs skip already-applied
+migrations and fail on checksum drift. `environment migration baseline` can
+record existing target schemas without re-running their SQL.
+
 ## SQL Store First
 
 Use one SQL Store per isolation boundary:

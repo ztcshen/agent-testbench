@@ -12,56 +12,70 @@ import (
 
 func waitEnvironmentRestoreHealthChecks(ctx context.Context, checks []any, timeout time.Duration, workspace string, composeBaseArgs []string) []environmentRestoreHealthCheckReport {
 	out := make([]environmentRestoreHealthCheckReport, 0, len(checks))
+	deadline := time.Now().Add(timeout)
 	for _, raw := range checks {
-		item, ok := raw.(map[string]any)
+		check, ok := environmentRestoreHealthCheckFromAny(raw)
 		if !ok {
 			continue
 		}
-		kind := strings.TrimSpace(valueString(item["kind"]))
-		if kind == "" && strings.TrimSpace(valueString(item["url"])) != "" {
-			kind = "url"
-		}
-		check := environmentRestoreHealthCheckReport{
-			ID:        strings.TrimSpace(valueString(item["id"])),
-			Kind:      kind,
-			URL:       strings.TrimSpace(valueString(item["url"])),
-			Address:   strings.TrimSpace(valueString(item["address"])),
-			Command:   strings.TrimSpace(valueString(item["command"])),
-			Service:   strings.TrimSpace(valueString(item["service"])),
-			Container: strings.TrimSpace(valueString(item["container"])),
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			check.Error = "health check deadline reached before probe started"
+			out = append(out, check)
+			continue
 		}
 		switch check.Kind {
 		case "url", "":
 			if check.URL == "" {
 				continue
 			}
-			out = append(out, waitEnvironmentRestoreURLHealthCheck(ctx, check, timeout))
+			out = append(out, waitEnvironmentRestoreURLHealthCheck(ctx, check, remaining))
 		case "tcp":
 			if check.Address == "" {
 				continue
 			}
-			out = append(out, waitEnvironmentRestoreTCPHealthCheck(ctx, check, timeout))
+			out = append(out, waitEnvironmentRestoreTCPHealthCheck(ctx, check, remaining))
 		case "command":
 			if check.Command == "" {
 				continue
 			}
-			out = append(out, waitEnvironmentRestoreCommandHealthCheck(ctx, check, timeout, workspace))
+			out = append(out, waitEnvironmentRestoreCommandHealthCheck(ctx, check, remaining, workspace))
 		case "compose-service":
 			if check.Service == "" {
 				continue
 			}
-			out = append(out, waitEnvironmentRestoreComposeServiceHealthCheck(ctx, check, timeout, workspace, composeBaseArgs))
+			out = append(out, waitEnvironmentRestoreComposeServiceHealthCheck(ctx, check, remaining, workspace, composeBaseArgs))
 		case "container":
 			if check.Container == "" {
 				continue
 			}
-			out = append(out, waitEnvironmentRestoreContainerHealthCheck(ctx, check, timeout))
+			out = append(out, waitEnvironmentRestoreContainerHealthCheck(ctx, check, remaining))
 		default:
 			check.Error = "unsupported health check kind: " + check.Kind
 			out = append(out, check)
 		}
 	}
 	return out
+}
+
+func environmentRestoreHealthCheckFromAny(raw any) (environmentRestoreHealthCheckReport, bool) {
+	item, ok := raw.(map[string]any)
+	if !ok {
+		return environmentRestoreHealthCheckReport{}, false
+	}
+	kind := strings.TrimSpace(valueString(item["kind"]))
+	if kind == "" && strings.TrimSpace(valueString(item["url"])) != "" {
+		kind = "url"
+	}
+	return environmentRestoreHealthCheckReport{
+		ID:        strings.TrimSpace(valueString(item["id"])),
+		Kind:      kind,
+		URL:       strings.TrimSpace(valueString(item["url"])),
+		Address:   strings.TrimSpace(valueString(item["address"])),
+		Command:   strings.TrimSpace(valueString(item["command"])),
+		Service:   strings.TrimSpace(valueString(item["service"])),
+		Container: strings.TrimSpace(valueString(item["container"])),
+	}, true
 }
 
 func waitEnvironmentRestoreURLHealthCheck(ctx context.Context, check environmentRestoreHealthCheckReport, timeout time.Duration) environmentRestoreHealthCheckReport {
@@ -192,7 +206,18 @@ func waitEnvironmentRestoreCommand(ctx context.Context, check environmentRestore
 	progress.start()
 	var lastErr string
 	for {
-		output, errText := runRestoreCommand(ctx, workspace, command)
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			check.Error = firstNonEmpty(lastErr, "health check deadline reached before probe started")
+			progress.done(false, check.Error)
+			return check
+		}
+		commandCtx, cancel := context.WithTimeout(ctx, minDuration(2*time.Second, remaining))
+		output, errText := runRestoreCommand(commandCtx, workspace, command)
+		if commandCtx.Err() == context.DeadlineExceeded {
+			errText = "health command timed out: " + commandCtx.Err().Error()
+		}
+		cancel()
 		if errText == "" && ok(&check, output) {
 			check.OK = true
 			check.Error = ""
@@ -323,4 +348,11 @@ func firstNonNil(values ...any) any {
 		}
 	}
 	return nil
+}
+
+func minDuration(left time.Duration, right time.Duration) time.Duration {
+	if left < right {
+		return left
+	}
+	return right
 }

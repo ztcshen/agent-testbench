@@ -59,6 +59,9 @@ func environmentRestoreUseExistingContainers(ctx context.Context, graph store.En
 	for _, check := range report.HealthChecks {
 		if !check.OK {
 			report.OK = false
+			if report.Error == "" {
+				report.Error = environmentRestoreHealthFailureError(check)
+			}
 		}
 	}
 	return report

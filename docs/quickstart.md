@@ -329,6 +329,69 @@ registered component repositories must clone, fetch, and ref-prepare first; only
 then does restore run Compose pull/build/up, wait for health probes, and run the
 verification workflow. A failed repository precheck stops before Docker startup,
 and a failed probe records `phase=health-check` in `summary.lastRestore`.
+The health timeout is a bound for the whole restore health phase, including
+command probes. In non-JSON runs restore prints active probe progress to
+stderr. In JSON mode stdout stays reserved for the final machine-readable
+report; on timeout, inspect `docker.healthChecks` and
+`summary.lastRestore.docker.healthFailed` for the blocking probe, latest
+status, and error. `--use-existing-containers` follows the same bounded health gate after
+adopting fixed-name containers, so it is safe to use for already-running local
+targets without starting new Compose services.
+
+For sandbox diagnostics, prefer Store-backed read-only checks before inspecting
+containers or temporary files directly:
+
+```sh
+./bin/agent-testbench.sh runtime mysql endpoints --include-tables --json
+./bin/agent-testbench.sh evidence list --run RUN_ID --json
+./bin/agent-testbench.sh sandbox service list --store NAME_OR_DSN --json
+./bin/agent-testbench.sh sandbox start --store NAME_OR_DSN --dry-run --json
+```
+
+`sandbox service list` shows the registered profile-service catalog without
+starting anything. `sandbox start --dry-run` reports which active services have
+startup commands and which entries would be skipped, also without executing
+those commands.
+
+When a consumer component already owns MySQL DDL on an edge such as
+`app:mysql`, add later table changes as versioned migration assets instead of
+editing earlier bootstrap DDL. The migration commands keep the SQL in the
+Environment Component Graph and write applied versions to the target MySQL
+database's `agent_testbench_schema_history` table.
+
+```sh
+./bin/agent-testbench.sh environment migration add ENV_ID \
+  --store NAME_OR_DSN \
+  --edge app:mysql \
+  --database app_db \
+  --version 0011 \
+  --description add-risk-score-column \
+  --precondition column-not-exists:risk_result.risk_score \
+  --file ./V0011__add_risk_score_column.sql \
+  --json
+
+./bin/agent-testbench.sh environment migration plan ENV_ID \
+  --store NAME_OR_DSN \
+  --edge app:mysql \
+  --database app_db \
+  --json
+
+./bin/agent-testbench.sh environment migration apply ENV_ID \
+  --store NAME_OR_DSN \
+  --edge app:mysql \
+  --database app_db \
+  --workspace /tmp/agent-testbench-restore \
+  --execute \
+  --json
+```
+
+`apply` creates the target database and history table when needed, checks an
+existing version's checksum before skipping it, evaluates registered
+preconditions before running new SQL, and then records the applied version.
+`baseline` uses the same history table but records existing versions without
+running their SQL; use it when a target database already contains the schema.
+Regular `environment restore --execute` also applies versioned MySQL migration
+assets through this history path.
 
 For a colleague-machine simulation, add `--clean-docker-state` during dry-run
 review to include a Compose-scoped cleanup plan before startup. Add

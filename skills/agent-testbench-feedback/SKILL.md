@@ -18,8 +18,13 @@ current implementation slice.
   current status.
 - If the current slice fixes the issue, mark it `fixed` and include the file or
   test that verifies it.
+- Update the existing entry when fixing or deferring registered feedback; do
+  not add a duplicate "fixed" entry for the same symptom.
 - If the issue is larger than the current slice, mark it `backlog` with a
   concrete next step.
+- When copying local feedback into the public repository, generalize private
+  service names, DSNs, ports, or customer-specific data into product-neutral
+  evidence.
 
 ## Register Feedback
 

@@ -125,35 +125,85 @@ func environmentRestoreApplyEdgeAsset(ctx context.Context, dep store.ComponentDe
 		item.Error = "edge asset target component is required"
 		return item
 	}
+	if environmentMigrationIsAsset(asset) {
+		return environmentRestoreApplyMigrationEdgeAsset(ctx, dep, asset, content, contentErr, workspace, execute, composeBaseArgs, item)
+	}
 	if environmentRestoreIsMySQLSQLAsset(asset, dep) {
-		item.Action = "plan-apply-mysql-sql"
-		item.Command = environmentRestoreMySQLApplyCommand(composeBaseArgs, targetService)
-		if len(composeBaseArgs) == 0 || targetService == "" {
-			item.OK = false
-			item.Error = "mysql edge asset requires a Docker Compose target service"
-			return item
-		}
-		if contentErr != nil {
-			item.OK = false
-			item.Error = contentErr.Error()
-			return item
-		}
-		if strings.TrimSpace(content) == "" {
-			item.OK = false
-			item.Error = "mysql edge asset requires SQL content"
-			return item
-		}
-		if execute {
-			item.Action = "apply-mysql-sql"
-			attempts, errText := runRestoreMySQLCommandWithInputRetry(ctx, workspace, item.Command, content)
-			item.Attempts = attempts
-			if errText != "" {
-				item.OK = false
-				item.Error = errText
-			}
-		}
+		return environmentRestoreApplyMySQLSQLEdgeAsset(ctx, content, contentErr, workspace, execute, composeBaseArgs, item)
+	}
+	return environmentRestoreApplyGeneratedEdgeAsset(asset, generated, workspace, execute, item)
+}
+
+func environmentRestoreApplyMigrationEdgeAsset(ctx context.Context, dep store.ComponentDependency, asset store.ComponentConfigAsset, content string, contentErr error, workspace string, execute bool, composeBaseArgs []string, item environmentRestoreAppliedAsset) environmentRestoreAppliedAsset {
+	item.Action = "plan-apply-mysql-migration"
+	item.Command = environmentRestoreMySQLApplyCommand(composeBaseArgs, item.TargetComposeService)
+	if len(composeBaseArgs) == 0 || item.TargetComposeService == "" {
+		item.OK = false
+		item.Error = "mysql migration asset requires a Docker Compose target service"
 		return item
 	}
+	migration, ok := environmentMigrationItemFromAsset(asset, item.TargetComponentID)
+	if !ok {
+		item.OK = false
+		item.Error = "mysql migration asset requires migration version and database metadata"
+		return item
+	}
+	migration.EnvironmentID = firstNonEmpty(asset.EnvID, dep.EnvID)
+	if contentErr != nil {
+		item.OK = false
+		item.Error = contentErr.Error()
+		return item
+	}
+	if strings.TrimSpace(content) == "" {
+		item.OK = false
+		item.Error = "mysql migration asset requires SQL content"
+		return item
+	}
+	migration.Content = content
+	if execute {
+		item.Action = "apply-mysql-migration"
+		edge := environmentMigrationEdge{Owner: dep.ConsumerComponentID, Provider: dep.ProviderComponentID}
+		attempts, _, errText := runEnvironmentMigrationWithHistory(ctx, workspace, item.Command, edge, migration, environmentMigrationApplySQL(edge, migration), false)
+		item.Attempts = attempts
+		if errText != "" {
+			item.OK = false
+			item.Error = errText
+		}
+	}
+	return item
+}
+
+func environmentRestoreApplyMySQLSQLEdgeAsset(ctx context.Context, content string, contentErr error, workspace string, execute bool, composeBaseArgs []string, item environmentRestoreAppliedAsset) environmentRestoreAppliedAsset {
+	item.Action = "plan-apply-mysql-sql"
+	item.Command = environmentRestoreMySQLApplyCommand(composeBaseArgs, item.TargetComposeService)
+	if len(composeBaseArgs) == 0 || item.TargetComposeService == "" {
+		item.OK = false
+		item.Error = "mysql edge asset requires a Docker Compose target service"
+		return item
+	}
+	if contentErr != nil {
+		item.OK = false
+		item.Error = contentErr.Error()
+		return item
+	}
+	if strings.TrimSpace(content) == "" {
+		item.OK = false
+		item.Error = "mysql edge asset requires SQL content"
+		return item
+	}
+	if execute {
+		item.Action = "apply-mysql-sql"
+		attempts, errText := runRestoreMySQLCommandWithInputRetry(ctx, workspace, item.Command, content)
+		item.Attempts = attempts
+		if errText != "" {
+			item.OK = false
+			item.Error = errText
+		}
+	}
+	return item
+}
+
+func environmentRestoreApplyGeneratedEdgeAsset(asset store.ComponentConfigAsset, generated map[string]string, workspace string, execute bool, item environmentRestoreAppliedAsset) environmentRestoreAppliedAsset {
 	targetPath := filepath.Clean(strings.TrimSpace(asset.TargetPath))
 	if targetPath == "." || targetPath == "" {
 		item.OK = false
