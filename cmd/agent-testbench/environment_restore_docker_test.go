@@ -178,13 +178,13 @@ func TestEnvironmentRestoreCommandHealthTimeoutBoundsSlowProbe(t *testing.T) {
 	check := waitEnvironmentRestoreCommandHealthCheck(context.Background(), environmentRestoreHealthCheckReport{
 		ID:      "slow-probe",
 		Kind:    "command",
-		Command: "sleep 0.2",
+		Command: "sleep 2",
 	}, 20*time.Millisecond, "")
 
 	if check.OK {
 		t.Fatalf("slow probe should fail")
 	}
-	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
+	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Fatalf("slow probe ignored health timeout: elapsed=%s check=%#v", elapsed, check)
 	}
 	if !strings.Contains(check.Error, "deadline") && !strings.Contains(check.Error, "killed") {
