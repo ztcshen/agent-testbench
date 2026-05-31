@@ -141,6 +141,13 @@ for tool in rg sqlite3; do
   fi
 done
 
+step "checking secret patterns"
+if [[ "$scoped_release_check" -eq 1 ]]; then
+  tools/guardrails/check_secrets.sh "${scope_paths[@]}"
+else
+  tools/guardrails/check_secrets.sh
+fi
+
 step "checking SQL smoke Store"
 if [[ -z "${AGENT_TESTBENCH_SMOKE_STORE_DSN:-${AGENT_TESTBENCH_SMOKE_STORE:-}}" ]]; then
   echo "AGENT_TESTBENCH_SMOKE_STORE_DSN or AGENT_TESTBENCH_SMOKE_STORE is required for release-check." >&2
@@ -239,6 +246,11 @@ if [[ -n "$tracked_generated" ]]; then
   echo "generated or local-only paths are tracked:" >&2
   echo "$tracked_generated" >&2
   exit 1
+fi
+
+if [[ "$full_release_check" -eq 1 ]]; then
+  step "checking dependency baseline"
+  tools/guardrails/check_dependency_baseline.sh
 fi
 
 step "checking source-domain guardrail"

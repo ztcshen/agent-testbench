@@ -18,28 +18,40 @@ fi
 
 existing=()
 scan_args=("$@")
-if [[ ${#scan_args[@]} -gt 0 ]]; then
-  git_files_cmd=(git ls-files --cached --others --exclude-standard -z -- "${scan_args[@]}")
-else
-  git_files_cmd=(git ls-files --cached --others --exclude-standard -z)
-fi
 
-while IFS= read -r -d '' path; do
-  case "$path" in
-    .git/*|.idea/*|.runtime/*|node_modules/*)
-      continue
-      ;;
-    docs/progress/*|docs/plans/*)
-      continue
-      ;;
-    package-lock.json|tools/guardrails/source-domain-terms.txt)
-      continue
-      ;;
-  esac
-  if [[ -f "$path" ]]; then
-    existing+=("$path")
-  fi
-done < <("${git_files_cmd[@]}")
+collect_git_files() {
+  local source=$1
+  shift
+  while IFS= read -r -d '' path; do
+    case "$path" in
+      .git/*|.idea/*|.runtime/*|node_modules/*)
+        continue
+        ;;
+      .scratch/*|.understand-anything/*)
+        if [[ "$source" == "untracked" ]]; then
+          continue
+        fi
+        ;;
+      docs/progress/*|docs/plans/*)
+        continue
+        ;;
+      package-lock.json|tools/guardrails/source-domain-terms.txt)
+        continue
+        ;;
+    esac
+    if [[ -f "$path" ]]; then
+      existing+=("$path")
+    fi
+  done < <("$@")
+}
+
+if [[ ${#scan_args[@]} -gt 0 ]]; then
+  collect_git_files cached git ls-files --cached -z -- "${scan_args[@]}"
+  collect_git_files untracked git ls-files --others --exclude-standard -z -- "${scan_args[@]}"
+else
+  collect_git_files cached git ls-files --cached -z
+  collect_git_files untracked git ls-files --others --exclude-standard -z
+fi
 
 if [[ ${#existing[@]} -eq 0 ]]; then
   echo "no core paths to scan"
