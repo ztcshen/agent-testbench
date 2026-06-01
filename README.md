@@ -117,7 +117,10 @@ Store or runtime directory is missing, use `update --channel release` or
 `commands --area AREA --filter TEXT` to find exact Store, case, workflow, and
 Evidence commands without scrolling the full help text. `config show`,
 `config path`, `logs`, and `completion bash|zsh` cover the common operator
-checks around local configuration, runtime logs, and shell integration.
+checks around local configuration, runtime logs, and shell integration. If a
+wrapper on `PATH` points at an older binary, `doctor` reports
+`runtime.shell-entrypoint` with the exact `.runtime/bin` directory or `ATB_BIN`
+value to use before rerunning `update`.
 
 The demo command starts a temporary local HTTP endpoint, runs the generic
 `examples/api-cases/create-item.json` case against the active SQL Store or

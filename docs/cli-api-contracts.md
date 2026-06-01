@@ -80,13 +80,16 @@ agent-testbench logs agent-testbench -n 80
 ```
 
 `status` is read-only and summarizes the checkout, runtime binary, active
-Store, suggested next commands, and with `--deep` the active Store schema state.
+entrypoint, active Store, suggested next commands, and with `--deep` the active Store schema state.
 `doctor` is read-only by default; `doctor --fix` may create the local runtime
 directory and a local SQLite Store config, while `doctor --deep` adds Docker
-Compose, Store schema, and optional trace GraphQL reachability checks. `update
+Compose, Store schema, optional trace GraphQL reachability checks, and a
+`runtime.shell-entrypoint` warning when `agent-testbench` on `PATH` is missing
+or points at a stale wrapper instead of `.runtime/bin/agent-testbench`. `update
 --channel main` pins the mainline flow; `update --channel release` resolves the
-highest version-like remote tag; `update --check` reports the next command
-before mutating the checkout. `config show`, `config path`, `logs`, and
+highest version-like remote tag; when no upstream is set, update prefers a
+configured `github` remote before `origin`; `update --check` reports the next
+command before mutating the checkout. `config show`, `config path`, `logs`, and
 `completion bash|zsh` are local operator conveniences and do not call the
 control-plane API.
 
@@ -250,7 +253,7 @@ and writes only when `--apply` is supplied.
 | Case batch run | `case batch start`, `case batch report`, `case suite report`, `workflow report`, `interface-node case report` | `/api/cases/batch-runs`, `/api/test-kit/run-batch` | Mostly paired for async batch execution through `case batch start/report`; report-specific CLI variants remain synchronous artifact generators. |
 | Case run list | `case runs` | `/api/case/runs` | Paired. CLI reads Store runs, API case runs, and Evidence counts through the active Store or `--store NAME_OR_DSN`. |
 | Case evidence detail | `case evidence` | `/api/case/evidence`, `/api/case-run/evidence` | Paired. CLI reuses the control-plane case Evidence payload and accepts active Store or `--store NAME_OR_DSN`. |
-| Case diagnosis | `case diagnose` | None | CLI-only Store-first triage. It reads case Evidence by `--case-run` or `--run`, parses assertion and response artifacts when available, classifies the failure, emits compact signals, and suggests the next reproducible CLI action. |
+| Case diagnosis | `case diagnose` | None | CLI-only Store-first triage. It reads case Evidence by `--case-run` or `--run`, parses assertion and response artifacts when available, classifies the failure, emits compact request/response/assertion/log/dependency signals, attempts bounded runtime-log collection for failed workflow steps when topology/correlation data exists, and suggests the next reproducible CLI action. |
 | Case quality gate | `case gate` | None | CLI-only CI gate. It reads Store case-run facts and Evidence indexes, reports counts, failed case runs, missing Evidence, gate booleans, and next actions, then exits non-zero when selected requirements such as `--require-no-failures`, `--require-evidence`, or `--min-passed` are not met. |
 | Case timing | `case timing` | `/api/case/timing` | Paired. CLI reuses the control-plane timing summary payload and accepts active Store or `--store NAME_OR_DSN`. |
 | Incomplete case batches | `case incomplete-batches` | `/api/case/incomplete-batches` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |

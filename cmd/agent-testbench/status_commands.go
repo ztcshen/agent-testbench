@@ -37,9 +37,11 @@ type statusRepoReport struct {
 }
 
 type statusRuntimeReport struct {
-	Path       string `json:"path"`
-	Exists     bool   `json:"exists"`
-	Executable bool   `json:"executable"`
+	Path                 string `json:"path"`
+	Exists               bool   `json:"exists"`
+	Executable           bool   `json:"executable"`
+	ActivePath           string `json:"activePath,omitempty"`
+	ActiveMatchesRuntime bool   `json:"activeMatchesRuntime"`
 }
 
 type statusStoreReport struct {
@@ -163,6 +165,10 @@ func statusRuntime(repo string) statusRuntimeReport {
 		path = filepath.Join(repo, ".runtime", "bin", "agent-testbench")
 	}
 	report := statusRuntimeReport{Path: path}
+	if active, err := os.Executable(); err == nil {
+		report.ActivePath = filepath.Clean(active)
+		report.ActiveMatchesRuntime = sameRuntimePath(report.ActivePath, path)
+	}
 	info, statErr := os.Stat(path)
 	if statErr != nil {
 		return report
@@ -266,7 +272,11 @@ func statusNextActions(runtime statusRuntimeReport, store statusStoreReport) []s
 		)
 	}
 	if !runtime.Exists {
-		next = append(next, "agent-testbench update")
+		next = append(next, "agent-testbench setup --build-runtime")
+		next = append(next, "agent-testbench update --channel main")
+	}
+	if runtime.Exists && runtime.Executable && !runtime.ActiveMatchesRuntime {
+		next = append(next, "put "+filepath.Dir(runtime.Path)+" before stale wrappers on PATH, or set ATB_BIN="+runtime.Path)
 	}
 	next = append(next, "agent-testbench commands --filter \"case gate\"")
 	return next
@@ -279,9 +289,10 @@ type doctorOptions struct {
 }
 
 const (
-	doctorCheckActiveStore  = "active-store"
-	doctorCheckTraceGraphQL = "trace-graphql"
-	doctorCodeTraceGraphQL  = "trace.graphql"
+	doctorCheckActiveStore           = "active-store"
+	doctorCheckTraceGraphQL          = "trace-graphql"
+	doctorCodeRuntimeShellEntrypoint = "runtime.shell-entrypoint"
+	doctorCodeTraceGraphQL           = "trace.graphql"
 )
 
 func buildDoctorReport(ctx context.Context, opts doctorOptions) doctorCommandReport {
@@ -301,6 +312,7 @@ func buildDoctorReport(ctx context.Context, opts doctorOptions) doctorCommandRep
 		doctorStoreCheck(status.Store),
 		doctorRuntimeDirectoryCheck(status.Runtime),
 		doctorRuntimeCheck(status.Runtime),
+		doctorShellEntrypointCheck(status.Runtime),
 	}
 	if fixErr != "" {
 		checks = append(checks, doctorCheckReport{Name: "doctor-fix", Code: "doctor.fix", OK: false, Detail: fixErr, Fix: "check repository and config-home permissions, then rerun agent-testbench doctor --fix"})
@@ -378,6 +390,49 @@ func doctorRuntimeCheck(runtime statusRuntimeReport) doctorCheckReport {
 		detail = "exists but is not executable"
 	}
 	return doctorCheckReport{Name: "runtime-binary", Code: "runtime.binary", OK: false, Optional: true, Detail: detail, Fix: "run agent-testbench update"}
+}
+
+func doctorShellEntrypointCheck(runtime statusRuntimeReport) doctorCheckReport {
+	found, err := exec.LookPath("agent-testbench")
+	if err != nil {
+		return doctorCheckReport{
+			Name:     "shell-entrypoint",
+			Code:     doctorCodeRuntimeShellEntrypoint,
+			OK:       false,
+			Optional: true,
+			Detail:   "agent-testbench is not on PATH",
+			Fix:      "build the runtime with agent-testbench setup --build-runtime, then add " + filepath.Dir(runtime.Path) + " to PATH",
+		}
+	}
+	found = filepath.Clean(found)
+	if sameRuntimePath(found, runtime.Path) {
+		return doctorCheckReport{Name: "shell-entrypoint", Code: doctorCodeRuntimeShellEntrypoint, OK: true, Optional: true, Detail: found}
+	}
+	return doctorCheckReport{
+		Name:     "shell-entrypoint",
+		Code:     doctorCodeRuntimeShellEntrypoint,
+		OK:       false,
+		Optional: true,
+		Detail:   fmt.Sprintf("PATH resolves agent-testbench to %s, expected %s", found, runtime.Path),
+		Fix:      "put " + filepath.Dir(runtime.Path) + " before stale wrappers on PATH, or set ATB_BIN=" + runtime.Path,
+	}
+}
+
+func sameRuntimePath(left string, right string) bool {
+	left = filepath.Clean(strings.TrimSpace(left))
+	right = filepath.Clean(strings.TrimSpace(right))
+	if left == "" || right == "" {
+		return false
+	}
+	leftEval, leftErr := filepath.EvalSymlinks(left)
+	rightEval, rightErr := filepath.EvalSymlinks(right)
+	if leftErr == nil {
+		left = filepath.Clean(leftEval)
+	}
+	if rightErr == nil {
+		right = filepath.Clean(rightEval)
+	}
+	return left == right
 }
 
 func doctorDockerComposeCheck(ctx context.Context) doctorCheckReport {
@@ -482,6 +537,9 @@ func printStatusReport(report statusCommandReport) {
 	fmt.Println()
 	fmt.Println("Runtime")
 	fmt.Printf("  Binary: %s\n", report.Runtime.Path)
+	if report.Runtime.ActivePath != "" {
+		fmt.Printf("  Active: %s\n", report.Runtime.ActivePath)
+	}
 	fmt.Printf("  Ready: %t\n", report.Runtime.Exists && report.Runtime.Executable)
 	fmt.Println()
 	fmt.Println("Store")

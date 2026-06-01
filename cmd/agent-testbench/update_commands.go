@@ -221,7 +221,19 @@ func resolveUpdateRemote(ctx context.Context, repo string, remote string) string
 			return upstreamRemote
 		}
 	}
+	if updateRemoteExists(ctx, repo, "github") {
+		return "github"
+	}
 	return updateDefaultRemote
+}
+
+func updateRemoteExists(ctx context.Context, repo string, remote string) bool {
+	remote = strings.TrimSpace(remote)
+	if remote == "" {
+		return false
+	}
+	_, err := updateGitOutput(ctx, repo, "remote", "get-url", remote)
+	return err == nil
 }
 
 func resolveLatestUpdateRelease(ctx context.Context, repo string, remote string) (string, error) {
@@ -469,7 +481,7 @@ func resolveUpdateTarget(ctx context.Context, repo string, remote string, branch
 		}
 	}
 	if remote == "" {
-		remote = updateDefaultRemote
+		remote = resolveUpdateRemote(ctx, repo, "")
 	}
 	if branch == "" {
 		branch, err = updateGitOutput(ctx, repo, "branch", "--show-current")

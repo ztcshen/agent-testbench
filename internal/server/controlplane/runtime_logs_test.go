@@ -153,3 +153,124 @@ func TestWorkflowStepLogsReturnPendingAndPersistInBackground(t *testing.T) {
 	}
 	t.Fatalf("runtime log evidence was not persisted in the background")
 }
+
+func TestEnsureCaseRuntimeLogsCollectsWorkflowStepLogs(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+
+	run := store.Run{
+		ID:           "run.ensure",
+		ProfileID:    "sample",
+		WorkflowID:   "workflow.alpha",
+		Status:       store.StatusFailed,
+		EvidenceRoot: filepath.Join(t.TempDir(), "evidence"),
+		SummaryJSON:  `{"steps":[{"stepId":"step.alpha","caseId":"case.alpha","summary":{"requestId":"request.ensure"}}]}`,
+		CreatedAt:    time.Now().UTC(),
+	}
+	if _, err := s.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if _, err := s.SaveTraceTopology(ctx, store.TraceTopology{
+		ID:            "topology.ensure",
+		WorkflowRunID: run.ID,
+		WorkflowID:    run.WorkflowID,
+		StepID:        "step.alpha",
+		CaseID:        "case.alpha",
+		Status:        "complete",
+		TopologyJSON:  `{"provider":"skywalking","requestId":"request.ensure","observedNodes":["worker"]}`,
+		CreatedAt:     time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("record topology: %v", err)
+	}
+
+	originalCommand := runRuntimeCommand
+	defer func() { runRuntimeCommand = originalCommand }()
+	runRuntimeCommand = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		switch {
+		case len(args) >= 2 && args[0] == "ps":
+			return []byte("sandbox-worker\n"), nil
+		case len(args) >= 1 && args[0] == "logs":
+			return []byte("[INFO] request.ensure handled by worker\n"), nil
+		default:
+			return []byte{}, nil
+		}
+	}
+
+	report, err := EnsureCaseRuntimeLogs(ctx, s, run.ID, "case.alpha", "step.alpha")
+	if err != nil {
+		t.Fatalf("ensure runtime logs: %v", err)
+	}
+	if !report.OK || !report.Collected || report.MatchedSystems != 1 || report.StepID != "step.alpha" {
+		t.Fatalf("runtime log ensure report = %#v", report)
+	}
+	records, err := s.ListEvidence(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("list evidence: %v", err)
+	}
+	if len(records) != 1 || records[0].Kind != workflowStepRuntimeLogsKind {
+		t.Fatalf("runtime log evidence records = %#v", records)
+	}
+}
+
+func TestEnsureCaseRuntimeLogsIgnoresTopologyFromOtherWorkflowStep(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+
+	run := store.Run{
+		ID:           "run.multi",
+		ProfileID:    "sample",
+		WorkflowID:   "workflow.alpha",
+		Status:       store.StatusFailed,
+		EvidenceRoot: filepath.Join(t.TempDir(), "evidence"),
+		SummaryJSON: `{"steps":[
+			{"stepId":"step.alpha","caseId":"case.alpha","summary":{"requestId":"request.alpha"}},
+			{"stepId":"step.beta","caseId":"case.beta","summary":{"requestId":"request.beta"}}
+		]}`,
+		CreatedAt: time.Now().UTC(),
+	}
+	if _, err := s.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if _, err := s.SaveTraceTopology(ctx, store.TraceTopology{
+		ID:            "topology.beta",
+		WorkflowRunID: run.ID,
+		WorkflowID:    run.WorkflowID,
+		StepID:        "step.beta",
+		CaseID:        "case.beta",
+		Status:        "complete",
+		TopologyJSON:  `{"provider":"skywalking","requestId":"request.beta","observedNodes":["worker"]}`,
+		CreatedAt:     time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("record topology: %v", err)
+	}
+
+	originalCommand := runRuntimeCommand
+	defer func() { runRuntimeCommand = originalCommand }()
+	runRuntimeCommand = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		t.Fatalf("runtime log collection should not run with only another step's topology: %s %#v", name, args)
+		return nil, nil
+	}
+
+	report, err := EnsureCaseRuntimeLogs(ctx, s, run.ID, "case.alpha", "step.alpha")
+	if err != nil {
+		t.Fatalf("ensure runtime logs: %v", err)
+	}
+	if report.Collected || report.Nodes != 0 || report.Correlators != 1 || report.StepID != "step.alpha" {
+		t.Fatalf("runtime log ensure report should skip unrelated topology: %#v", report)
+	}
+	records, err := s.ListEvidence(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("list evidence: %v", err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("runtime logs should not be persisted from another step topology: %#v", records)
+	}
+}
