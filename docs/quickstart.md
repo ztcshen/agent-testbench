@@ -104,8 +104,9 @@ use release mode:
 ./bin/agent-testbench.sh update --release latest
 ```
 
-By default the command uses the current branch's upstream remote/branch and
-writes the rebuilt binary to `.runtime/bin/agent-testbench`. Pass
+By default the command uses the current branch's upstream remote/branch, or a
+configured `github` remote before `origin` when no upstream is set, and writes
+the rebuilt binary to `.runtime/bin/agent-testbench`. Pass
 `--channel main` for the main branch, `--channel release` for the latest
 version-like tag, `--remote github --branch main`, `--remote origin --branch
 main`, or `--repo /path/to/agent-testbench` when the checkout does not have an
@@ -113,6 +114,11 @@ upstream tracking branch. Pass `--release v0.3.2` when you need a specific tag.
 Tracked local edits stop the update unless `--force` is set; untracked runtime
 artifacts are ignored. `update --check` prints the exact next update command
 when a newer target is available.
+
+`doctor` also checks the shell entrypoint. If `agent-testbench` resolves to an
+older wrapper or is missing from `PATH`, it reports `runtime.shell-entrypoint`
+with the exact `.runtime/bin` directory to put before stale wrappers, or the
+`ATB_BIN` value to export for wrapper-based launchers.
 
 ## Local Operator Commands
 
@@ -455,9 +461,17 @@ containers or temporary files directly:
 ```sh
 ./bin/agent-testbench.sh runtime mysql endpoints --include-tables --json
 ./bin/agent-testbench.sh evidence list --run RUN_ID --json
+./bin/agent-testbench.sh case diagnose --case-run CASE_RUN_ID --json
 ./bin/agent-testbench.sh sandbox service list --store NAME_OR_DSN --json
 ./bin/agent-testbench.sh sandbox start --store NAME_OR_DSN --dry-run --json
 ```
+
+`case diagnose` classifies the failing case, emits compact request, response,
+assertion, runtime-log, dependency-probe, and post-process task signals, and
+attempts bounded runtime-log collection for failed workflow steps when topology
+and request correlation data are present. When logs or dependency probes are
+still absent, it prints exact `workflow step` and `evidence tasks` follow-up
+commands instead of leaving the operator to inspect containers manually.
 
 `sandbox service list` shows the registered profile-service catalog without
 starting anything. `sandbox start --dry-run` reports which active services have

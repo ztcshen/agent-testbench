@@ -85,6 +85,83 @@ func TestCaseDiagnoseResolvesRelativeEvidenceAgainstRunRoot(t *testing.T) {
 	requireReadableCaseDiagnosisEvidence(t, out, "relative URI")
 }
 
+func TestCaseDiagnoseReportsMissingRuntimeAndDependencyDiagnostics(t *testing.T) {
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "diagnosis-missing-observability.sqlite")
+	runtime, err := openStore(ctx, "sqlite://"+storePath)
+	if err != nil {
+		t.Fatalf("open Store: %v", err)
+	}
+	defer runtime.Close()
+	evidenceRoot := filepath.Join(t.TempDir(), "evidence")
+	responsePath := filepath.Join(evidenceRoot, "response.json")
+	writeFile(t, responsePath, `{"statusCode":500,"body":"{\"ok\":false}"}`)
+	if _, err := runtime.CreateRun(ctx, store.Run{
+		ID:           "run.observability",
+		ProfileID:    "sample",
+		WorkflowID:   "workflow.observability",
+		Status:       store.StatusFailed,
+		EvidenceRoot: evidenceRoot,
+		SummaryJSON:  `{"steps":[{"stepId":"step.send","caseId":"case.send","summary":{"requestId":"request-123"}}]}`,
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if _, err := runtime.RecordAPICaseRun(ctx, store.APICaseRun{
+		ID:                   "run.observability.case",
+		RunID:                "run.observability",
+		CaseID:               "case.send",
+		Status:               store.StatusFailed,
+		RequestSummaryJSON:   `{"method":"POST","path":"/send","stepId":"step.send"}`,
+		AssertionSummaryJSON: `{"status":"failed","errorCount":1}`,
+	}); err != nil {
+		t.Fatalf("record api case run: %v", err)
+	}
+	if _, err := runtime.RecordEvidence(ctx, store.EvidenceRecord{
+		ID:        "run.observability.response",
+		RunID:     "run.observability",
+		CaseRunID: "run.observability.case",
+		Kind:      "response",
+		URI:       responsePath,
+		MediaType: "application/json",
+		Summary:   `{"statusCode":500}`,
+	}); err != nil {
+		t.Fatalf("record response evidence: %v", err)
+	}
+
+	out := runCLI(t, "case", "diagnose", "--case-run", "run.observability.case", "--store", "sqlite://"+storePath, "--json")
+	var report struct {
+		StepID      string `json:"stepId"`
+		Diagnostics struct {
+			LogRecords       int `json:"logRecords"`
+			DependencyProbes int `json:"dependencyProbes"`
+		} `json:"diagnostics"`
+		Signals []struct {
+			Name  string `json:"name"`
+			Value string `json:"value"`
+		} `json:"signals"`
+		Warnings    []string `json:"warnings"`
+		NextActions []string `json:"nextActions"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode diagnosis json: %v\n%s", err, out)
+	}
+	if report.StepID != "step.send" || report.Diagnostics.LogRecords != 0 || report.Diagnostics.DependencyProbes != 0 {
+		t.Fatalf("diagnosis observability report = %#v", report)
+	}
+	joinedWarnings := strings.Join(report.Warnings, "\n")
+	if !strings.Contains(joinedWarnings, "no runtime log evidence") || !strings.Contains(joinedWarnings, "no dependency probe evidence") {
+		t.Fatalf("diagnosis warnings = %#v", report.Warnings)
+	}
+	joinedActions := strings.Join(report.NextActions, "\n")
+	if !strings.Contains(joinedActions, "agent-testbench workflow step --run run.observability --step step.send --json") ||
+		!strings.Contains(joinedActions, "agent-testbench evidence tasks --run run.observability --step step.send --kind runtime_log_collect --json") {
+		t.Fatalf("diagnosis next actions = %#v", report.NextActions)
+	}
+	if !caseDiagnosisTestSignal(report.Signals, "evidence.logs", "0") || !caseDiagnosisTestSignal(report.Signals, "dependency.probes", "0") {
+		t.Fatalf("diagnosis signals = %#v", report.Signals)
+	}
+}
+
 func seedReadableCaseDiagnosisEvidence(t *testing.T, evidenceURI func(string) string) string {
 	t.Helper()
 	ctx := context.Background()
@@ -136,6 +213,18 @@ func seedReadableCaseDiagnosisEvidence(t *testing.T, evidenceURI func(string) st
 		}
 	}
 	return storePath
+}
+
+func caseDiagnosisTestSignal(signals []struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}, name string, value string) bool {
+	for _, signal := range signals {
+		if signal.Name == name && signal.Value == value {
+			return true
+		}
+	}
+	return false
 }
 
 func requireReadableCaseDiagnosisEvidence(t *testing.T, out string, label string) {

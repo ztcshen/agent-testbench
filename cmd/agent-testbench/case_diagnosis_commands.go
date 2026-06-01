@@ -10,23 +10,26 @@ import (
 	"strings"
 
 	"agent-testbench/internal/runner/apicase"
+	"agent-testbench/internal/server/controlplane"
 	"agent-testbench/internal/store"
 )
 
 type caseDiagnosisReport struct {
-	OK              bool                  `json:"ok"`
-	CaseRunID       string                `json:"caseRunId"`
-	RunID           string                `json:"runId"`
-	CaseID          string                `json:"caseId"`
-	Status          string                `json:"status"`
-	Operation       string                `json:"operation,omitempty"`
-	Category        string                `json:"category"`
-	PrimaryFinding  string                `json:"primaryFinding"`
-	EvidencePath    string                `json:"evidencePath,omitempty"`
-	AssertionErrors []string              `json:"assertionErrors"`
-	Signals         []caseDiagnosisSignal `json:"signals"`
-	NextActions     []string              `json:"nextActions"`
-	Warnings        []string              `json:"warnings"`
+	OK              bool                     `json:"ok"`
+	CaseRunID       string                   `json:"caseRunId"`
+	RunID           string                   `json:"runId"`
+	CaseID          string                   `json:"caseId"`
+	Status          string                   `json:"status"`
+	Operation       string                   `json:"operation,omitempty"`
+	Category        string                   `json:"category"`
+	StepID          string                   `json:"stepId,omitempty"`
+	PrimaryFinding  string                   `json:"primaryFinding"`
+	EvidencePath    string                   `json:"evidencePath,omitempty"`
+	AssertionErrors []string                 `json:"assertionErrors"`
+	Diagnostics     caseDiagnosisDiagnostics `json:"diagnostics"`
+	Signals         []caseDiagnosisSignal    `json:"signals"`
+	NextActions     []string                 `json:"nextActions"`
+	Warnings        []string                 `json:"warnings"`
 }
 
 type caseDiagnosisSignal struct {
@@ -41,7 +44,17 @@ type caseDiagnosisArtifacts struct {
 	MissingLocalEvidence []string
 }
 
+type caseDiagnosisDiagnostics struct {
+	LogRecords             int `json:"logRecords"`
+	RuntimeLogSystems      int `json:"runtimeLogSystems"`
+	RuntimeLogMatched      int `json:"runtimeLogMatched"`
+	DependencyProbes       int `json:"dependencyProbes"`
+	PostProcessTasks       int `json:"postProcessTasks"`
+	FailedPostProcessTasks int `json:"failedPostProcessTasks"`
+}
+
 const caseDiagnosisEvidenceKindAssertions = "assertions"
+const caseDiagnosisRuntimeLogTaskKind = "runtime_log_collect"
 
 func runCaseDiagnose(ctx context.Context, args []string) error {
 	return runCaseEvidenceReport(ctx, args, "case diagnose", diagnoseCaseEvidence, printCaseDiagnosis)
@@ -63,6 +76,7 @@ func diagnoseCaseEvidence(ctx context.Context, runtime store.Store, caseRunID st
 		RunID:           valueString(summary["run_id"]),
 		CaseID:          valueString(summary["case_id"]),
 		Status:          valueString(summary["status"]),
+		StepID:          valueString(summary["step_id"]),
 		Operation:       firstNonEmpty(valueString(summary["operation"]), caseRunOperationFromRequest(request, valueString(summary["case_id"]))),
 		EvidencePath:    valueString(summary["evidence_path"]),
 		AssertionErrors: []string{},
@@ -71,6 +85,18 @@ func diagnoseCaseEvidence(ctx context.Context, runtime store.Store, caseRunID st
 		Warnings:        []string{},
 	}
 	report.OK = strings.EqualFold(report.Status, store.StatusPassed)
+	if !report.OK && len(listFromReportAny(evidence["logs"])) == 0 {
+		if ensure, ensureErr := controlplane.EnsureCaseRuntimeLogs(ctx, runtime, report.RunID, report.CaseID, report.StepID); ensureErr == nil && (ensure.Collected || ensure.Cached) {
+			if refreshed, readErr := readCaseEvidence(ctx, runtime, caseRunID, runID, caseID, stepID); readErr == nil {
+				payload = refreshed
+				evidence = mapFromReportAny(payload["evidence"])
+				summary = mapFromReportAny(evidence["summary"])
+				report.StepID = firstNonEmpty(valueString(summary["step_id"]), report.StepID, ensure.StepID)
+			}
+		} else if ensureErr != nil {
+			report.Warnings = append(report.Warnings, "runtime log collection failed: "+ensureErr.Error())
+		}
+	}
 
 	artifacts, err := readCaseDiagnosisArtifacts(ctx, runtime, report.RunID, report.CaseRunID)
 	if err != nil {
@@ -81,11 +107,14 @@ func diagnoseCaseEvidence(ctx context.Context, runtime store.Store, caseRunID st
 	httpStatus := firstPositiveInt(artifacts.HTTPStatus, intFromReportAny(response["http_code"]), intFromReportAny(summary["actual_http_code"]))
 	assertionStatus := valueString(assertions["status"])
 	errorCount := firstPositiveInt(len(report.AssertionErrors), intFromReportAny(assertions["errorCount"]))
+	report.Diagnostics = caseDiagnosisDiagnosticsForEvidence(ctx, runtime, report, evidence)
 
 	report.Category = caseDiagnosisCategory(report.Status, assertionStatus, errorCount, httpStatus)
 	report.PrimaryFinding = caseDiagnosisPrimaryFinding(report.Category, report.AssertionErrors, httpStatus, report.Status)
 	report.Signals = caseDiagnosisSignals(report, assertionStatus, errorCount, httpStatus)
-	report.NextActions = caseDiagnosisNextActions(report, httpStatus, errorCount, artifacts.MissingLocalEvidence)
+	report.Signals = append(report.Signals, caseDiagnosisDiagnosticSignals(report.Diagnostics)...)
+	report.Warnings = append(report.Warnings, caseDiagnosisDiagnosticWarnings(report, report.Diagnostics)...)
+	report.NextActions = caseDiagnosisNextActions(report, httpStatus, errorCount, artifacts.MissingLocalEvidence, report.Diagnostics)
 	return report, nil
 }
 
@@ -238,10 +267,93 @@ func caseDiagnosisSignals(report caseDiagnosisReport, assertionStatus string, er
 	return signals
 }
 
-func caseDiagnosisNextActions(report caseDiagnosisReport, httpStatus int, errorCount int, missingLocalEvidence []string) []string {
+func caseDiagnosisDiagnosticsForEvidence(ctx context.Context, runtime store.Store, report caseDiagnosisReport, evidence map[string]any) caseDiagnosisDiagnostics {
+	diagnostics := caseDiagnosisDiagnostics{}
+	logs := listFromReportAny(evidence["logs"])
+	diagnostics.LogRecords = len(logs)
+	for _, raw := range logs {
+		log := mapFromReportAny(raw)
+		systems := listFromReportAny(log["systems"])
+		diagnostics.RuntimeLogSystems += len(systems)
+		for _, rawSystem := range systems {
+			system := mapFromReportAny(rawSystem)
+			if found, ok := system["found"].(bool); ok && found {
+				diagnostics.RuntimeLogMatched++
+			}
+		}
+	}
+	mysql := mapFromReportAny(evidence["mysql"])
+	diagnostics.DependencyProbes += len(listFromReportAny(mysql["queries"]))
+	if runtime != nil && strings.TrimSpace(report.RunID) != "" {
+		rows, err := runtime.ListPostProcessTasks(ctx, report.RunID)
+		if err == nil {
+			for _, row := range rows {
+				if !caseDiagnosisPostProcessTaskMatches(row, report) {
+					continue
+				}
+				diagnostics.PostProcessTasks++
+				if row.Status == store.StatusFailed {
+					diagnostics.FailedPostProcessTasks++
+				}
+			}
+		}
+	}
+	return diagnostics
+}
+
+func caseDiagnosisPostProcessTaskMatches(row store.PostProcessTask, report caseDiagnosisReport) bool {
+	if strings.TrimSpace(row.RunID) != strings.TrimSpace(report.RunID) {
+		return false
+	}
+	if report.StepID != "" && row.StepID != "" && row.StepID != report.StepID {
+		return false
+	}
+	if report.CaseID != "" && row.CaseID != "" && row.CaseID != report.CaseID {
+		return false
+	}
+	return true
+}
+
+func caseDiagnosisDiagnosticSignals(diagnostics caseDiagnosisDiagnostics) []caseDiagnosisSignal {
+	signals := []caseDiagnosisSignal{
+		{Name: "evidence.logs", Value: strconv.Itoa(diagnostics.LogRecords)},
+		{Name: "runtime_log.systems", Value: strconv.Itoa(diagnostics.RuntimeLogSystems)},
+		{Name: "runtime_log.matched_systems", Value: strconv.Itoa(diagnostics.RuntimeLogMatched)},
+		{Name: "dependency.probes", Value: strconv.Itoa(diagnostics.DependencyProbes)},
+		{Name: "post_process.tasks", Value: strconv.Itoa(diagnostics.PostProcessTasks)},
+	}
+	if diagnostics.FailedPostProcessTasks > 0 {
+		signals = append(signals, caseDiagnosisSignal{Name: "post_process.failed", Value: strconv.Itoa(diagnostics.FailedPostProcessTasks)})
+	}
+	return signals
+}
+
+func caseDiagnosisDiagnosticWarnings(report caseDiagnosisReport, diagnostics caseDiagnosisDiagnostics) []string {
+	if report.OK {
+		return nil
+	}
+	warnings := []string{}
+	if diagnostics.LogRecords == 0 {
+		warnings = append(warnings, "no runtime log evidence is attached to this failed case or workflow step")
+	}
+	if diagnostics.DependencyProbes == 0 {
+		warnings = append(warnings, "no dependency probe evidence is attached to this failed case; add post-run SQL, message, or custom probes for dependency-send failures")
+	}
+	return warnings
+}
+
+func caseDiagnosisNextActions(report caseDiagnosisReport, httpStatus int, errorCount int, missingLocalEvidence []string, diagnostics caseDiagnosisDiagnostics) []string {
 	actions := []string{}
 	if report.CaseRunID != "" {
 		actions = append(actions, "agent-testbench case evidence --case-run "+report.CaseRunID+" --json")
+	}
+	if !report.OK && diagnostics.LogRecords == 0 && report.RunID != "" {
+		if report.StepID != "" {
+			actions = append(actions, "agent-testbench workflow step --run "+report.RunID+" --step "+report.StepID+" --json")
+			actions = append(actions, "agent-testbench evidence tasks --run "+report.RunID+" --step "+report.StepID+" --kind "+caseDiagnosisRuntimeLogTaskKind+" --json")
+		} else {
+			actions = append(actions, "agent-testbench evidence tasks --run "+report.RunID+" --kind "+caseDiagnosisRuntimeLogTaskKind+" --json")
+		}
 	}
 	if len(missingLocalEvidence) > 0 {
 		actions = append(actions, "Rerun the case with --evidence-dir pointing to a durable directory, or copy/export local Evidence before temporary files are cleaned up; missing: "+strings.Join(missingLocalEvidence, ", "))
@@ -251,6 +363,9 @@ func caseDiagnosisNextActions(report caseDiagnosisReport, httpStatus int, errorC
 	}
 	if httpStatus >= 400 {
 		actions = append(actions, "Compare the planned request with the target service contract and expected status codes")
+	}
+	if !report.OK && diagnostics.DependencyProbes == 0 {
+		actions = append(actions, "Add Store-backed dependency probes for this case, then rerun and inspect agent-testbench evidence list --run "+report.RunID+" --json")
 	}
 	if len(actions) == 0 {
 		actions = append(actions, "No failure action needed")

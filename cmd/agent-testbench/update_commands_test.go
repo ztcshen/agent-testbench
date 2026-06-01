@@ -220,6 +220,34 @@ func TestUpdateChannelMainDefaultsToMainBranch(t *testing.T) {
 	}
 }
 
+func TestUpdateDefaultsToGithubRemoteWhenNoUpstream(t *testing.T) {
+	originRepo := createBareGitRepoWithFiles(t, "main", map[string]string{
+		"cmd/agent-testbench/main.go": "package main\nfunc main() {}\n",
+		"go.mod":                      "module update-fixture\n",
+	})
+	githubRepo := createBareGitRepoWithFiles(t, "main", map[string]string{
+		"cmd/agent-testbench/main.go": "package main\nfunc main() {}\n",
+		"go.mod":                      "module update-fixture\n",
+	})
+	checkout := cloneUpdateFixture(t, originRepo)
+	runGit(t, checkout, "branch", "--unset-upstream")
+	runGit(t, checkout, "remote", "add", "github", githubRepo)
+
+	out := runCLI(t, "update", "--repo", checkout, "--channel", "main", "--check", "--json")
+	var report struct {
+		OK      bool   `json:"ok"`
+		Remote  string `json:"remote"`
+		Branch  string `json:"branch"`
+		Channel string `json:"channel"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode github remote default report: %v\n%s", err, out)
+	}
+	if !report.OK || report.Remote != "github" || report.Branch != "main" || report.Channel != "main" {
+		t.Fatalf("update should prefer github remote when upstream is absent: %#v", report)
+	}
+}
+
 func TestUpdateCheckTextShowsNextAction(t *testing.T) {
 	remoteRepo := createBareGitRepoWithFiles(t, "main", map[string]string{
 		"cmd/agent-testbench/main.go": "package main\nfunc main() {}\n",

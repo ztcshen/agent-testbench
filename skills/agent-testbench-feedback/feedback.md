@@ -177,7 +177,8 @@ Durable feedback registered by local Codex sessions. Use
 ## 2026-06-01 - Hermes update entrypoint is not reliable across wrappers
 - Area: cli
 - Severity: P2
-- Status: new
+- Status: fixed
 - Source: 2026-06-01 local operator check after user asked why Hermes-style update does not auto-update
 - Evidence: Repo wrapper ./bin/agent-testbench.sh exposes update, but /Users/zlh/.codex/skills/agent-testbench-operator/scripts/atb.sh prefers a stale skill binary where update is unknown; status also reports .runtime/bin/agent-testbench missing, and release channel defaults to origin where no remote tags are available.
-- Suggestion: Make operator wrapper prefer the repo runtime or rebuild when missing/stale, document the correct release remote, and add a status/doctor check that warns when the active binary lacks commands present in the checkout.
+- Suggestion: `doctor` now reports `runtime.shell-entrypoint` when `agent-testbench` is missing from PATH or resolves to a stale wrapper, `status` reports the active executable beside the expected runtime binary, and `update --channel main|release` prefers a configured `github` remote before `origin` when no upstream is set.
+- Verification: `go test ./cmd/agent-testbench -run 'Test(DoctorWarnsWhenShellEntrypointIsStale|UpdateDefaultsToGithubRemoteWhenNoUpstream)' -count=1`

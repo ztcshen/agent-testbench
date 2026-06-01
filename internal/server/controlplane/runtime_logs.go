@@ -20,6 +20,76 @@ const runtimeLogLineLimit = 12
 const workflowStepRuntimeLogsKind = "runtime_logs"
 const workflowStepRuntimeLogCacheTimeout = time.Second
 
+type RuntimeLogEnsureReport struct {
+	OK             bool   `json:"ok"`
+	RunID          string `json:"runId"`
+	StepID         string `json:"stepId,omitempty"`
+	CaseID         string `json:"caseId,omitempty"`
+	Status         string `json:"status"`
+	Cached         bool   `json:"cached"`
+	Collected      bool   `json:"collected"`
+	Nodes          int    `json:"nodes"`
+	Correlators    int    `json:"correlators"`
+	Systems        int    `json:"systems"`
+	MatchedSystems int    `json:"matchedSystems"`
+	Error          string `json:"error,omitempty"`
+}
+
+func EnsureCaseRuntimeLogs(ctx context.Context, runtime store.Store, runID string, caseID string, stepID string) (RuntimeLogEnsureReport, error) {
+	report := RuntimeLogEnsureReport{
+		OK:     true,
+		RunID:  strings.TrimSpace(runID),
+		StepID: strings.TrimSpace(stepID),
+		CaseID: strings.TrimSpace(caseID),
+		Status: store.StatusSkipped,
+	}
+	if runtime == nil || report.RunID == "" {
+		report.OK = false
+		report.Error = "run id and Store are required"
+		return report, nil
+	}
+	run, err := runtime.GetRun(ctx, report.RunID)
+	if err != nil {
+		return report, err
+	}
+	step := workflowStepForRuntimeLogEnsure(run.SummaryJSON, report.CaseID, report.StepID)
+	if report.StepID == "" {
+		report.StepID = strings.TrimSpace(valueString(step["stepId"]))
+	}
+	if report.CaseID == "" {
+		report.CaseID = strings.TrimSpace(valueString(step["caseId"]))
+	}
+	if report.StepID == "" {
+		report.OK = false
+		report.Error = "workflow step id is required to collect runtime logs"
+		return report, nil
+	}
+	if systems, ok := cachedWorkflowStepRuntimeLogs(ctx, runtime, report.RunID, report.StepID); ok {
+		report.Cached = true
+		report.Status = store.StatusPassed
+		report.Systems, report.MatchedSystems = runtimeLogSystemCounts(systems)
+		return report, nil
+	}
+	topologyMaps, err := workflowRunTraceTopologies(ctx, runtime, report.RunID, report.StepID)
+	if err != nil {
+		return report, err
+	}
+	nodes := workflowStepLogNodes(topologyMaps)
+	correlators := workflowStepLogCorrelators(step, topologyMaps)
+	report.Nodes = len(nodes)
+	report.Correlators = len(correlators)
+	if len(nodes) == 0 || len(correlators) == 0 {
+		return report, nil
+	}
+	collectAndPersistWorkflowStepRuntimeLogs(ctx, runtime, run, step, topologyMaps)
+	if systems, ok := cachedWorkflowStepRuntimeLogs(ctx, runtime, report.RunID, report.StepID); ok {
+		report.Collected = true
+		report.Status = store.StatusPassed
+		report.Systems, report.MatchedSystems = runtimeLogSystemCounts(systems)
+	}
+	return report, nil
+}
+
 func enrichWorkflowStepLogs(ctx context.Context, runtime store.Store, run store.Run, step map[string]any, topologies []map[string]any) {
 	trace := mapFromAny(step["trace"])
 	if systems, ok := trace["systems"].([]any); ok && len(systems) > 0 {
@@ -36,6 +106,39 @@ func enrichWorkflowStepLogs(ctx context.Context, runtime store.Store, run store.
 	trace["systems"] = pendingWorkflowStepLogSystems(topologies)
 	step["trace"] = trace
 	scheduleWorkflowStepRuntimeLogCollection(runtime, run, step, topologies)
+}
+
+func workflowStepForRuntimeLogEnsure(summaryJSON string, caseID string, stepID string) map[string]any {
+	caseID = strings.TrimSpace(caseID)
+	stepID = strings.TrimSpace(stepID)
+	for _, raw := range workflowRunSteps(jsonObject(summaryJSON)) {
+		step, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if stepID != "" && strings.TrimSpace(valueString(step["stepId"])) == stepID {
+			return copyMap(step)
+		}
+		if caseID != "" && strings.TrimSpace(valueString(step["caseId"])) == caseID {
+			return copyMap(step)
+		}
+	}
+	return map[string]any{
+		"stepId": stepID,
+		"caseId": caseID,
+	}
+}
+
+func runtimeLogSystemCounts(systems any) (int, int) {
+	rows := listFromAny(systems)
+	matched := 0
+	for _, raw := range rows {
+		row := mapFromAny(raw)
+		if found, ok := row["found"].(bool); ok && found {
+			matched++
+		}
+	}
+	return len(rows), matched
 }
 
 func scheduleWorkflowStepRuntimeLogCollection(runtime store.Store, run store.Run, step map[string]any, topologies []map[string]any) {

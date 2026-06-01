@@ -127,6 +127,54 @@ func TestDoctorFixCreatesLocalStoreAndRuntimeDirectory(t *testing.T) {
 	}
 }
 
+func TestDoctorWarnsWhenShellEntrypointIsStale(t *testing.T) {
+	remoteRepo := createBareGitRepoWithFiles(t, "main", map[string]string{
+		"cmd/agent-testbench/main.go": "package main\nfunc main() {}\n",
+		"go.mod":                      "module status-fixture\n",
+	})
+	checkout := cloneUpdateFixture(t, remoteRepo)
+	runtimePath := filepath.Join(checkout, ".runtime", "bin", "agent-testbench")
+	writeFile(t, runtimePath, "#!/usr/bin/env sh\nexit 0\n")
+	if err := os.Chmod(runtimePath, 0o755); err != nil {
+		t.Fatalf("chmod runtime: %v", err)
+	}
+	staleDir := t.TempDir()
+	stalePath := filepath.Join(staleDir, "agent-testbench")
+	writeFile(t, stalePath, "#!/usr/bin/env sh\nexit 0\n")
+	if err := os.Chmod(stalePath, 0o755); err != nil {
+		t.Fatalf("chmod stale binary: %v", err)
+	}
+
+	out := runCLIWithEnv(t, []string{
+		"AGENT_TESTBENCH_CONFIG_HOME=" + t.TempDir(),
+		"AGENT_TESTBENCH_REPO=" + checkout,
+		"PATH=" + staleDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+	}, "doctor", "--json")
+	var report struct {
+		Checks []struct {
+			Name     string `json:"name"`
+			Code     string `json:"code"`
+			OK       bool   `json:"ok"`
+			Optional bool   `json:"optional"`
+			Detail   string `json:"detail"`
+			Fix      string `json:"fix"`
+		} `json:"checks"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode doctor report: %v\n%s", err, out)
+	}
+	for _, check := range report.Checks {
+		if check.Code != "runtime.shell-entrypoint" {
+			continue
+		}
+		if check.OK || !check.Optional || !strings.Contains(check.Detail, stalePath) || !strings.Contains(check.Fix, ".runtime/bin") {
+			t.Fatalf("shell entrypoint check = %#v", check)
+		}
+		return
+	}
+	t.Fatalf("doctor report missing runtime.shell-entrypoint check: %#v", report.Checks)
+}
+
 func TestStatusDeepIncludesStoreSchema(t *testing.T) {
 	configHome := t.TempDir()
 	storePath := t.TempDir() + "/status.sqlite"
