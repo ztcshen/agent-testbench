@@ -10,7 +10,9 @@ import (
 
 func TestStatusReportsRepoRuntimeAndStoreSummary(t *testing.T) {
 	configHome := t.TempDir()
-	out := runCLIWithEnv(t, []string{"AGENT_TESTBENCH_CONFIG_HOME=" + configHome}, "status", "--json")
+	repo := createSetupRepo(t)
+	env := []string{"AGENT_TESTBENCH_CONFIG_HOME=" + configHome, "AGENT_TESTBENCH_REPO=" + repo}
+	out := runCLIWithEnv(t, env, "status", "--json")
 
 	var report struct {
 		OK      bool   `json:"ok"`
@@ -45,7 +47,7 @@ func TestStatusReportsRepoRuntimeAndStoreSummary(t *testing.T) {
 		t.Fatalf("status should include first-time store setup next action: %#v", report.Next)
 	}
 
-	textOut := runCLIWithEnv(t, []string{"AGENT_TESTBENCH_CONFIG_HOME=" + configHome}, "status")
+	textOut := runCLIWithEnv(t, env, "status")
 	if !strings.Contains(textOut, "AgentTestBench Status") || !strings.Contains(textOut, "Next") {
 		t.Fatalf("status text output should be readable:\n%s", textOut)
 	}

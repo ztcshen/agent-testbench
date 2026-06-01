@@ -5,12 +5,22 @@ const helpTextContent = `AgentTestBench
 Usage:
   agent-testbench version
   agent-testbench setup [--repo PATH] [--store NAME] [--url DSN | --sqlite PATH] [--build-runtime] [--json]
+  agent-testbench onboard [--repo PATH] [--store NAME] [--url DSN | --sqlite PATH] [--build-runtime] [--install-shell] [--bin-dir PATH] [--smoke none|commands|store] [--json]
   agent-testbench status [--deep] [--json]
   agent-testbench doctor [--fix] [--deep] [--trace-graphql-url URL] [--json]
   agent-testbench update [--repo PATH] [--remote NAME] [--branch NAME] [--release TAG|latest] [--channel main|release] [--check] [--force] [--output PATH] [--json]
   agent-testbench commands [--area AREA] [--filter TEXT] [--json]
   agent-testbench completion [bash|zsh]
   agent-testbench logs [NAME|list] [-n N] [--json]
+  agent-testbench task run NAME --command COMMAND [--store NAME_OR_DSN] [--notify-file PATH] [--notify-webhook URL] [--json]
+  agent-testbench task schedule NAME --command COMMAND (--interval DURATION | --cron EXPR) [--store NAME_OR_DSN] [--notify-file PATH] [--notify-webhook URL] [--json]
+  agent-testbench task watch NAME --command COMMAND [--store NAME_OR_DSN] [--interval DURATION] [--limit N] [--until always|success|failure] [--notify-file PATH] [--notify-webhook URL] [--json]
+  agent-testbench task list [--store NAME_OR_DSN] [--json]
+  agent-testbench task status NAME [--store NAME_OR_DSN] [--json]
+  agent-testbench task logs NAME [--store NAME_OR_DSN] [-n N] [--json]
+  agent-testbench task stop NAME [--store NAME_OR_DSN] [--json]
+  agent-testbench watch NAME --command COMMAND [--store NAME_OR_DSN] [--interval DURATION] [--limit N] [--until always|success|failure] [--notify-file PATH] [--notify-webhook URL] [--json]
+  agent-testbench notify test (--file PATH | --webhook URL) [--message TEXT] [--json]
   agent-testbench config path
   agent-testbench config show [--json]
   agent-testbench config edit
@@ -132,6 +142,7 @@ Usage:
 
 Examples:
   agent-testbench setup --store local --sqlite .runtime/agent-testbench-local.sqlite --build-runtime
+  agent-testbench onboard --store local --sqlite .runtime/agent-testbench-local.sqlite --install-shell
   agent-testbench status
   agent-testbench doctor --fix
   agent-testbench update --check --channel release --json
@@ -139,6 +150,9 @@ Examples:
   agent-testbench commands --filter "case gate"
   agent-testbench commands --area workflow --filter "gate"
   agent-testbench logs agent-testbench -n 80
+  agent-testbench task run catalog-smoke --command "commands --json" --store local --json
+  agent-testbench watch catalog-smoke --command "commands --json" --store local --interval 5m --limit 3
+  agent-testbench notify test --file .runtime/notifications.jsonl --message "AgentTestBench ready"
   agent-testbench config show --json
   agent-testbench store config set local --url sqlite://$PWD/.runtime/agent-testbench-local.sqlite
   agent-testbench store use local

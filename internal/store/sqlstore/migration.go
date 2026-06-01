@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	CurrentSchemaVersion = 11
+	CurrentSchemaVersion = 12
 	CoreSchemaName       = "create shared sql store schema"
 	mysqlVarchar255Type  = "varchar(255)"
 	sha256ColumnName     = "sha256"
@@ -107,6 +107,7 @@ func CoreSchemaSQL(d Dialect) []string {
 	}
 	statements := coreRunSchemaSQL(d, types)
 	statements = append(statements, coreObservabilitySchemaSQL(d, types)...)
+	statements = append(statements, coreAgentTaskSchemaSQL(d, types)...)
 	statements = append(statements, coreProfileConfigSchemaSQL(d, types)...)
 	return append(statements, coreEnvironmentCatalogSchemaSQL(d, types)...)
 }
@@ -224,6 +225,42 @@ create table if not exists baseline_gates (
   updated_at %s not null,
   primary key (profile_id, subject_id)
 );`, types.profileIDText, types.keyText, types.keyText, types.boolType, types.jsonType, types.timeType, types.timeType),
+	}
+}
+
+func coreAgentTaskSchemaSQL(d Dialect, types coreSchemaTypes) []string {
+	return []string{
+		fmt.Sprintf(`
+create table if not exists agent_tasks (
+  id %s primary key,
+  name %s not null unique,
+  kind %s not null,
+  command %s not null,
+  schedule %s not null,
+  status %s not null,
+  notify_json %s not null,
+  summary_json %s not null,
+  created_at %s not null,
+  updated_at %s not null
+);`, types.runIDText, types.keyText, types.keyText, types.text, types.text, types.keyText, types.jsonType, types.jsonType, types.timeType, types.timeType),
+		d.CreateIndexSQL("idx_agent_tasks_status_updated", "agent_tasks", []string{"status", "updated_at", "id"}),
+		fmt.Sprintf(`
+create table if not exists agent_task_runs (
+  id %s primary key,
+  task_id %s not null,
+  status %s not null,
+  command %s not null,
+  started_at %s,
+  finished_at %s,
+  duration_ms %s not null,
+  exit_code %s not null,
+  output %s not null,
+  error %s not null,
+  summary_json %s not null,
+  created_at %s not null
+);`, types.runIDText, types.runIDText, types.keyText, types.text, types.timeType, types.timeType, types.intType, types.intType, types.text, types.text, types.jsonType, types.timeType),
+		d.CreateIndexSQL("idx_agent_task_runs_task_started", "agent_task_runs", []string{"task_id", "started_at", "id"}),
+		d.CreateIndexSQL("idx_agent_task_runs_status_created", "agent_task_runs", []string{"status", "created_at", "id"}),
 	}
 }
 

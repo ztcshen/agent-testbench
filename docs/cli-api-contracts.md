@@ -46,8 +46,9 @@ Verification baseline: this page was checked against `cmd/agent-testbench/main.g
 
 | Area | CLI commands |
 | --- | --- |
-| General | `version`, `help`, `setup`, `status`, `doctor`, `update`, `commands`, `completion`, `logs`, `config path/show/edit` |
+| General | `version`, `help`, `setup`, `onboard`, `status`, `doctor`, `update`, `commands`, `completion`, `logs`, `config path/show/edit` |
 | Store | `store config set/list/remove`, `store use`, `store current`, `store status`, `store provision`, `store upgrade`, `store ddl`, `store copy` |
+| Tasks and notifications | `task run`, `task schedule`, `task watch`, `task list`, `task status`, `task logs`, `task stop`, `watch`, `notify test` |
 | Environment catalog | `environment register`, `environment discover`, `environment inspect`, `environment bootstrap`, `environment restore`, `environment migration ...`, `environment verify`, `environment publish-verified` |
 | Sandbox runtime | `sandbox start`, `sandbox service list`, `sandbox service register`, `sandbox interface register` |
 | Template package lifecycle | `template-package ...` / `template-packages ...` aliases for `profile init`, `profile install`, `profile pack`, `profile list`, `profile inspect`, `profile audit`, `profile audit-plan`, `profile doctor`, `profile repair`, `profile verify`, `profile import` |
@@ -71,16 +72,23 @@ need.
 
 ```sh
 agent-testbench status
+agent-testbench onboard --store local --sqlite .runtime/agent-testbench-local.sqlite --install-shell
 agent-testbench doctor --fix
 agent-testbench update --check --channel release --json
 agent-testbench update --release latest
 agent-testbench commands --area workflow --filter "gate"
 agent-testbench config show --json
 agent-testbench logs agent-testbench -n 80
+agent-testbench task run catalog-smoke --command "commands --json" --store local --json
+agent-testbench watch catalog-smoke --command "commands --json" --store local --interval 5m --limit 3
+agent-testbench notify test --file .runtime/notifications.jsonl --message "AgentTestBench ready"
 ```
 
-`status` is read-only and summarizes the checkout, runtime binary, active
-entrypoint, active Store, suggested next commands, and with `--deep` the active Store schema state.
+`onboard` is the one-command clean-machine path: it configures a named Store,
+optionally builds `.runtime/bin/agent-testbench`, optionally installs a shell
+entrypoint, runs a small smoke check, and reports next actions. `status` is
+read-only and summarizes the checkout, runtime binary, active entrypoint,
+active Store, suggested next commands, and with `--deep` the active Store schema state.
 `doctor` is read-only by default; `doctor --fix` may create the local runtime
 directory and a local SQLite Store config, while `doctor --deep` adds Docker
 Compose, Store schema, optional trace GraphQL reachability checks, and a
@@ -92,6 +100,15 @@ configured `github` remote before `origin`; `update --check` reports the next
 command before mutating the checkout. `config show`, `config path`, `logs`, and
 `completion bash|zsh` are local operator conveniences and do not call the
 control-plane API.
+
+The task surface is Store-backed CLI orchestration. `task run` stores or updates
+a task definition, executes one AgentTestBench command, records the run output,
+exit code, status, and duration in `agent_task_runs`, then emits configured
+file or webhook notifications. `task schedule` records durable schedule metadata
+for external schedulers or future runners; it does not start a background
+daemon. `task watch` and the top-level `watch` alias run a foreground loop and
+record every attempt. `task list`, `task status`, `task logs`, and `task stop`
+read or update the same Store records.
 
 ## API Surface
 

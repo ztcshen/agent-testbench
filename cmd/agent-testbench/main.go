@@ -21,6 +21,7 @@ import (
 
 const version = "0.1.0"
 const interfaceNodeCommand = "interface-node"
+const cliCommandTask = "task"
 
 type rootCommand func([]string) error
 
@@ -33,11 +34,15 @@ func (e unknownRootCommandError) Error() string {
 var rootCommands = map[string]rootCommand{
 	"commands":           runCommands,
 	"setup":              func(args []string) error { return runSetup(context.Background(), args) },
+	"onboard":            func(args []string) error { return runOnboard(context.Background(), args) },
 	"status":             func(args []string) error { return runStatus(context.Background(), args) },
 	"doctor":             func(args []string) error { return runDoctor(context.Background(), args) },
 	"update":             func(args []string) error { return runUpdate(context.Background(), args) },
 	"completion":         runCompletion,
 	"logs":               func(args []string) error { return runLogs(context.Background(), args) },
+	cliCommandTask:       func(args []string) error { return runTask(context.Background(), args) },
+	"watch":              func(args []string) error { return runWatch(context.Background(), args) },
+	"notify":             func(args []string) error { return runNotify(context.Background(), args) },
 	"store":              func(args []string) error { return runStore(context.Background(), args) },
 	"sandbox":            func(args []string) error { return runSandbox(context.Background(), args) },
 	"environment":        func(args []string) error { return runEnvironment(context.Background(), args) },
