@@ -45,3 +45,5 @@ jq '{
     .results[]? | select((.status // "") != "passed") | (.error // "")
   ] | group_by(.) | map({error: .[0], failed: length}) | sort_by(-.failed))
 }' "$JSON_REPORT"
+
+jq -e '.ok == true' "$JSON_REPORT" >/dev/null
