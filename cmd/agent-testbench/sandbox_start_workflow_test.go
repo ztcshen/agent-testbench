@@ -16,7 +16,7 @@ func TestSandboxStartSelectedServiceFailsWhenStartupCommandMissing(t *testing.T)
 		`"ok": false`,
 		`"failed": 1`,
 		`"id": "documented-service"`,
-		"startup command is empty",
+		sandboxStartupCommandEmpty,
 		"sandbox service register --id documented-service --startup-command",
 	} {
 		if !strings.Contains(out, want) {
@@ -47,7 +47,7 @@ func TestSandboxStartDryRunDoesNotRunStartupCommands(t *testing.T) {
 
 func TestSandboxStartWorkflowBlocksMissingStartupCommand(t *testing.T) {
 	fixture := writeSandboxStartStoreFixture(t)
-	addSandboxStartWorkflow(t, fixture.storePath)
+	addSandboxStartWorkflow(t, fixture.storePath, true)
 
 	out := runCLIFails(t, "sandbox", "start", "--store", "sqlite://"+fixture.storePath, "--workflow", "workflow.smoke", "--dry-run", "--json")
 	for _, want := range []string{
@@ -57,7 +57,7 @@ func TestSandboxStartWorkflowBlocksMissingStartupCommand(t *testing.T) {
 		`"failed": 1`,
 		`"id": "entry-service"`,
 		`"id": "documented-service"`,
-		"startup command is empty",
+		sandboxStartupCommandEmpty,
 		"required by workflow workflow.smoke",
 	} {
 		if !strings.Contains(out, want) {
@@ -67,7 +67,33 @@ func TestSandboxStartWorkflowBlocksMissingStartupCommand(t *testing.T) {
 	requireSandboxNoStartupSideEffects(t, fixture)
 }
 
-func addSandboxStartWorkflow(t *testing.T, storePath string) {
+func TestSandboxStartWorkflowIgnoresOptionalBindings(t *testing.T) {
+	fixture := writeSandboxStartStoreFixture(t)
+	addSandboxStartWorkflow(t, fixture.storePath, false)
+
+	out := runCLI(t, "sandbox", "start", "--store", "sqlite://"+fixture.storePath, "--workflow", "workflow.smoke", "--dry-run", "--json")
+	for _, want := range []string{
+		`"ok": true`,
+		`"workflowId": "workflow.smoke"`,
+		`"planned": 1`,
+		`"id": "entry-service"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("workflow start with optional binding output should contain %q:\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{
+		`"id": "documented-service"`,
+		sandboxStartupCommandEmpty,
+	} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("workflow start should ignore optional binding %q:\n%s", unwanted, out)
+		}
+	}
+	requireSandboxNoStartupSideEffects(t, fixture)
+}
+
+func addSandboxStartWorkflow(t *testing.T, storePath string, documentedRequired bool) {
 	t.Helper()
 
 	ctx := context.Background()
@@ -87,7 +113,7 @@ func addSandboxStartWorkflow(t *testing.T, storePath string) {
 	)
 	catalog.WorkflowBindings = append(catalog.WorkflowBindings,
 		store.CatalogWorkflowBinding{WorkflowID: "workflow.smoke", StepID: "step.entry", NodeID: "node.entry", CaseID: "case.entry", Required: true, SortOrder: 1},
-		store.CatalogWorkflowBinding{WorkflowID: "workflow.smoke", StepID: "step.documented", NodeID: "node.documented", CaseID: "case.documented", Required: true, SortOrder: 2},
+		store.CatalogWorkflowBinding{WorkflowID: "workflow.smoke", StepID: "step.documented", NodeID: "node.documented", CaseID: "case.documented", Required: documentedRequired, SortOrder: 2},
 	)
 	if err := s.ReplaceProfileCatalog(ctx, catalog); err != nil {
 		t.Fatalf("replace catalog with workflow: %v", err)

@@ -11,6 +11,8 @@ import (
 	"agent-testbench/internal/store"
 )
 
+const sandboxStartupCommandEmpty = "startup command is empty"
+
 func sandboxWorkflowRequiredServiceReasons(catalog store.ProfileCatalog, workflowID string) (map[string]string, error) {
 	workflowID = strings.TrimSpace(workflowID)
 	if workflowID == "" {
@@ -30,6 +32,9 @@ func sandboxWorkflowRequiredServiceReasons(catalog store.ProfileCatalog, workflo
 		if binding.WorkflowID != workflowID {
 			continue
 		}
+		if !binding.Required {
+			continue
+		}
 		bindingCount++
 		nodeID := strings.TrimSpace(binding.NodeID)
 		node, ok := nodes[nodeID]
@@ -46,7 +51,7 @@ func sandboxWorkflowRequiredServiceReasons(catalog store.ProfileCatalog, workflo
 		reasons[serviceID] = strings.TrimSpace("required by workflow " + workflowID + " step " + strings.TrimSpace(binding.StepID))
 	}
 	if bindingCount == 0 {
-		return nil, fmt.Errorf("workflow has no service bindings: %s", workflowID)
+		return nil, fmt.Errorf("workflow has no required service bindings: %s", workflowID)
 	}
 	return reasons, nil
 }
@@ -81,11 +86,11 @@ func runSandboxServiceStartup(ctx context.Context, service store.CatalogService,
 	if command == "" {
 		if strings.TrimSpace(requiredReason) != "" {
 			result.ExitCode = 1
-			result.Error = fmt.Sprintf("startup command is empty (%s); repair with: agent-testbench sandbox service register --id %s --startup-command '...'", requiredReason, service.ID)
+			result.Error = fmt.Sprintf("%s (%s); repair with: agent-testbench sandbox service register --id %s --startup-command '...'", sandboxStartupCommandEmpty, requiredReason, service.ID)
 			return result
 		}
 		result.Skipped = true
-		result.SkipReason = "startup command is empty"
+		result.SkipReason = sandboxStartupCommandEmpty
 		return result
 	}
 	if dryRun {
