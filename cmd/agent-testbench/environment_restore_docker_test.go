@@ -311,6 +311,141 @@ func TestEnvironmentRestoreSupportsMultipleComposeFiles(t *testing.T) {
 	}
 }
 
+func TestEnvironmentRestoreRejectsMissingHostBindMountBeforeComposeUp(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	missingHostPath := filepath.Join(t.TempDir(), "missing-source")
+	composeSource := filepath.Join(t.TempDir(), "compose.yml")
+	writeFile(t, composeSource, "services:\n  app:\n    image: alpine:3.20\n    volumes:\n      - "+missingHostPath+":/workspace/app\n")
+	runCLI(t, "environment", "register",
+		"--store", fixture.StoreDSN,
+		"--id", "env.compose.bind-missing",
+		"--compose-file", "compose.yml",
+		"--compose-generated-file", "compose.yml="+composeSource,
+		"--compose-service", "app",
+		"--compose-skip-pull",
+		"--compose-skip-build",
+		"--health-compose-service", "app",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIFailsWithEnv(t, fixture.DockerEnv, "environment", "restore", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--execute", "--json", "env.compose.bind-missing")
+	if !strings.Contains(out, "missing host bind mount source") || !strings.Contains(out, missingHostPath) {
+		t.Fatalf("missing host bind mount should fail before compose up, got:\n%s", out)
+	}
+	dockerCalls, err := os.ReadFile(fixture.DockerCallsPath)
+	if err != nil {
+		t.Fatalf("read fake docker calls: %v", err)
+	}
+	if strings.Contains(string(dockerCalls), " up -d") {
+		t.Fatalf("restore should not run compose up after bind preflight failure:\n%s", dockerCalls)
+	}
+}
+
+func TestEnvironmentRestoreRewritesGeneratedHostBindMountsToRegisteredCheckouts(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	checkout := filepath.Join(fixture.Workspace, "entry-service")
+	if err := os.MkdirAll(checkout, 0o755); err != nil {
+		t.Fatalf("create checkout: %v", err)
+	}
+	legacyHostPath := "/Users/example/Workspaces/private/entry-service"
+	composeSource := filepath.Join(t.TempDir(), "compose.yml")
+	writeFile(t, composeSource, "services:\n  entry-service:\n    image: alpine:3.20\n    volumes:\n      - "+legacyHostPath+":/workspace/entry-service\n")
+	runCLI(t, "environment", "register",
+		"--store", fixture.StoreDSN,
+		"--id", "env.compose.bind-rewrite",
+		"--repo", "entry-service=https://example.com/team/entry-service.git",
+		"--checkout", "entry-service=entry-service",
+		"--compose-file", "compose.yml",
+		"--compose-generated-file", "compose.yml="+composeSource,
+		"--compose-service", "entry-service",
+		"--compose-skip-pull",
+		"--compose-skip-build",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIWithEnv(t, fixture.DockerEnv, "environment", "restore", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--json", "env.compose.bind-rewrite")
+	var report struct {
+		OK        bool `json:"ok"`
+		Preflight struct {
+			OK            bool     `json:"ok"`
+			ComposeIssues []string `json:"composeIssues"`
+		} `json:"preflight"`
+		Compose struct {
+			GeneratedFiles map[string]string `json:"generatedFiles"`
+		} `json:"compose"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode bind rewrite restore json: %v\n%s", err, out)
+	}
+	if !report.OK || !report.Preflight.OK || len(report.Preflight.ComposeIssues) != 0 {
+		t.Fatalf("rewritten bind restore should pass preflight: %#v\n%s", report.Preflight, out)
+	}
+	content := report.Compose.GeneratedFiles["compose.yml"]
+	if !strings.Contains(content, checkout+":/workspace/entry-service") || strings.Contains(content, legacyHostPath) {
+		t.Fatalf("generated compose bind source was not rewritten:\n%s", content)
+	}
+}
+
+func TestEnvironmentRestoreRewritesBindMountsWithoutPrefixBleed(t *testing.T) {
+	content := "services:\n  combined:\n    image: alpine:3.20\n    volumes:\n      - /old/app:/workspace/app\n      - /old/app-api:/workspace/app-api\n"
+	rewritten, ok := environmentRestoreRewriteComposeHostBindSources(content, map[string]string{
+		"app":     "/current/service-alpha",
+		"app-api": "/current/service-beta",
+	})
+	if !ok {
+		t.Fatalf("expected bind sources to be rewritten")
+	}
+	if !strings.Contains(rewritten, "/current/service-alpha:/workspace/app") || !strings.Contains(rewritten, "/current/service-beta:/workspace/app-api") {
+		t.Fatalf("bind sources were not rewritten exactly:\n%s", rewritten)
+	}
+	if strings.Contains(rewritten, "/current/service-alpha-api") {
+		t.Fatalf("shorter bind source leaked into longer source:\n%s", rewritten)
+	}
+}
+
+func TestEnvironmentRestoreReportsUnavailableComposeImageBeforePull(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	fixture.writeDockerTool(t, `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
+if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
+  printf 'Docker Compose version v2.0.0\n'
+  exit 0
+fi
+if [ "$1" = "manifest" ] && [ "$2" = "inspect" ]; then
+  printf 'manifest for %s not found\n' "$3" >&2
+  exit 1
+fi
+if [ "$1" = "compose" ] && [ "$2" = "ps" ]; then
+  service="${@: -1}"
+  printf '{"Name":"%s","Service":"%s","State":"running","Health":"healthy"}\n' "$service" "$service"
+fi
+`)
+	composeSource := filepath.Join(t.TempDir(), "compose.yml")
+	writeFile(t, composeSource, "services:\n  kafka:\n    image: bitnami/kafka:3.9.0\n")
+	runCLI(t, "environment", "register",
+		"--store", fixture.StoreDSN,
+		"--id", "env.compose.image-missing",
+		"--compose-file", "compose.yml",
+		"--compose-generated-file", "compose.yml="+composeSource,
+		"--compose-service", "kafka",
+		"--compose-skip-build",
+		"--health-compose-service", "kafka",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIFailsWithEnv(t, fixture.DockerEnv, "environment", "restore", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--execute", "--json", "env.compose.image-missing")
+	if !strings.Contains(out, "unavailable compose image") || !strings.Contains(out, "bitnami/kafka:3.9.0") {
+		t.Fatalf("unavailable image should fail before pull, got:\n%s", out)
+	}
+	dockerCalls, err := os.ReadFile(fixture.DockerCallsPath)
+	if err != nil {
+		t.Fatalf("read fake docker calls: %v", err)
+	}
+	if strings.Contains(string(dockerCalls), " pull kafka") {
+		t.Fatalf("restore should not run compose pull after image preflight failure:\n%s", dockerCalls)
+	}
+}
+
 func TestEnvironmentRestoreDoesNotPullComposeBuildServices(t *testing.T) {
 	fixture := newEnvironmentRestoreDockerCLIFixture(t)
 	composeSource := filepath.Join(t.TempDir(), "compose.yml")

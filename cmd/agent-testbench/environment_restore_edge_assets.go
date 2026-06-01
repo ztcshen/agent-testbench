@@ -41,6 +41,7 @@ type environmentRestoreAppliedAsset struct {
 	Action               string   `json:"action"`
 	Command              []string `json:"command,omitempty"`
 	Attempts             int      `json:"attempts,omitempty"`
+	Status               string   `json:"status,omitempty"`
 	OK                   bool     `json:"ok"`
 	Error                string   `json:"error,omitempty"`
 }
@@ -163,11 +164,13 @@ func environmentRestoreApplyMigrationEdgeAsset(ctx context.Context, dep store.Co
 	if execute {
 		item.Action = environmentMigrationActionApplyMySQL
 		edge := environmentMigrationEdge{Owner: dep.ConsumerComponentID, Provider: dep.ProviderComponentID}
-		attempts, _, errText := runEnvironmentMigrationWithHistory(ctx, workspace, item.Command, edge, migration, environmentMigrationApplySQL(edge, migration), false)
+		attempts, status, errText := runEnvironmentMigrationWithHistory(ctx, workspace, item.Command, edge, migration, environmentMigrationApplySQL(edge, migration), false)
 		item.Attempts = attempts
 		if errText != "" {
 			item.OK = false
 			item.Error = errText
+		} else {
+			item.Status = status
 		}
 	}
 	return item

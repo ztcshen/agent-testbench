@@ -271,10 +271,12 @@ func environmentRestoreBuildPlanFromEnvironment(env store.Environment, workflowI
 		graph = componentGraphs[0]
 	}
 	compose := environmentRestoreComposeWithComponentAssets(env.ID, jsonObjectString(env.ComposeJSON), graph)
+	specs := environmentRestoreRepoSpecs(env, workspace)
+	compose = environmentRestoreComposeWithRepoCheckouts(compose, specs)
 	return environmentRestoreBuildPlan{
 		WorkflowID:           workflowID,
 		Workspace:            workspace,
-		Specs:                environmentRestoreRepoSpecs(env, workspace),
+		Specs:                specs,
 		Compose:              compose,
 		ComponentGraph:       graph,
 		PackageSpec:          environmentRestorePackageSpecFromCompose(compose, workspace),
@@ -298,7 +300,7 @@ func newEnvironmentRestoreReport(env store.Environment, plan environmentRestoreB
 		HealthChecks:         plan.HealthChecks,
 		ComponentGraph:       plan.ComponentGraphReport,
 		ComponentStartupPlan: plan.ComponentStartupPlan,
-		Preflight:            environmentRestorePreflightReport(plan.PackageSpec, plan.Specs, plan.Compose, plan.Workspace, cleanupOptions, prepareReposOnly),
+		Preflight:            environmentRestorePreflightReport(plan.PackageSpec, plan.Specs, plan.Compose, plan.Workspace, execute, cleanupOptions, prepareReposOnly),
 		SourcePolicy:         environmentRestoreSourcePolicyReport(plan.PackageSpec, plan.Specs, plan.RemoteOnly),
 		Workflow: environmentRestoreWorkflowRun{
 			OK:         !workflowOptions.Run,
@@ -426,6 +428,11 @@ func environmentRestoreAddDryRunNextAction(report *environmentRestoreReport, exe
 
 func environmentRestoreMaybePersist(ctx context.Context, env *store.Environment, report *environmentRestoreReport, plan environmentRestoreBuildPlan, workflowOptions environmentRestoreWorkflowOptions, cleanupOptions environmentRestoreDockerCleanupOptions) {
 	if strings.TrimSpace(workflowOptions.StoreURL) != "" {
+		if err := environmentRestorePersistAppliedMigrationStatuses(ctx, workflowOptions.StoreURL, env.ID, report.Docker.AppliedAssets); err != nil {
+			report.OK = false
+			report.Error = err.Error()
+			report.Readiness = environmentRestoreReadinessReport(*report, plan.PackageSpec, plan.Specs, cleanupOptions)
+		}
 		persisted, err := environmentRestorePersistEnvironment(ctx, workflowOptions.StoreURL, *env, *report, plan.AttemptedAt)
 		if err != nil {
 			report.OK = false

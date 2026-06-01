@@ -459,6 +459,42 @@ func TestSandboxRegisterCommandsWriteStoreCatalog(t *testing.T) {
 	}
 }
 
+func TestSandboxServiceRegisterCanRepairStartupCommand(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	startedPath := filepath.Join(t.TempDir(), "started.txt")
+	runCLI(t, "sandbox", "service", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "service.refresh",
+		"--display-name", "Refresh Service",
+		"--kind", "app",
+	)
+	before := runCLI(t, "sandbox", "start",
+		"--store", "sqlite://"+storePath,
+		"--service", "service.refresh",
+		"--dry-run",
+		"--json",
+	)
+	if !strings.Contains(before, `"skipped": true`) || !strings.Contains(before, "startup command is empty") {
+		t.Fatalf("service without startup command should be skipped before repair: %s", before)
+	}
+
+	runCLI(t, "sandbox", "service", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "service.refresh",
+		"--startup-command", "printf refreshed > "+startedPath,
+		"--json",
+	)
+	after := runCLI(t, "sandbox", "start",
+		"--store", "sqlite://"+storePath,
+		"--service", "service.refresh",
+		"--dry-run",
+		"--json",
+	)
+	if !strings.Contains(after, `"planned": true`) || !strings.Contains(after, startedPath) {
+		t.Fatalf("service startup command repair should make dry-run planned: %s", after)
+	}
+}
+
 func TestSandboxRegisterCommandsUseNamedPostgreSQLActiveStore(t *testing.T) {
 	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-sandbox-register-pg")
 	runSandboxRegisterCommandsUseNamedActiveStore(t, storeRef, "pg", "PostgreSQL")

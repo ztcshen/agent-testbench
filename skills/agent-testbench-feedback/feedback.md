@@ -137,3 +137,47 @@ Durable feedback registered by local Codex sessions. Use
 - Evidence: Longer-term operator ergonomics need deeper diagnostics and shell integration once the basic entrypoints are stable.
 - Suggestion: P2 is fixed for the Hermes CLI baseline by shell completion, `logs`, `doctor --deep`, stable doctor check codes, `config path/show/edit`, `status --deep`, and documentation that points operators at existing run/case/workflow/evidence query commands instead of chat-session instructions.
 - Verification: `go test ./cmd/agent-testbench -run 'Test(CompletionPrints|Logs|Config|MainHelpIncludesP2|DoctorFix|StatusDeep)' -count=1`; `go test ./... -count=1`; `make quality`
+
+## 2026-05-29 - MySQL migration apply leaves plan pending
+- Area: store
+- Severity: P2
+- Status: fixed
+- Source: private validation table-prefix migration via environment migration apply
+- Evidence: `environment migration apply --execute` returned applied, but the next `environment migration plan` still reported the same migration as pending because the Store asset status was not updated after target history changed.
+- Suggestion: Successful migration apply/baseline now persists completed asset status back to the Store, and `plan` filters applied or baselined versions.
+- Verification: `go test ./cmd/agent-testbench -run TestEnvironmentMigrationApplyPersistsStatusForPlan -count=1`
+
+## 2026-05-29 - Sandbox service start skips services without editable startup command
+- Area: environment
+- Severity: P2
+- Status: fixed
+- Source: private validation workflow smoke run, 2026-05-29
+- Evidence: `sandbox service list` could show active services with `hasStartupCommand=false`, and `sandbox start --dry-run` skipped them.
+- Suggestion: `sandbox service register --startup-command ...` is an idempotent repair path for empty startup metadata; the regression test protects that a repaired service becomes planned by `sandbox start --dry-run`.
+- Verification: `go test ./cmd/agent-testbench -run TestSandboxServiceRegisterCanRepairStartupCommand -count=1`
+
+## 2026-06-01 - Environment restore generated Kafka image tag is unavailable
+- Area: environment
+- Severity: P2
+- Status: fixed
+- Source: private validation smoke restore via agent-testbench-operator on 2026-06-01
+- Evidence: Docker Compose pull failed late with an unavailable Kafka image tag.
+- Suggestion: `environment restore --execute` now validates image manifests for services that would be pulled and fails before `docker compose pull` with a concrete image/service message.
+- Verification: `go test ./cmd/agent-testbench -run TestEnvironmentRestoreReportsUnavailableComposeImageBeforePull -count=1`
+
+## 2026-06-01 - Environment restore emits host-specific bind mounts despite repo env overrides
+- Area: environment
+- Severity: P2
+- Status: fixed
+- Source: private validation smoke restore via agent-testbench-operator on 2026-06-01
+- Evidence: Generated Compose files could retain a previous operator machine's absolute repo path even when the current environment recorded repo checkout facts.
+- Suggestion: Restore now rewrites generated Compose bind sources to the current registered component checkout when the source path identifies that service, and rejects any remaining missing absolute host bind sources before Docker starts.
+- Verification: `go test ./cmd/agent-testbench -run 'TestEnvironmentRestore(RewritesGeneratedHostBindMountsToRegisteredCheckouts|RejectsMissingHostBindMountBeforeComposeUp)' -count=1`
+
+## 2026-06-01 - Hermes update entrypoint is not reliable across wrappers
+- Area: cli
+- Severity: P2
+- Status: new
+- Source: 2026-06-01 local operator check after user asked why Hermes-style update does not auto-update
+- Evidence: Repo wrapper ./bin/agent-testbench.sh exposes update, but /Users/zlh/.codex/skills/agent-testbench-operator/scripts/atb.sh prefers a stale skill binary where update is unknown; status also reports .runtime/bin/agent-testbench missing, and release channel defaults to origin where no remote tags are available.
+- Suggestion: Make operator wrapper prefer the repo runtime or rebuild when missing/stale, document the correct release remote, and add a status/doctor check that warns when the active binary lacks commands present in the checkout.

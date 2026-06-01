@@ -40,6 +40,7 @@ type environmentMigrationMetadata struct {
 	Database      string                             `json:"database"`
 	Preconditions []environmentMigrationPrecondition `json:"preconditions,omitempty"`
 	Checksum      string                             `json:"checksum,omitempty"`
+	Status        string                             `json:"status,omitempty"`
 }
 
 type environmentMigrationSummary struct {
@@ -307,6 +308,13 @@ func runEnvironmentMigrationTargetCommand(ctx context.Context, args []string, co
 	planEnvironmentMigrationTarget(opts, baseline, command, &report)
 	if opts.Execute {
 		executeEnvironmentMigrationTarget(ctx, opts, baseline, command, &report)
+		if err := persistEnvironmentMigrationTargetStatuses(ctx, opts, &report); err != nil {
+			report.OK = false
+			if len(report.Migrations) > 0 {
+				report.Migrations[0].OK = false
+				report.Migrations[0].Error = err.Error()
+			}
+		}
 	}
 	if opts.JSONOutput {
 		return writeIndentedJSON(report)
@@ -487,8 +495,13 @@ func environmentMigrationReadOnlyReport(ctx context.Context, command string, arg
 		return environmentMigrationReport{}, false, err
 	}
 	items := environmentMigrationItems(graph, edge, strings.TrimSpace(*database), "")
+	if status == "pending" {
+		items = environmentMigrationPendingItems(items)
+	}
 	for index := range items {
-		items[index].Status = status
+		if strings.TrimSpace(items[index].Status) == "" || status == "pending" {
+			items[index].Status = status
+		}
 	}
 	report := environmentMigrationReport{
 		OK:            true,
@@ -500,6 +513,47 @@ func environmentMigrationReadOnlyReport(ctx context.Context, command string, arg
 		Migrations:    items,
 	}
 	return report, *jsonOutput, nil
+}
+
+func persistEnvironmentMigrationTargetStatuses(ctx context.Context, opts environmentMigrationTargetOptions, report *environmentMigrationReport) error {
+	statusByAsset := map[string]string{}
+	for _, item := range report.Migrations {
+		if !item.OK || !environmentMigrationStatusComplete(item.Status) {
+			continue
+		}
+		statusByAsset[item.OwnerComponentID+"\x00"+item.AssetID] = item.Status
+	}
+	if len(statusByAsset) == 0 {
+		return nil
+	}
+	runtime, cleanup, _, err := openEnvironmentMigrationStore(ctx, opts.StoreRef, opts.StoreURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	graph, err := runtime.GetEnvironmentComponentGraph(ctx, opts.EnvID)
+	if err != nil {
+		return err
+	}
+	changed := false
+	for index := range graph.Assets {
+		asset := &graph.Assets[index]
+		status, ok := statusByAsset[asset.OwnerComponentID+"\x00"+asset.AssetID]
+		if !ok {
+			continue
+		}
+		metadata := environmentMigrationAssetMetadata(*asset)
+		if metadata.Version == "" || metadata.Database == "" {
+			continue
+		}
+		metadata.Status = status
+		asset.SummaryJSON = mustCompactJSON(environmentMigrationSummary{Migration: metadata})
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return runtime.ReplaceEnvironmentComponentGraph(ctx, opts.EnvID, graph)
 }
 
 func openEnvironmentMigrationStore(ctx context.Context, storeRef string, storeURL string) (store.Store, func(), string, error) {

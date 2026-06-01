@@ -172,6 +172,29 @@ func environmentRestorePersistEnvironment(ctx context.Context, storeURL string, 
 	return runtime.UpsertEnvironment(ctx, env)
 }
 
+func environmentRestorePersistAppliedMigrationStatuses(ctx context.Context, storeURL string, envID string, assets []environmentRestoreAppliedAsset) error {
+	migrations := []environmentMigrationItem{}
+	for _, asset := range assets {
+		if asset.Action != environmentMigrationActionApplyMySQL || !asset.OK || !environmentMigrationStatusComplete(asset.Status) {
+			continue
+		}
+		migrations = append(migrations, environmentMigrationItem{
+			AssetID:          asset.AssetID,
+			OwnerComponentID: asset.OwnerComponentID,
+			Status:           asset.Status,
+			OK:               true,
+		})
+	}
+	if len(migrations) == 0 {
+		return nil
+	}
+	report := environmentMigrationReport{Migrations: migrations}
+	return persistEnvironmentMigrationTargetStatuses(ctx, environmentMigrationTargetOptions{
+		EnvID:    envID,
+		StoreRef: storeURL,
+	}, &report)
+}
+
 func environmentRestoreSummaryJSON(existing string, report environmentRestoreReport, attemptedAt time.Time) string {
 	summary := jsonObjectString(existing)
 	finishedAt := time.Now().UTC()
