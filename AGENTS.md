@@ -14,6 +14,11 @@ agent-native, API-operated, Store-first, and local-first.
 - When a session discovers AgentTestBench usability or workflow feedback that is
   not immediately fixed, register it with `skills/agent-testbench-feedback`
   instead of writing temporary notes under `/tmp`.
+- When CLI/operator behavior changes, update
+  `skills/agent-testbench-operator` in the same slice so the source tree stays
+  the canonical operation manual. Keep that public skill generic: do not add
+  private Store names, environment IDs, customer workflows, internal service
+  names, DSNs, ports, or business-domain examples.
 
 ## Core Rules
 
