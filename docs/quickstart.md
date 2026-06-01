@@ -21,6 +21,7 @@ npm ci
 ```sh
 ./bin/agent-testbench.sh version
 ./bin/agent-testbench.sh setup --store local --sqlite .runtime/agent-testbench-local.sqlite --build-runtime
+./bin/agent-testbench.sh onboard --store local --sqlite .runtime/agent-testbench-local.sqlite --install-shell
 ./bin/agent-testbench.sh status
 ./bin/agent-testbench.sh doctor --fix
 # SQL Store examples:
@@ -78,6 +79,51 @@ searchable command catalog instead of scrolling the full help page.
 ./bin/agent-testbench.sh commands --filter "store"
 ./bin/agent-testbench.sh commands --area workflow --filter "gate"
 ./bin/agent-testbench.sh commands --filter "case gate" --json
+```
+
+On a clean workstation, `onboard` wraps the common first-run sequence:
+configure a named Store, optionally build `.runtime/bin/agent-testbench`,
+optionally install a shell entrypoint such as `~/.local/bin/agent-testbench`,
+run a small smoke check, and print the next commands.
+
+```sh
+./bin/agent-testbench.sh onboard \
+  --store local \
+  --sqlite .runtime/agent-testbench-local.sqlite \
+  --install-shell \
+  --smoke store \
+  --json
+```
+
+When a one-off command needs to become repeatable, use the Store-backed task
+surface. Task definitions and run history are stored in the selected SQL Store,
+so a colleague or agent can inspect status and logs later from the same Store.
+`task schedule` records schedule metadata; `task watch` and the top-level
+`watch` alias run a foreground retry loop and record each attempt.
+
+```sh
+agent-testbench task run catalog-smoke \
+  --command "commands --json" \
+  --store local \
+  --notify-file .runtime/notifications.jsonl \
+  --json
+
+agent-testbench task schedule nightly-cases \
+  --command "case suite report --store local --json" \
+  --interval 24h \
+  --store local \
+  --json
+
+agent-testbench watch catalog-smoke \
+  --command "commands --json" \
+  --store local \
+  --interval 5m \
+  --limit 3 \
+  --until success
+
+agent-testbench task list --store local --json
+agent-testbench task logs catalog-smoke --store local -n 5 --json
+agent-testbench notify test --file .runtime/notifications.jsonl --message "AgentTestBench ready"
 ```
 
 ## Update the Local Runtime

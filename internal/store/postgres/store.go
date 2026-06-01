@@ -123,6 +123,26 @@ func (s *Store) ListPostProcessTasks(ctx context.Context, runID string) ([]store
 	return s.core.ListPostProcessTasks(ctx, runID)
 }
 
+func (s *Store) UpsertAgentTask(ctx context.Context, t store.AgentTask) (store.AgentTask, error) {
+	return s.core.UpsertAgentTask(ctx, t)
+}
+
+func (s *Store) GetAgentTask(ctx context.Context, ref string) (store.AgentTask, error) {
+	return s.core.GetAgentTask(ctx, ref)
+}
+
+func (s *Store) ListAgentTasks(ctx context.Context) ([]store.AgentTask, error) {
+	return s.core.ListAgentTasks(ctx)
+}
+
+func (s *Store) RecordAgentTaskRun(ctx context.Context, r store.AgentTaskRun) (store.AgentTaskRun, error) {
+	return s.core.RecordAgentTaskRun(ctx, r)
+}
+
+func (s *Store) ListAgentTaskRuns(ctx context.Context, taskID string, limit int) ([]store.AgentTaskRun, error) {
+	return s.core.ListAgentTaskRuns(ctx, taskID, limit)
+}
+
 func (s *Store) UpsertBaselineGate(ctx context.Context, r store.BaselineGate) (store.BaselineGate, error) {
 	return s.core.UpsertBaselineGate(ctx, r)
 }

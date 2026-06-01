@@ -64,7 +64,7 @@ contract instead of guessing target ids from prompts or private notes.
 
 | Capability | What it means |
 | --- | --- |
-| SQL Store-first | Named SQLite, PostgreSQL, or MySQL Stores with schema upgrades, run indexes, case run records, Evidence indexes, timing, logs, topology, and post-process task records. |
+| SQL Store-first | Named SQLite, PostgreSQL, or MySQL Stores with schema upgrades, run indexes, case run records, Evidence indexes, timing, logs, topology, post-process task records, and Store-backed CLI task history. |
 | API-operated catalog | Services, workflows, interface nodes, cases, request templates, fixtures, dependencies, and bindings are exposed through AgentTestBench APIs and UI discovery. |
 | Agent-friendly discovery | Agents call discovery APIs first, then run reports with exact returned ids instead of hidden prompt knowledge. |
 | API case execution | Run one HTTP case, a maintained case suite, or only the failed/not-run part of a suite; render requests, assert responses, write Evidence, and index results into Store. |
@@ -93,6 +93,7 @@ Install dependencies and verify the checkout:
 npm ci
 ./bin/agent-testbench.sh version
 ./bin/agent-testbench.sh setup --store local --sqlite .runtime/agent-testbench-local.sqlite --build-runtime
+./bin/agent-testbench.sh onboard --store local --sqlite .runtime/agent-testbench-local.sqlite --install-shell
 ./bin/agent-testbench.sh status
 ./bin/agent-testbench.sh doctor --fix
 ./bin/agent-testbench.sh update --check --channel release --json
@@ -110,17 +111,20 @@ AGENT_TESTBENCH_SMOKE_STORE_DSN="sqlite://$PWD/.runtime/agent-testbench-smoke.sq
 
 The primary CLI is `agent-testbench`; public configuration and smoke-test
 environment variables use the `AGENT_TESTBENCH_*` namespace.
-For daily operation, start with `status`, use `doctor` for setup diagnostics,
-run `setup --build-runtime` or `doctor --fix` on a clean machine when the local
-Store or runtime directory is missing, use `update --channel release` or
-`update --release latest` when you want the newest tagged runtime, and use
-`commands --area AREA --filter TEXT` to find exact Store, case, workflow, and
-Evidence commands without scrolling the full help text. `config show`,
-`config path`, `logs`, and `completion bash|zsh` cover the common operator
-checks around local configuration, runtime logs, and shell integration. If a
-wrapper on `PATH` points at an older binary, `doctor` reports
-`runtime.shell-entrypoint` with the exact `.runtime/bin` directory or `ATB_BIN`
-value to use before rerunning `update`.
+For daily operation, start with `onboard` on a clean machine when you want one
+command to configure a named Store, optionally build the local runtime, install
+a shell entrypoint, and run a smoke check. Use `status` for read-only setup
+state, `doctor` for diagnostics, `update --channel release` or `update
+--release latest` when you want the newest tagged runtime, and `commands --area
+AREA --filter TEXT` to find exact Store, case, workflow, and Evidence commands
+without scrolling the full help text. `task run`, `task schedule`, `task watch`,
+top-level `watch`, and `notify test` turn repeatable CLI operations into
+Store-backed task definitions, run history, logs, and file/webhook completion
+notifications. `config show`, `config path`, `logs`, and `completion bash|zsh`
+cover the common operator checks around local configuration, runtime logs, and
+shell integration. If a wrapper on `PATH` points at an older binary, `doctor`
+reports `runtime.shell-entrypoint` with the exact `.runtime/bin` directory or
+`ATB_BIN` value to use before rerunning `update`.
 
 The demo command starts a temporary local HTTP endpoint, runs the generic
 `examples/api-cases/create-item.json` case against the active SQL Store or

@@ -27,6 +27,7 @@ type Store interface {
 	BaselineGateStore
 	ProfileCatalogStore
 	EnvironmentStore
+	AgentTaskStore
 }
 
 type Closer interface {
@@ -78,6 +79,14 @@ type EnvironmentStore interface {
 	GetEnvironmentComponentGraph(context.Context, string) (EnvironmentComponentGraph, error)
 }
 
+type AgentTaskStore interface {
+	UpsertAgentTask(context.Context, AgentTask) (AgentTask, error)
+	GetAgentTask(context.Context, string) (AgentTask, error)
+	ListAgentTasks(context.Context) ([]AgentTask, error)
+	RecordAgentTaskRun(context.Context, AgentTaskRun) (AgentTaskRun, error)
+	ListAgentTaskRuns(context.Context, string, int) ([]AgentTaskRun, error)
+}
+
 type Run = execution.Run
 type APICaseRun = execution.APICaseRun
 type APICaseRunRecord = execution.APICaseRunRecord
@@ -127,6 +136,85 @@ type PostProcessTask struct {
 	Error       string
 	SummaryJSON string
 	CreatedAt   time.Time
+}
+
+type AgentTask struct {
+	ID           string
+	Name         string
+	Kind         string
+	Command      string
+	Schedule     string
+	Status       string
+	NotifyJSON   string
+	SummaryJSON  string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	LatestStatus string
+	LatestRunID  string
+	LastRunAt    time.Time
+	RunCount     int
+}
+
+type AgentTaskRun struct {
+	ID          string
+	TaskID      string
+	Status      string
+	Command     string
+	StartedAt   time.Time
+	FinishedAt  time.Time
+	DurationMs  int64
+	ExitCode    int
+	Output      string
+	Error       string
+	SummaryJSON string
+	CreatedAt   time.Time
+}
+
+func PrepareAgentTaskForUpsert(t AgentTask, now time.Time) AgentTask {
+	if t.Kind == "" {
+		t.Kind = "cli"
+	}
+	if t.Status == "" {
+		t.Status = "active"
+	}
+	if strings.TrimSpace(t.NotifyJSON) == "" {
+		t.NotifyJSON = "{}"
+	}
+	if strings.TrimSpace(t.SummaryJSON) == "" {
+		t.SummaryJSON = "{}"
+	}
+	if t.CreatedAt.IsZero() {
+		t.CreatedAt = now
+	}
+	if t.UpdatedAt.IsZero() {
+		t.UpdatedAt = now
+	}
+	return t
+}
+
+func PrepareAgentTaskRunForRecord(r AgentTaskRun, now time.Time) AgentTaskRun {
+	if r.CreatedAt.IsZero() {
+		r.CreatedAt = now
+	}
+	if r.StartedAt.IsZero() {
+		r.StartedAt = r.CreatedAt
+	}
+	if r.FinishedAt.IsZero() && r.Status != StatusRunning {
+		r.FinishedAt = r.StartedAt
+	}
+	if r.DurationMs == 0 && !r.StartedAt.IsZero() && !r.FinishedAt.IsZero() {
+		r.DurationMs = r.FinishedAt.Sub(r.StartedAt).Milliseconds()
+		if r.DurationMs < 0 {
+			r.DurationMs = 0
+		}
+	}
+	if r.Status == "" {
+		r.Status = StatusPassed
+	}
+	if strings.TrimSpace(r.SummaryJSON) == "" {
+		r.SummaryJSON = "{}"
+	}
+	return r
 }
 
 type BaselineGate struct {

@@ -66,6 +66,7 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	requireAPICaseRunContract(t, ctx, s, started)
 	requireEvidenceContract(t, ctx, s)
 	requirePostProcessTaskContract(t, ctx, s)
+	requireAgentTaskContract(t, ctx, s)
 	requireTraceTopologyContract(t, ctx, s, started)
 	env := requireEnvironmentContract(t, ctx, s, started)
 	requireEnvironmentComponentGraphContract(t, ctx, s, env.ID)
@@ -234,6 +235,63 @@ func requirePostProcessTaskContract(t *testing.T, ctx context.Context, s store.S
 	}
 	if len(tasks) != 1 || tasks[0].Kind != "runtime_log_collect" || tasks[0].DurationMs != 125 {
 		t.Fatalf("post process tasks = %#v", tasks)
+	}
+}
+
+func requireAgentTaskContract(t *testing.T, ctx context.Context, s store.Store) {
+	t.Helper()
+
+	task, err := s.UpsertAgentTask(ctx, store.AgentTask{
+		ID:          "agent-task-001",
+		Name:        "catalog-smoke",
+		Kind:        "cli",
+		Command:     "commands --filter case --json",
+		Schedule:    "interval:15m",
+		Status:      "scheduled",
+		NotifyJSON:  `{"file":"notify.jsonl"}`,
+		SummaryJSON: `{"owner":"qa"}`,
+	})
+	if err != nil {
+		t.Fatalf("upsert agent task: %v", err)
+	}
+	if task.CreatedAt.IsZero() || task.UpdatedAt.IsZero() {
+		t.Fatalf("agent task should have timestamps: %#v", task)
+	}
+	loaded, err := s.GetAgentTask(ctx, "catalog-smoke")
+	if err != nil {
+		t.Fatalf("get agent task by name: %v", err)
+	}
+	if loaded.ID != "agent-task-001" || loaded.Command != "commands --filter case --json" || loaded.Schedule != "interval:15m" {
+		t.Fatalf("loaded agent task = %#v", loaded)
+	}
+	run, err := s.RecordAgentTaskRun(ctx, store.AgentTaskRun{
+		ID:          "agent-task-run-001",
+		TaskID:      task.ID,
+		Status:      store.StatusPassed,
+		Command:     task.Command,
+		ExitCode:    0,
+		Output:      `{"ok":true}`,
+		SummaryJSON: `{"attempt":1}`,
+	})
+	if err != nil {
+		t.Fatalf("record agent task run: %v", err)
+	}
+	if run.StartedAt.IsZero() || run.FinishedAt.IsZero() {
+		t.Fatalf("agent task run should have timestamps: %#v", run)
+	}
+	tasks, err := s.ListAgentTasks(ctx)
+	if err != nil {
+		t.Fatalf("list agent tasks: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].Name != "catalog-smoke" || tasks[0].LatestStatus != store.StatusPassed || tasks[0].RunCount != 1 {
+		t.Fatalf("agent tasks = %#v", tasks)
+	}
+	runs, err := s.ListAgentTaskRuns(ctx, task.ID, 5)
+	if err != nil {
+		t.Fatalf("list agent task runs: %v", err)
+	}
+	if len(runs) != 1 || runs[0].ID != "agent-task-run-001" || runs[0].Output != `{"ok":true}` {
+		t.Fatalf("agent task runs = %#v", runs)
 	}
 }
 
