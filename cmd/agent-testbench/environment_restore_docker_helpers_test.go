@@ -36,6 +36,15 @@ func (fixture environmentRestoreDockerCLIFixture) writeWorkspaceFile(t *testing.
 	return path
 }
 
+func (fixture environmentRestoreDockerCLIFixture) writeDockerTool(t *testing.T, content string) {
+	t.Helper()
+	path := filepath.Join(filepath.Dir(fixture.DockerCallsPath), "docker")
+	writeFile(t, path, content)
+	if err := os.Chmod(path, 0o755); err != nil {
+		t.Fatalf("chmod fake docker: %v", err)
+	}
+}
+
 func installEnvironmentRestoreDockerTool(t *testing.T, dockerScript string) {
 	t.Helper()
 	fakeBin := t.TempDir()

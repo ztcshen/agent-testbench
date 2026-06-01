@@ -36,16 +36,12 @@ func TestEnvironmentMigrationAddAndListRegistersVersionedMySQLAsset(t *testing.T
 		t.Fatalf("migration add report = %#v", addReport)
 	}
 
-	listOut := runCLI(t, "environment", "migration", cliCommandList, "env.migration",
+	listReport := runEnvironmentMigrationReport(t, cliCommandList, "env.migration",
 		"--store", "sqlite://"+fixture.storePath,
 		"--edge", "app:mysql",
 		"--database", "app_db",
 		"--json",
 	)
-	var listReport environmentMigrationReport
-	if err := json.Unmarshal([]byte(listOut), &listReport); err != nil {
-		t.Fatalf("decode migration list report: %v\n%s", err, listOut)
-	}
 	if !listReport.OK || listReport.Count != 1 || listReport.Migrations[0].Status != "registered" {
 		t.Fatalf("migration list report = %#v", listReport)
 	}
@@ -81,6 +77,44 @@ func TestEnvironmentMigrationPlanAndApplyDryRunReportCommands(t *testing.T) {
 	}
 	if got := strings.Join(report.Migrations[0].Command, " "); !strings.Contains(got, "compose") || !strings.Contains(got, "exec -T mysql") {
 		t.Fatalf("migration dry-run command = %q", got)
+	}
+}
+
+func TestEnvironmentMigrationApplyPersistsStatusForPlan(t *testing.T) {
+	fixture := writeEnvironmentMigrationStoreFixture(t)
+	seedEnvironmentMigrationAsset(t, fixture.storePath)
+	dockerEnv, _, _ := fakeDockerCommandCapturingExecStdin(t)
+
+	applyReport := runEnvironmentMigrationReportWithEnv(t, dockerEnv, "apply", "env.migration",
+		"--store", "sqlite://"+fixture.storePath,
+		"--edge", "app:mysql",
+		"--database", "app_db",
+		"--workspace", fixture.workspace,
+		"--execute",
+		"--json",
+	)
+	if !applyReport.OK || applyReport.Count != 1 || applyReport.Migrations[0].Status != environmentMigrationStatusApplied {
+		t.Fatalf("migration apply report = %#v", applyReport)
+	}
+
+	planReport := runEnvironmentMigrationReport(t, "plan", "env.migration",
+		"--store", "sqlite://"+fixture.storePath,
+		"--edge", "app:mysql",
+		"--database", "app_db",
+		"--json",
+	)
+	if !planReport.OK || planReport.Count != 0 {
+		t.Fatalf("migration plan after apply should be empty, got %#v", planReport)
+	}
+
+	listReport := runEnvironmentMigrationReport(t, cliCommandList, "env.migration",
+		"--store", "sqlite://"+fixture.storePath,
+		"--edge", "app:mysql",
+		"--database", "app_db",
+		"--json",
+	)
+	if !listReport.OK || listReport.Count != 1 || listReport.Migrations[0].Status != environmentMigrationStatusApplied {
+		t.Fatalf("migration list after apply = %#v", listReport)
 	}
 }
 
@@ -197,9 +231,86 @@ func TestEnvironmentRestoreAppliesMySQLMigrationThroughHistoryTable(t *testing.T
 	}
 }
 
+func TestEnvironmentRestorePersistsAppliedMigrationStatusForPlan(t *testing.T) {
+	fixture := writeEnvironmentMigrationStoreFixture(t)
+	seedEnvironmentMigrationAsset(t, fixture.storePath)
+	dockerEnv, _, _ := fakeDockerCommandCapturingExecStdin(t)
+	for _, kv := range dockerEnv {
+		parts := strings.SplitN(kv, "=", 2)
+		t.Setenv(parts[0], parts[1])
+	}
+	ctx := context.Background()
+	s := openMigrationFixtureStore(t, fixture.storePath)
+	env, err := s.GetEnvironment(ctx, "env.migration")
+	if err != nil {
+		t.Fatalf("get migration environment: %v", err)
+	}
+	graph, err := s.GetEnvironmentComponentGraph(ctx, "env.migration")
+	if err != nil {
+		t.Fatalf("get migration graph: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close migration fixture store: %v", err)
+	}
+	healthURL := newHealthyTestURL(t)
+	for index := range graph.Components {
+		if graph.Components[index].ComponentID == "app" {
+			graph.Components[index].HealthCheckJSON = `{"kind":"url","url":"` + healthURL + `"}`
+		}
+	}
+	report, err := buildEnvironmentRestoreReport(ctx, env, fixture.workspace, true, false, false, time.Second, environmentRestoreWorkflowOptions{
+		StoreURL: "sqlite://" + fixture.storePath,
+	}, environmentRestoreDockerCleanupOptions{}, graph)
+	if err != nil {
+		t.Fatalf("build migration restore report: %v", err)
+	}
+	if !report.OK || len(report.Docker.AppliedAssets) != 1 || report.Docker.AppliedAssets[0].Status != environmentMigrationStatusApplied {
+		t.Fatalf("migration restore report ok=%t error=%q applied=%#v", report.OK, report.Error, report.Docker.AppliedAssets)
+	}
+	planReport := runEnvironmentMigrationReport(t, "plan", "env.migration",
+		"--store", "sqlite://"+fixture.storePath,
+		"--edge", "app:mysql",
+		"--database", "app_db",
+		"--json",
+	)
+	if !planReport.OK || planReport.Count != 0 {
+		t.Fatalf("migration plan should omit restore-applied asset: %#v", planReport)
+	}
+	listReport := runEnvironmentMigrationReport(t, cliCommandList, "env.migration",
+		"--store", "sqlite://"+fixture.storePath,
+		"--edge", "app:mysql",
+		"--database", "app_db",
+		"--json",
+	)
+	if !listReport.OK || listReport.Count != 1 || listReport.Migrations[0].Status != environmentMigrationStatusApplied {
+		t.Fatalf("migration list should preserve restore-applied status: %#v", listReport)
+	}
+}
+
 type environmentMigrationStoreFixture struct {
 	storePath string
 	workspace string
+}
+
+func runEnvironmentMigrationReport(t *testing.T, args ...string) environmentMigrationReport {
+	t.Helper()
+	out := runCLI(t, append([]string{"environment", "migration"}, args...)...)
+	return decodeEnvironmentMigrationReport(t, out)
+}
+
+func runEnvironmentMigrationReportWithEnv(t *testing.T, env []string, args ...string) environmentMigrationReport {
+	t.Helper()
+	out := runCLIWithEnv(t, env, append([]string{"environment", "migration"}, args...)...)
+	return decodeEnvironmentMigrationReport(t, out)
+}
+
+func decodeEnvironmentMigrationReport(t *testing.T, out string) environmentMigrationReport {
+	t.Helper()
+	var report environmentMigrationReport
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode migration report: %v\n%s", err, out)
+	}
+	return report
 }
 
 func writeEnvironmentMigrationStoreFixture(t *testing.T) environmentMigrationStoreFixture {
@@ -207,7 +318,7 @@ func writeEnvironmentMigrationStoreFixture(t *testing.T) environmentMigrationSto
 	dir := t.TempDir()
 	storePath := filepath.Join(dir, "store.sqlite")
 	workspace := filepath.Join(dir, "workspace")
-	writeFile(t, filepath.Join(workspace, "compose.yml"), "services:\n  mysql:\n    image: mysql:8\n")
+	writeFile(t, filepath.Join(workspace, "compose.yml"), "services:\n  mysql:\n    image: mysql:8\n  app:\n    image: alpine:3.20\n")
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
 	if err != nil {

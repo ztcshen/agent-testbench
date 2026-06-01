@@ -13,6 +13,13 @@ import (
 	"agent-testbench/internal/store"
 )
 
+const (
+	environmentMigrationStatusApplied                 = "applied"
+	environmentMigrationStatusAlreadyApplied          = "already-applied"
+	environmentMigrationStatusBaseline                = "baseline"
+	environmentMigrationStatusBaselineAlreadyRecorded = "baseline-already-recorded"
+)
+
 func addEnvironmentMigrationAsset(graph store.EnvironmentComponentGraph, edge environmentMigrationEdge, asset store.ComponentConfigAsset, force bool) (store.EnvironmentComponentGraph, environmentMigrationItem, error) {
 	if !environmentMigrationComponentExists(graph, edge.Owner) {
 		return graph, environmentMigrationItem{}, fmt.Errorf("migration owner component is not registered: %s", edge.Owner)
@@ -127,6 +134,7 @@ func environmentMigrationItemFromAsset(asset store.ComponentConfigAsset, provide
 		ApplyOrder:        asset.ApplyOrder,
 		Bytes:             len(asset.ContentInline),
 		Content:           asset.ContentInline,
+		Status:            metadata.Status,
 	}, true
 }
 
@@ -148,6 +156,26 @@ func environmentMigrationIsAsset(asset store.ComponentConfigAsset) bool {
 	}
 	kind := strings.ToLower(strings.TrimSpace(asset.AssetKind))
 	return strings.Contains(kind, "migration") && environmentRestoreIsMySQLSQLAsset(asset, store.ComponentDependency{Capability: "sql", ProviderComponentID: asset.TargetComponentID})
+}
+
+func environmentMigrationPendingItems(items []environmentMigrationItem) []environmentMigrationItem {
+	out := make([]environmentMigrationItem, 0, len(items))
+	for _, item := range items {
+		if environmentMigrationStatusComplete(item.Status) {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func environmentMigrationStatusComplete(status string) bool {
+	switch strings.TrimSpace(status) {
+	case environmentMigrationStatusApplied, environmentMigrationStatusAlreadyApplied, environmentMigrationStatusBaseline, environmentMigrationStatusBaselineAlreadyRecorded:
+		return true
+	default:
+		return false
+	}
 }
 
 func parseEnvironmentMigrationEdge(raw string) (environmentMigrationEdge, error) {

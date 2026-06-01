@@ -14,7 +14,7 @@ func environmentMigrationApplySQL(edge environmentMigrationEdge, item environmen
 	b.WriteString(";\n")
 	b.WriteString(strings.TrimSpace(item.Content))
 	b.WriteString("\n")
-	b.WriteString(environmentMigrationInsertHistorySQL(edge, item, "applied"))
+	b.WriteString(environmentMigrationInsertHistorySQL(edge, item, environmentMigrationStatusApplied))
 	return b.String()
 }
 
@@ -23,7 +23,7 @@ func environmentMigrationBaselineSQL(edge environmentMigrationEdge, item environ
 	b.WriteString("USE ")
 	b.WriteString(mysqlQuoteIdentifier(item.Database))
 	b.WriteString(";\n")
-	b.WriteString(environmentMigrationInsertHistorySQL(edge, item, "baseline"))
+	b.WriteString(environmentMigrationInsertHistorySQL(edge, item, environmentMigrationStatusBaseline))
 	return b.String()
 }
 
@@ -45,9 +45,9 @@ func runEnvironmentMigrationWithHistory(ctx context.Context, workspace string, c
 			return totalAttempts, "", "agent-testbench migration checksum mismatch for " + item.AssetID
 		}
 		if baseline {
-			return totalAttempts, "baseline-already-recorded", ""
+			return totalAttempts, environmentMigrationStatusBaselineAlreadyRecorded, ""
 		}
-		return totalAttempts, "already-applied", ""
+		return totalAttempts, environmentMigrationStatusAlreadyApplied, ""
 	}
 	if !baseline {
 		for _, precondition := range item.Preconditions {
@@ -71,9 +71,9 @@ func runEnvironmentMigrationWithHistory(ctx context.Context, workspace string, c
 		return totalAttempts, "", errText
 	}
 	if baseline {
-		return totalAttempts, "baseline", ""
+		return totalAttempts, environmentMigrationStatusBaseline, ""
 	}
-	return totalAttempts, "applied", ""
+	return totalAttempts, environmentMigrationStatusApplied, ""
 }
 
 func runRestoreMySQLCommandWithInputOutputRetry(ctx context.Context, workdir string, command []string, input string) (int, string, string) {

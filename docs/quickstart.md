@@ -362,7 +362,10 @@ tool checks, Docker Compose pull/build/up commands, and recorded health checks.
 Preflight checks `git` when a missing
 checkout must be cloned, then checks both `docker` and `docker compose version`
 when a compose plan is recorded; it also labels heavy Docker steps so an
-operator can review them before destructive local validation. Add
+operator can review them before destructive local validation. Before Docker
+starts, restore also rejects generated Compose bind mounts whose absolute host
+source does not exist, and `--execute` validates image manifests for services
+that would be pulled so unavailable tags fail before `docker compose pull`. Add
 `--execute` to clone missing remote repositories, run Docker Compose, and wait
 for recorded health checks. If the environment records `startCommand` without a
 compose file, restore reports and can execute that command as the local start
@@ -373,7 +376,12 @@ restore readiness compares each required component `composeService` with both
 the recorded service allow-list and the generated or local Compose service
 definitions. If a workflow component is missing from either place, restore
 fails before Docker starts and tells the operator to update the Store compose
-startup file or service allow-list. Add `--pull` with `--execute` to update
+startup file or service allow-list. Host paths in generated Compose startup
+files should be parameterized through recorded `--compose-env` values such as
+`$AGENT_TESTBENCH_WORKSPACE/...`; restore can rewrite legacy absolute bind
+sources to the current registered repo checkout when the source path identifies
+that service, and any remaining missing machine-specific paths become preflight
+issues. Add `--pull` with `--execute` to update
 existing checkouts using `git pull --ff-only`. Repository
 facts may also record `--repo-ref SERVICE=REF`; restore checks out that tag,
 commit, or ref after cloning with detached HEAD semantics. Existing checkouts
