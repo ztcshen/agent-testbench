@@ -218,9 +218,9 @@ database already contains the schema and only needs history rows recorded.
 - Keep this repository copy as the source of truth.
 - Keep local `~/.codex/skills/agent-testbench-operator` as a symlink to this
   folder.
-- Do not commit runtime evidence, generated reports, local databases, fallback
-  binaries, private environment IDs, private Store names, internal services, or
-  customer workflow examples.
+- Do not commit runtime evidence, generated reports, local databases,
+  temporary runtime repair binaries, private environment IDs, private Store
+  names, internal services, or customer workflow examples.
 - Update `SKILL.md`, this runbook, and helper scripts whenever CLI/operator
   behavior changes.
 - Keep helper script JSON output and report paths stable enough for another
@@ -234,8 +234,8 @@ database already contains the schema and only needs history rows recorded.
 - `workflow report` has a short synchronous per-step timeout and can fail on
   slow target paths. Prefer acceptance commands with explicit timeouts.
 - Docker must be running before restore or live case execution.
-- Runtime evidence, reports, local databases, and fallback binaries should not
-  be committed.
+- Runtime evidence, reports, local databases, and temporary runtime repair
+  binaries should not be committed.
 - `environment migration apply` and `baseline` are dry-run unless `--execute`
   is supplied. Do not edit old bootstrap DDL for already-applied schemas; add a
   new migration version and let the target history table/checksum guard repeats.

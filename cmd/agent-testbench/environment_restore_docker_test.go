@@ -588,7 +588,7 @@ fi
 
 	out := runCLIWithEnv(t, fixture.DockerEnv, "environment", "restore", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--execute", "--json", "env.compose.image-local")
 	if !strings.Contains(out, `"ok": true`) || !strings.Contains(out, "local Docker image is available") {
-		t.Fatalf("local image fallback should pass with note, got:\n%s", out)
+		t.Fatalf("local image reuse should pass with note, got:\n%s", out)
 	}
 	dockerCalls, err := os.ReadFile(fixture.DockerCallsPath)
 	if err != nil {
