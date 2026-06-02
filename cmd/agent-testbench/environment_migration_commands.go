@@ -305,11 +305,12 @@ func runEnvironmentMigrationTargetCommand(ctx context.Context, args []string, co
 	if opts.OutputFormat == cliOutputFormatStreamJSON {
 		ctx = contextWithAgentEventStream(ctx, os.Stdout)
 	}
+	agentEmitRunStarted(ctx, newEnvironmentMigrationRunID(baseline), environmentMigrationRunPhase(baseline), opts.EnvID, environmentMigrationRunMessage(baseline, "started"))
 	report, command, err := prepareEnvironmentMigrationTarget(ctx, opts)
 	if err != nil {
+		emitEnvironmentMigrationStreamFailure(ctx, opts, baseline, err)
 		return err
 	}
-	agentEmitRunStarted(ctx, newEnvironmentMigrationRunID(baseline), environmentMigrationRunPhase(baseline), opts.EnvID, environmentMigrationRunMessage(baseline, "started"))
 	planEnvironmentMigrationTarget(opts, baseline, command, &report)
 	if opts.Execute {
 		executeEnvironmentMigrationTarget(ctx, opts, baseline, command, &report)
@@ -336,6 +337,22 @@ func runEnvironmentMigrationTargetCommand(ctx context.Context, args []string, co
 		return errors.New("one or more environment migrations failed")
 	}
 	return nil
+}
+
+func emitEnvironmentMigrationStreamFailure(ctx context.Context, opts environmentMigrationTargetOptions, baseline bool, err error) {
+	if !agentHasEventStream(ctx) {
+		return
+	}
+	report := environmentMigrationReport{
+		OK:            false,
+		EnvironmentID: opts.EnvID,
+		Edge:          opts.Edge,
+		Database:      opts.Database,
+		Execute:       opts.Execute,
+		Workspace:     opts.Workspace,
+		HistoryTable:  environmentMigrationHistoryTable,
+	}
+	agentEmitRunCompleted(ctx, environmentMigrationRunPhase(baseline), "failed", opts.EnvID, environmentMigrationRunMessage(baseline, "failed"), err.Error(), report)
 }
 
 func parseEnvironmentMigrationTargetOptions(args []string, commandName string) (environmentMigrationTargetOptions, error) {

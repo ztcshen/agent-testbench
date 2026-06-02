@@ -427,17 +427,8 @@ func runSandboxStart(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	runtime, err := openStore(ctx, resolvedStoreURL)
-	if err != nil {
-		return err
-	}
-	defer closeCLIStore(runtime)
 	if resolvedOutputFormat == cliOutputFormatStreamJSON {
 		ctx = contextWithAgentEventStream(ctx, os.Stdout)
-	}
-	catalog, err := runtime.GetProfileCatalog(ctx)
-	if err != nil {
-		return err
 	}
 	report := sandboxStartReport{
 		OK:         true,
@@ -446,6 +437,17 @@ func runSandboxStart(ctx context.Context, args []string) error {
 		StorePath:  maskStoreURL(resolvedStoreURL),
 	}
 	agentEmitRunStarted(ctx, newSandboxStartRunID(), "sandbox.start", sandboxStartTarget(report), "sandbox start started")
+	runtime, err := openStore(ctx, resolvedStoreURL)
+	if err != nil {
+		emitSandboxStartStreamFailure(ctx, report, err)
+		return err
+	}
+	defer closeCLIStore(runtime)
+	catalog, err := runtime.GetProfileCatalog(ctx)
+	if err != nil {
+		emitSandboxStartStreamFailure(ctx, report, err)
+		return err
+	}
 	workflowRequired, err := sandboxWorkflowRequiredServiceReasons(catalog, report.WorkflowID)
 	if err != nil {
 		emitSandboxStartStreamFailure(ctx, report, err)

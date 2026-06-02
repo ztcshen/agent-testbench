@@ -294,7 +294,7 @@ func environmentRestoreReadinessDockerDetail(report environmentRestoreReport) st
 func environmentRestoreDockerPlanReady(report environmentRestoreReport) bool {
 	switch report.Docker.Action {
 	case "plan-docker-compose", "run-docker-compose":
-		return report.Docker.OK && environmentRestoreComposeFilesReady(report)
+		return report.Docker.OK && (!report.Executed || environmentRestoreComposeFilesReady(report))
 	case "plan-start-command", "run-start-command", "plan-use-existing-containers", "use-existing-containers", "skipped-after-repository-preparation":
 		return report.Docker.OK
 	default:

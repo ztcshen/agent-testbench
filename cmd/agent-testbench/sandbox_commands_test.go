@@ -100,7 +100,19 @@ func TestSandboxStartStreamJSONCompletesMissingServiceFailure(t *testing.T) {
 	if !strings.Contains(out, "profile service registry") {
 		t.Fatalf("missing service error should still be printed, got %q", out)
 	}
-	events := decodeAgentStreamEvents(t, sandboxStartJSONEventLines(out))
+	events := decodeAgentStreamEvents(t, agentStreamJSONEventLines(out))
+	if !agentStreamHasEvent(events, "run_started", "sandbox.start", "running", "profile-service-registry") {
+		t.Fatalf("stream missing sandbox run start: %#v", events)
+	}
+	if !agentStreamHasEvent(events, "run_completed", "sandbox.start", "failed", "profile-service-registry") {
+		t.Fatalf("stream missing failed sandbox run completion: %#v", events)
+	}
+}
+
+func TestSandboxStartStreamJSONCompletesStoreOpenFailure(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "missing", "store.sqlite")
+	out := runCLIFails(t, "sandbox", "start", "--store", "sqlite://"+storePath, "--output-format", "stream-json")
+	events := decodeAgentStreamEvents(t, agentStreamJSONEventLines(out))
 	if !agentStreamHasEvent(events, "run_started", "sandbox.start", "running", "profile-service-registry") {
 		t.Fatalf("stream missing sandbox run start: %#v", events)
 	}
@@ -252,7 +264,7 @@ func TestSandboxServiceListCanReadComponentOnlyEnvironment(t *testing.T) {
 	}
 }
 
-func sandboxStartJSONEventLines(output string) string {
+func agentStreamJSONEventLines(output string) string {
 	lines := []string{}
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)

@@ -151,6 +151,39 @@ func TestEnvironmentMigrationApplyStreamJSONEmitsAgentEvents(t *testing.T) {
 	}
 }
 
+func TestEnvironmentMigrationApplyStreamJSONCompletesPrepareFailure(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.migration.no-compose",
+		"--verification-workflow", "workflow.core-10",
+	)
+	graphPath := filepath.Join(t.TempDir(), "graph.json")
+	writeFile(t, graphPath, mustJSON(t, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "app", Kind: "app", Role: "consumer", ComposeService: "app", Required: true, HealthCheckJSON: `{"kind":"url","url":"http://127.0.0.1:1/health"}`},
+			{ComponentID: "mysql", Kind: "middleware", Role: "database", ComposeService: "mysql", Required: true, HealthCheckJSON: `{"kind":"compose-service","service":"mysql"}`},
+		},
+	}))
+	runCLI(t, "environment", "components", "replace", "--store", "sqlite://"+storePath, "--file", graphPath, "env.migration.no-compose")
+
+	out := runCLIFails(t, "environment", "migration", "apply", "env.migration.no-compose",
+		"--store", "sqlite://"+storePath,
+		"--edge", "app:mysql",
+		"--database", "app_db",
+		"--workspace", workspace,
+		"--output-format", "stream-json",
+	)
+	events := decodeAgentStreamEvents(t, agentStreamJSONEventLines(out))
+	if !agentStreamHasEvent(events, "run_started", "environment.migration.apply", "running", "env.migration.no-compose") {
+		t.Fatalf("stream missing migration run start: %#v", events)
+	}
+	if !agentStreamHasEvent(events, "run_completed", "environment.migration.apply", "failed", "env.migration.no-compose") {
+		t.Fatalf("stream missing failed migration run completion: %#v", events)
+	}
+}
+
 func TestEnvironmentMigrationApplySQLUsesHistoryChecksumAndPreconditions(t *testing.T) {
 	item := environmentMigrationItem{
 		EnvironmentID:    "env.migration",
