@@ -44,6 +44,15 @@ needed, then register feedback through the local AgentTestBench feedback skill
 or its helper script. Report that human intervention or a product change is
 needed before continuing.
 
+Do not stop after a repeated or unrecoverable workflow/case failure with only a
+chat summary. Before handing off, either match the blocker to an existing
+feedback entry or add/update a durable feedback record. Include the workflow
+run id, failed step or case id, service id, relevant Store state such as
+`hasStartupCommand=false`, the exact CLI error, and the next repair command.
+If the product behavior is already fixed but the local Store/runtime still
+needs repair, record that operational follow-up instead of treating the
+conversation as sufficient evidence.
+
 Only leave this boundary when the user explicitly asks for AgentTestBench
 implementation work or gives explicit permission to use a non-CLI recovery path
 for the current turn. Even then, keep product feedback separate from the tested

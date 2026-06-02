@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStatusReportsRepoRuntimeAndStoreSummary(t *testing.T) {
@@ -175,6 +176,67 @@ func TestDoctorWarnsWhenShellEntrypointIsStale(t *testing.T) {
 		return
 	}
 	t.Fatalf("doctor report missing runtime.shell-entrypoint check: %#v", report.Checks)
+}
+
+func TestStatusAndDoctorWarnWhenRuntimeBinaryPredatesHead(t *testing.T) {
+	repo := createSetupRepo(t)
+	runtimePath := filepath.Join(repo, ".runtime", "bin", "agent-testbench")
+	writeFile(t, runtimePath, "#!/usr/bin/env sh\nexit 0\n")
+	if err := os.Chmod(runtimePath, 0o755); err != nil {
+		t.Fatalf("chmod runtime: %v", err)
+	}
+	old := time.Now().Add(-24 * time.Hour)
+	if err := os.Chtimes(runtimePath, old, old); err != nil {
+		t.Fatalf("make runtime stale: %v", err)
+	}
+	env := []string{"AGENT_TESTBENCH_CONFIG_HOME=" + t.TempDir(), "AGENT_TESTBENCH_REPO=" + repo}
+	statusOut := runCLIWithEnv(t, env, "status", "--json")
+	var statusReport struct {
+		Runtime struct {
+			Exists           bool   `json:"exists"`
+			Executable       bool   `json:"executable"`
+			Fresh            bool   `json:"fresh"`
+			StaleReason      string `json:"staleReason"`
+			BinaryModifiedAt string `json:"binaryModifiedAt"`
+			SourceCommitAt   string `json:"sourceCommitAt"`
+		} `json:"runtime"`
+		Next []string `json:"next"`
+	}
+	if err := json.Unmarshal([]byte(statusOut), &statusReport); err != nil {
+		t.Fatalf("decode stale runtime status: %v\n%s", err, statusOut)
+	}
+	if !statusReport.Runtime.Exists || !statusReport.Runtime.Executable || statusReport.Runtime.Fresh || !strings.Contains(statusReport.Runtime.StaleReason, "older than") {
+		t.Fatalf("status should report stale runtime: %#v", statusReport.Runtime)
+	}
+	if statusReport.Runtime.BinaryModifiedAt == "" || statusReport.Runtime.SourceCommitAt == "" {
+		t.Fatalf("status should include runtime/source timestamps: %#v", statusReport.Runtime)
+	}
+	if !stringSliceContains(statusReport.Next, "agent-testbench onboard --repo . --build-runtime --install-shell --smoke commands") {
+		t.Fatalf("status should suggest runtime rebuild: %#v", statusReport.Next)
+	}
+
+	doctorOut := runCLIWithEnv(t, env, "doctor", "--json")
+	var doctorReport struct {
+		Checks []struct {
+			Code   string `json:"code"`
+			OK     bool   `json:"ok"`
+			Detail string `json:"detail"`
+			Fix    string `json:"fix"`
+		} `json:"checks"`
+	}
+	if err := json.Unmarshal([]byte(doctorOut), &doctorReport); err != nil {
+		t.Fatalf("decode stale runtime doctor: %v\n%s", err, doctorOut)
+	}
+	for _, check := range doctorReport.Checks {
+		if check.Code != "runtime.fresh" {
+			continue
+		}
+		if check.OK || !strings.Contains(check.Detail, "older than") || !strings.Contains(check.Fix, "--build-runtime") {
+			t.Fatalf("runtime freshness check = %#v", check)
+		}
+		return
+	}
+	t.Fatalf("doctor report missing runtime.fresh check: %#v", doctorReport.Checks)
 }
 
 func TestStatusDeepIncludesStoreSchema(t *testing.T) {

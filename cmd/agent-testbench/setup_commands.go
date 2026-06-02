@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type setupCommandReport struct {
@@ -28,6 +30,41 @@ type setupStoreReport struct {
 type setupRuntimeReport struct {
 	Path  string `json:"path"`
 	Built bool   `json:"built"`
+}
+
+const runtimeFreshnessRepairCommand = "run agent-testbench onboard --repo . --build-runtime --install-shell --smoke commands"
+
+func statusRepoCommitTime(ctx context.Context, repo string) (time.Time, error) {
+	out, err := updateGitOutput(ctx, repo, "show", "-s", "--format=%ct", "HEAD")
+	if err != nil {
+		return time.Time{}, err
+	}
+	seconds, parseErr := strconv.ParseInt(strings.TrimSpace(out), 10, 64)
+	if parseErr != nil {
+		return time.Time{}, parseErr
+	}
+	return time.Unix(seconds, 0), nil
+}
+
+func doctorRuntimeFreshnessCheck(runtime statusRuntimeReport) doctorCheckReport {
+	if !runtime.Exists || !runtime.Executable {
+		return doctorCheckReport{Name: "runtime-freshness", Code: "runtime.fresh", OK: false, Optional: true, Detail: "runtime binary is not ready", Fix: runtimeFreshnessRepairCommand}
+	}
+	if runtime.Fresh {
+		return doctorCheckReport{Name: "runtime-freshness", Code: "runtime.fresh", OK: true, Optional: true, Detail: "runtime binary is at least as new as git HEAD"}
+	}
+	detail := runtime.StaleReason
+	if detail == "" {
+		detail = "runtime binary may be stale"
+	}
+	return doctorCheckReport{
+		Name:     "runtime-freshness",
+		Code:     "runtime.fresh",
+		OK:       false,
+		Optional: true,
+		Detail:   detail,
+		Fix:      runtimeFreshnessRepairCommand,
+	}
 }
 
 func runSetup(ctx context.Context, args []string) error {

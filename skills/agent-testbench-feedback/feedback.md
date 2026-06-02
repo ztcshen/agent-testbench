@@ -200,3 +200,21 @@ Durable feedback registered by local Codex sessions. Use
 - Evidence: `sandbox service list --service SERVICE_ID` could show an active service with `hasStartupCommand=false`, while `sandbox start --service SERVICE_ID --json` returned `ok=true`, `started=0`, and `skipped=1` with `skipReason=startup command is empty`. That made an integration workflow appear successfully started even though its required app service could not be launched by the CLI.
 - Suggestion: Explicit `--service` targets and workflow-required services now fail the command when their startup command is empty, returning `ok=false`, a failed count, and a concrete `sandbox service register --id SERVICE_ID --startup-command ...` repair hint.
 - Verification: `go test ./cmd/agent-testbench -run 'TestSandboxStart(SelectedServiceFailsWhenStartupCommandMissing|WorkflowBlocksMissingStartupCommand|DryRunDoesNotRunStartupCommands|CommandRunsStartupCommandsFromStore)' -count=1`
+
+## 2026-06-02 - status/doctor cannot detect stale runtime binary after source update
+- Area: cli
+- Severity: P2
+- Status: fixed
+- Source: local post-merge runtime freshness verification
+- Evidence: A checkout could be on a newer Git revision while `.runtime/bin/agent-testbench` still contained an older build. `status` reported the active executable path as matching the runtime path, and `doctor` did not warn, so other local sessions could continue using stale command behavior until the runtime was manually rebuilt.
+- Suggestion: `status` now reports runtime freshness from the runtime binary modification time versus the current Git HEAD commit time, and `doctor` emits a `runtime.fresh` warning with an `onboard --build-runtime --install-shell` repair hint when the runtime predates HEAD.
+- Verification: `go test ./cmd/agent-testbench -run 'TestStatusAndDoctorWarnWhenRuntimeBinaryPredatesHead|TestDoctorWarnsWhenShellEntrypointIsStale|TestStatusReportsRepoRuntimeAndStoreSummary' -count=1`
+
+## 2026-06-02 - Operator retry can stop after workflow failure without durable feedback
+- Area: skill
+- Severity: P2
+- Status: fixed
+- Source: local operator workflow retry feedback
+- Evidence: An operator session could summarize a repeated workflow failure and updated report paths, but stop without matching or registering durable feedback for the unrecoverable blocker.
+- Suggestion: The operator skill and runbook now require matching or registering feedback before stopping on repeated or unrecoverable CLI-diagnosed blockers, including the blocking command, workflow run id, failed step/case id, service id, Store state, exact error, and next repair command.
+- Verification: `skills/agent-testbench-operator/SKILL.md`; `skills/agent-testbench-operator/references/operator-runbook.md`

@@ -42,6 +42,11 @@ type statusRuntimeReport struct {
 	Executable           bool   `json:"executable"`
 	ActivePath           string `json:"activePath,omitempty"`
 	ActiveMatchesRuntime bool   `json:"activeMatchesRuntime"`
+	Fresh                bool   `json:"fresh"`
+	StaleReason          string `json:"staleReason,omitempty"`
+	BinaryModifiedAt     string `json:"binaryModifiedAt,omitempty"`
+	SourceRevision       string `json:"sourceRevision,omitempty"`
+	SourceCommitAt       string `json:"sourceCommitAt,omitempty"`
 }
 
 type statusStoreReport struct {
@@ -113,7 +118,7 @@ func runDoctor(ctx context.Context, args []string) error {
 
 func buildStatusReport(ctx context.Context, deep bool) statusCommandReport {
 	repo := statusRepo(ctx)
-	runtime := statusRuntime(repo.Path)
+	runtime := statusRuntime(ctx, repo)
 	store := statusStore()
 	if deep && store.Configured {
 		store.Schema = statusStoreSchema(ctx, store)
@@ -156,15 +161,16 @@ func statusRepo(ctx context.Context) statusRepoReport {
 	return report
 }
 
-func statusRuntime(repo string) statusRuntimeReport {
-	if strings.TrimSpace(repo) == "" {
-		repo = "."
+func statusRuntime(ctx context.Context, repo statusRepoReport) statusRuntimeReport {
+	repoPath := repo.Path
+	if strings.TrimSpace(repoPath) == "" {
+		repoPath = "."
 	}
-	path, err := resolveUpdateOutputPath(repo, filepath.Join(".runtime", "bin", "agent-testbench"))
+	path, err := resolveUpdateOutputPath(repoPath, filepath.Join(".runtime", "bin", "agent-testbench"))
 	if err != nil {
-		path = filepath.Join(repo, ".runtime", "bin", "agent-testbench")
+		path = filepath.Join(repoPath, ".runtime", "bin", "agent-testbench")
 	}
-	report := statusRuntimeReport{Path: path}
+	report := statusRuntimeReport{Path: path, SourceRevision: repo.Revision}
 	if active, err := os.Executable(); err == nil {
 		report.ActivePath = filepath.Clean(active)
 		report.ActiveMatchesRuntime = sameRuntimePath(report.ActivePath, path)
@@ -175,6 +181,15 @@ func statusRuntime(repo string) statusRuntimeReport {
 	}
 	report.Exists = true
 	report.Executable = info.Mode()&0o111 != 0
+	report.BinaryModifiedAt = info.ModTime().UTC().Format(time.RFC3339)
+	report.Fresh = true
+	if repoCommitTime, err := statusRepoCommitTime(ctx, repoPath); err == nil {
+		report.SourceCommitAt = repoCommitTime.UTC().Format(time.RFC3339)
+		if info.ModTime().Before(repoCommitTime) {
+			report.Fresh = false
+			report.StaleReason = "runtime binary is older than the current git HEAD"
+		}
+	}
 	return report
 }
 
@@ -278,6 +293,9 @@ func statusNextActions(runtime statusRuntimeReport, store statusStoreReport) []s
 	if runtime.Exists && runtime.Executable && !runtime.ActiveMatchesRuntime {
 		next = append(next, "put "+filepath.Dir(runtime.Path)+" before stale wrappers on PATH, or set ATB_BIN="+runtime.Path)
 	}
+	if runtime.Exists && runtime.Executable && !runtime.Fresh {
+		next = append(next, strings.TrimPrefix(runtimeFreshnessRepairCommand, "run "))
+	}
 	next = append(next, "agent-testbench commands --filter \"case gate\"")
 	return next
 }
@@ -312,6 +330,7 @@ func buildDoctorReport(ctx context.Context, opts doctorOptions) doctorCommandRep
 		doctorStoreCheck(status.Store),
 		doctorRuntimeDirectoryCheck(status.Runtime),
 		doctorRuntimeCheck(status.Runtime),
+		doctorRuntimeFreshnessCheck(status.Runtime),
 		doctorShellEntrypointCheck(status.Runtime),
 	}
 	if fixErr != "" {
@@ -541,6 +560,12 @@ func printStatusReport(report statusCommandReport) {
 		fmt.Printf("  Active: %s\n", report.Runtime.ActivePath)
 	}
 	fmt.Printf("  Ready: %t\n", report.Runtime.Exists && report.Runtime.Executable)
+	if report.Runtime.Exists {
+		fmt.Printf("  Fresh: %t\n", report.Runtime.Fresh)
+		if report.Runtime.StaleReason != "" {
+			fmt.Printf("  Stale Reason: %s\n", report.Runtime.StaleReason)
+		}
+	}
 	fmt.Println()
 	fmt.Println("Store")
 	if report.Store.Configured {
