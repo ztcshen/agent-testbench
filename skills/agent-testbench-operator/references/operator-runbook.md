@@ -59,6 +59,12 @@ service logs. Inspect source only for one of these reasons:
 
 When source inspection is needed, keep it narrow and explain why.
 
+Before stopping on a repeated or unrecoverable CLI-diagnosed blocker, preserve
+it as durable feedback. Match it to an existing feedback item or register a new
+one with the blocking command, workflow run id, failed step or case id, service
+id, Store state, exact error, and next repair command. A chat-only summary is
+not enough evidence for an AgentTestBench operator handoff.
+
 ## Environment Acceptance
 
 Use explicit environment and workflow identifiers supplied by the user, Store,

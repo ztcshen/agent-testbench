@@ -160,7 +160,7 @@ func updateRuntime(ctx context.Context, opts updateCommandOptions) (updateComman
 	if err := os.MkdirAll(filepath.Dir(report.RuntimePath), 0o755); err != nil {
 		return report, err
 	}
-	buildStep := runUpdateCommandStep(ctx, repo, "build-runtime", "go", "build", "-o", report.RuntimePath, "./cmd/agent-testbench")
+	buildStep := runUpdateCommandStep(ctx, repo, "build-runtime", runtimeBuildCommand(ctx, repo, report.RuntimePath)...)
 	report.Steps = append(report.Steps, buildStep)
 	if !buildStep.OK {
 		return report, updateStepError(buildStep)
@@ -535,6 +535,14 @@ func runUpdateCommandStep(ctx context.Context, workdir string, name string, comm
 		step.Error = errText
 	}
 	return step
+}
+
+func runtimeBuildCommand(ctx context.Context, repo string, output string) []string {
+	args := []string{"go", "build"}
+	if revision, err := updateGitOutput(ctx, repo, "rev-parse", "HEAD"); err == nil && strings.TrimSpace(revision) != "" {
+		args = append(args, "-ldflags", "-X main.buildRevision="+strings.TrimSpace(revision))
+	}
+	return append(args, "-o", output, "./cmd/agent-testbench")
 }
 
 func updateGitOutput(ctx context.Context, repo string, args ...string) (string, error) {

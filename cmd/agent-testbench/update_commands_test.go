@@ -78,9 +78,8 @@ func TestUpdatePullsFastForwardAndRebuildsRuntimeBinary(t *testing.T) {
 		t.Fatalf("runtime path = %q, want %q", report.RuntimePath, wantRuntime)
 	}
 	calls := readUpdateCalls(t, callsPath)
-	wantBuild := "build -o " + wantRuntime + " ./cmd/agent-testbench"
-	if !strings.Contains(calls, wantBuild) {
-		t.Fatalf("go build command missing %q:\n%s", wantBuild, calls)
+	if !strings.Contains(calls, "build -ldflags -X main.buildRevision="+remoteHead) || !strings.Contains(calls, "-o "+wantRuntime+" ./cmd/agent-testbench") {
+		t.Fatalf("go build command missing runtime revision or output path:\n%s", calls)
 	}
 }
 
@@ -318,10 +317,19 @@ func fakeUpdateGoCommand(t *testing.T) ([]string, string) {
 	writeFile(t, goPath, `#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> "$GO_CALLS_FILE"
-if [[ "$1" == "build" && "$2" == "-o" ]]; then
-  mkdir -p "$(dirname "$3")"
-  printf '#!/usr/bin/env sh\n' > "$3"
-  chmod +x "$3"
+if [[ "$1" == "build" ]]; then
+  output=""
+  for ((idx = 1; idx <= $#; idx++)); do
+    if [[ "${!idx}" == "-o" ]]; then
+      next=$((idx + 1))
+      output="${!next}"
+    fi
+  done
+  if [[ -n "$output" ]]; then
+    mkdir -p "$(dirname "$output")"
+    printf '#!/usr/bin/env sh\n' > "$output"
+    chmod +x "$output"
+  fi
 fi
 `)
 	if err := os.Chmod(goPath, 0o755); err != nil {

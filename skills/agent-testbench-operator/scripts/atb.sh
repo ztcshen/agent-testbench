@@ -11,6 +11,15 @@ if [[ -n "${ATB_BIN:-}" ]]; then
   exec "$ATB_BIN" "$@"
 fi
 
+REPO_WRAPPER="$REPO_DIR/bin/agent-testbench.sh"
+case "${1:-}" in
+  status|doctor|version|--version|-v)
+    if [[ -x "$REPO_WRAPPER" ]]; then
+      exec "$REPO_WRAPPER" "$@"
+    fi
+    ;;
+esac
+
 REPO_RUNTIME="$REPO_DIR/.runtime/bin/agent-testbench"
 if [[ -x "$REPO_RUNTIME" ]]; then
   exec "$REPO_RUNTIME" "$@"
@@ -21,7 +30,6 @@ if [[ -n "$PATH_BIN" && -x "$PATH_BIN" ]]; then
   exec "$PATH_BIN" "$@"
 fi
 
-REPO_WRAPPER="$REPO_DIR/bin/agent-testbench.sh"
 if [[ -x "$REPO_WRAPPER" ]]; then
   exec "$REPO_WRAPPER" "$@"
 fi

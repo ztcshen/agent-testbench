@@ -23,6 +23,13 @@ const version = "0.1.0"
 const interfaceNodeCommand = "interface-node"
 const cliCommandTask = "task"
 
+var buildRevision = ""
+
+type versionCommandReport struct {
+	Version       string `json:"version"`
+	BuildRevision string `json:"buildRevision,omitempty"`
+}
+
 type rootCommand func([]string) error
 
 type unknownRootCommandError string
@@ -81,8 +88,7 @@ func runRootCommand(args []string) error {
 	}
 	switch args[0] {
 	case "version", "--version", "-v":
-		fmt.Printf("AgentTestBench %s\n", version)
-		return nil
+		return runVersion(args[1:])
 	case "help", "--help", "-h":
 		printHelp()
 		return nil
@@ -92,6 +98,17 @@ func runRootCommand(args []string) error {
 		return unknownRootCommandError(args[0])
 	}
 	return command(args[1:])
+}
+
+func runVersion(args []string) error {
+	if len(args) == 1 && args[0] == "--json" {
+		return writeIndentedJSON(versionCommandReport{Version: version, BuildRevision: strings.TrimSpace(buildRevision)})
+	}
+	if len(args) != 0 {
+		return fmt.Errorf("unexpected version arguments: %s", strings.Join(args, " "))
+	}
+	fmt.Printf("AgentTestBench %s\n", version)
+	return nil
 }
 
 func printHelp() {
