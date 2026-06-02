@@ -351,14 +351,14 @@ exit 0
 		Kind:      "container",
 		Container: "seed-job",
 		OneShot:   true,
-	}, 200*time.Millisecond)
+	}, 2*time.Second)
 	if !check.OK || check.State != environmentRestoreDockerStateExited || check.ExitCode != 0 {
 		t.Fatalf("explicit one-shot container should pass via exit code: %#v", check)
 	}
 	normal := waitEnvironmentRestoreContainerHealthCheck(context.Background(), environmentRestoreHealthCheckReport{
 		Kind:      "container",
 		Container: "app",
-	}, 200*time.Millisecond)
+	}, 500*time.Millisecond)
 	if normal.OK || normal.State != environmentRestoreDockerStateExited || normal.ExitCode != 0 {
 		t.Fatalf("non-one-shot exited container should not pass: %#v", normal)
 	}

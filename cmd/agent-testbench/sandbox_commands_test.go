@@ -94,6 +94,21 @@ func TestSandboxStartMissingServiceExplainsRegistryBoundary(t *testing.T) {
 	}
 }
 
+func TestSandboxStartStreamJSONCompletesMissingServiceFailure(t *testing.T) {
+	fixture := writeSandboxStartStoreFixture(t)
+	out := runCLIFails(t, "sandbox", "start", "--store", "sqlite://"+fixture.storePath, "--service", "mysql", "--output-format", "stream-json")
+	if !strings.Contains(out, "profile service registry") {
+		t.Fatalf("missing service error should still be printed, got %q", out)
+	}
+	events := decodeAgentStreamEvents(t, sandboxStartJSONEventLines(out))
+	if !agentStreamHasEvent(events, "run_started", "sandbox.start", "running", "profile-service-registry") {
+		t.Fatalf("stream missing sandbox run start: %#v", events)
+	}
+	if !agentStreamHasEvent(events, "run_completed", "sandbox.start", "failed", "profile-service-registry") {
+		t.Fatalf("stream missing failed sandbox run completion: %#v", events)
+	}
+}
+
 func TestSandboxServiceListReportsRegisteredServicesReadOnly(t *testing.T) {
 	fixture := writeSandboxStartStoreFixture(t)
 
@@ -235,6 +250,17 @@ func TestSandboxServiceListCanReadComponentOnlyEnvironment(t *testing.T) {
 	if !report.OK || report.Count != 1 || report.Services[0].ID != "mysql" || report.Services[0].InProfileRegistry || !report.Services[0].InComponentGraph {
 		t.Fatalf("component-only sandbox service list = %#v", report)
 	}
+}
+
+func sandboxStartJSONEventLines(output string) string {
+	lines := []string{}
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "{") {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func writeSandboxStartStoreFixture(t *testing.T) sandboxStartFixture {

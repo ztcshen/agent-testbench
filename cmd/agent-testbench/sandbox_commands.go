@@ -448,6 +448,7 @@ func runSandboxStart(ctx context.Context, args []string) error {
 	agentEmitRunStarted(ctx, newSandboxStartRunID(), "sandbox.start", sandboxStartTarget(report), "sandbox start started")
 	workflowRequired, err := sandboxWorkflowRequiredServiceReasons(catalog, report.WorkflowID)
 	if err != nil {
+		emitSandboxStartStreamFailure(ctx, report, err)
 		return err
 	}
 	filters := sandboxStartFilters{
@@ -457,6 +458,7 @@ func runSandboxStart(ctx context.Context, args []string) error {
 	}
 	startSandboxServices(ctx, &report, catalog.Services, workflowRequired, filters, time.Duration(*timeoutSeconds)*time.Second, *dryRun)
 	if err := validateSandboxStartSelection(report, filters); err != nil {
+		emitSandboxStartStreamFailure(ctx, report, err)
 		return err
 	}
 	switch resolvedOutputFormat {
@@ -473,6 +475,14 @@ func runSandboxStart(ctx context.Context, args []string) error {
 		return errors.New("one or more sandbox services failed to start")
 	}
 	return nil
+}
+
+func emitSandboxStartStreamFailure(ctx context.Context, report sandboxStartReport, err error) {
+	if !agentHasEventStream(ctx) {
+		return
+	}
+	report.OK = false
+	agentEmitRunCompleted(ctx, "sandbox.start", "failed", sandboxStartTarget(report), "sandbox start failed", err.Error(), report)
 }
 
 func startSandboxServices(ctx context.Context, report *sandboxStartReport, services []store.CatalogService, workflowRequired map[string]string, filters sandboxStartFilters, timeout time.Duration, dryRun bool) {
