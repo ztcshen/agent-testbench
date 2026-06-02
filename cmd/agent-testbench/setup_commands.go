@@ -48,10 +48,10 @@ func statusRepoCommitTime(ctx context.Context, repo string) (time.Time, error) {
 
 func doctorRuntimeFreshnessCheck(runtime statusRuntimeReport) doctorCheckReport {
 	if !runtime.Exists || !runtime.Executable {
-		return doctorCheckReport{Name: "runtime-freshness", Code: "runtime.fresh", OK: false, Optional: true, Detail: "runtime binary is not ready", Fix: runtimeFreshnessRepairCommand}
+		return doctorCheckReport{Name: "runtime-freshness", Code: doctorCodeRuntimeFreshness, OK: false, Optional: true, Detail: "runtime binary is not ready", Fix: runtimeFreshnessRepairCommand}
 	}
 	if runtime.Fresh {
-		return doctorCheckReport{Name: "runtime-freshness", Code: "runtime.fresh", OK: true, Optional: true, Detail: "runtime binary is at least as new as git HEAD"}
+		return doctorCheckReport{Name: "runtime-freshness", Code: doctorCodeRuntimeFreshness, OK: true, Optional: true, Detail: "runtime binary is at least as new as git HEAD"}
 	}
 	detail := runtime.StaleReason
 	if detail == "" {
@@ -59,7 +59,7 @@ func doctorRuntimeFreshnessCheck(runtime statusRuntimeReport) doctorCheckReport 
 	}
 	return doctorCheckReport{
 		Name:     "runtime-freshness",
-		Code:     "runtime.fresh",
+		Code:     doctorCodeRuntimeFreshness,
 		OK:       false,
 		Optional: true,
 		Detail:   detail,

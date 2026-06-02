@@ -309,6 +309,7 @@ type doctorOptions struct {
 const (
 	doctorCheckActiveStore           = "active-store"
 	doctorCheckTraceGraphQL          = "trace-graphql"
+	doctorCodeRuntimeFreshness       = "runtime.fresh"
 	doctorCodeRuntimeShellEntrypoint = "runtime.shell-entrypoint"
 	doctorCodeTraceGraphQL           = "trace.graphql"
 )
