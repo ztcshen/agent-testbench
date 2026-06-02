@@ -4,7 +4,7 @@ const helpTextContent = `AgentTestBench
 
 Usage:
   agent-testbench version
-  agent-testbench setup [--repo PATH] [--store NAME] [--url DSN | --sqlite PATH] [--build-runtime] [--json]
+  agent-testbench setup [--repo PATH] [--store NAME] [--url DSN | --sqlite PATH] [--build-runtime] [--runtime-only] [--json]
   agent-testbench onboard [--repo PATH] [--store NAME] [--url DSN | --sqlite PATH] [--build-runtime] [--install-shell] [--bin-dir PATH] [--smoke none|commands|store] [--json]
   agent-testbench status [--deep] [--json]
   agent-testbench doctor [--fix] [--deep] [--trace-graphql-url URL] [--json]
@@ -142,6 +142,7 @@ Usage:
 
 Examples:
   agent-testbench setup --store local --sqlite .runtime/agent-testbench-local.sqlite --build-runtime
+  agent-testbench setup --repo . --build-runtime --runtime-only
   agent-testbench onboard --store local --sqlite .runtime/agent-testbench-local.sqlite --install-shell
   agent-testbench status
   agent-testbench doctor --fix

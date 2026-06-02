@@ -199,6 +199,7 @@ func TestStatusAndDoctorWarnWhenRuntimeBinaryPredatesHead(t *testing.T) {
 			StaleReason      string `json:"staleReason"`
 			BinaryModifiedAt string `json:"binaryModifiedAt"`
 			SourceCommitAt   string `json:"sourceCommitAt"`
+			RepairCommand    string `json:"repairCommand"`
 		} `json:"runtime"`
 		Next []string `json:"next"`
 	}
@@ -211,7 +212,8 @@ func TestStatusAndDoctorWarnWhenRuntimeBinaryPredatesHead(t *testing.T) {
 	if statusReport.Runtime.BinaryModifiedAt == "" || statusReport.Runtime.SourceCommitAt == "" {
 		t.Fatalf("status should include runtime/source timestamps: %#v", statusReport.Runtime)
 	}
-	if !stringSliceContains(statusReport.Next, "agent-testbench onboard --repo . --build-runtime --install-shell --smoke commands") {
+	wantRepair := statusReport.Runtime.RepairCommand
+	if !strings.Contains(wantRepair, "agent-testbench setup --repo ") || !strings.Contains(wantRepair, "--build-runtime --runtime-only") || !stringSliceContains(statusReport.Next, wantRepair) {
 		t.Fatalf("status should suggest runtime rebuild: %#v", statusReport.Next)
 	}
 
@@ -231,12 +233,48 @@ func TestStatusAndDoctorWarnWhenRuntimeBinaryPredatesHead(t *testing.T) {
 		if check.Code != "runtime.fresh" {
 			continue
 		}
-		if check.OK || !strings.Contains(check.Detail, "older than") || !strings.Contains(check.Fix, "--build-runtime") {
+		if check.OK || !strings.Contains(check.Detail, "older than") || check.Fix != wantRepair {
 			t.Fatalf("runtime freshness check = %#v", check)
 		}
 		return
 	}
 	t.Fatalf("doctor report missing runtime.fresh check: %#v", doctorReport.Checks)
+}
+
+func TestStatusWarnsWhenRuntimeBuildRevisionDiffersFromHead(t *testing.T) {
+	repo := createSetupRepo(t)
+	head := strings.TrimSpace(runGit(t, repo, "rev-parse", "HEAD"))
+	runtimePath := filepath.Join(repo, ".runtime", "bin", "agent-testbench")
+	writeFile(t, runtimePath, `#!/usr/bin/env sh
+if [ "$1" = "version" ] && [ "$2" = "--json" ]; then
+  printf '{"version":"0.1.0","buildRevision":"ffffffffffffffffffffffffffffffffffffffff"}\n'
+  exit 0
+fi
+exit 0
+`)
+	if err := os.Chmod(runtimePath, 0o755); err != nil {
+		t.Fatalf("chmod runtime: %v", err)
+	}
+	future := time.Now().Add(24 * time.Hour)
+	if err := os.Chtimes(runtimePath, future, future); err != nil {
+		t.Fatalf("make runtime mtime newer than head: %v", err)
+	}
+
+	out := runCLIWithEnv(t, []string{"AGENT_TESTBENCH_CONFIG_HOME=" + t.TempDir(), "AGENT_TESTBENCH_REPO=" + repo}, "status", "--json")
+	var report struct {
+		Runtime struct {
+			Fresh          bool   `json:"fresh"`
+			BuildRevision  string `json:"buildRevision"`
+			SourceRevision string `json:"sourceRevision"`
+			StaleReason    string `json:"staleReason"`
+		} `json:"runtime"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode different revision status: %v\n%s", err, out)
+	}
+	if report.Runtime.Fresh || report.Runtime.SourceRevision != head || !strings.Contains(report.Runtime.StaleReason, "different git revision") {
+		t.Fatalf("status should reject mismatched runtime revision: %#v", report.Runtime)
+	}
 }
 
 func TestStatusDeepIncludesStoreSchema(t *testing.T) {

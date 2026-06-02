@@ -44,9 +44,11 @@ type statusRuntimeReport struct {
 	ActiveMatchesRuntime bool   `json:"activeMatchesRuntime"`
 	Fresh                bool   `json:"fresh"`
 	StaleReason          string `json:"staleReason,omitempty"`
+	BuildRevision        string `json:"buildRevision,omitempty"`
 	BinaryModifiedAt     string `json:"binaryModifiedAt,omitempty"`
 	SourceRevision       string `json:"sourceRevision,omitempty"`
 	SourceCommitAt       string `json:"sourceCommitAt,omitempty"`
+	RepairCommand        string `json:"repairCommand,omitempty"`
 }
 
 type statusStoreReport struct {
@@ -170,7 +172,7 @@ func statusRuntime(ctx context.Context, repo statusRepoReport) statusRuntimeRepo
 	if err != nil {
 		path = filepath.Join(repoPath, ".runtime", "bin", "agent-testbench")
 	}
-	report := statusRuntimeReport{Path: path, SourceRevision: repo.Revision}
+	report := statusRuntimeReport{Path: path, SourceRevision: repo.Revision, RepairCommand: runtimeFreshnessRepairCommand(repoPath)}
 	if active, err := os.Executable(); err == nil {
 		report.ActivePath = filepath.Clean(active)
 		report.ActiveMatchesRuntime = sameRuntimePath(report.ActivePath, path)
@@ -183,6 +185,14 @@ func statusRuntime(ctx context.Context, repo statusRepoReport) statusRuntimeRepo
 	report.Executable = info.Mode()&0o111 != 0
 	report.BinaryModifiedAt = info.ModTime().UTC().Format(time.RFC3339)
 	report.Fresh = true
+	if buildRevision, err := statusRuntimeBuildRevision(ctx, repoPath, path); err == nil && strings.TrimSpace(buildRevision) != "" {
+		report.BuildRevision = strings.TrimSpace(buildRevision)
+		if strings.TrimSpace(repo.Revision) != "" && report.BuildRevision != strings.TrimSpace(repo.Revision) {
+			report.Fresh = false
+			report.StaleReason = "runtime binary was built from a different git revision"
+			return report
+		}
+	}
 	if repoCommitTime, err := statusRepoCommitTime(ctx, repoPath); err == nil {
 		report.SourceCommitAt = repoCommitTime.UTC().Format(time.RFC3339)
 		if info.ModTime().Before(repoCommitTime) {
@@ -294,7 +304,7 @@ func statusNextActions(runtime statusRuntimeReport, store statusStoreReport) []s
 		next = append(next, "put "+filepath.Dir(runtime.Path)+" before stale wrappers on PATH, or set ATB_BIN="+runtime.Path)
 	}
 	if runtime.Exists && runtime.Executable && !runtime.Fresh {
-		next = append(next, strings.TrimPrefix(runtimeFreshnessRepairCommand, "run "))
+		next = append(next, runtime.RepairCommand)
 	}
 	next = append(next, "agent-testbench commands --filter \"case gate\"")
 	return next
@@ -352,64 +362,6 @@ func buildDoctorReport(ctx context.Context, opts doctorOptions) doctorCommandRep
 		}
 	}
 	return doctorCommandReport{OK: ok, Checks: checks, Next: status.Next}
-}
-
-func doctorToolCheck(name string, optional bool) doctorCheckReport {
-	path, err := exec.LookPath(name)
-	if err != nil {
-		fix := fmt.Sprintf("install %s and ensure it is on PATH", name)
-		if optional {
-			fix = fmt.Sprintf("install %s before Docker-backed restore flows", name)
-		}
-		return doctorCheckReport{Name: "tool-" + name, Code: "tool." + name, OK: false, Optional: optional, Detail: "not found on PATH", Fix: fix}
-	}
-	return doctorCheckReport{Name: "tool-" + name, Code: "tool." + name, OK: true, Optional: optional, Detail: path}
-}
-
-func doctorRepoCheck(repo statusRepoReport) doctorCheckReport {
-	if repo.Error != "" {
-		return doctorCheckReport{Name: "git-checkout", Code: "git.checkout", OK: false, Detail: repo.Error, Fix: "run from an AgentTestBench git checkout or pass --repo to update"}
-	}
-	detail := repo.Path
-	if repo.Branch != "" {
-		detail = fmt.Sprintf("%s on %s", repo.Path, repo.Branch)
-	}
-	return doctorCheckReport{Name: "git-checkout", Code: "git.checkout", OK: true, Detail: detail}
-}
-
-func doctorStoreCheck(store statusStoreReport) doctorCheckReport {
-	if store.Configured {
-		return doctorCheckReport{Name: doctorCheckActiveStore, Code: "store.active", OK: true, Fixed: doctorActiveStoreIsFixed(), Detail: fmt.Sprintf("%s (%s)", store.Name, store.Backend)}
-	}
-	fix := "run agent-testbench store config set NAME --url sqlite://PATH, then agent-testbench store use NAME"
-	return doctorCheckReport{
-		Name:   doctorCheckActiveStore,
-		Code:   "store.active",
-		OK:     false,
-		Fixed:  doctorActiveStoreIsFixed(),
-		Detail: fmt.Sprintf("%s; %s", stringDefault(store.Detail, "no active Store configured"), fix),
-		Fix:    fix,
-	}
-}
-
-func doctorRuntimeDirectoryCheck(runtime statusRuntimeReport) doctorCheckReport {
-	dir := filepath.Dir(runtime.Path)
-	info, err := os.Stat(dir)
-	if err == nil && info.IsDir() {
-		return doctorCheckReport{Name: "runtime-directory", Code: "runtime.directory", OK: true, Fixed: doctorRuntimeDirectoryWasFixed(), Detail: dir}
-	}
-	return doctorCheckReport{Name: "runtime-directory", Code: "runtime.directory", OK: false, Optional: true, Detail: dir + " is missing", Fix: "run agent-testbench doctor --fix"}
-}
-
-func doctorRuntimeCheck(runtime statusRuntimeReport) doctorCheckReport {
-	if runtime.Exists && runtime.Executable {
-		return doctorCheckReport{Name: "runtime-binary", Code: "runtime.binary", OK: true, Optional: true, Detail: runtime.Path}
-	}
-	detail := "missing"
-	if runtime.Exists {
-		detail = "exists but is not executable"
-	}
-	return doctorCheckReport{Name: "runtime-binary", Code: "runtime.binary", OK: false, Optional: true, Detail: detail, Fix: "run agent-testbench update"}
 }
 
 func doctorShellEntrypointCheck(runtime statusRuntimeReport) doctorCheckReport {

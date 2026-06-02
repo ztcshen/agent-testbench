@@ -34,7 +34,8 @@ func TestSetupConfiguresLocalStoreAndCanBuildRuntime(t *testing.T) {
 	if !report.OK || report.Store.Name != "local" || report.Store.Backend != "sqlite" || !report.Store.Active || !report.Runtime.Built {
 		t.Fatalf("setup report = %#v", report)
 	}
-	if !strings.Contains(readUpdateCalls(t, callsPath), "build -o "+report.Runtime.Path+" ./cmd/agent-testbench") {
+	calls := readUpdateCalls(t, callsPath)
+	if !strings.Contains(calls, "build -ldflags -X main.buildRevision=") || !strings.Contains(calls, "-o "+report.Runtime.Path+" ./cmd/agent-testbench") {
 		t.Fatalf("setup did not build runtime: %s", readUpdateCalls(t, callsPath))
 	}
 	if len(report.Next) == 0 || !strings.Contains(strings.Join(report.Next, "\n"), "agent-testbench status") {
@@ -59,6 +60,38 @@ func TestSetupRejectsNonGitRepoWithoutCreatingConfigOrRuntime(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(configHome, "store-config.json")); !os.IsNotExist(err) {
 		t.Fatalf("setup should not write config for invalid repo, stat err = %v", err)
+	}
+}
+
+func TestSetupRuntimeOnlyPreservesActiveStore(t *testing.T) {
+	configHome := t.TempDir()
+	repo := createSetupRepo(t)
+	fakeGoEnv, callsPath := fakeUpdateGoCommand(t)
+	env := append(fakeGoEnv, "AGENT_TESTBENCH_CONFIG_HOME="+configHome)
+	runCLIWithEnv(t, env, "store", "config", "set", "team", "--url", "postgres://user:secret@example.com:5432/team?sslmode=disable")
+	runCLIWithEnv(t, env, "store", "use", "team")
+
+	out := runCLIWithEnv(t, env, "setup", "--repo", repo, "--build-runtime", "--runtime-only", "--json")
+	var report struct {
+		OK      bool `json:"ok"`
+		Store   any  `json:"store"`
+		Runtime struct {
+			Built bool   `json:"built"`
+			Path  string `json:"path"`
+		} `json:"runtime"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode runtime-only setup report: %v\n%s", err, out)
+	}
+	if !report.OK || !report.Runtime.Built || report.Runtime.Path == "" {
+		t.Fatalf("runtime-only setup report = %#v", report)
+	}
+	current := runCLIWithEnv(t, env, "store", "current", "--json")
+	if !strings.Contains(current, `"name": "team"`) || !strings.Contains(current, `"backend": "postgres"`) {
+		t.Fatalf("runtime-only setup should preserve active Store, current = %s", current)
+	}
+	if !strings.Contains(readUpdateCalls(t, callsPath), "-o "+report.Runtime.Path+" ./cmd/agent-testbench") {
+		t.Fatalf("runtime-only setup did not build runtime: %s", readUpdateCalls(t, callsPath))
 	}
 }
 
