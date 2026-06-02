@@ -435,7 +435,7 @@ func workflowGateEvidenceRecords(ctx context.Context, runtime store.Store, runID
 		}
 		rows, err := runtime.ListEvidence(ctx, caseRun.ID)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("list case-run evidence %s: %w", caseRun.ID, err)
 		}
 		for _, row := range rows {
 			if seen[row.ID] {

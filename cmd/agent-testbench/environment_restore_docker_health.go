@@ -75,6 +75,8 @@ func environmentRestoreHealthCheckFromAny(raw any) (environmentRestoreHealthChec
 		Command:   strings.TrimSpace(valueString(item["command"])),
 		Service:   strings.TrimSpace(valueString(item["service"])),
 		Container: strings.TrimSpace(valueString(item["container"])),
+		Expect:    strings.ToLower(strings.TrimSpace(valueString(item["expect"]))),
+		OneShot:   boolFromReportAny(item["oneShot"]),
 	}, true
 }
 
@@ -184,8 +186,15 @@ func waitEnvironmentRestoreComposeServiceHealthCheck(ctx context.Context, check 
 		if hasExitCode {
 			check.ExitCode = exitCode
 		}
-		return state == "running" && (health == "" || health == "healthy") || state == "exited" && hasExitCode && exitCode == 0
+		return state == "running" && (health == "" || health == "healthy") || environmentRestoreComposeServiceCompleted(check, state, exitCode, hasExitCode)
 	})
+}
+
+func environmentRestoreComposeServiceCompleted(check *environmentRestoreHealthCheckReport, state string, exitCode int, hasExitCode bool) bool {
+	if state != "exited" || !hasExitCode || exitCode != 0 {
+		return false
+	}
+	return check.OneShot || check.Expect == "completed" || check.Expect == "service_completed_successfully"
 }
 
 func waitEnvironmentRestoreContainerHealthCheck(ctx context.Context, check environmentRestoreHealthCheckReport, timeout time.Duration) environmentRestoreHealthCheckReport {

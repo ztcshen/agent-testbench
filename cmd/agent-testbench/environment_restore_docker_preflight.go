@@ -18,6 +18,7 @@ type environmentRestorePreflight struct {
 	ContainerConflicts []string                          `json:"containerConflicts,omitempty"`
 	StartupAssets      []environmentRestoreStartupAsset  `json:"startupAssets,omitempty"`
 	ComposeIssues      []string                          `json:"composeIssues,omitempty"`
+	LocalImageServices []string                          `json:"localImageServices,omitempty"`
 	Notes              []string                          `json:"notes,omitempty"`
 }
 
@@ -224,6 +225,7 @@ func environmentRestoreCheckComposeImages(report *environmentRestorePreflight, c
 			continue
 		}
 		if environmentRestoreLocalDockerImageExists(dockerPath, image) {
+			report.LocalImageServices = append(report.LocalImageServices, service)
 			report.Notes = append(report.Notes, "local Docker image is available for compose service "+service+": "+image)
 			continue
 		}

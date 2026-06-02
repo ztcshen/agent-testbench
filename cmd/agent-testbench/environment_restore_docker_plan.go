@@ -52,6 +52,8 @@ type environmentRestoreHealthCheckReport struct {
 	Command    string `json:"command,omitempty"`
 	Service    string `json:"service,omitempty"`
 	Container  string `json:"container,omitempty"`
+	Expect     string `json:"expect,omitempty"`
+	OneShot    bool   `json:"oneShot,omitempty"`
 	OK         bool   `json:"ok"`
 	StatusCode int    `json:"statusCode,omitempty"`
 	State      string `json:"state,omitempty"`
@@ -86,6 +88,7 @@ func environmentRestorePlanComposeCommands(report *environmentRestoreDockerRepor
 	services := stringSliceFromAny(compose["services"])
 	report.Cleanup = environmentRestoreDockerCleanupPlan(baseArgs, cleanupOptions, environmentRestoreContainerNameConflicts(compose, workspace))
 	imageServices, buildServices := environmentRestoreComposeCommandServices(compose, workspace, composeFiles, services)
+	imageServices = environmentRestoreFilterSkippedPullServices(imageServices, stringSliceFromAny(compose["skipPullServices"]))
 	if !boolFromReportAny(compose["skipPull"]) && len(imageServices) > 0 {
 		report.Commands = append(report.Commands, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"pull"}, imageServices...)...))
 	}
@@ -94,6 +97,20 @@ func environmentRestorePlanComposeCommands(report *environmentRestoreDockerRepor
 	}
 	report.Commands = append(report.Commands, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"up", "-d"}, services...)...))
 	return baseArgs
+}
+
+func environmentRestoreFilterSkippedPullServices(imageServices []string, skipPullServices []string) []string {
+	if len(imageServices) == 0 || len(skipPullServices) == 0 {
+		return imageServices
+	}
+	skip := environmentRestoreStringSet(skipPullServices)
+	out := make([]string, 0, len(imageServices))
+	for _, service := range imageServices {
+		if !skip[strings.TrimSpace(service)] {
+			out = append(out, service)
+		}
+	}
+	return out
 }
 
 func environmentRestorePlanStartCommand(workspace string, startCommand string, cleanupOptions environmentRestoreDockerCleanupOptions) environmentRestoreDockerReport {
@@ -195,6 +212,9 @@ func environmentRestoreRunCleanup(ctx context.Context, report *environmentRestor
 			report.Cleanup.Output = append(report.Cleanup.Output, output)
 		}
 		if errText != "" {
+			if environmentRestoreCleanupIgnoreMissingContainer(command, errText) {
+				continue
+			}
 			report.OK = false
 			report.Cleanup.Error = errText
 			report.Error = errText
@@ -202,6 +222,24 @@ func environmentRestoreRunCleanup(ctx context.Context, report *environmentRestor
 		}
 	}
 	return true
+}
+
+func environmentRestoreCleanupIgnoreMissingContainer(command []string, errText string) bool {
+	if len(command) < 4 || command[0] != "docker" || command[1] != "rm" {
+		return false
+	}
+	hasForce := false
+	for _, part := range command[2:] {
+		if part == "-f" || part == "--force" {
+			hasForce = true
+			break
+		}
+	}
+	if !hasForce {
+		return false
+	}
+	lower := strings.ToLower(errText)
+	return strings.Contains(lower, "no such container") || strings.Contains(lower, "no container")
 }
 
 func environmentRestoreMarkDockerExecuting(report *environmentRestoreDockerReport) {

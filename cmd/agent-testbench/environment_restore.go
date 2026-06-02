@@ -396,13 +396,27 @@ func environmentRestoreDockerForReport(ctx context.Context, report environmentRe
 		return docker
 	}
 	if report.OK {
-		docker = environmentRestoreDocker(ctx, plan.ComponentGraph, plan.Compose, plan.HealthChecks, plan.Workspace, execute, healthTimeout, cleanupOptions)
+		compose := environmentRestoreComposeWithPullSkipServices(plan.Compose, report.Preflight.LocalImageServices)
+		docker = environmentRestoreDocker(ctx, plan.ComponentGraph, compose, plan.HealthChecks, plan.Workspace, execute, healthTimeout, cleanupOptions)
 		environmentRestoreEmitStep(ctx, "step_completed", "docker.restore", statusText(docker.OK), report.EnvironmentID, docker.Action, docker.Error)
 		return docker
 	}
 	docker = environmentRestoreSkippedDockerReport(report, plan.Workspace)
 	environmentRestoreEmitStep(ctx, "step_completed", "docker.restore", statusText(docker.OK), report.EnvironmentID, docker.Action, docker.Error)
 	return docker
+}
+
+func environmentRestoreComposeWithPullSkipServices(compose map[string]any, services []string) map[string]any {
+	services = dedupeStrings(services)
+	if len(services) == 0 {
+		return compose
+	}
+	out := map[string]any{}
+	for key, value := range compose {
+		out[key] = value
+	}
+	out["skipPullServices"] = services
+	return out
 }
 
 func environmentRestorePrepareReposOnlyDockerReport(plan environmentRestoreBuildPlan, execute bool) environmentRestoreDockerReport {

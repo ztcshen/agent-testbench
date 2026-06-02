@@ -373,8 +373,7 @@ func environmentRestoreWorkspaceStartupFileExists(report environmentRestoreRepor
 			return true
 		}
 	}
-	stat, err := os.Stat(target)
-	return err == nil && !stat.IsDir()
+	return false
 }
 
 func environmentRestoreStartupAssetsReadiness(assets []environmentRestoreStartupAsset) (bool, string) {
