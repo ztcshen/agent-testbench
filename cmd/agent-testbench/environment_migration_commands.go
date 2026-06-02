@@ -107,6 +107,7 @@ type environmentMigrationTargetOptions struct {
 	Workspace      string
 	ThroughVersion string
 	Execute        bool
+	OutputFormat   string
 	JSONOutput     bool
 }
 
@@ -301,8 +302,13 @@ func runEnvironmentMigrationTargetCommand(ctx context.Context, args []string, co
 	if err != nil {
 		return err
 	}
+	if opts.OutputFormat == cliOutputFormatStreamJSON {
+		ctx = contextWithAgentEventStream(ctx, os.Stdout)
+	}
+	agentEmitRunStarted(ctx, newEnvironmentMigrationRunID(baseline), environmentMigrationRunPhase(baseline), opts.EnvID, environmentMigrationRunMessage(baseline, "started"))
 	report, command, err := prepareEnvironmentMigrationTarget(ctx, opts)
 	if err != nil {
+		emitEnvironmentMigrationStreamFailure(ctx, opts, baseline, err)
 		return err
 	}
 	planEnvironmentMigrationTarget(opts, baseline, command, &report)
@@ -316,18 +322,37 @@ func runEnvironmentMigrationTargetCommand(ctx context.Context, args []string, co
 			}
 		}
 	}
-	if opts.JSONOutput {
+	if opts.OutputFormat == cliOutputFormatStreamJSON {
+		agentEmitRunCompleted(ctx, environmentMigrationRunPhase(baseline), statusText(report.OK), opts.EnvID, environmentMigrationRunMessage(baseline, "completed"), environmentMigrationReportError(report), report)
+	} else if opts.JSONOutput {
 		return writeIndentedJSON(report)
-	}
-	if baseline {
-		printEnvironmentMigrationReport("Environment Migration Baseline", report)
 	} else {
-		printEnvironmentMigrationReport("Environment Migration Apply", report)
+		if baseline {
+			printEnvironmentMigrationReport("Environment Migration Baseline", report)
+		} else {
+			printEnvironmentMigrationReport("Environment Migration Apply", report)
+		}
 	}
 	if !report.OK {
 		return errors.New("one or more environment migrations failed")
 	}
 	return nil
+}
+
+func emitEnvironmentMigrationStreamFailure(ctx context.Context, opts environmentMigrationTargetOptions, baseline bool, err error) {
+	if !agentHasEventStream(ctx) {
+		return
+	}
+	report := environmentMigrationReport{
+		OK:            false,
+		EnvironmentID: opts.EnvID,
+		Edge:          opts.Edge,
+		Database:      opts.Database,
+		Execute:       opts.Execute,
+		Workspace:     opts.Workspace,
+		HistoryTable:  environmentMigrationHistoryTable,
+	}
+	agentEmitRunCompleted(ctx, environmentMigrationRunPhase(baseline), "failed", opts.EnvID, environmentMigrationRunMessage(baseline, "failed"), err.Error(), report)
 }
 
 func parseEnvironmentMigrationTargetOptions(args []string, commandName string) (environmentMigrationTargetOptions, error) {
@@ -340,8 +365,13 @@ func parseEnvironmentMigrationTargetOptions(args []string, commandName string) (
 	workspace := flags.String("workspace", "", "Restore workspace containing generated Compose files")
 	throughVersion := flags.String("through-version", "", "Only apply or baseline migrations up to this version")
 	execute := flags.Bool("execute", false, "Execute against the target MySQL container")
+	outputFormat := flags.String("output-format", "", "Output format: text, json, or stream-json")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := parseInterspersedFlags(flags, args); err != nil {
+		return environmentMigrationTargetOptions{}, err
+	}
+	resolvedOutputFormat, err := resolveCLIOutputFormat(*outputFormat, *jsonOutput)
+	if err != nil {
 		return environmentMigrationTargetOptions{}, err
 	}
 	envID := strings.TrimSpace(flags.Arg(0))
@@ -368,7 +398,8 @@ func parseEnvironmentMigrationTargetOptions(args []string, commandName string) (
 		Workspace:      strings.TrimSpace(*workspace),
 		ThroughVersion: strings.TrimSpace(*throughVersion),
 		Execute:        *execute,
-		JSONOutput:     *jsonOutput,
+		OutputFormat:   resolvedOutputFormat,
+		JSONOutput:     resolvedOutputFormat == cliOutputFormatJSON,
 	}, nil
 }
 
@@ -438,6 +469,7 @@ func planEnvironmentMigrationTarget(opts environmentMigrationTargetOptions, base
 func executeEnvironmentMigrationTarget(ctx context.Context, opts environmentMigrationTargetOptions, baseline bool, command []string, report *environmentMigrationReport) {
 	for index := range report.Migrations {
 		item := &report.Migrations[index]
+		agentEmitStep(ctx, "step_started", "environment.migration", "running", item.AssetID, environmentMigrationItemMessage(baseline, "started", *item), "")
 		if baseline {
 			item.Action = environmentMigrationActionBaselineMySQL
 		} else {
@@ -460,6 +492,7 @@ func executeEnvironmentMigrationTarget(ctx context.Context, opts environmentMigr
 		} else {
 			item.Status = status
 		}
+		agentEmitStep(ctx, "step_completed", "environment.migration", environmentMigrationItemStatus(*item), item.AssetID, environmentMigrationItemMessage(baseline, "completed", *item), item.Error)
 	}
 }
 

@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
+
+const environmentRestoreDockerStateExited = "exited"
 
 func waitEnvironmentRestoreHealthChecks(ctx context.Context, checks []any, timeout time.Duration, workspace string, composeBaseArgs []string) []environmentRestoreHealthCheckReport {
 	out := make([]environmentRestoreHealthCheckReport, 0, len(checks))
@@ -75,6 +78,8 @@ func environmentRestoreHealthCheckFromAny(raw any) (environmentRestoreHealthChec
 		Command:   strings.TrimSpace(valueString(item["command"])),
 		Service:   strings.TrimSpace(valueString(item["service"])),
 		Container: strings.TrimSpace(valueString(item["container"])),
+		Expect:    strings.ToLower(strings.TrimSpace(valueString(item["expect"]))),
+		OneShot:   boolFromReportAny(item["oneShot"]),
 	}, true
 }
 
@@ -175,29 +180,67 @@ func waitEnvironmentRestoreComposeServiceHealthCheck(ctx context.Context, check 
 		check.Error = "compose service health check requires composeFile"
 		return check
 	}
-	command := append(append([]string{"docker", "compose"}, composeBaseArgs...), "ps", "--format", "json", check.Service)
+	command := append(append([]string{"docker", "compose"}, composeBaseArgs...), "ps", "-a", "--format", "json", check.Service)
 	return waitEnvironmentRestoreCommand(ctx, check, timeout, workspace, command, func(check *environmentRestoreHealthCheckReport, output string) bool {
 		check.Output = truncateReportText(output, 200)
-		state, health := parseComposeServiceHealth(output)
+		state, health, exitCode, hasExitCode := parseComposeServiceHealth(output)
 		check.State = state
 		check.Health = health
-		return state == "running" && (health == "" || health == "healthy")
+		if hasExitCode {
+			check.ExitCode = exitCode
+		}
+		return state == "running" && (health == "" || health == "healthy") || environmentRestoreExitedCompleted(check, state, exitCode, hasExitCode)
 	})
 }
 
+func environmentRestoreExitedCompleted(check *environmentRestoreHealthCheckReport, state string, exitCode int, hasExitCode bool) bool {
+	if state != environmentRestoreDockerStateExited || !hasExitCode || exitCode != 0 {
+		return false
+	}
+	return check.OneShot || check.Expect == "completed" || check.Expect == "service_completed_successfully"
+}
+
 func waitEnvironmentRestoreContainerHealthCheck(ctx context.Context, check environmentRestoreHealthCheckReport, timeout time.Duration) environmentRestoreHealthCheckReport {
-	command := []string{"docker", "inspect", "--format", "{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}", check.Container}
+	command := []string{"docker", "inspect", "--format", "{{.State.Status}}\t{{if .State.Health}}{{.State.Health.Status}}{{end}}\t{{.State.ExitCode}}", check.Container}
 	return waitEnvironmentRestoreCommand(ctx, check, timeout, "", command, func(check *environmentRestoreHealthCheckReport, output string) bool {
 		check.Output = truncateReportText(output, 200)
-		fields := strings.Fields(output)
-		if len(fields) > 0 {
-			check.State = strings.TrimSpace(fields[0])
+		state, health, exitCode, hasExitCode := parseContainerHealth(output)
+		check.State = state
+		check.Health = health
+		if hasExitCode {
+			check.ExitCode = exitCode
 		}
-		if len(fields) > 1 {
-			check.Health = strings.TrimSpace(fields[1])
-		}
-		return check.State == "running" && (check.Health == "" || check.Health == "healthy")
+		return check.State == "running" && (check.Health == "" || check.Health == "healthy") || environmentRestoreExitedCompleted(check, check.State, exitCode, hasExitCode)
 	})
+}
+
+func parseContainerHealth(output string) (string, string, int, bool) {
+	parts := strings.Split(strings.TrimSpace(output), "\t")
+	if len(parts) >= 3 {
+		exitCode, ok := parseHealthExitCode(parts[2])
+		return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), exitCode, ok
+	}
+	fields := strings.Fields(output)
+	if len(fields) == 0 {
+		return "", "", 0, false
+	}
+	state := strings.TrimSpace(fields[0])
+	if len(fields) == 1 {
+		return state, "", 0, false
+	}
+	if exitCode, ok := parseHealthExitCode(fields[len(fields)-1]); ok {
+		health := ""
+		if len(fields) > 2 {
+			health = strings.TrimSpace(fields[1])
+		}
+		return state, health, exitCode, true
+	}
+	return state, strings.TrimSpace(fields[1]), 0, false
+}
+
+func parseHealthExitCode(value string) (int, bool) {
+	exitCode, err := strconv.Atoi(strings.TrimSpace(value))
+	return exitCode, err == nil
 }
 
 func waitEnvironmentRestoreCommand(ctx context.Context, check environmentRestoreHealthCheckReport, timeout time.Duration, workspace string, command []string, ok func(*environmentRestoreHealthCheckReport, string) bool) environmentRestoreHealthCheckReport {
@@ -268,6 +311,7 @@ func newEnvironmentRestoreHealthProgress(ctx context.Context, check environmentR
 
 func (p *environmentRestoreHealthProgress) start() {
 	environmentRestoreProgressf(p.ctx, "restore health checking: %s timeout=%s\n", p.target, p.timeout)
+	environmentRestoreEmitStep(p.ctx, "step_started", "health.wait", "running", p.target, "health check started", "")
 	p.lastPrint = time.Now()
 }
 
@@ -280,6 +324,14 @@ func (p *environmentRestoreHealthProgress) waiting(lastErr string, deadline time
 		remaining = 0
 	}
 	environmentRestoreProgressf(p.ctx, "restore health waiting: %s last=%s remaining=%s\n", p.target, lastErr, remaining)
+	environmentRestoreEmitEvent(p.ctx, agentStreamEvent{
+		Type:        "tool_observation",
+		Phase:       "health.wait",
+		Status:      "waiting",
+		Target:      p.target,
+		Message:     truncateReportText(lastErr, 200),
+		RemainingMs: remaining.Milliseconds(),
+	})
 	p.lastPrint = time.Now()
 }
 
@@ -289,6 +341,13 @@ func (p *environmentRestoreHealthProgress) done(ok bool, detail string) {
 		state = "ok"
 	}
 	environmentRestoreProgressf(p.ctx, "restore health %s: %s last=%s\n", state, p.target, detail)
+	status := "failed"
+	errText := detail
+	if ok {
+		status = "passed"
+		errText = ""
+	}
+	environmentRestoreEmitStep(p.ctx, "step_completed", "health.wait", status, p.target, detail, errText)
 }
 
 func environmentRestoreHealthProgressTarget(check environmentRestoreHealthCheckReport) string {
@@ -314,18 +373,20 @@ func environmentRestoreHealthProgressTarget(check environmentRestoreHealthCheckR
 	}
 }
 
-func parseComposeServiceHealth(output string) (string, string) {
+func parseComposeServiceHealth(output string) (string, string, int, bool) {
 	output = strings.TrimSpace(output)
 	if output == "" {
-		return "", ""
+		return "", "", 0, false
 	}
 	var object map[string]any
 	if err := json.Unmarshal([]byte(output), &object); err == nil && object != nil {
-		return strings.ToLower(valueString(firstNonNil(object["State"], object["state"]))), strings.ToLower(valueString(firstNonNil(object["Health"], object["health"])))
+		state, health, exitCode, hasExitCode := composeServiceHealthFromObject(object)
+		return state, health, exitCode, hasExitCode
 	}
 	var array []map[string]any
 	if err := json.Unmarshal([]byte(output), &array); err == nil && len(array) > 0 {
-		return strings.ToLower(valueString(firstNonNil(array[0]["State"], array[0]["state"]))), strings.ToLower(valueString(firstNonNil(array[0]["Health"], array[0]["health"])))
+		state, health, exitCode, hasExitCode := composeServiceHealthFromObject(array[0])
+		return state, health, exitCode, hasExitCode
 	}
 	lower := strings.ToLower(output)
 	state := ""
@@ -338,7 +399,37 @@ func parseComposeServiceHealth(output string) (string, string) {
 	} else if strings.Contains(lower, "healthy") {
 		health = "healthy"
 	}
-	return state, health
+	return state, health, 0, false
+}
+
+func composeServiceHealthFromObject(object map[string]any) (string, string, int, bool) {
+	state := strings.ToLower(valueString(firstNonNil(object["State"], object["state"])))
+	health := strings.ToLower(valueString(firstNonNil(object["Health"], object["health"])))
+	exitCode, ok := intFromAny(firstNonNil(object["ExitCode"], object["exitCode"], object["Exit"], object["exit"]))
+	return state, health, exitCode, ok
+}
+
+func intFromAny(value any) (int, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case int64:
+		return int(typed), true
+	case float64:
+		return int(typed), true
+	case string:
+		typed = strings.TrimSpace(typed)
+		if typed == "" {
+			return 0, false
+		}
+		var parsed int
+		if _, err := fmt.Sscanf(typed, "%d", &parsed); err != nil {
+			return 0, false
+		}
+		return parsed, true
+	default:
+		return 0, false
+	}
 }
 
 func firstNonNil(values ...any) any {

@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -99,21 +97,18 @@ func runSandboxServiceStartup(ctx context.Context, service store.CatalogService,
 	}
 	commandCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(commandCtx, "/bin/sh", "-c", command)
-	output, err := cmd.CombinedOutput()
-	result.Output = strings.TrimSpace(string(output))
+	commandResult := runAgentObservedCommand(commandCtx, agentObservedCommandOptions{
+		Command: []string{"/bin/sh", "-c", command},
+	})
+	result.Output = commandResult.Output
 	if commandCtx.Err() == context.DeadlineExceeded {
 		result.ExitCode = 124
 		result.Error = "startup command timed out"
 		return result
 	}
-	if err != nil {
-		result.ExitCode = 1
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			result.ExitCode = exitErr.ExitCode()
-		}
-		result.Error = err.Error()
+	if commandResult.Err != nil {
+		result.ExitCode = commandResult.ExitCode
+		result.Error = commandResult.Err.Error()
 	}
 	return result
 }

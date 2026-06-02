@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -115,6 +116,35 @@ func commandSlicesContain(commands [][]string, part string) bool {
 			if item == part {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func decodeAgentStreamEvents(t *testing.T, output string) []map[string]any {
+	t.Helper()
+	events := []map[string]any{}
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var event map[string]any
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("decode agent stream event: %v\nline=%s\noutput=%s", err, line, output)
+		}
+		events = append(events, event)
+	}
+	return events
+}
+
+func agentStreamHasEvent(events []map[string]any, eventType string, phase string, status string, targetContains string) bool {
+	for _, event := range events {
+		if valueString(event["type"]) != eventType || valueString(event["phase"]) != phase || valueString(event["status"]) != status {
+			continue
+		}
+		if targetContains == "" || strings.Contains(valueString(event["target"]), targetContains) {
+			return true
 		}
 	}
 	return false

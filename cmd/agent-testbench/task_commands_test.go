@@ -74,6 +74,42 @@ func TestTaskRunRecordsHistoryAndNotification(t *testing.T) {
 	}
 }
 
+func TestTaskRunShellExecutesSandboxTriggerCommand(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "tasks.sqlite")
+	storeRef := "sqlite://" + storePath
+
+	out := runCLI(t,
+		"task", "run", "mq-trigger",
+		"--store", storeRef,
+		"--shell",
+		"--command", "MID=CAP-ATB-$(printf 42); printf '%s\\n' \"$MID\"",
+		"--json",
+	)
+	var report struct {
+		OK   bool `json:"ok"`
+		Task struct {
+			Kind    string `json:"kind"`
+			Command string `json:"command"`
+		} `json:"task"`
+		Run struct {
+			Status   string `json:"status"`
+			ExitCode int    `json:"exitCode"`
+			Output   string `json:"output"`
+		} `json:"run"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode shell task run report: %v\n%s", err, out)
+	}
+	if !report.OK || report.Task.Kind != "shell" || report.Run.Status != "passed" || report.Run.ExitCode != 0 || !strings.Contains(report.Run.Output, "CAP-ATB-42") {
+		t.Fatalf("shell task run report = %#v", report)
+	}
+
+	logsOut := runCLI(t, "task", "logs", "mq-trigger", "--store", storeRef, "-n", "1", "--json")
+	if !strings.Contains(logsOut, "CAP-ATB-42") || !strings.Contains(logsOut, `"command": "MID=CAP-ATB-$(printf 42); printf '%s\\n' \"$MID\""`) {
+		t.Fatalf("shell task logs should retain command and output:\n%s", logsOut)
+	}
+}
+
 func TestTaskScheduleWatchStopAndRootAliases(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "tasks.sqlite")
 	storeRef := "sqlite://" + storePath

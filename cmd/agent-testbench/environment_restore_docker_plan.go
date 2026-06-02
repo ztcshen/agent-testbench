@@ -32,15 +32,16 @@ type environmentRestoreGeneratedFile struct {
 }
 
 type environmentRestoreDockerCleanupReport struct {
-	Requested      bool       `json:"requested,omitempty"`
-	Allowed        bool       `json:"allowed,omitempty"`
-	IncludeImages  bool       `json:"includeImages,omitempty"`
-	Action         string     `json:"action,omitempty"`
-	BackupCommands [][]string `json:"backupCommands,omitempty"`
-	Commands       [][]string `json:"commands,omitempty"`
-	Output         []string   `json:"output,omitempty"`
-	Error          string     `json:"error,omitempty"`
-	Warning        string     `json:"warning,omitempty"`
+	Requested           bool       `json:"requested,omitempty"`
+	Allowed             bool       `json:"allowed,omitempty"`
+	IncludeImages       bool       `json:"includeImages,omitempty"`
+	Action              string     `json:"action,omitempty"`
+	FixedContainerNames []string   `json:"fixedContainerNames,omitempty"`
+	BackupCommands      [][]string `json:"backupCommands,omitempty"`
+	Commands            [][]string `json:"commands,omitempty"`
+	Output              []string   `json:"output,omitempty"`
+	Error               string     `json:"error,omitempty"`
+	Warning             string     `json:"warning,omitempty"`
 }
 
 type environmentRestoreHealthCheckReport struct {
@@ -51,10 +52,13 @@ type environmentRestoreHealthCheckReport struct {
 	Command    string `json:"command,omitempty"`
 	Service    string `json:"service,omitempty"`
 	Container  string `json:"container,omitempty"`
+	Expect     string `json:"expect,omitempty"`
+	OneShot    bool   `json:"oneShot,omitempty"`
 	OK         bool   `json:"ok"`
 	StatusCode int    `json:"statusCode,omitempty"`
 	State      string `json:"state,omitempty"`
 	Health     string `json:"health,omitempty"`
+	ExitCode   int    `json:"exitCode,omitempty"`
 	Output     string `json:"output,omitempty"`
 	Error      string `json:"error,omitempty"`
 }
@@ -82,8 +86,9 @@ func environmentRestorePlanComposeCommands(report *environmentRestoreDockerRepor
 	report.ComposeFile = strings.Join(resolvedComposeFiles, ",")
 	baseArgs := environmentRestoreComposeBaseArgs(compose, workspace, resolvedComposeFiles)
 	services := stringSliceFromAny(compose["services"])
-	report.Cleanup = environmentRestoreDockerCleanupPlan(baseArgs, cleanupOptions)
+	report.Cleanup = environmentRestoreDockerCleanupPlan(baseArgs, cleanupOptions, environmentRestoreContainerNameConflicts(compose, workspace))
 	imageServices, buildServices := environmentRestoreComposeCommandServices(compose, workspace, composeFiles, services)
+	imageServices = environmentRestoreFilterSkippedPullServices(imageServices, stringSliceFromAny(compose["skipPullServices"]))
 	if !boolFromReportAny(compose["skipPull"]) && len(imageServices) > 0 {
 		report.Commands = append(report.Commands, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"pull"}, imageServices...)...))
 	}
@@ -92,6 +97,20 @@ func environmentRestorePlanComposeCommands(report *environmentRestoreDockerRepor
 	}
 	report.Commands = append(report.Commands, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"up", "-d"}, services...)...))
 	return baseArgs
+}
+
+func environmentRestoreFilterSkippedPullServices(imageServices []string, skipPullServices []string) []string {
+	if len(imageServices) == 0 || len(skipPullServices) == 0 {
+		return imageServices
+	}
+	skip := environmentRestoreStringSet(skipPullServices)
+	out := make([]string, 0, len(imageServices))
+	for _, service := range imageServices {
+		if !skip[strings.TrimSpace(service)] {
+			out = append(out, service)
+		}
+	}
+	return out
 }
 
 func environmentRestorePlanStartCommand(workspace string, startCommand string, cleanupOptions environmentRestoreDockerCleanupOptions) environmentRestoreDockerReport {
@@ -193,6 +212,9 @@ func environmentRestoreRunCleanup(ctx context.Context, report *environmentRestor
 			report.Cleanup.Output = append(report.Cleanup.Output, output)
 		}
 		if errText != "" {
+			if environmentRestoreCleanupIgnoreMissingContainer(command, errText) {
+				continue
+			}
 			report.OK = false
 			report.Cleanup.Error = errText
 			report.Error = errText
@@ -200,6 +222,24 @@ func environmentRestoreRunCleanup(ctx context.Context, report *environmentRestor
 		}
 	}
 	return true
+}
+
+func environmentRestoreCleanupIgnoreMissingContainer(command []string, errText string) bool {
+	if len(command) < 4 || command[0] != "docker" || command[1] != "rm" {
+		return false
+	}
+	hasForce := false
+	for _, part := range command[2:] {
+		if part == "-f" || part == "--force" {
+			hasForce = true
+			break
+		}
+	}
+	if !hasForce {
+		return false
+	}
+	lower := strings.ToLower(errText)
+	return strings.Contains(lower, "no such container") || strings.Contains(lower, "no container")
 }
 
 func environmentRestoreMarkDockerExecuting(report *environmentRestoreDockerReport) {
@@ -225,7 +265,7 @@ func environmentRestoreRunCommands(ctx context.Context, report *environmentResto
 	return true
 }
 
-func environmentRestoreDockerCleanupPlan(baseArgs []string, options environmentRestoreDockerCleanupOptions) environmentRestoreDockerCleanupReport {
+func environmentRestoreDockerCleanupPlan(baseArgs []string, options environmentRestoreDockerCleanupOptions, fixedContainerNames []string) environmentRestoreDockerCleanupReport {
 	if !options.Requested {
 		return environmentRestoreDockerCleanupReport{}
 	}
@@ -235,6 +275,10 @@ func environmentRestoreDockerCleanupPlan(baseArgs []string, options environmentR
 		IncludeImages: options.IncludeImages,
 		Action:        "plan-cleanup",
 		Warning:       "Review Docker cleanup commands before simulating a clean colleague machine; the sandbox SQL Store must remain outside these Docker target services.",
+	}
+	if len(fixedContainerNames) > 0 {
+		cleanup.FixedContainerNames = append([]string(nil), fixedContainerNames...)
+		sort.Strings(cleanup.FixedContainerNames)
 	}
 	cleanup.BackupCommands = [][]string{
 		append(append([]string{"docker", "compose"}, baseArgs...), "ps"),
@@ -246,6 +290,9 @@ func environmentRestoreDockerCleanupPlan(baseArgs []string, options environmentR
 		down = append(down, "--rmi", "all")
 	}
 	cleanup.Commands = [][]string{down}
+	if len(cleanup.FixedContainerNames) > 0 {
+		cleanup.Commands = append(cleanup.Commands, append([]string{"docker", "rm", "-f"}, cleanup.FixedContainerNames...))
+	}
 	return cleanup
 }
 

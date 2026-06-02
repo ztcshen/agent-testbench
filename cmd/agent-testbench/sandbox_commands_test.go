@@ -49,12 +49,75 @@ func TestSandboxStartCommandRunsStartupCommandsFromStore(t *testing.T) {
 	requireSandboxStartupSideEffects(t, fixture)
 }
 
+func TestSandboxStartStreamJSONEmitsAgentEvents(t *testing.T) {
+	fixture := writeSandboxStartStoreFixture(t)
+	out := runCLI(t, "sandbox", "start", "--store", "sqlite://"+fixture.storePath, "--output-format", "stream-json")
+	events := decodeAgentStreamEvents(t, out)
+	if len(events) < 8 {
+		t.Fatalf("expected sandbox start stream events, got %d: %s", len(events), out)
+	}
+	if valueString(events[0]["type"]) != "run_started" || valueString(events[0]["phase"]) != "sandbox.start" {
+		t.Fatalf("first sandbox stream event = %#v", events[0])
+	}
+	if !agentStreamHasEvent(events, "step_started", "sandbox.service", "running", "entry-service") {
+		t.Fatalf("stream missing entry-service step start: %#v", events)
+	}
+	if !agentStreamHasEvent(events, "tool_call_started", "command", "started", "/bin/sh") {
+		t.Fatalf("stream missing startup command start: %#v", events)
+	}
+	if !agentStreamHasEvent(events, "step_completed", "sandbox.service", "skipped", "documented-service") {
+		t.Fatalf("stream missing documented-service skipped step: %#v", events)
+	}
+	last := events[len(events)-1]
+	report := mapFromReportAny(last["report"])
+	if valueString(last["type"]) != "run_completed" || valueString(last["status"]) != "passed" || !boolFromReportAny(report["ok"]) {
+		t.Fatalf("last sandbox stream event = %#v", last)
+	}
+	requireSandboxStartupSideEffects(t, fixture)
+}
+
+func TestSandboxStartOutputFormatRejectsJSONConflict(t *testing.T) {
+	fixture := writeSandboxStartStoreFixture(t)
+	out := runCLIFails(t, "sandbox", "start", "--store", "sqlite://"+fixture.storePath, "--json", "--output-format", "stream-json")
+	if !strings.Contains(out, "--json cannot be combined with --output-format stream-json") {
+		t.Fatalf("sandbox start output-format conflict error = %q", out)
+	}
+	requireSandboxNoStartupSideEffects(t, fixture)
+}
+
 func TestSandboxStartMissingServiceExplainsRegistryBoundary(t *testing.T) {
 	fixture := writeSandboxStartStoreFixture(t)
 
 	out := runCLIFails(t, "sandbox", "start", "--store", "sqlite://"+fixture.storePath, "--service", "mysql")
 	if !strings.Contains(out, "profile service registry") || !strings.Contains(out, "environment restore") {
 		t.Fatalf("missing service error should explain registry boundary, got %q", out)
+	}
+}
+
+func TestSandboxStartStreamJSONCompletesMissingServiceFailure(t *testing.T) {
+	fixture := writeSandboxStartStoreFixture(t)
+	out := runCLIFails(t, "sandbox", "start", "--store", "sqlite://"+fixture.storePath, "--service", "mysql", "--output-format", "stream-json")
+	if !strings.Contains(out, "profile service registry") {
+		t.Fatalf("missing service error should still be printed, got %q", out)
+	}
+	events := decodeAgentStreamEvents(t, agentStreamJSONEventLines(out))
+	if !agentStreamHasEvent(events, "run_started", "sandbox.start", "running", "profile-service-registry") {
+		t.Fatalf("stream missing sandbox run start: %#v", events)
+	}
+	if !agentStreamHasEvent(events, "run_completed", "sandbox.start", "failed", "profile-service-registry") {
+		t.Fatalf("stream missing failed sandbox run completion: %#v", events)
+	}
+}
+
+func TestSandboxStartStreamJSONCompletesStoreOpenFailure(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "missing", "store.sqlite")
+	out := runCLIFails(t, "sandbox", "start", "--store", "sqlite://"+storePath, "--output-format", "stream-json")
+	events := decodeAgentStreamEvents(t, agentStreamJSONEventLines(out))
+	if !agentStreamHasEvent(events, "run_started", "sandbox.start", "running", "profile-service-registry") {
+		t.Fatalf("stream missing sandbox run start: %#v", events)
+	}
+	if !agentStreamHasEvent(events, "run_completed", "sandbox.start", "failed", "profile-service-registry") {
+		t.Fatalf("stream missing failed sandbox run completion: %#v", events)
 	}
 }
 
@@ -199,6 +262,17 @@ func TestSandboxServiceListCanReadComponentOnlyEnvironment(t *testing.T) {
 	if !report.OK || report.Count != 1 || report.Services[0].ID != "mysql" || report.Services[0].InProfileRegistry || !report.Services[0].InComponentGraph {
 		t.Fatalf("component-only sandbox service list = %#v", report)
 	}
+}
+
+func agentStreamJSONEventLines(output string) string {
+	lines := []string{}
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "{") {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func writeSandboxStartStoreFixture(t *testing.T) sandboxStartFixture {

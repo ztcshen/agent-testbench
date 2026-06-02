@@ -112,6 +112,7 @@ Run or watch repeatable Store-backed CLI tasks:
 
 ```bash
 ./skills/agent-testbench-operator/scripts/atb.sh task run catalog-smoke --store STORE_NAME --command "commands --filter task --json" --json
+./skills/agent-testbench-operator/scripts/atb.sh task run sandbox-trigger --store STORE_NAME --shell --command "docker exec CONTAINER kafka-console-producer.sh --bootstrap-server HOST:PORT --topic TOPIC < MESSAGE_FILE" --json
 ./skills/agent-testbench-operator/scripts/atb.sh task watch catalog-smoke --store STORE_NAME --command "commands --filter task --json" --interval 30s --limit 3 --until success --json
 ./skills/agent-testbench-operator/scripts/atb.sh task logs catalog-smoke --store STORE_NAME --json
 ```
@@ -129,6 +130,16 @@ Inspect sandbox service registration without starting services:
 ./skills/agent-testbench-operator/scripts/atb.sh workflow discover --store STORE_NAME --service SERVICE_ID --json
 ./skills/agent-testbench-operator/scripts/atb.sh sandbox start --store STORE_NAME --dry-run --json
 ./skills/agent-testbench-operator/scripts/atb.sh sandbox start --store STORE_NAME --workflow WORKFLOW_ID --dry-run --json
+```
+
+For long Docker-backed startup or restore execution, prefer the agent event
+stream so the CLI emits one machine-readable event per line while work is still
+running:
+
+```bash
+./skills/agent-testbench-operator/scripts/atb.sh sandbox start --store STORE_NAME --workflow WORKFLOW_ID --output-format stream-json
+./skills/agent-testbench-operator/scripts/atb.sh environment restore ENV_ID --store STORE_NAME --workspace WORKSPACE --execute --output-format stream-json
+./skills/agent-testbench-operator/scripts/atb.sh environment migration apply ENV_ID --store STORE_NAME --edge OWNER:PROVIDER --database DB_NAME --workspace WORKSPACE --execute --output-format stream-json
 ```
 
 Plan or apply Store-first SQL edge migrations:

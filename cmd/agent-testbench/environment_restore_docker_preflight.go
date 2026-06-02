@@ -18,6 +18,7 @@ type environmentRestorePreflight struct {
 	ContainerConflicts []string                          `json:"containerConflicts,omitempty"`
 	StartupAssets      []environmentRestoreStartupAsset  `json:"startupAssets,omitempty"`
 	ComposeIssues      []string                          `json:"composeIssues,omitempty"`
+	LocalImageServices []string                          `json:"localImageServices,omitempty"`
 	Notes              []string                          `json:"notes,omitempty"`
 }
 
@@ -166,7 +167,7 @@ func environmentRestorePreflightRequiresGit(packageSpec environmentRestorePackag
 
 func environmentRestoreAddComposePreflight(report *environmentRestorePreflight, compose map[string]any, specs []environmentRestoreRepoSpec, workspace string, execute bool, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool) {
 	report.Tools = append(report.Tools, environmentRestoreTool("docker", true))
-	report.Tools = append(report.Tools, environmentRestoreCommandTool("docker compose", true, "docker", "compose", "version"))
+	report.Tools = append(report.Tools, environmentRestoreCommandTool("docker compose", true, "docker", "compose", dockerComposeCommandVersion))
 	report.HeavySteps = append(report.HeavySteps, environmentRestoreComposeHeavySteps(compose, cleanupOptions)...)
 	environmentRestoreCheckComposeBindMounts(report, compose, workspace)
 	environmentRestoreCheckComposeImages(report, compose, workspace, execute)
@@ -223,6 +224,11 @@ func environmentRestoreCheckComposeImages(report *environmentRestorePreflight, c
 		if err == nil {
 			continue
 		}
+		if environmentRestoreLocalDockerImageExists(dockerPath, image) {
+			report.LocalImageServices = append(report.LocalImageServices, service)
+			report.Notes = append(report.Notes, "local Docker image is available for compose service "+service+": "+image)
+			continue
+		}
 		detail := strings.TrimSpace(string(out))
 		issue := "unavailable compose image for service " + service + ": " + image
 		if detail != "" {
@@ -232,6 +238,16 @@ func environmentRestoreCheckComposeImages(report *environmentRestorePreflight, c
 		report.Notes = append(report.Notes, issue)
 		report.OK = false
 	}
+}
+
+func environmentRestoreLocalDockerImageExists(dockerPath string, image string) bool {
+	image = strings.TrimSpace(image)
+	if image == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, dockerPath, "image", "inspect", image).Run() == nil
 }
 
 func environmentRestoreComposeBindMountSources(compose map[string]any, workspace string) map[string][]string {

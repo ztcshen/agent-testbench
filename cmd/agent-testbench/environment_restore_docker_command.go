@@ -1,59 +1,33 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"os"
 	"os/exec"
-	"strings"
 	"syscall"
 )
 
 func runRestoreGitCommand(ctx context.Context, args ...string) (string, string) {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	out, err := cmd.CombinedOutput()
-	output := strings.TrimSpace(string(out))
-	if err != nil {
-		return output, err.Error()
-	}
-	return output, ""
+	return runRestoreExecCommand(ctx, "", append([]string{"git"}, args...), "", false)
 }
 
 func runRestoreCommand(ctx context.Context, workdir string, command []string) (string, string) {
-	if len(command) == 0 {
-		return "", "empty restore command"
-	}
-	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
-	configureRestoreCommandCancellation(cmd)
-	cmd.Dir = workdir
-	out, err := cmd.CombinedOutput()
-	output := strings.TrimSpace(string(out))
-	if err != nil {
-		if output != "" {
-			return output, err.Error() + ": " + output
-		}
-		return output, err.Error()
-	}
-	return output, ""
+	return runRestoreExecCommand(ctx, workdir, command, "", false)
 }
 
 func runRestoreCommandWithInput(ctx context.Context, workdir string, command []string, input string) (string, string) {
-	if len(command) == 0 {
-		return "", "empty restore command"
-	}
-	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
-	configureRestoreCommandCancellation(cmd)
-	cmd.Dir = workdir
-	cmd.Stdin = bytes.NewBufferString(input)
-	out, err := cmd.CombinedOutput()
-	output := strings.TrimSpace(string(out))
-	if err != nil {
-		if output != "" {
-			return output, err.Error() + ": " + output
-		}
-		return output, err.Error()
-	}
-	return output, ""
+	return runRestoreExecCommand(ctx, workdir, command, input, true)
+}
+
+func runRestoreExecCommand(ctx context.Context, workdir string, command []string, input string, hasInput bool) (string, string) {
+	result := runAgentObservedCommand(ctx, agentObservedCommandOptions{
+		Workdir:   workdir,
+		Command:   command,
+		Input:     input,
+		HasInput:  hasInput,
+		Configure: configureRestoreCommandCancellation,
+	})
+	return result.Output, result.Error
 }
 
 func configureRestoreCommandCancellation(cmd *exec.Cmd) {

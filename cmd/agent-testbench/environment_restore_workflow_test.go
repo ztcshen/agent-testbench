@@ -175,6 +175,98 @@ func TestEnvironmentRestoreRunsAllowedDockerCleanupBeforeStartup(t *testing.T) {
 	}
 }
 
+func TestEnvironmentRestoreCleanupRemovesConflictingFixedContainerNames(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	fixture.writeDockerTool(t, `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
+if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
+  printf 'Docker Compose version v2.0.0\n'
+  exit 0
+fi
+if [ "$1" = "ps" ] && [ "$2" = "-a" ]; then
+  printf 'sandbox-kafka\n'
+  exit 0
+fi
+if [ "$1" = "compose" ] && [[ "$*" == *" ps -a --format json "* ]]; then
+  service="${@: -1}"
+  printf '{"Name":"%s","Service":"%s","State":"running","Health":"healthy"}\n' "$service" "$service"
+fi
+`)
+	composeSource := filepath.Join(t.TempDir(), "compose.yml")
+	writeFile(t, composeSource, "services:\n  kafka:\n    image: apache/kafka:3.7.0\n    container_name: sandbox-kafka\n")
+	runCLI(t, "environment", "register",
+		"--store", fixture.StoreDSN,
+		"--id", "env.cleanup.fixed-container",
+		"--compose-file", "compose.yml",
+		"--compose-generated-file", "compose.yml="+composeSource,
+		"--compose-service", "kafka",
+		"--compose-skip-pull",
+		"--compose-skip-build",
+		"--health-compose-service", "kafka",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIWithEnv(t, fixture.DockerEnv, "environment", "restore", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--execute", "--clean-docker-state", "--allow-destructive-docker-cleanup", "--json", "env.cleanup.fixed-container")
+	if !strings.Contains(out, `"ok": true`) || !strings.Contains(out, "fixedContainerNames") {
+		t.Fatalf("cleanup with fixed container report = %s", out)
+	}
+	raw, err := os.ReadFile(fixture.DockerCallsPath)
+	if err != nil {
+		t.Fatalf("read fake docker calls: %v", err)
+	}
+	joined := string(raw)
+	for _, want := range []string{
+		"compose -f " + filepath.Join(fixture.Workspace, "compose.yml") + " down --remove-orphans",
+		"rm -f sandbox-kafka",
+		"compose -f " + filepath.Join(fixture.Workspace, "compose.yml") + " up -d kafka",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("cleanup docker calls missing %q:\n%s", want, joined)
+		}
+	}
+}
+
+func TestEnvironmentRestoreCleanupIgnoresMissingFixedContainerAfterComposeDown(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	fixture.writeDockerTool(t, `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
+if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
+  printf 'Docker Compose version v2.0.0\n'
+  exit 0
+fi
+if [ "$1" = "ps" ] && [ "$2" = "-a" ]; then
+  printf 'sandbox-kafka\n'
+  exit 0
+fi
+if [ "$1" = "rm" ] && [ "$2" = "-f" ]; then
+  printf 'Error: No such container: %s\n' "$3" >&2
+  exit 1
+fi
+if [ "$1" = "compose" ] && [[ "$*" == *" ps -a --format json "* ]]; then
+  service="${@: -1}"
+  printf '{"Name":"%s","Service":"%s","State":"running","Health":"healthy"}\n' "$service" "$service"
+fi
+`)
+	composeSource := filepath.Join(t.TempDir(), "compose.yml")
+	writeFile(t, composeSource, "services:\n  kafka:\n    image: apache/kafka:3.7.0\n    container_name: sandbox-kafka\n")
+	runCLI(t, "environment", "register",
+		"--store", fixture.StoreDSN,
+		"--id", "env.cleanup.fixed-container-missing",
+		"--compose-file", "compose.yml",
+		"--compose-generated-file", "compose.yml="+composeSource,
+		"--compose-service", "kafka",
+		"--compose-skip-pull",
+		"--compose-skip-build",
+		"--health-compose-service", "kafka",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIWithEnv(t, fixture.DockerEnv, "environment", "restore", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--execute", "--clean-docker-state", "--allow-destructive-docker-cleanup", "--json", "env.cleanup.fixed-container-missing")
+	if !strings.Contains(out, `"ok": true`) {
+		t.Fatalf("missing fixed container after compose down should not fail cleanup: %s", out)
+	}
+}
+
 func TestEnvironmentRestoreFailsBeforeDockerWhenComposeFileIsMissing(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	workspace := filepath.Join(t.TempDir(), "workspace")

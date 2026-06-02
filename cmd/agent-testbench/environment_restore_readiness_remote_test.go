@@ -30,6 +30,51 @@ func TestEnvironmentRestoreClonesRemoteReposForVerifiedWorkflow(t *testing.T) {
 	fixture.assertPersistedSummary(inspected, executed.RestoreID)
 }
 
+func TestEnvironmentRestoreDryRunAllowsRepoBackedComposeFile(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	remoteRepo := createBareGitRepoWithFiles(t, "main", map[string]string{
+		"docker-compose.yml": "services:\n  entry-gateway:\n    image: alpine:3.20\n",
+	})
+	remoteURL := "https://example.test/repo-backed-compose.git"
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(healthServer.Close)
+	fakeDockerEnv, dockerCallsPath := fakeDockerCommand(t)
+	installGitRemoteFixture(t, filepath.Dir(dockerCallsPath), remoteURL, remoteRepo)
+
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.repo.compose",
+		"--repo", "entry-gateway="+remoteURL,
+		"--branch", "entry-gateway=main",
+		"--checkout", "entry-gateway=services/entry-gateway",
+		"--compose-file", "services/entry-gateway/docker-compose.yml",
+		"--health-url", healthServer.URL+"/health",
+		"--verification-workflow", "workflow.core-10",
+	)
+	graphPath := filepath.Join(t.TempDir(), "graph.json")
+	writeFile(t, graphPath, mustJSON(t, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			environmentRestoreReadinessAppComponent("entry-gateway", "entry-gateway", healthServer.URL+"/health"),
+		},
+	}))
+	runCLI(t, "environment", "components", "replace", "--store", "sqlite://"+storePath, "--file", graphPath, "env.repo.compose")
+
+	out := runCLIWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--json", "env.repo.compose")
+	var report environmentRestoreRemoteRepoDryRun
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode repo-backed compose dry-run json: %v\n%s", err, out)
+	}
+	if !report.OK || report.Executed || !report.Docker.OK || report.Docker.Action != "plan-docker-compose" || !report.Readiness.OK {
+		t.Fatalf("repo-backed compose dry-run should be ready: %#v", report)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "services", "entry-gateway", "docker-compose.yml")); !os.IsNotExist(err) {
+		t.Fatalf("dry-run should not clone repo-backed compose file, err=%v", err)
+	}
+}
+
 type environmentRestoreRemoteRepoFixture struct {
 	t                *testing.T
 	storePath        string

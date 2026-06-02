@@ -69,6 +69,48 @@ func TestEnvironmentRestoreSQLStoreUsesStoreGeneratedStartupFiles(t *testing.T) 
 	}
 }
 
+func TestEnvironmentRestoreStoreStartupFilesAcceptWrittenWorkspaceCompose(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	composePath := filepath.Join(workspace, "compose", "docker-compose.yml")
+	writeFile(t, composePath, "services: {}\n")
+	report := environmentRestoreReport{
+		Workspace: workspace,
+		Compose: map[string]any{
+			"composeFile": "compose/docker-compose.yml",
+			"generatedFiles": map[string]any{
+				"generated/docker-compose.yml": "services: {}\n",
+			},
+		},
+		Docker: environmentRestoreDockerReport{
+			Generated: []environmentRestoreGeneratedFile{{
+				Path:   composePath,
+				Action: "write",
+				OK:     true,
+			}},
+		},
+	}
+	ok, detail := environmentRestoreStoreStartupFilesReady(report)
+	if !ok || !strings.Contains(detail, "generated from Store metadata") {
+		t.Fatalf("written workspace compose should satisfy Store startup readiness: ok=%t detail=%q", ok, detail)
+	}
+}
+
+func TestEnvironmentRestoreStoreStartupFilesRejectLeftoverWorkspaceCompose(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	composePath := filepath.Join(workspace, "compose", "docker-compose.yml")
+	writeFile(t, composePath, "services: {}\n")
+	report := environmentRestoreReport{
+		Workspace: workspace,
+		Compose: map[string]any{
+			"composeFile": "compose/docker-compose.yml",
+		},
+	}
+	ok, detail := environmentRestoreStoreStartupFilesReady(report)
+	if ok || !strings.Contains(detail, "missing generatedFiles") {
+		t.Fatalf("leftover workspace compose should not satisfy Store startup readiness: ok=%t detail=%q", ok, detail)
+	}
+}
+
 func TestEnvironmentRestoreSQLStoreRejectsLocalStartupFilesWithoutStoreGeneratedContent(t *testing.T) {
 	for _, backend := range environmentRestoreReadinessProductStoreBackends() {
 		t.Run(backend.name, func(t *testing.T) {

@@ -62,6 +62,7 @@ type environmentRestoreCommandOptions struct {
 	HealthTimeout    time.Duration
 	Workflow         environmentRestoreWorkflowOptions
 	Cleanup          environmentRestoreDockerCleanupOptions
+	OutputFormat     string
 	JSONOutput       bool
 }
 
@@ -99,6 +100,7 @@ func parseEnvironmentRestoreCommandOptions(args []string) (environmentRestoreCom
 	cleanDockerState := flags.Bool("clean-docker-state", false, "Plan or run Docker Compose cleanup before startup")
 	cleanDockerImages := flags.Bool("clean-docker-images", false, "Include Docker Compose image removal in cleanup plan")
 	allowDestructiveDockerCleanup := flags.Bool("allow-destructive-docker-cleanup", false, "Allow --execute to run requested Docker cleanup commands")
+	outputFormat := flags.String("output-format", "", "Output format: text, json, or stream-json")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := parseInterspersedFlags(flags, args); err != nil {
 		return environmentRestoreCommandOptions{}, err
@@ -123,6 +125,10 @@ func parseEnvironmentRestoreCommandOptions(args []string) (environmentRestoreCom
 		return environmentRestoreCommandOptions{}, err
 	}
 	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
+	if err != nil {
+		return environmentRestoreCommandOptions{}, err
+	}
+	resolvedOutputFormat, err := resolveCLIOutputFormat(*outputFormat, *jsonOutput)
 	if err != nil {
 		return environmentRestoreCommandOptions{}, err
 	}
@@ -151,8 +157,28 @@ func parseEnvironmentRestoreCommandOptions(args []string) (environmentRestoreCom
 			UseExistingContainers: *useExistingContainers,
 			AssumeCleanDocker:     *assumeCleanDocker,
 		},
-		JSONOutput: *jsonOutput,
+		OutputFormat: resolvedOutputFormat,
+		JSONOutput:   resolvedOutputFormat == cliOutputFormatJSON,
 	}, nil
+}
+
+func resolveCLIOutputFormat(outputFormat string, jsonOutput bool) (string, error) {
+	outputFormat = strings.TrimSpace(outputFormat)
+	if outputFormat == "" {
+		outputFormat = cliOutputFormatText
+	}
+	if jsonOutput {
+		if outputFormat != cliOutputFormatText && outputFormat != cliOutputFormatJSON {
+			return "", errors.New("--json cannot be combined with --output-format " + outputFormat)
+		}
+		outputFormat = cliOutputFormatJSON
+	}
+	switch outputFormat {
+	case cliOutputFormatText, cliOutputFormatJSON, cliOutputFormatStreamJSON:
+		return outputFormat, nil
+	default:
+		return "", errors.New("--output-format must be text, json, or stream-json")
+	}
 }
 
 type environmentRestoreCommandFlagValues struct {
@@ -198,7 +224,9 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if options.Execute && !options.JSONOutput {
+	if options.OutputFormat == cliOutputFormatStreamJSON {
+		ctx = contextWithEnvironmentRestoreEventStream(ctx, os.Stdout)
+	} else if options.Execute && !options.JSONOutput {
 		ctx = contextWithEnvironmentRestoreProgress(ctx, os.Stderr)
 	}
 	runtime, err := openStore(ctx, options.StoreURL)
@@ -219,7 +247,9 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if options.JSONOutput {
+	if options.OutputFormat == cliOutputFormatStreamJSON {
+		environmentRestoreEmitRunCompleted(ctx, report)
+	} else if options.JSONOutput {
 		if encodeErr := writeIndentedJSON(report); encodeErr != nil {
 			return encodeErr
 		}
@@ -242,6 +272,7 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 		return environmentRestoreReport{}, err
 	}
 	report := newEnvironmentRestoreReport(env, plan, execute, workflowOptions, cleanupOptions, prepareReposOnly)
+	environmentRestoreEmitRunStarted(ctx, report)
 	environmentRestoreAddSourceReports(ctx, &report, plan, execute, pull)
 	report.Docker = environmentRestoreDockerForReport(ctx, report, plan, execute, prepareReposOnly, healthTimeout, cleanupOptions)
 	if !report.Docker.OK {
@@ -324,36 +355,68 @@ func newEnvironmentRestoreReport(env store.Environment, plan environmentRestoreB
 }
 
 func environmentRestoreAddSourceReports(ctx context.Context, report *environmentRestoreReport, plan environmentRestoreBuildPlan, execute bool, pull bool) {
+	environmentRestoreEmitStep(ctx, "step_started", "source.package", "running", plan.PackageSpec.Checkout, "preparing environment package source", "")
 	report.Package = environmentRestorePackage(ctx, plan.PackageSpec, execute, pull, plan.RemoteOnly)
+	environmentRestoreEmitStep(ctx, "step_completed", "source.package", statusText(report.Package.OK), plan.PackageSpec.Checkout, report.Package.Action, report.Package.Error)
 	if !report.Package.OK {
 		report.OK = false
 	}
 	for _, spec := range plan.Specs {
+		environmentRestoreEmitStep(ctx, "step_started", "source.repository", "running", spec.ServiceID, "preparing repository source", "")
 		item := environmentRestoreRepo(ctx, spec, execute, pull)
+		environmentRestoreEmitStep(ctx, "step_completed", "source.repository", statusText(item.OK), spec.ServiceID, item.Action, item.Error)
 		if !item.OK {
 			report.OK = false
 		}
 		report.Repos = append(report.Repos, item)
 	}
+	environmentRestoreEmitStep(ctx, "step_started", "source.component-assets", "running", report.EnvironmentID, "preparing remote component assets", "")
 	report.ComponentAssets = environmentRestoreRemoteComponentAssets(ctx, report.EnvironmentID, plan.ComponentGraph, plan.Workspace, execute, pull)
+	componentAssetsOK := true
 	for _, item := range report.ComponentAssets {
 		if !item.OK {
 			report.OK = false
+			componentAssetsOK = false
 		}
 	}
+	environmentRestoreEmitStep(ctx, "step_completed", "source.component-assets", statusText(componentAssetsOK), report.EnvironmentID, fmt.Sprintf("%d remote component asset(s)", len(report.ComponentAssets)), "")
 }
 
 func environmentRestoreDockerForReport(ctx context.Context, report environmentRestoreReport, plan environmentRestoreBuildPlan, execute bool, prepareReposOnly bool, healthTimeout time.Duration, cleanupOptions environmentRestoreDockerCleanupOptions) environmentRestoreDockerReport {
+	environmentRestoreEmitStep(ctx, "step_started", "docker.restore", "running", report.EnvironmentID, "preparing Docker restore phase", "")
+	var docker environmentRestoreDockerReport
 	if report.OK && prepareReposOnly {
-		return environmentRestorePrepareReposOnlyDockerReport(plan, execute)
+		docker = environmentRestorePrepareReposOnlyDockerReport(plan, execute)
+		environmentRestoreEmitStep(ctx, "step_completed", "docker.restore", statusText(docker.OK), report.EnvironmentID, docker.Action, docker.Error)
+		return docker
 	}
 	if report.OK && cleanupOptions.UseExistingContainers {
-		return environmentRestoreUseExistingContainers(ctx, plan.ComponentGraph, plan.Compose, plan.HealthChecks, plan.Workspace, execute, healthTimeout)
+		docker = environmentRestoreUseExistingContainers(ctx, plan.ComponentGraph, plan.Compose, plan.HealthChecks, plan.Workspace, execute, healthTimeout)
+		environmentRestoreEmitStep(ctx, "step_completed", "docker.restore", statusText(docker.OK), report.EnvironmentID, docker.Action, docker.Error)
+		return docker
 	}
 	if report.OK {
-		return environmentRestoreDocker(ctx, plan.ComponentGraph, plan.Compose, plan.HealthChecks, plan.Workspace, execute, healthTimeout, cleanupOptions)
+		compose := environmentRestoreComposeWithPullSkipServices(plan.Compose, report.Preflight.LocalImageServices)
+		docker = environmentRestoreDocker(ctx, plan.ComponentGraph, compose, plan.HealthChecks, plan.Workspace, execute, healthTimeout, cleanupOptions)
+		environmentRestoreEmitStep(ctx, "step_completed", "docker.restore", statusText(docker.OK), report.EnvironmentID, docker.Action, docker.Error)
+		return docker
 	}
-	return environmentRestoreSkippedDockerReport(report, plan.Workspace)
+	docker = environmentRestoreSkippedDockerReport(report, plan.Workspace)
+	environmentRestoreEmitStep(ctx, "step_completed", "docker.restore", statusText(docker.OK), report.EnvironmentID, docker.Action, docker.Error)
+	return docker
+}
+
+func environmentRestoreComposeWithPullSkipServices(compose map[string]any, services []string) map[string]any {
+	services = dedupeStrings(services)
+	if len(services) == 0 {
+		return compose
+	}
+	out := map[string]any{}
+	for key, value := range compose {
+		out[key] = value
+	}
+	out["skipPullServices"] = services
+	return out
 }
 
 func environmentRestorePrepareReposOnlyDockerReport(plan environmentRestoreBuildPlan, execute bool) environmentRestoreDockerReport {

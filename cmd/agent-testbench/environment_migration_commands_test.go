@@ -118,6 +118,72 @@ func TestEnvironmentMigrationApplyPersistsStatusForPlan(t *testing.T) {
 	}
 }
 
+func TestEnvironmentMigrationApplyStreamJSONEmitsAgentEvents(t *testing.T) {
+	fixture := writeEnvironmentMigrationStoreFixture(t)
+	seedEnvironmentMigrationAsset(t, fixture.storePath)
+	dockerEnv, _, _ := fakeDockerCommandCapturingExecStdin(t)
+
+	out := runCLIWithEnv(t, dockerEnv, "environment", "migration", "apply", "env.migration",
+		"--store", "sqlite://"+fixture.storePath,
+		"--edge", "app:mysql",
+		"--database", "app_db",
+		"--workspace", fixture.workspace,
+		"--execute",
+		"--output-format", "stream-json",
+	)
+	events := decodeAgentStreamEvents(t, out)
+	if len(events) < 6 {
+		t.Fatalf("expected migration apply stream events, got %d: %s", len(events), out)
+	}
+	if valueString(events[0]["type"]) != "run_started" || valueString(events[0]["phase"]) != "environment.migration.apply" {
+		t.Fatalf("first migration stream event = %#v", events[0])
+	}
+	if !agentStreamHasEvent(events, "step_started", "environment.migration", "running", "app.mysql.migration.0011") {
+		t.Fatalf("stream missing migration step start: %#v", events)
+	}
+	if !agentStreamHasEvent(events, "tool_call_started", "command", "started", "docker compose exec") {
+		t.Fatalf("stream missing docker compose exec start: %#v", events)
+	}
+	last := events[len(events)-1]
+	report := mapFromReportAny(last["report"])
+	if valueString(last["type"]) != "run_completed" || valueString(last["status"]) != "passed" || !boolFromReportAny(report["ok"]) {
+		t.Fatalf("last migration stream event = %#v", last)
+	}
+}
+
+func TestEnvironmentMigrationApplyStreamJSONCompletesPrepareFailure(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.migration.no-compose",
+		"--verification-workflow", "workflow.core-10",
+	)
+	graphPath := filepath.Join(t.TempDir(), "graph.json")
+	writeFile(t, graphPath, mustJSON(t, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "app", Kind: "app", Role: "consumer", ComposeService: "app", Required: true, HealthCheckJSON: `{"kind":"url","url":"http://127.0.0.1:1/health"}`},
+			{ComponentID: "mysql", Kind: "middleware", Role: "database", ComposeService: "mysql", Required: true, HealthCheckJSON: `{"kind":"compose-service","service":"mysql"}`},
+		},
+	}))
+	runCLI(t, "environment", "components", "replace", "--store", "sqlite://"+storePath, "--file", graphPath, "env.migration.no-compose")
+
+	out := runCLIFails(t, "environment", "migration", "apply", "env.migration.no-compose",
+		"--store", "sqlite://"+storePath,
+		"--edge", "app:mysql",
+		"--database", "app_db",
+		"--workspace", workspace,
+		"--output-format", "stream-json",
+	)
+	events := decodeAgentStreamEvents(t, agentStreamJSONEventLines(out))
+	if !agentStreamHasEvent(events, "run_started", "environment.migration.apply", "running", "env.migration.no-compose") {
+		t.Fatalf("stream missing migration run start: %#v", events)
+	}
+	if !agentStreamHasEvent(events, "run_completed", "environment.migration.apply", "failed", "env.migration.no-compose") {
+		t.Fatalf("stream missing failed migration run completion: %#v", events)
+	}
+}
+
 func TestEnvironmentMigrationApplySQLUsesHistoryChecksumAndPreconditions(t *testing.T) {
 	item := environmentMigrationItem{
 		EnvironmentID:    "env.migration",
@@ -393,7 +459,7 @@ if [[ "$*" == *" exec -T mysql "* ]]; then
   cat >> "$MYSQL_STDIN_FILE"
   printf '\n-- agent-testbench-call-boundary --\n' >> "$MYSQL_STDIN_FILE"
 fi
-if [[ "$*" == *" ps --format json "* ]]; then
+if [[ "$*" == *" ps -a --format json "* ]]; then
   service="${@: -1}"
   printf '{"Name":"%s","Service":"%s","State":"running","Health":"healthy"}\n' "$service" "$service"
 fi

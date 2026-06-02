@@ -384,7 +384,7 @@ func buildWorkflowGateReport(ctx context.Context, runtime store.Store, options w
 	if err != nil {
 		return workflowGateReport{}, err
 	}
-	evidence, err := runtime.ListEvidence(ctx, run.ID)
+	evidence, err := workflowGateEvidenceRecords(ctx, runtime, run.ID, caseRuns)
 	if err != nil {
 		return workflowGateReport{}, err
 	}
@@ -418,6 +418,34 @@ func buildWorkflowGateReport(ctx context.Context, runtime store.Store, options w
 		(!options.RequireEvidence || report.Gates.EvidenceComplete)
 	report.NextActions = workflowGateNextActions(report, options)
 	return report, nil
+}
+
+func workflowGateEvidenceRecords(ctx context.Context, runtime store.Store, runID string, caseRuns []store.APICaseRun) ([]store.EvidenceRecord, error) {
+	out, err := runtime.ListEvidence(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	for _, row := range out {
+		seen[row.ID] = true
+	}
+	for _, caseRun := range caseRuns {
+		if strings.TrimSpace(caseRun.ID) == "" || strings.TrimSpace(caseRun.ID) == runID {
+			continue
+		}
+		rows, err := runtime.ListEvidence(ctx, caseRun.ID)
+		if err != nil {
+			return nil, fmt.Errorf("list case-run evidence %s: %w", caseRun.ID, err)
+		}
+		for _, row := range rows {
+			if seen[row.ID] {
+				continue
+			}
+			seen[row.ID] = true
+			out = append(out, row)
+		}
+	}
+	return out, nil
 }
 
 type workflowGateCaseRunIndex struct {

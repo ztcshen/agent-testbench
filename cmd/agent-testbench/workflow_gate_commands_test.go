@@ -51,6 +51,81 @@ func TestWorkflowGateFailsWithFailedStepAndActionableReport(t *testing.T) {
 	requireWorkflowGateFailureReport(t, fixture, report)
 }
 
+func TestWorkflowGateCountsEvidenceStoredUnderCaseRunID(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	storePath := filepath.Join(dir, "store.sqlite")
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	started := time.Date(2026, 6, 2, 6, 0, 0, 0, time.UTC)
+	runID := "run.workflow.case-evidence"
+	caseRunID := runID + ".case"
+	if _, err := s.CreateRun(ctx, store.Run{
+		ID:           runID,
+		ProfileID:    "sample",
+		WorkflowID:   "workflow.case-evidence",
+		Status:       store.StatusPassed,
+		EvidenceRoot: filepath.Join(dir, "evidence", runID),
+		SummaryJSON:  `{"steps":[{"stepId":"step.submit","caseId":"case.submit","caseRunId":"` + caseRunID + `","status":"passed"}]}`,
+		StartedAt:    started,
+		FinishedAt:   started.Add(time.Second),
+		CreatedAt:    started,
+		UpdatedAt:    started.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if _, err := s.RecordAPICaseRun(ctx, store.APICaseRun{
+		ID:                   caseRunID,
+		RunID:                runID,
+		CaseID:               "case.submit",
+		Status:               store.StatusPassed,
+		RequestSummaryJSON:   `{"method":"POST","path":"/workflow","stepId":"step.submit"}`,
+		AssertionSummaryJSON: `{"status":"passed"}`,
+		StartedAt:            started,
+		FinishedAt:           started.Add(time.Second),
+		CreatedAt:            started,
+	}); err != nil {
+		t.Fatalf("record case run: %v", err)
+	}
+	if _, err := s.CreateRun(ctx, store.Run{
+		ID:           caseRunID,
+		ProfileID:    "sample",
+		WorkflowID:   "workflow.case-evidence",
+		Status:       store.StatusPassed,
+		EvidenceRoot: filepath.Join(dir, "evidence", caseRunID),
+		StartedAt:    started,
+		FinishedAt:   started.Add(time.Second),
+		CreatedAt:    started,
+		UpdatedAt:    started.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("create case-run evidence run: %v", err)
+	}
+	if _, err := s.RecordEvidence(ctx, store.EvidenceRecord{
+		ID:        caseRunID + ".response",
+		RunID:     caseRunID,
+		CaseRunID: caseRunID,
+		StepID:    "step.submit",
+		Kind:      "http-response",
+		URI:       filepath.Join(dir, "evidence", caseRunID, "response.json"),
+		MediaType: "application/json",
+		Summary:   `{"http_code":200}`,
+		CreatedAt: started,
+	}); err != nil {
+		t.Fatalf("record case-run evidence: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	out := runCLI(t, "workflow", "gate", "--store", "sqlite://"+storePath, "--run", runID, "--require-passed", "--require-steps", "--require-evidence", "--json")
+	report := decodeWorkflowGateFullReport(t, out)
+	if !report.OK || report.Counts.EvidenceComplete != 1 || !report.Gates.EvidenceComplete {
+		t.Fatalf("workflow gate should count case-run scoped evidence = %#v", report)
+	}
+}
+
 func writeWorkflowGateFailureStore(t *testing.T) workflowGateFailureFixture {
 	t.Helper()
 	ctx := context.Background()
