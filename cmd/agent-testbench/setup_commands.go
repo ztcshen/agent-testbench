@@ -66,7 +66,8 @@ func runtimeFreshnessRepairCommand(repo string) string {
 	if repo == "" {
 		repo = "."
 	}
-	return "agent-testbench setup --repo " + quoteCommandValue(repo) + " --build-runtime --runtime-only"
+	wrapper := filepath.Join(repo, "bin", "agent-testbench.sh")
+	return quoteCommandValue(wrapper) + " setup --repo " + quoteCommandValue(repo) + " --build-runtime --runtime-only"
 }
 
 func doctorRuntimeFreshnessCheck(runtime statusRuntimeReport) doctorCheckReport {

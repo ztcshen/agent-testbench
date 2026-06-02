@@ -218,7 +218,7 @@ func TestStatusAndDoctorWarnWhenRuntimeBinaryPredatesHead(t *testing.T) {
 		t.Fatalf("status should include runtime/source timestamps: %#v", statusReport.Runtime)
 	}
 	wantRepair := statusReport.Runtime.RepairCommand
-	if !strings.Contains(wantRepair, "agent-testbench setup --repo ") || !strings.Contains(wantRepair, "--build-runtime --runtime-only") || !stringSliceContains(statusReport.Next, wantRepair) {
+	if !strings.Contains(wantRepair, "/bin/agent-testbench.sh' setup --repo ") || !strings.Contains(wantRepair, "--build-runtime --runtime-only") || !stringSliceContains(statusReport.Next, wantRepair) {
 		t.Fatalf("status should suggest runtime rebuild: %#v", statusReport.Next)
 	}
 
