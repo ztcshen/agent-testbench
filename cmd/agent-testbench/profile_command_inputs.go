@@ -17,11 +17,16 @@ type profileDiscoveryCommandOptions struct {
 	StoreRef               string
 	StoreURL               string
 	Filter                 string
+	ServiceID              string
 	OfflineTemplatePackage bool
 	JSONOutput             bool
 }
 
 func parseProfileDiscoveryCommandOptions(command string, filterHelp string, args []string) (profileDiscoveryCommandOptions, error) {
+	return parseProfileDiscoveryCommandOptionsWith(command, filterHelp, args, nil)
+}
+
+func parseProfileDiscoveryCommandOptionsWith(command string, filterHelp string, args []string, bindExtra func(*flag.FlagSet) func(*profileDiscoveryCommandOptions)) (profileDiscoveryCommandOptions, error) {
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
@@ -31,10 +36,14 @@ func parseProfileDiscoveryCommandOptions(command string, filterHelp string, args
 	filter := flags.String("filter", "", filterHelp)
 	offlineTemplatePackage := flags.Bool("offline-template-package", false, "Read the template package directly for offline review")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	applyExtra := func(*profileDiscoveryCommandOptions) {}
+	if bindExtra != nil {
+		applyExtra = bindExtra(flags)
+	}
 	if err := flags.Parse(args); err != nil {
 		return profileDiscoveryCommandOptions{}, err
 	}
-	return profileDiscoveryCommandOptions{
+	options := profileDiscoveryCommandOptions{
 		ProfilePath:            *profilePath,
 		ProfileHome:            *profileHome,
 		StoreRef:               *storeRef,
@@ -42,7 +51,9 @@ func parseProfileDiscoveryCommandOptions(command string, filterHelp string, args
 		Filter:                 *filter,
 		OfflineTemplatePackage: *offlineTemplatePackage,
 		JSONOutput:             *jsonOutput,
-	}, nil
+	}
+	applyExtra(&options)
+	return options, nil
 }
 
 func (options profileDiscoveryCommandOptions) loadDiscoveryBundle(ctx context.Context) (profile.Bundle, func(), error) {

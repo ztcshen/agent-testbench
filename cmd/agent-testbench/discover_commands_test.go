@@ -408,10 +408,14 @@ func TestWorkflowDiscoverRequiresStoreUnlessOfflineTemplatePackage(t *testing.T)
 		t.Fatalf("workflow discover package-only output = %q", missingStore)
 	}
 
-	out := runCLIWithEnv(t, env, "workflow", "discover", "--profile", profileDir, "--offline-template-package", "--filter", "Workflow Alpha", "--json")
+	out := runCLIWithEnv(t, env, "workflow", "discover", "--profile", profileDir, "--offline-template-package", "--filter", "Workflow Alpha", "--service", "service.alpha", "--json")
 	var report struct {
 		Items []struct {
-			ID string `json:"id"`
+			ID           string `json:"id"`
+			MatchedSteps []struct {
+				StepID    string `json:"stepId"`
+				ServiceID string `json:"serviceId"`
+			} `json:"matchedSteps"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
@@ -419,5 +423,8 @@ func TestWorkflowDiscoverRequiresStoreUnlessOfflineTemplatePackage(t *testing.T)
 	}
 	if len(report.Items) != 1 || report.Items[0].ID != "workflow.alpha" {
 		t.Fatalf("offline workflow discover = %#v", report.Items)
+	}
+	if len(report.Items[0].MatchedSteps) != 2 || report.Items[0].MatchedSteps[0].StepID != "first" || report.Items[0].MatchedSteps[0].ServiceID != "service.alpha" {
+		t.Fatalf("offline workflow discover matched steps = %#v", report.Items[0].MatchedSteps)
 	}
 }
