@@ -8,10 +8,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"sort"
 	"strings"
 
-	"agent-testbench/internal/domain/profile"
 	"agent-testbench/internal/server/controlplane"
 	"agent-testbench/internal/store"
 )
@@ -503,65 +501,4 @@ func printWorkflowGate(report workflowGateReport) {
 	for _, action := range report.NextActions {
 		fmt.Printf("Next: %s\n", action)
 	}
-}
-
-type workflowListReport struct {
-	OK        bool               `json:"ok"`
-	ProfileID string             `json:"profileId"`
-	Count     int                `json:"count"`
-	Items     []workflowListItem `json:"items"`
-}
-
-type workflowListItem struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"displayName,omitempty"`
-	Description string `json:"description,omitempty"`
-	StepCount   int    `json:"stepCount"`
-}
-
-func runWorkflowDiscover(ctx context.Context, args []string) error {
-	options, err := parseProfileDiscoveryCommandOptions("workflow discover", "Filter by id, display name, or description", args)
-	if err != nil {
-		return err
-	}
-	bundle, cleanup, err := options.loadDiscoveryBundle(ctx)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
-	report := workflowList(bundle, options.Filter)
-	if options.JSONOutput {
-		return writeIndentedJSON(report)
-	}
-	for _, item := range report.Items {
-		fmt.Printf("%s\t%s\t%d\n", item.ID, item.DisplayName, item.StepCount)
-	}
-	return nil
-}
-
-func workflowList(bundle profile.Bundle, filter string) workflowListReport {
-	stepCounts := map[string]int{}
-	for _, item := range bundle.WorkflowBindings {
-		if strings.TrimSpace(item.WorkflowID) != "" {
-			stepCounts[item.WorkflowID]++
-		}
-	}
-	workflows := append([]profile.Workflow(nil), bundle.Workflows...)
-	sort.SliceStable(workflows, func(i, j int) bool {
-		return workflows[i].ID < workflows[j].ID
-	})
-	report := workflowListReport{OK: true, ProfileID: bundle.ID}
-	for _, workflow := range workflows {
-		if !matchesDiscoveryFilter(filter, workflow.ID, workflow.DisplayName, workflow.Description) {
-			continue
-		}
-		report.Items = append(report.Items, workflowListItem{
-			ID:          workflow.ID,
-			DisplayName: workflow.DisplayName,
-			Description: workflow.Description,
-			StepCount:   stepCounts[workflow.ID],
-		})
-	}
-	report.Count = len(report.Items)
-	return report
 }

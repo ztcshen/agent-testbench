@@ -126,6 +126,7 @@ Inspect sandbox service registration without starting services:
 
 ```bash
 ./skills/agent-testbench-operator/scripts/atb.sh sandbox service list --store STORE_NAME --json
+./skills/agent-testbench-operator/scripts/atb.sh workflow discover --store STORE_NAME --service SERVICE_ID --json
 ./skills/agent-testbench-operator/scripts/atb.sh sandbox start --store STORE_NAME --dry-run --json
 ./skills/agent-testbench-operator/scripts/atb.sh sandbox start --store STORE_NAME --workflow WORKFLOW_ID --dry-run --json
 ```

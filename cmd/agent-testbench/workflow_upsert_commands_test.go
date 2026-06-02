@@ -17,6 +17,7 @@ func TestWorkflowRegisterAndBindingUpsertStoreCatalog(t *testing.T) {
 	requireWorkflowBindingRegisterReport(t, runWorkflowBindingRegisterJSON(t, storeRef))
 	requireWorkflowUpsertInPlace(t, storeRef)
 	requireWorkflowDiscoverAfterUpsert(t, storeRef)
+	requireWorkflowDiscoverByServiceAfterUpsert(t, storeRef)
 	requireWorkflowPlanAfterBinding(t, storeRef)
 }
 
@@ -164,6 +165,54 @@ func requireWorkflowDiscoverAfterUpsert(t *testing.T, storeRef string) {
 	}
 	if len(discoverReport.Items) != 1 || discoverReport.Items[0].ID != "workflow.smoke" || discoverReport.Items[0].StepCount != 1 {
 		t.Fatalf("workflow discover after upsert = %#v", discoverReport.Items)
+	}
+}
+
+func requireWorkflowDiscoverByServiceAfterUpsert(t *testing.T, storeRef string) {
+	t.Helper()
+	discoverOut := runCLI(t, "workflow", "discover", "--store", storeRef, "--service", "service.alpha", "--filter", "Smoke Workflow Updated", "--json")
+	var discoverReport struct {
+		ServiceID string `json:"serviceId"`
+		Items     []struct {
+			ID           string   `json:"id"`
+			StepCount    int      `json:"stepCount"`
+			ServiceIDs   []string `json:"serviceIds"`
+			MatchedSteps []struct {
+				StepID    string `json:"stepId"`
+				NodeID    string `json:"nodeId"`
+				CaseID    string `json:"caseId"`
+				ServiceID string `json:"serviceId"`
+				Required  bool   `json:"required"`
+				SortOrder int    `json:"sortOrder"`
+			} `json:"matchedSteps"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(discoverOut), &discoverReport); err != nil {
+		t.Fatalf("decode workflow discover by service json: %v\n%s", err, discoverOut)
+	}
+	if discoverReport.ServiceID != "service.alpha" || len(discoverReport.Items) != 1 {
+		t.Fatalf("workflow discover service report = %#v", discoverReport)
+	}
+	item := discoverReport.Items[0]
+	if item.ID != "workflow.smoke" || item.StepCount != 1 || strings.Join(item.ServiceIDs, ",") != "service.alpha" {
+		t.Fatalf("workflow discover service item = %#v", item)
+	}
+	if len(item.MatchedSteps) != 1 || item.MatchedSteps[0].StepID != "smoke" || item.MatchedSteps[0].NodeID != "node.first" || item.MatchedSteps[0].CaseID != "case.first" || item.MatchedSteps[0].ServiceID != "service.alpha" || !item.MatchedSteps[0].Required || item.MatchedSteps[0].SortOrder != 5 {
+		t.Fatalf("workflow discover service matched steps = %#v", item.MatchedSteps)
+	}
+
+	missingOut := runCLI(t, "workflow", "discover", "--store", storeRef, "--service", "service.missing", "--json")
+	var missingReport struct {
+		Count int `json:"count"`
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(missingOut), &missingReport); err != nil {
+		t.Fatalf("decode workflow discover missing service json: %v\n%s", err, missingOut)
+	}
+	if missingReport.Count != 0 || len(missingReport.Items) != 0 {
+		t.Fatalf("workflow discover missing service = %#v", missingReport)
 	}
 }
 
