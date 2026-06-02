@@ -65,6 +65,39 @@ func TestEnvironmentRestoreExecutesDockerComposeWithoutRepository(t *testing.T) 
 	}
 }
 
+func TestEnvironmentRestoreStreamJSONEmitsAgentEvents(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	fixture.writeWorkspaceFile(t, "compose.yml", "services: {}\n")
+
+	runCLI(t, "environment", "register",
+		"--store", fixture.StoreDSN,
+		"--id", "env.stream.events",
+		"--compose-file", "compose.yml",
+		"--health-url", newHealthyTestURL(t),
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIWithEnv(t, fixture.DockerEnv, "environment", "restore", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--execute", "--output-format", "stream-json", "env.stream.events")
+	events := decodeAgentStreamEvents(t, out)
+	if len(events) < 6 {
+		t.Fatalf("expected multiple stream events, got %d: %s", len(events), out)
+	}
+	if valueString(events[0]["type"]) != "run_started" || valueString(events[0]["status"]) != "running" {
+		t.Fatalf("first stream event = %#v", events[0])
+	}
+	if !agentStreamHasEvent(events, "tool_call_started", "command", "started", "docker compose up") {
+		t.Fatalf("stream missing docker compose command start: %#v", events)
+	}
+	if !agentStreamHasEvent(events, "tool_call_completed", "command", "completed", "docker compose up") {
+		t.Fatalf("stream missing docker compose command completion: %#v", events)
+	}
+	last := events[len(events)-1]
+	report := mapFromReportAny(last["report"])
+	if valueString(last["type"]) != "run_completed" || valueString(last["status"]) != "passed" || !boolFromReportAny(report["ok"]) {
+		t.Fatalf("last stream event = %#v", last)
+	}
+}
+
 func TestEnvironmentRestoreRunsMixedHealthProbes(t *testing.T) {
 	fixture := newEnvironmentRestoreDockerCLIFixture(t)
 	fixture.writeWorkspaceFile(t, "compose.yml", "services: {}\n")
@@ -257,8 +290,56 @@ func TestEnvironmentRestoreHonorsComposeOptionsFromStore(t *testing.T) {
 	if strings.Contains(string(dockerCalls), " pull") || strings.Contains(string(dockerCalls), " build") || !strings.Contains(string(dockerCalls), want) {
 		t.Fatalf("compose option docker calls want %q:\n%s", want, dockerCalls)
 	}
-	if !strings.Contains(string(dockerCalls), "compose -f "+filepath.Join(fixture.Workspace, "compose.yml")+" -p demo --env-file "+filepath.Join(fixture.Workspace, ".env.local")+" --profile api ps --format json web") {
+	if !strings.Contains(string(dockerCalls), "compose -f "+filepath.Join(fixture.Workspace, "compose.yml")+" -p demo --env-file "+filepath.Join(fixture.Workspace, ".env.local")+" --profile api ps -a --format json web") {
 		t.Fatalf("compose option docker calls should include service readiness check:\n%s", dockerCalls)
+	}
+}
+
+func TestEnvironmentRestoreAcceptsCompletedOneShotComposeServiceHealth(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	fixture.writeDockerTool(t, `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
+if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
+  printf 'Docker Compose version v2.0.0\n'
+  exit 0
+fi
+if [ "$1" = "compose" ] && [[ "$*" == *" ps -a --format json "* ]]; then
+  service="${@: -1}"
+  printf '{"Name":"%s","Service":"%s","State":"exited","ExitCode":0}\n' "$service" "$service"
+  exit 0
+fi
+exit 0
+`)
+	fixture.writeWorkspaceFile(t, "compose.yml", "services:\n  s3-seed:\n    image: minio/mc\n")
+	runCLI(t, "environment", "register",
+		"--store", fixture.StoreDSN,
+		"--id", "env.compose.oneshot",
+		"--compose-file", "compose.yml",
+		"--compose-service", "s3-seed",
+		"--compose-skip-pull",
+		"--compose-skip-build",
+		"--health-compose-service", "s3-seed",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIWithEnv(t, fixture.DockerEnv, "environment", "restore", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--execute", "--health-timeout-seconds", "1", "--json", "env.compose.oneshot")
+	var report struct {
+		OK     bool `json:"ok"`
+		Docker struct {
+			HealthChecks []struct {
+				Kind     string `json:"kind"`
+				Service  string `json:"service"`
+				State    string `json:"state"`
+				ExitCode int    `json:"exitCode"`
+				OK       bool   `json:"ok"`
+			} `json:"healthChecks"`
+		} `json:"docker"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode one-shot restore json: %v\n%s", err, out)
+	}
+	if !report.OK || len(report.Docker.HealthChecks) != 1 || !report.Docker.HealthChecks[0].OK || report.Docker.HealthChecks[0].State != "exited" || report.Docker.HealthChecks[0].ExitCode != 0 {
+		t.Fatalf("one-shot compose service should pass via exit code: %#v", report)
 	}
 }
 
@@ -415,7 +496,11 @@ if [ "$1" = "manifest" ] && [ "$2" = "inspect" ]; then
   printf 'manifest for %s not found\n' "$3" >&2
   exit 1
 fi
-if [ "$1" = "compose" ] && [ "$2" = "ps" ]; then
+if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
+  printf 'image %s not found\n' "$3" >&2
+  exit 1
+fi
+if [ "$1" = "compose" ] && [[ "$*" == *" ps -a --format json "* ]]; then
   service="${@: -1}"
   printf '{"Name":"%s","Service":"%s","State":"running","Health":"healthy"}\n' "$service" "$service"
 fi
@@ -443,6 +528,53 @@ fi
 	}
 	if strings.Contains(string(dockerCalls), " pull kafka") {
 		t.Fatalf("restore should not run compose pull after image preflight failure:\n%s", dockerCalls)
+	}
+}
+
+func TestEnvironmentRestoreAcceptsLocalComposeImageWhenRegistryProbeFails(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	fixture.writeDockerTool(t, `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
+if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
+  printf 'Docker Compose version v2.0.0\n'
+  exit 0
+fi
+if [ "$1" = "manifest" ] && [ "$2" = "inspect" ]; then
+  printf 'registry timeout for %s\n' "$3" >&2
+  exit 1
+fi
+if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
+  printf '[{"Id":"sha256:local"}]\n'
+  exit 0
+fi
+if [ "$1" = "compose" ] && [[ "$*" == *" ps -a --format json "* ]]; then
+  service="${@: -1}"
+  printf '{"Name":"%s","Service":"%s","State":"running","Health":"healthy"}\n' "$service" "$service"
+fi
+`)
+	composeSource := filepath.Join(t.TempDir(), "compose.yml")
+	writeFile(t, composeSource, "services:\n  kafka:\n    image: apache/kafka:3.7.0\n")
+	runCLI(t, "environment", "register",
+		"--store", fixture.StoreDSN,
+		"--id", "env.compose.image-local",
+		"--compose-file", "compose.yml",
+		"--compose-generated-file", "compose.yml="+composeSource,
+		"--compose-service", "kafka",
+		"--compose-skip-build",
+		"--health-compose-service", "kafka",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIWithEnv(t, fixture.DockerEnv, "environment", "restore", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--execute", "--json", "env.compose.image-local")
+	if !strings.Contains(out, `"ok": true`) || !strings.Contains(out, "local Docker image is available") {
+		t.Fatalf("local image fallback should pass with note, got:\n%s", out)
+	}
+	dockerCalls, err := os.ReadFile(fixture.DockerCallsPath)
+	if err != nil {
+		t.Fatalf("read fake docker calls: %v", err)
+	}
+	if !strings.Contains(string(dockerCalls), "image inspect apache/kafka:3.7.0") || !strings.Contains(string(dockerCalls), "compose -f "+filepath.Join(fixture.Workspace, "compose.yml")+" up -d kafka") {
+		t.Fatalf("restore should inspect local image and still run compose up:\n%s", dockerCalls)
 	}
 }
 

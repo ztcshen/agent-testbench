@@ -32,15 +32,16 @@ type environmentRestoreGeneratedFile struct {
 }
 
 type environmentRestoreDockerCleanupReport struct {
-	Requested      bool       `json:"requested,omitempty"`
-	Allowed        bool       `json:"allowed,omitempty"`
-	IncludeImages  bool       `json:"includeImages,omitempty"`
-	Action         string     `json:"action,omitempty"`
-	BackupCommands [][]string `json:"backupCommands,omitempty"`
-	Commands       [][]string `json:"commands,omitempty"`
-	Output         []string   `json:"output,omitempty"`
-	Error          string     `json:"error,omitempty"`
-	Warning        string     `json:"warning,omitempty"`
+	Requested           bool       `json:"requested,omitempty"`
+	Allowed             bool       `json:"allowed,omitempty"`
+	IncludeImages       bool       `json:"includeImages,omitempty"`
+	Action              string     `json:"action,omitempty"`
+	FixedContainerNames []string   `json:"fixedContainerNames,omitempty"`
+	BackupCommands      [][]string `json:"backupCommands,omitempty"`
+	Commands            [][]string `json:"commands,omitempty"`
+	Output              []string   `json:"output,omitempty"`
+	Error               string     `json:"error,omitempty"`
+	Warning             string     `json:"warning,omitempty"`
 }
 
 type environmentRestoreHealthCheckReport struct {
@@ -55,6 +56,7 @@ type environmentRestoreHealthCheckReport struct {
 	StatusCode int    `json:"statusCode,omitempty"`
 	State      string `json:"state,omitempty"`
 	Health     string `json:"health,omitempty"`
+	ExitCode   int    `json:"exitCode,omitempty"`
 	Output     string `json:"output,omitempty"`
 	Error      string `json:"error,omitempty"`
 }
@@ -82,7 +84,7 @@ func environmentRestorePlanComposeCommands(report *environmentRestoreDockerRepor
 	report.ComposeFile = strings.Join(resolvedComposeFiles, ",")
 	baseArgs := environmentRestoreComposeBaseArgs(compose, workspace, resolvedComposeFiles)
 	services := stringSliceFromAny(compose["services"])
-	report.Cleanup = environmentRestoreDockerCleanupPlan(baseArgs, cleanupOptions)
+	report.Cleanup = environmentRestoreDockerCleanupPlan(baseArgs, cleanupOptions, environmentRestoreContainerNameConflicts(compose, workspace))
 	imageServices, buildServices := environmentRestoreComposeCommandServices(compose, workspace, composeFiles, services)
 	if !boolFromReportAny(compose["skipPull"]) && len(imageServices) > 0 {
 		report.Commands = append(report.Commands, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"pull"}, imageServices...)...))
@@ -225,7 +227,7 @@ func environmentRestoreRunCommands(ctx context.Context, report *environmentResto
 	return true
 }
 
-func environmentRestoreDockerCleanupPlan(baseArgs []string, options environmentRestoreDockerCleanupOptions) environmentRestoreDockerCleanupReport {
+func environmentRestoreDockerCleanupPlan(baseArgs []string, options environmentRestoreDockerCleanupOptions, fixedContainerNames []string) environmentRestoreDockerCleanupReport {
 	if !options.Requested {
 		return environmentRestoreDockerCleanupReport{}
 	}
@@ -235,6 +237,10 @@ func environmentRestoreDockerCleanupPlan(baseArgs []string, options environmentR
 		IncludeImages: options.IncludeImages,
 		Action:        "plan-cleanup",
 		Warning:       "Review Docker cleanup commands before simulating a clean colleague machine; the sandbox SQL Store must remain outside these Docker target services.",
+	}
+	if len(fixedContainerNames) > 0 {
+		cleanup.FixedContainerNames = append([]string(nil), fixedContainerNames...)
+		sort.Strings(cleanup.FixedContainerNames)
 	}
 	cleanup.BackupCommands = [][]string{
 		append(append([]string{"docker", "compose"}, baseArgs...), "ps"),
@@ -246,6 +252,9 @@ func environmentRestoreDockerCleanupPlan(baseArgs []string, options environmentR
 		down = append(down, "--rmi", "all")
 	}
 	cleanup.Commands = [][]string{down}
+	if len(cleanup.FixedContainerNames) > 0 {
+		cleanup.Commands = append(cleanup.Commands, append([]string{"docker", "rm", "-f"}, cleanup.FixedContainerNames...))
+	}
 	return cleanup
 }
 

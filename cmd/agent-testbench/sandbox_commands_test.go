@@ -49,6 +49,42 @@ func TestSandboxStartCommandRunsStartupCommandsFromStore(t *testing.T) {
 	requireSandboxStartupSideEffects(t, fixture)
 }
 
+func TestSandboxStartStreamJSONEmitsAgentEvents(t *testing.T) {
+	fixture := writeSandboxStartStoreFixture(t)
+	out := runCLI(t, "sandbox", "start", "--store", "sqlite://"+fixture.storePath, "--output-format", "stream-json")
+	events := decodeAgentStreamEvents(t, out)
+	if len(events) < 8 {
+		t.Fatalf("expected sandbox start stream events, got %d: %s", len(events), out)
+	}
+	if valueString(events[0]["type"]) != "run_started" || valueString(events[0]["phase"]) != "sandbox.start" {
+		t.Fatalf("first sandbox stream event = %#v", events[0])
+	}
+	if !agentStreamHasEvent(events, "step_started", "sandbox.service", "running", "entry-service") {
+		t.Fatalf("stream missing entry-service step start: %#v", events)
+	}
+	if !agentStreamHasEvent(events, "tool_call_started", "command", "started", "/bin/sh") {
+		t.Fatalf("stream missing startup command start: %#v", events)
+	}
+	if !agentStreamHasEvent(events, "step_completed", "sandbox.service", "skipped", "documented-service") {
+		t.Fatalf("stream missing documented-service skipped step: %#v", events)
+	}
+	last := events[len(events)-1]
+	report := mapFromReportAny(last["report"])
+	if valueString(last["type"]) != "run_completed" || valueString(last["status"]) != "passed" || !boolFromReportAny(report["ok"]) {
+		t.Fatalf("last sandbox stream event = %#v", last)
+	}
+	requireSandboxStartupSideEffects(t, fixture)
+}
+
+func TestSandboxStartOutputFormatRejectsJSONConflict(t *testing.T) {
+	fixture := writeSandboxStartStoreFixture(t)
+	out := runCLIFails(t, "sandbox", "start", "--store", "sqlite://"+fixture.storePath, "--json", "--output-format", "stream-json")
+	if !strings.Contains(out, "--json cannot be combined with --output-format stream-json") {
+		t.Fatalf("sandbox start output-format conflict error = %q", out)
+	}
+	requireSandboxNoStartupSideEffects(t, fixture)
+}
+
 func TestSandboxStartMissingServiceExplainsRegistryBoundary(t *testing.T) {
 	fixture := writeSandboxStartStoreFixture(t)
 

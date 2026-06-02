@@ -118,6 +118,39 @@ func TestEnvironmentMigrationApplyPersistsStatusForPlan(t *testing.T) {
 	}
 }
 
+func TestEnvironmentMigrationApplyStreamJSONEmitsAgentEvents(t *testing.T) {
+	fixture := writeEnvironmentMigrationStoreFixture(t)
+	seedEnvironmentMigrationAsset(t, fixture.storePath)
+	dockerEnv, _, _ := fakeDockerCommandCapturingExecStdin(t)
+
+	out := runCLIWithEnv(t, dockerEnv, "environment", "migration", "apply", "env.migration",
+		"--store", "sqlite://"+fixture.storePath,
+		"--edge", "app:mysql",
+		"--database", "app_db",
+		"--workspace", fixture.workspace,
+		"--execute",
+		"--output-format", "stream-json",
+	)
+	events := decodeAgentStreamEvents(t, out)
+	if len(events) < 6 {
+		t.Fatalf("expected migration apply stream events, got %d: %s", len(events), out)
+	}
+	if valueString(events[0]["type"]) != "run_started" || valueString(events[0]["phase"]) != "environment.migration.apply" {
+		t.Fatalf("first migration stream event = %#v", events[0])
+	}
+	if !agentStreamHasEvent(events, "step_started", "environment.migration", "running", "app.mysql.migration.0011") {
+		t.Fatalf("stream missing migration step start: %#v", events)
+	}
+	if !agentStreamHasEvent(events, "tool_call_started", "command", "started", "docker compose exec") {
+		t.Fatalf("stream missing docker compose exec start: %#v", events)
+	}
+	last := events[len(events)-1]
+	report := mapFromReportAny(last["report"])
+	if valueString(last["type"]) != "run_completed" || valueString(last["status"]) != "passed" || !boolFromReportAny(report["ok"]) {
+		t.Fatalf("last migration stream event = %#v", last)
+	}
+}
+
 func TestEnvironmentMigrationApplySQLUsesHistoryChecksumAndPreconditions(t *testing.T) {
 	item := environmentMigrationItem{
 		EnvironmentID:    "env.migration",
@@ -393,7 +426,7 @@ if [[ "$*" == *" exec -T mysql "* ]]; then
   cat >> "$MYSQL_STDIN_FILE"
   printf '\n-- agent-testbench-call-boundary --\n' >> "$MYSQL_STDIN_FILE"
 fi
-if [[ "$*" == *" ps --format json "* ]]; then
+if [[ "$*" == *" ps -a --format json "* ]]; then
   service="${@: -1}"
   printf '{"Name":"%s","Service":"%s","State":"running","Health":"healthy"}\n' "$service" "$service"
 fi

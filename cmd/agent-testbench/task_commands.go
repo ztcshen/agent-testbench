@@ -45,6 +45,7 @@ func runTaskRun(ctx context.Context, args []string) error {
 	flags.SetOutput(os.Stderr)
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	command := flags.String("command", "", "AgentTestBench command to execute")
+	shellMode := flags.Bool("shell", false, "Execute --command through /bin/sh -c for local sandbox trigger commands")
 	notifyFile := flags.String("notify-file", "", "Append completion notifications to a JSONL file")
 	notifyWebhook := flags.String("notify-webhook", "", "POST completion notifications to a webhook")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable task run report")
@@ -63,7 +64,11 @@ func runTaskRun(ctx context.Context, args []string) error {
 		return err
 	}
 	defer cleanup()
-	task, err := upsertCLITask(ctx, runtime, name, *command, "", "active", taskNotificationOptions{File: *notifyFile, Webhook: *notifyWebhook})
+	kind := "cli"
+	if *shellMode {
+		kind = "shell"
+	}
+	task, err := upsertTask(ctx, runtime, name, *command, "", "active", kind, taskNotificationOptions{File: *notifyFile, Webhook: *notifyWebhook})
 	if err != nil {
 		return err
 	}

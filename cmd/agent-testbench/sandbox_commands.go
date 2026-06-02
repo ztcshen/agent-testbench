@@ -46,6 +46,12 @@ type sandboxStartServiceResult struct {
 	Error          string `json:"error,omitempty"`
 }
 
+type sandboxStartFilters struct {
+	ServiceID  string
+	WorkflowID string
+	Kind       string
+}
+
 type sandboxServiceListReport struct {
 	OK            bool                     `json:"ok"`
 	StorePath     string                   `json:"storePath"`
@@ -399,8 +405,13 @@ func runSandboxStart(ctx context.Context, args []string) error {
 	serviceKind := flags.String("kind", "", "Only start services of this kind; default includes all kinds")
 	timeoutSeconds := flags.Int("timeout-seconds", 300, "Per-service startup command timeout")
 	dryRun := flags.Bool("dry-run", false, "Plan service startup without running startup commands")
+	outputFormat := flags.String("output-format", "", "Output format: text, json, or stream-json")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	resolvedOutputFormat, err := resolveCLIOutputFormat(*outputFormat, *jsonOutput)
+	if err != nil {
 		return err
 	}
 	if *timeoutSeconds <= 0 {
@@ -421,6 +432,9 @@ func runSandboxStart(ctx context.Context, args []string) error {
 		return err
 	}
 	defer closeCLIStore(runtime)
+	if resolvedOutputFormat == "stream-json" {
+		ctx = contextWithAgentEventStream(ctx, os.Stdout)
+	}
 	catalog, err := runtime.GetProfileCatalog(ctx)
 	if err != nil {
 		return err
@@ -431,46 +445,23 @@ func runSandboxStart(ctx context.Context, args []string) error {
 		WorkflowID: strings.TrimSpace(*workflowID),
 		StorePath:  maskStoreURL(resolvedStoreURL),
 	}
+	agentEmitRunStarted(ctx, newSandboxStartRunID(), "sandbox.start", sandboxStartTarget(report), "sandbox start started")
 	workflowRequired, err := sandboxWorkflowRequiredServiceReasons(catalog, report.WorkflowID)
 	if err != nil {
 		return err
 	}
-	kindFilter := strings.TrimSpace(*serviceKind)
-	serviceFilter := strings.TrimSpace(*serviceID)
-	for _, service := range catalog.Services {
-		if serviceFilter != "" && service.ID != serviceFilter {
-			continue
-		}
-		workflowReason := workflowRequired[service.ID]
-		if report.WorkflowID != "" && workflowReason == "" {
-			continue
-		}
-		if kindFilter != "" && strings.TrimSpace(service.Kind) != kindFilter {
-			continue
-		}
-		requiredReason := sandboxRequiredStartupReason(service.ID, serviceFilter, workflowReason)
-		result := runSandboxServiceStartup(ctx, service, time.Duration(*timeoutSeconds)*time.Second, *dryRun, requiredReason)
-		report.Services = append(report.Services, result)
-		report.Counts.Total++
-		switch {
-		case result.Planned:
-			report.Counts.Planned++
-		case result.Skipped:
-			report.Counts.Skipped++
-		case result.ExitCode == 0:
-			report.Counts.Started++
-		case result.ExitCode != 0:
-			report.Counts.Failed++
-			report.OK = false
-		}
+	filters := sandboxStartFilters{
+		ServiceID:  strings.TrimSpace(*serviceID),
+		WorkflowID: report.WorkflowID,
+		Kind:       strings.TrimSpace(*serviceKind),
 	}
-	if serviceFilter != "" && report.Counts.Total == 0 {
-		return fmt.Errorf("registered service not found in profile service registry: %s (sandbox start does not read the environment component graph; use environment restore for component-graph Docker startup or register the service with sandbox service register)", serviceFilter)
+	startSandboxServices(ctx, &report, catalog.Services, workflowRequired, filters, time.Duration(*timeoutSeconds)*time.Second, *dryRun)
+	if err := validateSandboxStartSelection(report, filters); err != nil {
+		return err
 	}
-	if report.WorkflowID != "" && report.Counts.Total == 0 {
-		return fmt.Errorf("workflow has no registered startable services: %s", report.WorkflowID)
-	}
-	if *jsonOutput {
+	if resolvedOutputFormat == "stream-json" {
+		agentEmitRunCompleted(ctx, "sandbox.start", sandboxStartStatus(report), sandboxStartTarget(report), "sandbox start completed", sandboxStartError(report), report)
+	} else if resolvedOutputFormat == "json" {
 		if err := writeIndentedJSON(report); err != nil {
 			return err
 		}
@@ -481,6 +472,106 @@ func runSandboxStart(ctx context.Context, args []string) error {
 		return errors.New("one or more sandbox services failed to start")
 	}
 	return nil
+}
+
+func startSandboxServices(ctx context.Context, report *sandboxStartReport, services []store.CatalogService, workflowRequired map[string]string, filters sandboxStartFilters, timeout time.Duration, dryRun bool) {
+	for _, service := range services {
+		if !sandboxStartServiceMatches(service, workflowRequired[service.ID], filters) {
+			continue
+		}
+		requiredReason := sandboxRequiredStartupReason(service.ID, filters.ServiceID, workflowRequired[service.ID])
+		agentEmitStep(ctx, "step_started", "sandbox.service", "running", service.ID, "service startup started", "")
+		result := runSandboxServiceStartup(ctx, service, timeout, dryRun, requiredReason)
+		agentEmitStep(ctx, "step_completed", "sandbox.service", sandboxStartServiceStatus(result), service.ID, sandboxStartServiceMessage(result), result.Error)
+		addSandboxStartResult(report, result)
+	}
+}
+
+func sandboxStartServiceMatches(service store.CatalogService, workflowReason string, filters sandboxStartFilters) bool {
+	if filters.ServiceID != "" && service.ID != filters.ServiceID {
+		return false
+	}
+	if filters.WorkflowID != "" && workflowReason == "" {
+		return false
+	}
+	return filters.Kind == "" || strings.TrimSpace(service.Kind) == filters.Kind
+}
+
+func addSandboxStartResult(report *sandboxStartReport, result sandboxStartServiceResult) {
+	report.Services = append(report.Services, result)
+	report.Counts.Total++
+	switch {
+	case result.Planned:
+		report.Counts.Planned++
+	case result.Skipped:
+		report.Counts.Skipped++
+	case result.ExitCode == 0:
+		report.Counts.Started++
+	default:
+		report.Counts.Failed++
+		report.OK = false
+	}
+}
+
+func validateSandboxStartSelection(report sandboxStartReport, filters sandboxStartFilters) error {
+	if filters.ServiceID != "" && report.Counts.Total == 0 {
+		return fmt.Errorf("registered service not found in profile service registry: %s (sandbox start does not read the environment component graph; use environment restore for component-graph Docker startup or register the service with sandbox service register)", filters.ServiceID)
+	}
+	if filters.WorkflowID != "" && report.Counts.Total == 0 {
+		return fmt.Errorf("workflow has no registered startable services: %s", filters.WorkflowID)
+	}
+	return nil
+}
+
+func newSandboxStartRunID() string {
+	return "sandbox.start." + time.Now().UTC().Format("20060102T150405.000000000Z")
+}
+
+func sandboxStartTarget(report sandboxStartReport) string {
+	if strings.TrimSpace(report.WorkflowID) != "" {
+		return report.WorkflowID
+	}
+	return "profile-service-registry"
+}
+
+func sandboxStartStatus(report sandboxStartReport) string {
+	if report.OK {
+		return "passed"
+	}
+	return "failed"
+}
+
+func sandboxStartError(report sandboxStartReport) string {
+	if report.OK {
+		return ""
+	}
+	return "one or more sandbox services failed to start"
+}
+
+func sandboxStartServiceStatus(result sandboxStartServiceResult) string {
+	switch {
+	case result.Planned:
+		return "planned"
+	case result.Skipped:
+		return "skipped"
+	case result.ExitCode == 0:
+		return "passed"
+	default:
+		return "failed"
+	}
+}
+
+func sandboxStartServiceMessage(result sandboxStartServiceResult) string {
+	switch sandboxStartServiceStatus(result) {
+	case "planned":
+		return "service startup planned"
+	case "skipped":
+		return result.SkipReason
+	case "failed":
+		return "service startup failed"
+	default:
+		return "service startup completed"
+	}
 }
 
 func printSandboxStartReport(report sandboxStartReport) {

@@ -175,13 +175,16 @@ func waitEnvironmentRestoreComposeServiceHealthCheck(ctx context.Context, check 
 		check.Error = "compose service health check requires composeFile"
 		return check
 	}
-	command := append(append([]string{"docker", "compose"}, composeBaseArgs...), "ps", "--format", "json", check.Service)
+	command := append(append([]string{"docker", "compose"}, composeBaseArgs...), "ps", "-a", "--format", "json", check.Service)
 	return waitEnvironmentRestoreCommand(ctx, check, timeout, workspace, command, func(check *environmentRestoreHealthCheckReport, output string) bool {
 		check.Output = truncateReportText(output, 200)
-		state, health := parseComposeServiceHealth(output)
+		state, health, exitCode, hasExitCode := parseComposeServiceHealth(output)
 		check.State = state
 		check.Health = health
-		return state == "running" && (health == "" || health == "healthy")
+		if hasExitCode {
+			check.ExitCode = exitCode
+		}
+		return state == "running" && (health == "" || health == "healthy") || state == "exited" && hasExitCode && exitCode == 0
 	})
 }
 
@@ -268,6 +271,7 @@ func newEnvironmentRestoreHealthProgress(ctx context.Context, check environmentR
 
 func (p *environmentRestoreHealthProgress) start() {
 	environmentRestoreProgressf(p.ctx, "restore health checking: %s timeout=%s\n", p.target, p.timeout)
+	environmentRestoreEmitStep(p.ctx, "step_started", "health.wait", "running", p.target, "health check started", "")
 	p.lastPrint = time.Now()
 }
 
@@ -280,6 +284,14 @@ func (p *environmentRestoreHealthProgress) waiting(lastErr string, deadline time
 		remaining = 0
 	}
 	environmentRestoreProgressf(p.ctx, "restore health waiting: %s last=%s remaining=%s\n", p.target, lastErr, remaining)
+	environmentRestoreEmitEvent(p.ctx, agentStreamEvent{
+		Type:        "tool_observation",
+		Phase:       "health.wait",
+		Status:      "waiting",
+		Target:      p.target,
+		Message:     truncateReportText(lastErr, 200),
+		RemainingMs: remaining.Milliseconds(),
+	})
 	p.lastPrint = time.Now()
 }
 
@@ -289,6 +301,13 @@ func (p *environmentRestoreHealthProgress) done(ok bool, detail string) {
 		state = "ok"
 	}
 	environmentRestoreProgressf(p.ctx, "restore health %s: %s last=%s\n", state, p.target, detail)
+	status := "failed"
+	errText := detail
+	if ok {
+		status = "passed"
+		errText = ""
+	}
+	environmentRestoreEmitStep(p.ctx, "step_completed", "health.wait", status, p.target, detail, errText)
 }
 
 func environmentRestoreHealthProgressTarget(check environmentRestoreHealthCheckReport) string {
@@ -314,18 +333,20 @@ func environmentRestoreHealthProgressTarget(check environmentRestoreHealthCheckR
 	}
 }
 
-func parseComposeServiceHealth(output string) (string, string) {
+func parseComposeServiceHealth(output string) (string, string, int, bool) {
 	output = strings.TrimSpace(output)
 	if output == "" {
-		return "", ""
+		return "", "", 0, false
 	}
 	var object map[string]any
 	if err := json.Unmarshal([]byte(output), &object); err == nil && object != nil {
-		return strings.ToLower(valueString(firstNonNil(object["State"], object["state"]))), strings.ToLower(valueString(firstNonNil(object["Health"], object["health"])))
+		state, health, exitCode, hasExitCode := composeServiceHealthFromObject(object)
+		return state, health, exitCode, hasExitCode
 	}
 	var array []map[string]any
 	if err := json.Unmarshal([]byte(output), &array); err == nil && len(array) > 0 {
-		return strings.ToLower(valueString(firstNonNil(array[0]["State"], array[0]["state"]))), strings.ToLower(valueString(firstNonNil(array[0]["Health"], array[0]["health"])))
+		state, health, exitCode, hasExitCode := composeServiceHealthFromObject(array[0])
+		return state, health, exitCode, hasExitCode
 	}
 	lower := strings.ToLower(output)
 	state := ""
@@ -338,7 +359,37 @@ func parseComposeServiceHealth(output string) (string, string) {
 	} else if strings.Contains(lower, "healthy") {
 		health = "healthy"
 	}
-	return state, health
+	return state, health, 0, false
+}
+
+func composeServiceHealthFromObject(object map[string]any) (string, string, int, bool) {
+	state := strings.ToLower(valueString(firstNonNil(object["State"], object["state"])))
+	health := strings.ToLower(valueString(firstNonNil(object["Health"], object["health"])))
+	exitCode, ok := intFromAny(firstNonNil(object["ExitCode"], object["exitCode"], object["Exit"], object["exit"]))
+	return state, health, exitCode, ok
+}
+
+func intFromAny(value any) (int, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case int64:
+		return int(typed), true
+	case float64:
+		return int(typed), true
+	case string:
+		typed = strings.TrimSpace(typed)
+		if typed == "" {
+			return 0, false
+		}
+		var parsed int
+		if _, err := fmt.Sscanf(typed, "%d", &parsed); err != nil {
+			return 0, false
+		}
+		return parsed, true
+	default:
+		return 0, false
+	}
 }
 
 func firstNonNil(values ...any) any {

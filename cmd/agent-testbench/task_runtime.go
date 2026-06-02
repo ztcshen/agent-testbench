@@ -39,6 +39,10 @@ func openTaskByArg(ctx context.Context, storeRef string, taskRef string) (store.
 }
 
 func upsertCLITask(ctx context.Context, runtime store.Store, name string, command string, schedule string, status string, notify taskNotificationOptions) (store.AgentTask, error) {
+	return upsertTask(ctx, runtime, name, command, schedule, status, "cli", notify)
+}
+
+func upsertTask(ctx context.Context, runtime store.Store, name string, command string, schedule string, status string, kind string, notify taskNotificationOptions) (store.AgentTask, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return store.AgentTask{}, errors.New("task name is required")
@@ -47,11 +51,15 @@ func upsertCLITask(ctx context.Context, runtime store.Store, name string, comman
 	if command == "" {
 		return store.AgentTask{}, errors.New("task command is required")
 	}
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		kind = "cli"
+	}
 	now := time.Now().UTC()
 	task := store.AgentTask{
 		ID:          "agent-task." + safeTaskIDPart(name),
 		Name:        name,
-		Kind:        "cli",
+		Kind:        kind,
 		Command:     command,
 		Schedule:    schedule,
 		Status:      status,
@@ -75,7 +83,7 @@ func upsertCLITask(ctx context.Context, runtime store.Store, name string, comman
 
 func executeAndRecordTaskRun(ctx context.Context, runtime store.Store, task store.AgentTask, command string) (store.AgentTaskRun, error) {
 	started := time.Now().UTC()
-	output, exitCode, execErr := executeAgentTestBenchCommand(ctx, command)
+	output, exitCode, execErr := executeTaskCommand(ctx, task.Kind, command)
 	finished := time.Now().UTC()
 	status := store.StatusPassed
 	errorText := ""
@@ -93,13 +101,20 @@ func executeAndRecordTaskRun(ctx context.Context, runtime store.Store, task stor
 		ExitCode:    exitCode,
 		Output:      output,
 		Error:       errorText,
-		SummaryJSON: mustCompactJSON(map[string]any{"taskName": task.Name}),
+		SummaryJSON: mustCompactJSON(map[string]any{"taskName": task.Name, "kind": task.Kind}),
 		CreatedAt:   finished,
 	})
 	if recordErr != nil {
 		return store.AgentTaskRun{}, recordErr
 	}
 	return run, execErr
+}
+
+func executeTaskCommand(ctx context.Context, kind string, command string) (string, int, error) {
+	if strings.TrimSpace(kind) == "shell" {
+		return executeShellTaskCommand(ctx, command)
+	}
+	return executeAgentTestBenchCommand(ctx, command)
 }
 
 func executeAgentTestBenchCommand(ctx context.Context, command string) (string, int, error) {
@@ -115,6 +130,24 @@ func executeAgentTestBenchCommand(ctx context.Context, command string) (string, 
 		return "", -1, err
 	}
 	cmd := exec.CommandContext(ctx, exe, args...)
+	cmd.Env = os.Environ()
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return string(out), 0, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return string(out), exitErr.ExitCode(), err
+	}
+	return string(out), -1, err
+}
+
+func executeShellTaskCommand(ctx context.Context, command string) (string, int, error) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return "", -1, errors.New("task command is empty")
+	}
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
 	cmd.Env = os.Environ()
 	out, err := cmd.CombinedOutput()
 	if err == nil {

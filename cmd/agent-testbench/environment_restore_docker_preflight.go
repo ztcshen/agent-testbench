@@ -223,6 +223,10 @@ func environmentRestoreCheckComposeImages(report *environmentRestorePreflight, c
 		if err == nil {
 			continue
 		}
+		if environmentRestoreLocalDockerImageExists(dockerPath, image) {
+			report.Notes = append(report.Notes, "local Docker image is available for compose service "+service+": "+image)
+			continue
+		}
 		detail := strings.TrimSpace(string(out))
 		issue := "unavailable compose image for service " + service + ": " + image
 		if detail != "" {
@@ -232,6 +236,16 @@ func environmentRestoreCheckComposeImages(report *environmentRestorePreflight, c
 		report.Notes = append(report.Notes, issue)
 		report.OK = false
 	}
+}
+
+func environmentRestoreLocalDockerImageExists(dockerPath string, image string) bool {
+	image = strings.TrimSpace(image)
+	if image == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, dockerPath, "image", "inspect", image).Run() == nil
 }
 
 func environmentRestoreComposeBindMountSources(compose map[string]any, workspace string) map[string][]string {
