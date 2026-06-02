@@ -147,9 +147,9 @@ func RegisterSandboxService(ctx context.Context, runtime store.Store, request Sa
 	if runtime == nil {
 		return SandboxServiceRegistrationResponse{}, errSandboxStoreRequired
 	}
-	service, err := catalogServiceFromRegistration(request)
-	if err != nil {
-		return SandboxServiceRegistrationResponse{}, fmt.Errorf("%w: %w", errSandboxInvalidRegistration, err)
+	serviceID := strings.TrimSpace(request.ID)
+	if serviceID == "" {
+		return SandboxServiceRegistrationResponse{}, fmt.Errorf("%w: service id is required", errSandboxInvalidRegistration)
 	}
 
 	catalog, err := runtime.GetProfileCatalog(ctx)
@@ -161,6 +161,15 @@ func RegisterSandboxService(ctx context.Context, runtime store.Store, request Sa
 	}
 	if strings.TrimSpace(catalog.ProfileID) == "" {
 		catalog.ProfileID = currentSandboxStoreID
+	}
+	service, found := findRegisteredCatalogService(catalog.Services, serviceID)
+	if found {
+		service = mergeCatalogServiceRegistration(service, request)
+	} else {
+		service, err = catalogServiceFromRegistration(request)
+		if err != nil {
+			return SandboxServiceRegistrationResponse{}, fmt.Errorf("%w: %w", errSandboxInvalidRegistration, err)
+		}
 	}
 	catalog.IndexedAt = time.Now().UTC()
 	catalog.Services = upsertCatalogService(catalog.Services, service)
@@ -281,6 +290,77 @@ func catalogServiceFromRegistration(request sandboxServiceRegistrationRequest) (
 		Status:              status,
 		SortOrder:           request.SortOrder,
 	}, nil
+}
+
+func findRegisteredCatalogService(services []store.CatalogService, serviceID string) (store.CatalogService, bool) {
+	for _, service := range services {
+		if service.ID == serviceID {
+			return service, true
+		}
+	}
+	return store.CatalogService{}, false
+}
+
+func mergeCatalogServiceRegistration(service store.CatalogService, request sandboxServiceRegistrationRequest) store.CatalogService {
+	service.ID = strings.TrimSpace(request.ID)
+	if strings.TrimSpace(request.DisplayName) != "" {
+		service.DisplayName = strings.TrimSpace(request.DisplayName)
+	}
+	if strings.TrimSpace(request.Kind) != "" {
+		service.Kind = strings.TrimSpace(request.Kind)
+	}
+	if request.AttachedTemplateIDs != nil {
+		service.AttachedTemplateIDs = request.AttachedTemplateIDs
+	}
+	if strings.TrimSpace(request.GitURL) != "" {
+		service.GitURL = strings.TrimSpace(request.GitURL)
+	}
+	if strings.TrimSpace(request.GitBranch) != "" {
+		service.GitBranch = strings.TrimSpace(request.GitBranch)
+	}
+	if strings.TrimSpace(request.RepoEnv) != "" {
+		service.RepoEnv = strings.TrimSpace(request.RepoEnv)
+	}
+	if strings.TrimSpace(request.SourcePath) != "" {
+		service.SourcePath = strings.TrimSpace(request.SourcePath)
+	}
+	if strings.TrimSpace(request.ContainerName) != "" {
+		service.ContainerName = strings.TrimSpace(request.ContainerName)
+	}
+	if strings.TrimSpace(request.Image) != "" {
+		service.Image = strings.TrimSpace(request.Image)
+	}
+	if strings.TrimSpace(request.DockerService) != "" {
+		service.DockerService = strings.TrimSpace(request.DockerService)
+	}
+	if request.ServicePort > 0 {
+		service.ServicePort = request.ServicePort
+	}
+	if request.ManagementPort > 0 {
+		service.ManagementPort = request.ManagementPort
+	}
+	if request.MemoryMb > 0 {
+		service.MemoryMb = request.MemoryMb
+	}
+	if request.CPUMilli > 0 {
+		service.CPUMilli = request.CPUMilli
+	}
+	if strings.TrimSpace(request.StartupCommand) != "" {
+		service.StartupCommand = strings.TrimSpace(request.StartupCommand)
+	}
+	if strings.TrimSpace(request.HealthURL) != "" {
+		service.HealthURL = strings.TrimSpace(request.HealthURL)
+	}
+	if strings.TrimSpace(request.LogPath) != "" {
+		service.LogPath = strings.TrimSpace(request.LogPath)
+	}
+	if strings.TrimSpace(request.Status) != "" {
+		service.Status = strings.TrimSpace(request.Status)
+	}
+	if request.SortOrder != 0 {
+		service.SortOrder = request.SortOrder
+	}
+	return service
 }
 
 func catalogInterfacePartsFromRegistration(request sandboxInterfaceRegistrationRequest) (store.CatalogInterfaceNode, store.CatalogRequestTemplate, store.CatalogAPICase, store.CatalogTemplateConfig, error) {

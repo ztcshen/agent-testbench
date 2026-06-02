@@ -2,9 +2,9 @@
 
 ## Defaults
 
-- Project source, only when needed: `/Users/zlh/codes/agent-testbench`
+- Project source, only when needed: `the current AgentTestBench checkout`
 - Canonical operator skill:
-  `/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator`
+  `./skills/agent-testbench-operator`
 - Runtime/report root: `.runtime/operator-reports`
 - Default helper Store: `local`
 
@@ -17,7 +17,7 @@ IDs, private DSNs, or business-domain examples. Use placeholders such as
 For shared validation, pass the desired Store explicitly:
 
 ```bash
-ATB_STORE=STORE_NAME /Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh store current --json
+./skills/agent-testbench-operator/scripts/atb.sh store status --store STORE_NAME --json
 ```
 
 ## CLI Freshness And Onboarding
@@ -25,18 +25,18 @@ ATB_STORE=STORE_NAME /Users/zlh/codes/agent-testbench/skills/agent-testbench-ope
 Use:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh status --json
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh doctor --json
+./skills/agent-testbench-operator/scripts/atb.sh status --json
+./skills/agent-testbench-operator/scripts/atb.sh doctor --json
 ```
 
 The wrapper prefers `ATB_BIN`, then
-`/Users/zlh/codes/agent-testbench/.runtime/bin/agent-testbench`, then
+`./.runtime/bin/agent-testbench`, then
 `agent-testbench` on `PATH`, then the repo wrapper. If the runtime is missing
 or stale, rebuild it with the current checkout:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh onboard \
-  --repo /Users/zlh/codes/agent-testbench \
+./skills/agent-testbench-operator/scripts/atb.sh onboard \
+  --repo "$(pwd)" \
   --store local \
   --build-runtime \
   --install-shell \
@@ -67,22 +67,22 @@ or command discovery. Do not bake a private default into the public skill.
 Discover environments and workflows:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh environment discover --store STORE_NAME --json
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh workflow discover --store STORE_NAME --json
+./skills/agent-testbench-operator/scripts/atb.sh environment discover --store STORE_NAME --json
+./skills/agent-testbench-operator/scripts/atb.sh workflow discover --store STORE_NAME --json
 ```
 
 Plan a workflow:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh workflow plan --store STORE_NAME --workflow WORKFLOW_ID --json
+./skills/agent-testbench-operator/scripts/atb.sh workflow plan --store STORE_NAME --workflow WORKFLOW_ID --json
 ```
 
 Run environment acceptance only after the environment is explicit:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh serve --store STORE_NAME --host 127.0.0.1 --port PORT
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh environment acceptance start ENV_ID --server-url http://127.0.0.1:PORT --request-id REQUEST_ID --evidence-dir OUTPUT_DIR --json
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh environment acceptance report ENV_ID --server-url http://127.0.0.1:PORT --run RUN_ID --json
+./skills/agent-testbench-operator/scripts/atb.sh serve --store STORE_NAME --host 127.0.0.1 --port PORT
+./skills/agent-testbench-operator/scripts/atb.sh environment acceptance start ENV_ID --server-url http://127.0.0.1:PORT --request-id REQUEST_ID --evidence-dir OUTPUT_DIR --json
+./skills/agent-testbench-operator/scripts/atb.sh environment acceptance report ENV_ID --server-url http://127.0.0.1:PORT --run RUN_ID --json
 ```
 
 Report both the workflow result and extra health failures separately.
@@ -92,14 +92,14 @@ Report both the workflow result and extra health failures separately.
 Use:
 
 ```bash
-ATB_STORE=STORE_NAME /Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/run-case-suite.sh
+ATB_STORE=STORE_NAME ./skills/agent-testbench-operator/scripts/run-case-suite.sh
 ```
 
 Useful environment overrides:
 
 ```bash
-ATB_TIMEOUT_SECONDS=45 ATB_STORE=STORE_NAME /Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/run-case-suite.sh
-ATB_OUTPUT_DIR=/tmp/atb-suite ATB_STORE=STORE_NAME /Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/run-case-suite.sh --node NODE_ID
+ATB_TIMEOUT_SECONDS=45 ATB_STORE=STORE_NAME ./skills/agent-testbench-operator/scripts/run-case-suite.sh
+ATB_OUTPUT_DIR=/tmp/atb-suite ATB_STORE=STORE_NAME ./skills/agent-testbench-operator/scripts/run-case-suite.sh --node NODE_ID
 ```
 
 The script runs `case suite report --status active`, writes HTML/JSON/JUnit
@@ -110,7 +110,7 @@ reports, and prints failure aggregation by node and error.
 Use `task run` for one-shot repeatable CLI actions:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh task run catalog-smoke \
+./skills/agent-testbench-operator/scripts/atb.sh task run catalog-smoke \
   --store STORE_NAME \
   --command "commands --filter task --json" \
   --json
@@ -120,7 +120,7 @@ Use `task watch` for bounded polling. Prefer a finite `--limit` unless the user
 explicitly asks for a long-running watch:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh task watch catalog-smoke \
+./skills/agent-testbench-operator/scripts/atb.sh task watch catalog-smoke \
   --store STORE_NAME \
   --command "commands --filter task --json" \
   --interval 30s \
@@ -132,21 +132,21 @@ explicitly asks for a long-running watch:
 Inspect task state and logs from the Store:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh task list --store STORE_NAME --json
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh task status catalog-smoke --store STORE_NAME --json
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh task logs catalog-smoke --store STORE_NAME --json
+./skills/agent-testbench-operator/scripts/atb.sh task list --store STORE_NAME --json
+./skills/agent-testbench-operator/scripts/atb.sh task status catalog-smoke --store STORE_NAME --json
+./skills/agent-testbench-operator/scripts/atb.sh task logs catalog-smoke --store STORE_NAME --json
 ```
 
 Stop a long watch from another shell:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh task stop catalog-smoke --store STORE_NAME --json
+./skills/agent-testbench-operator/scripts/atb.sh task stop catalog-smoke --store STORE_NAME --json
 ```
 
 Validate notification targets before wiring them to task runs:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh notify test \
+./skills/agent-testbench-operator/scripts/atb.sh notify test \
   --file /tmp/agent-testbench-notify.jsonl \
   --message "AgentTestBench notification check" \
   --json
@@ -160,26 +160,33 @@ delivery failure as a task operation failure and report the failed channel.
 Discover active cases:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh case discover --store STORE_NAME --status active --json
+./skills/agent-testbench-operator/scripts/atb.sh case discover --store STORE_NAME --status active --json
 ```
 
 Check suite coverage after a run:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh case suite coverage --store STORE_NAME --status active --json
+./skills/agent-testbench-operator/scripts/atb.sh case suite coverage --store STORE_NAME --status active --json
 ```
 
 Inspect registered sandbox services without executing startup commands:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh sandbox service list --store STORE_NAME --json
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh sandbox start --store STORE_NAME --dry-run --json
+./skills/agent-testbench-operator/scripts/atb.sh sandbox service list --store STORE_NAME --json
+./skills/agent-testbench-operator/scripts/atb.sh sandbox start --store STORE_NAME --dry-run --json
+./skills/agent-testbench-operator/scripts/atb.sh sandbox start --store STORE_NAME --workflow WORKFLOW_ID --dry-run --json
 ```
+
+When a workflow-scoped sandbox start reports a service with an empty startup
+command, treat the workflow as blocked. Repair the Store service entry with
+`sandbox service register --id SERVICE_ID --startup-command ...`, or rerun the
+environment restore path that owns the generated startup files and component
+assets, before claiming the workflow is startable.
 
 Add a Store-first SQL edge migration for incremental DDL/ALTER work:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh environment migration add ENV_ID \
+./skills/agent-testbench-operator/scripts/atb.sh environment migration add ENV_ID \
   --store STORE_NAME \
   --edge OWNER:KIND \
   --database DB_NAME \
@@ -193,8 +200,8 @@ Add a Store-first SQL edge migration for incremental DDL/ALTER work:
 Review before writes, then execute against a restored workspace:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh environment migration plan ENV_ID --store STORE_NAME --edge OWNER:KIND --database DB_NAME --json
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh environment migration apply ENV_ID --store STORE_NAME --edge OWNER:KIND --database DB_NAME --workspace WORKSPACE --execute --json
+./skills/agent-testbench-operator/scripts/atb.sh environment migration plan ENV_ID --store STORE_NAME --edge OWNER:KIND --database DB_NAME --json
+./skills/agent-testbench-operator/scripts/atb.sh environment migration apply ENV_ID --store STORE_NAME --edge OWNER:KIND --database DB_NAME --workspace WORKSPACE --execute --json
 ```
 
 Use `environment migration baseline` instead of `apply` when the target

@@ -10,7 +10,7 @@ description: Operate AgentTestBench as a mostly black-box local CLI/service for 
 This skill is maintained in the AgentTestBench repository:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator
+./skills/agent-testbench-operator
 ```
 
 Local Codex installs should symlink to that directory instead of carrying a
@@ -28,39 +28,60 @@ Treat AgentTestBench as a CLI/service first. Do not read `cmd/`, `internal/`,
 or other source files unless the CLI/service behavior is broken, the user asks
 for implementation work, or a command's help/report is insufficient.
 
+### Failure Boundary
+
+For integration-test and sandbox-operation tasks, stay on the AgentTestBench
+CLI path. Do not bypass the CLI by manually starting containers, editing
+generated runtime files, patching temporary workspaces, querying implementation
+databases directly, or reading AgentTestBench source to work around missing
+features.
+
+If the CLI cannot express the needed action, returns a misleading success
+state, lacks a required workflow/service capability, or cannot recover a broken
+sandbox without manual intervention, stop the current test session. Capture the
+blocking command, the relevant JSON output, the impact, and the next capability
+needed, then register feedback through the local AgentTestBench feedback skill
+or its helper script. Report that human intervention or a product change is
+needed before continuing.
+
+Only leave this boundary when the user explicitly asks for AgentTestBench
+implementation work or gives explicit permission to use a non-CLI recovery path
+for the current turn. Even then, keep product feedback separate from the tested
+project and avoid presenting manually repaired state as clean CLI evidence.
+
 Use the repository-maintained operator wrapper:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh ...
+./skills/agent-testbench-operator/scripts/atb.sh ...
 ```
 
 The wrapper leaves `AGENT_TESTBENCH_CONFIG_HOME` to the CLI/default environment
 and exports `ATB_STORE=local` only for helper scripts that need a Store name.
 It prefers, in order: `ATB_BIN`, the latest repo runtime at
-`/Users/zlh/codes/agent-testbench/.runtime/bin/agent-testbench`, the
+`./.runtime/bin/agent-testbench`, the
 `agent-testbench` binary on `PATH`, and the repo wrapper at
-`/Users/zlh/codes/agent-testbench/bin/agent-testbench.sh`.
+`./bin/agent-testbench.sh`.
 
 ## Freshness Check
 
 Before real work, confirm the wrapper is on the latest repo runtime:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh status --json
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh doctor --json
+./skills/agent-testbench-operator/scripts/atb.sh status --json
+./skills/agent-testbench-operator/scripts/atb.sh doctor --json
 ```
 
 If the runtime binary is missing or stale, rebuild and optionally install the
 bare shell command from the current checkout:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh onboard --repo /Users/zlh/codes/agent-testbench --store local --build-runtime --install-shell --smoke commands --json
+./skills/agent-testbench-operator/scripts/atb.sh onboard --repo "$(pwd)" --store local --build-runtime --install-shell --smoke commands --json
 ```
 
 For team/shared validation, use the Store name or DSN explicitly:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh store use STORE_NAME
+./skills/agent-testbench-operator/scripts/atb.sh store use STORE_NAME
 ```
 
 ## Quick Commands
@@ -68,42 +89,43 @@ For team/shared validation, use the Store name or DSN explicitly:
 Confirm Store and Docker before running real tests:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh store current --json
+./skills/agent-testbench-operator/scripts/atb.sh store current --json
 docker info
 ```
 
 Run all active interface cases in the selected Store:
 
 ```bash
-ATB_STORE=STORE_NAME /Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/run-case-suite.sh
+ATB_STORE=STORE_NAME ./skills/agent-testbench-operator/scripts/run-case-suite.sh
 ```
 
 Run or watch repeatable Store-backed CLI tasks:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh task run catalog-smoke --store STORE_NAME --command "commands --filter task --json" --json
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh task watch catalog-smoke --store STORE_NAME --command "commands --filter task --json" --interval 30s --limit 3 --until success --json
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh task logs catalog-smoke --store STORE_NAME --json
+./skills/agent-testbench-operator/scripts/atb.sh task run catalog-smoke --store STORE_NAME --command "commands --filter task --json" --json
+./skills/agent-testbench-operator/scripts/atb.sh task watch catalog-smoke --store STORE_NAME --command "commands --filter task --json" --interval 30s --limit 3 --until success --json
+./skills/agent-testbench-operator/scripts/atb.sh task logs catalog-smoke --store STORE_NAME --json
 ```
 
 Send a notification test before wiring a task to notifications:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh notify test --file /tmp/agent-testbench-notify.jsonl --message "AgentTestBench notification check" --json
+./skills/agent-testbench-operator/scripts/atb.sh notify test --file /tmp/agent-testbench-notify.jsonl --message "AgentTestBench notification check" --json
 ```
 
 Inspect sandbox service registration without starting services:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh sandbox service list --store STORE_NAME --json
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh sandbox start --store STORE_NAME --dry-run --json
+./skills/agent-testbench-operator/scripts/atb.sh sandbox service list --store STORE_NAME --json
+./skills/agent-testbench-operator/scripts/atb.sh sandbox start --store STORE_NAME --dry-run --json
+./skills/agent-testbench-operator/scripts/atb.sh sandbox start --store STORE_NAME --workflow WORKFLOW_ID --dry-run --json
 ```
 
 Plan or apply Store-first SQL edge migrations:
 
 ```bash
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh environment migration plan ENV_ID --store STORE_NAME --edge OWNER:KIND --database DB_NAME --json
-/Users/zlh/codes/agent-testbench/skills/agent-testbench-operator/scripts/atb.sh environment migration apply ENV_ID --store STORE_NAME --edge OWNER:KIND --database DB_NAME --workspace WORKSPACE --execute --json
+./skills/agent-testbench-operator/scripts/atb.sh environment migration plan ENV_ID --store STORE_NAME --edge OWNER:KIND --database DB_NAME --json
+./skills/agent-testbench-operator/scripts/atb.sh environment migration apply ENV_ID --store STORE_NAME --edge OWNER:KIND --database DB_NAME --workspace WORKSPACE --execute --json
 ```
 
 ## Report Back

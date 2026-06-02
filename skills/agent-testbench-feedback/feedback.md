@@ -182,3 +182,21 @@ Durable feedback registered by local Codex sessions. Use
 - Evidence: Repo wrapper ./bin/agent-testbench.sh exposes update, but /Users/zlh/.codex/skills/agent-testbench-operator/scripts/atb.sh prefers a stale skill binary where update is unknown; status also reports .runtime/bin/agent-testbench missing, and release channel defaults to origin where no remote tags are available.
 - Suggestion: `doctor` now reports `runtime.shell-entrypoint` when `agent-testbench` is missing from PATH or resolves to a stale wrapper, `status` reports the active executable beside the expected runtime binary, and `update --channel main|release` prefers a configured `github` remote before `origin` when no upstream is set.
 - Verification: `go test ./cmd/agent-testbench -run 'Test(DoctorWarnsWhenShellEntrypointIsStale|UpdateDefaultsToGithubRemoteWhenNoUpstream)' -count=1`
+
+## 2026-06-01 - Lightweight sandbox workflow cannot be rebuilt after tmp-backed assets disappear
+- Area: environment
+- Severity: P2
+- Status: fixed
+- Source: local AgentTestBench operator feedback after a machine reboot
+- Evidence: A registered lightweight workflow still existed in the Store, but the previously running containers depended on temporary workspace bind mounts and generated startup assets that were gone after reboot. `sandbox service list` showed the required app service without a startup command, and the CLI had no workflow-scoped startup path to regenerate only the services required by that workflow.
+- Suggestion: `sandbox start --workflow WORKFLOW_ID` now selects only services referenced by the workflow's bound interface nodes, so operators can dry-run or execute the lightweight workflow startup path without launching unrelated services. Workflow-required services with missing startup commands now block with a repair hint instead of looking startable.
+- Verification: `go test ./cmd/agent-testbench -run 'TestSandboxStart(SelectedServiceFailsWhenStartupCommandMissing|WorkflowBlocksMissingStartupCommand|DryRunDoesNotRunStartupCommands|CommandRunsStartupCommandsFromStore)' -count=1`; `docs/quickstart.md`; `docs/cli-api-contracts.md`; `skills/agent-testbench-operator/references/operator-runbook.md`
+
+## 2026-06-01 - sandbox start returns ok while required service is skipped due empty startup command
+- Area: environment
+- Severity: P1
+- Status: fixed
+- Source: local AgentTestBench operator feedback for workflow-bound sandbox startup
+- Evidence: `sandbox service list --service SERVICE_ID` could show an active service with `hasStartupCommand=false`, while `sandbox start --service SERVICE_ID --json` returned `ok=true`, `started=0`, and `skipped=1` with `skipReason=startup command is empty`. That made an integration workflow appear successfully started even though its required app service could not be launched by the CLI.
+- Suggestion: Explicit `--service` targets and workflow-required services now fail the command when their startup command is empty, returning `ok=false`, a failed count, and a concrete `sandbox service register --id SERVICE_ID --startup-command ...` repair hint.
+- Verification: `go test ./cmd/agent-testbench -run 'TestSandboxStart(SelectedServiceFailsWhenStartupCommandMissing|WorkflowBlocksMissingStartupCommand|DryRunDoesNotRunStartupCommands|CommandRunsStartupCommandsFromStore)' -count=1`

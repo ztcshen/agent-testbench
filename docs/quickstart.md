@@ -510,6 +510,7 @@ containers or temporary files directly:
 ./bin/agent-testbench.sh case diagnose --case-run CASE_RUN_ID --json
 ./bin/agent-testbench.sh sandbox service list --store NAME_OR_DSN --json
 ./bin/agent-testbench.sh sandbox start --store NAME_OR_DSN --dry-run --json
+./bin/agent-testbench.sh sandbox start --store NAME_OR_DSN --workflow WORKFLOW_ID --dry-run --json
 ```
 
 `case diagnose` classifies the failing case, emits compact request, response,
@@ -522,7 +523,11 @@ commands instead of leaving the operator to inspect containers manually.
 `sandbox service list` shows the registered profile-service catalog without
 starting anything. `sandbox start --dry-run` reports which active services have
 startup commands and which entries would be skipped, also without executing
-those commands.
+those commands. `sandbox start --workflow WORKFLOW_ID` narrows startup to the
+services bound to that workflow and fails if a required workflow service has no
+startup command, so a rebooted or temporary-asset-backed workflow cannot look
+startable when its Store service entry cannot regenerate the local runtime
+files.
 
 When a consumer component already owns MySQL DDL on an edge such as
 `app:mysql`, add later table changes as versioned migration assets instead of

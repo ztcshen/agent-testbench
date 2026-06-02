@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -15,11 +14,12 @@ import (
 )
 
 type sandboxStartReport struct {
-	OK        bool                        `json:"ok"`
-	DryRun    bool                        `json:"dryRun,omitempty"`
-	StorePath string                      `json:"storePath"`
-	Services  []sandboxStartServiceResult `json:"services"`
-	Counts    sandboxStartReportCounts    `json:"counts"`
+	OK         bool                        `json:"ok"`
+	DryRun     bool                        `json:"dryRun,omitempty"`
+	WorkflowID string                      `json:"workflowId,omitempty"`
+	StorePath  string                      `json:"storePath"`
+	Services   []sandboxStartServiceResult `json:"services"`
+	Counts     sandboxStartReportCounts    `json:"counts"`
 }
 
 type sandboxStartReportCounts struct {
@@ -395,6 +395,7 @@ func runSandboxStart(ctx context.Context, args []string) error {
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
 	serviceID := flags.String("service", "", "Only start one registered service")
+	workflowID := flags.String("workflow", "", "Start only services required by a workflow")
 	serviceKind := flags.String("kind", "", "Only start services of this kind; default includes all kinds")
 	timeoutSeconds := flags.Int("timeout-seconds", 300, "Per-service startup command timeout")
 	dryRun := flags.Bool("dry-run", false, "Plan service startup without running startup commands")
@@ -404,6 +405,12 @@ func runSandboxStart(ctx context.Context, args []string) error {
 	}
 	if *timeoutSeconds <= 0 {
 		return errors.New("--timeout-seconds must be greater than 0")
+	}
+	if strings.TrimSpace(*workflowID) != "" && strings.TrimSpace(*serviceID) != "" {
+		return errors.New("--workflow cannot be combined with --service")
+	}
+	if strings.TrimSpace(*workflowID) != "" && strings.TrimSpace(*serviceKind) != "" {
+		return errors.New("--workflow cannot be combined with --kind")
 	}
 	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
 	if err != nil {
@@ -419,35 +426,49 @@ func runSandboxStart(ctx context.Context, args []string) error {
 		return err
 	}
 	report := sandboxStartReport{
-		OK:        true,
-		DryRun:    *dryRun,
-		StorePath: maskStoreURL(resolvedStoreURL),
+		OK:         true,
+		DryRun:     *dryRun,
+		WorkflowID: strings.TrimSpace(*workflowID),
+		StorePath:  maskStoreURL(resolvedStoreURL),
+	}
+	workflowRequired, err := sandboxWorkflowRequiredServiceReasons(catalog, report.WorkflowID)
+	if err != nil {
+		return err
 	}
 	kindFilter := strings.TrimSpace(*serviceKind)
+	serviceFilter := strings.TrimSpace(*serviceID)
 	for _, service := range catalog.Services {
-		if strings.TrimSpace(*serviceID) != "" && service.ID != strings.TrimSpace(*serviceID) {
+		if serviceFilter != "" && service.ID != serviceFilter {
+			continue
+		}
+		workflowReason := workflowRequired[service.ID]
+		if report.WorkflowID != "" && workflowReason == "" {
 			continue
 		}
 		if kindFilter != "" && strings.TrimSpace(service.Kind) != kindFilter {
 			continue
 		}
-		result := runSandboxServiceStartup(ctx, service, time.Duration(*timeoutSeconds)*time.Second, *dryRun)
+		requiredReason := sandboxRequiredStartupReason(service.ID, serviceFilter, workflowReason)
+		result := runSandboxServiceStartup(ctx, service, time.Duration(*timeoutSeconds)*time.Second, *dryRun, requiredReason)
 		report.Services = append(report.Services, result)
 		report.Counts.Total++
 		switch {
-		case result.Skipped:
-			report.Counts.Skipped++
 		case result.Planned:
 			report.Counts.Planned++
+		case result.Skipped:
+			report.Counts.Skipped++
 		case result.ExitCode == 0:
 			report.Counts.Started++
-		default:
+		case result.ExitCode != 0:
 			report.Counts.Failed++
 			report.OK = false
 		}
 	}
-	if strings.TrimSpace(*serviceID) != "" && report.Counts.Total == 0 {
-		return fmt.Errorf("registered service not found in profile service registry: %s (sandbox start does not read the environment component graph; use environment restore for component-graph Docker startup or register the service with sandbox service register)", strings.TrimSpace(*serviceID))
+	if serviceFilter != "" && report.Counts.Total == 0 {
+		return fmt.Errorf("registered service not found in profile service registry: %s (sandbox start does not read the environment component graph; use environment restore for component-graph Docker startup or register the service with sandbox service register)", serviceFilter)
+	}
+	if report.WorkflowID != "" && report.Counts.Total == 0 {
+		return fmt.Errorf("workflow has no registered startable services: %s", report.WorkflowID)
 	}
 	if *jsonOutput {
 		if err := writeIndentedJSON(report); err != nil {
@@ -460,53 +481,6 @@ func runSandboxStart(ctx context.Context, args []string) error {
 		return errors.New("one or more sandbox services failed to start")
 	}
 	return nil
-}
-
-func runSandboxServiceStartup(ctx context.Context, service store.CatalogService, timeout time.Duration, dryRun bool) sandboxStartServiceResult {
-	command := strings.TrimSpace(service.StartupCommand)
-	result := sandboxStartServiceResult{
-		ID:             service.ID,
-		DisplayName:    service.DisplayName,
-		Kind:           service.Kind,
-		ContainerName:  service.ContainerName,
-		ServicePort:    service.ServicePort,
-		ManagementPort: service.ManagementPort,
-		Command:        command,
-		ExitCode:       0,
-	}
-	if strings.TrimSpace(service.Status) != "" && strings.TrimSpace(service.Status) != "active" {
-		result.Skipped = true
-		result.SkipReason = "service is not active"
-		return result
-	}
-	if command == "" {
-		result.Skipped = true
-		result.SkipReason = "startup command is empty"
-		return result
-	}
-	if dryRun {
-		result.Planned = true
-		return result
-	}
-	commandCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	cmd := exec.CommandContext(commandCtx, "/bin/sh", "-c", command)
-	output, err := cmd.CombinedOutput()
-	result.Output = strings.TrimSpace(string(output))
-	if commandCtx.Err() == context.DeadlineExceeded {
-		result.ExitCode = 124
-		result.Error = "startup command timed out"
-		return result
-	}
-	if err != nil {
-		result.ExitCode = 1
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			result.ExitCode = exitErr.ExitCode()
-		}
-		result.Error = err.Error()
-	}
-	return result
 }
 
 func printSandboxStartReport(report sandboxStartReport) {

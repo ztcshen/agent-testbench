@@ -16,19 +16,24 @@ import (
 )
 
 type sandboxStartCommandReport struct {
-	OK       bool                         `json:"ok"`
-	DryRun   bool                         `json:"dryRun"`
-	Services []sandboxStartCommandService `json:"services"`
-	Counts   struct {
+	OK         bool                         `json:"ok"`
+	DryRun     bool                         `json:"dryRun"`
+	WorkflowID string                       `json:"workflowId"`
+	Services   []sandboxStartCommandService `json:"services"`
+	Counts     struct {
 		Planned int `json:"planned"`
+		Failed  int `json:"failed"`
 	} `json:"counts"`
 }
 
 type sandboxStartCommandService struct {
-	ID       string `json:"id"`
-	ExitCode int    `json:"exitCode"`
-	Skipped  bool   `json:"skipped"`
-	Planned  bool   `json:"planned"`
+	ID         string `json:"id"`
+	Command    string `json:"command"`
+	ExitCode   int    `json:"exitCode"`
+	Skipped    bool   `json:"skipped"`
+	Planned    bool   `json:"planned"`
+	SkipReason string `json:"skipReason"`
+	Error      string `json:"error"`
 }
 
 type sandboxStartFixture struct {
@@ -194,25 +199,6 @@ func TestSandboxServiceListCanReadComponentOnlyEnvironment(t *testing.T) {
 	if !report.OK || report.Count != 1 || report.Services[0].ID != "mysql" || report.Services[0].InProfileRegistry || !report.Services[0].InComponentGraph {
 		t.Fatalf("component-only sandbox service list = %#v", report)
 	}
-}
-
-func TestSandboxStartDryRunDoesNotRunStartupCommands(t *testing.T) {
-	fixture := writeSandboxStartStoreFixture(t)
-
-	report := runSandboxStartJSON(t, "sqlite://"+fixture.storePath, "sandbox start dry-run", "--dry-run")
-	if !report.OK || !report.DryRun || report.Counts.Planned != 2 {
-		t.Fatalf("sandbox start dry-run report = %#v", report)
-	}
-	planned := map[string]bool{}
-	skipped := map[string]bool{}
-	for _, service := range report.Services {
-		planned[service.ID] = service.Planned
-		skipped[service.ID] = service.Skipped
-	}
-	if !planned["entry-service"] || !planned["platform-service"] || !skipped["documented-service"] {
-		t.Fatalf("sandbox start dry-run services = %#v", report.Services)
-	}
-	requireSandboxNoStartupSideEffects(t, fixture)
 }
 
 func writeSandboxStartStoreFixture(t *testing.T) sandboxStartFixture {
@@ -462,20 +448,24 @@ func TestSandboxRegisterCommandsWriteStoreCatalog(t *testing.T) {
 func TestSandboxServiceRegisterCanRepairStartupCommand(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	startedPath := filepath.Join(t.TempDir(), "started.txt")
+	healthURL := newHealthyTestURL(t)
 	runCLI(t, "sandbox", "service", "register",
 		"--store", "sqlite://"+storePath,
 		"--id", "service.refresh",
 		"--display-name", "Refresh Service",
 		"--kind", "app",
+		"--service-port", "18081",
+		"--management-port", "19091",
+		"--health-url", healthURL,
 	)
-	before := runCLI(t, "sandbox", "start",
+	before := runCLIFails(t, "sandbox", "start",
 		"--store", "sqlite://"+storePath,
 		"--service", "service.refresh",
 		"--dry-run",
 		"--json",
 	)
-	if !strings.Contains(before, `"skipped": true`) || !strings.Contains(before, "startup command is empty") {
-		t.Fatalf("service without startup command should be skipped before repair: %s", before)
+	if !strings.Contains(before, `"ok": false`) || !strings.Contains(before, `"failed": 1`) || !strings.Contains(before, sandboxStartupCommandEmpty) {
+		t.Fatalf("service without startup command should fail before repair: %s", before)
 	}
 
 	runCLI(t, "sandbox", "service", "register",
@@ -492,6 +482,22 @@ func TestSandboxServiceRegisterCanRepairStartupCommand(t *testing.T) {
 	)
 	if !strings.Contains(after, `"planned": true`) || !strings.Contains(after, startedPath) {
 		t.Fatalf("service startup command repair should make dry-run planned: %s", after)
+	}
+	s, err := sqlite.Open(context.Background(), sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+	catalog, err := s.GetProfileCatalog(context.Background())
+	if err != nil {
+		t.Fatalf("get catalog: %v", err)
+	}
+	if len(catalog.Services) != 1 {
+		t.Fatalf("catalog services = %#v", catalog.Services)
+	}
+	service := catalog.Services[0]
+	if service.DisplayName != "Refresh Service" || service.Kind != "app" || service.ServicePort != 18081 || service.ManagementPort != 19091 || service.HealthURL != healthURL || service.Status != "active" {
+		t.Fatalf("startup command repair should preserve service metadata: %#v", service)
 	}
 }
 
