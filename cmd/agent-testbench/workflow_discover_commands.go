@@ -1,9 +1,11 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"flag"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -146,16 +148,18 @@ func sortedWorkflowServiceIDs(values map[string]bool) []string {
 }
 
 func sortWorkflowServiceMatchSteps(items []workflowServiceMatchStep) {
-	sort.SliceStable(items, func(i, j int) bool {
-		if items[i].SortOrder != items[j].SortOrder {
-			return items[i].SortOrder < items[j].SortOrder
-		}
-		if items[i].StepID != items[j].StepID {
-			return items[i].StepID < items[j].StepID
-		}
-		if items[i].NodeID != items[j].NodeID {
-			return items[i].NodeID < items[j].NodeID
-		}
-		return items[i].CaseID < items[j].CaseID
-	})
+	slices.SortStableFunc(items, compareWorkflowServiceMatchStep)
+}
+
+func compareWorkflowServiceMatchStep(left workflowServiceMatchStep, right workflowServiceMatchStep) int {
+	if value := cmp.Compare(left.SortOrder, right.SortOrder); value != 0 {
+		return value
+	}
+	if value := strings.Compare(left.StepID, right.StepID); value != 0 {
+		return value
+	}
+	if value := strings.Compare(left.NodeID, right.NodeID); value != 0 {
+		return value
+	}
+	return strings.Compare(left.CaseID, right.CaseID)
 }
