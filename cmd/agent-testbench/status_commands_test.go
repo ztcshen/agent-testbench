@@ -180,8 +180,9 @@ func TestDoctorWarnsWhenShellEntrypointIsStale(t *testing.T) {
 
 func TestStatusAndDoctorWarnWhenRuntimeBinaryPredatesHead(t *testing.T) {
 	repo := createSetupRepo(t)
+	oldRevision := strings.TrimSpace(runGit(t, repo, "rev-parse", "HEAD"))
 	runtimePath := filepath.Join(repo, ".runtime", "bin", "agent-testbench")
-	writeFile(t, runtimePath, "#!/usr/bin/env sh\nexit 0\n")
+	writeRuntimeVersionScript(t, runtimePath, oldRevision)
 	if err := os.Chmod(runtimePath, 0o755); err != nil {
 		t.Fatalf("chmod runtime: %v", err)
 	}
@@ -189,6 +190,9 @@ func TestStatusAndDoctorWarnWhenRuntimeBinaryPredatesHead(t *testing.T) {
 	if err := os.Chtimes(runtimePath, old, old); err != nil {
 		t.Fatalf("make runtime stale: %v", err)
 	}
+	writeFile(t, filepath.Join(repo, "README.md"), "# newer source\n")
+	runGit(t, repo, "add", "README.md")
+	runGit(t, repo, "-c", "user.name=Open Test", "-c", "user.email=open-test@example.com", "commit", "-m", "newer source")
 	env := []string{"AGENT_TESTBENCH_CONFIG_HOME=" + t.TempDir(), "AGENT_TESTBENCH_REPO=" + repo}
 	statusOut := runCLIWithEnv(t, env, "status", "--json")
 	var statusReport struct {
@@ -197,6 +201,7 @@ func TestStatusAndDoctorWarnWhenRuntimeBinaryPredatesHead(t *testing.T) {
 			Executable       bool   `json:"executable"`
 			Fresh            bool   `json:"fresh"`
 			StaleReason      string `json:"staleReason"`
+			BuildRevision    string `json:"buildRevision"`
 			BinaryModifiedAt string `json:"binaryModifiedAt"`
 			SourceCommitAt   string `json:"sourceCommitAt"`
 			RepairCommand    string `json:"repairCommand"`
@@ -206,7 +211,7 @@ func TestStatusAndDoctorWarnWhenRuntimeBinaryPredatesHead(t *testing.T) {
 	if err := json.Unmarshal([]byte(statusOut), &statusReport); err != nil {
 		t.Fatalf("decode stale runtime status: %v\n%s", err, statusOut)
 	}
-	if !statusReport.Runtime.Exists || !statusReport.Runtime.Executable || statusReport.Runtime.Fresh || !strings.Contains(statusReport.Runtime.StaleReason, "older than") {
+	if !statusReport.Runtime.Exists || !statusReport.Runtime.Executable || statusReport.Runtime.Fresh || !strings.Contains(statusReport.Runtime.StaleReason, "different git revision") || statusReport.Runtime.BuildRevision != oldRevision {
 		t.Fatalf("status should report stale runtime: %#v", statusReport.Runtime)
 	}
 	if statusReport.Runtime.BinaryModifiedAt == "" || statusReport.Runtime.SourceCommitAt == "" {
@@ -233,7 +238,7 @@ func TestStatusAndDoctorWarnWhenRuntimeBinaryPredatesHead(t *testing.T) {
 		if check.Code != "runtime.fresh" {
 			continue
 		}
-		if check.OK || !strings.Contains(check.Detail, "older than") || check.Fix != wantRepair {
+		if check.OK || !strings.Contains(check.Detail, "different git revision") || check.Fix != wantRepair {
 			t.Fatalf("runtime freshness check = %#v", check)
 		}
 		return
@@ -245,13 +250,7 @@ func TestStatusWarnsWhenRuntimeBuildRevisionDiffersFromHead(t *testing.T) {
 	repo := createSetupRepo(t)
 	head := strings.TrimSpace(runGit(t, repo, "rev-parse", "HEAD"))
 	runtimePath := filepath.Join(repo, ".runtime", "bin", "agent-testbench")
-	writeFile(t, runtimePath, `#!/usr/bin/env sh
-if [ "$1" = "version" ] && [ "$2" = "--json" ]; then
-  printf '{"version":"0.1.0","buildRevision":"ffffffffffffffffffffffffffffffffffffffff"}\n'
-  exit 0
-fi
-exit 0
-`)
+	writeRuntimeVersionScript(t, runtimePath, "ffffffffffffffffffffffffffffffffffffffff")
 	if err := os.Chmod(runtimePath, 0o755); err != nil {
 		t.Fatalf("chmod runtime: %v", err)
 	}
@@ -275,6 +274,38 @@ exit 0
 	if report.Runtime.Fresh || report.Runtime.SourceRevision != head || !strings.Contains(report.Runtime.StaleReason, "different git revision") {
 		t.Fatalf("status should reject mismatched runtime revision: %#v", report.Runtime)
 	}
+}
+
+func TestStatusWarnsWhenRuntimeBuildRevisionUnavailable(t *testing.T) {
+	repo := createSetupRepo(t)
+	runtimePath := filepath.Join(repo, ".runtime", "bin", "agent-testbench")
+	writeFile(t, runtimePath, "#!/usr/bin/env sh\nexit 0\n")
+	if err := os.Chmod(runtimePath, 0o755); err != nil {
+		t.Fatalf("chmod runtime: %v", err)
+	}
+	future := time.Now().Add(24 * time.Hour)
+	if err := os.Chtimes(runtimePath, future, future); err != nil {
+		t.Fatalf("make runtime mtime newer than head: %v", err)
+	}
+
+	out := runCLIWithEnv(t, []string{"AGENT_TESTBENCH_CONFIG_HOME=" + t.TempDir(), "AGENT_TESTBENCH_REPO=" + repo}, "status", "--json")
+	var report struct {
+		Runtime struct {
+			Fresh       bool   `json:"fresh"`
+			StaleReason string `json:"staleReason"`
+		} `json:"runtime"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode missing revision status: %v\n%s", err, out)
+	}
+	if report.Runtime.Fresh || !strings.Contains(report.Runtime.StaleReason, "does not report a build revision") {
+		t.Fatalf("status should reject runtime without build revision: %#v", report.Runtime)
+	}
+}
+
+func writeRuntimeVersionScript(t *testing.T, path string, revision string) {
+	t.Helper()
+	writeFile(t, path, "#!/usr/bin/env sh\nif [ \"$1\" = \"version\" ] && [ \"$2\" = \"--json\" ]; then\n  printf '{\"version\":\"0.1.0\",\"buildRevision\":\""+revision+"\"}\\n'\n  exit 0\nfi\nexit 0\n")
 }
 
 func TestStatusDeepIncludesStoreSchema(t *testing.T) {

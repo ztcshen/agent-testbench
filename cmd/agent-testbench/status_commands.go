@@ -185,16 +185,26 @@ func statusRuntime(ctx context.Context, repo statusRepoReport) statusRuntimeRepo
 	report.Executable = info.Mode()&0o111 != 0
 	report.BinaryModifiedAt = info.ModTime().UTC().Format(time.RFC3339)
 	report.Fresh = true
-	if buildRevision, err := statusRuntimeBuildRevision(ctx, repoPath, path); err == nil && strings.TrimSpace(buildRevision) != "" {
+	var repoCommitTime time.Time
+	if commitTime, err := statusRepoCommitTime(ctx, repoPath); err == nil {
+		repoCommitTime = commitTime
+		report.SourceCommitAt = repoCommitTime.UTC().Format(time.RFC3339)
+	}
+	if strings.TrimSpace(repo.Revision) != "" {
+		buildRevision, err := statusRuntimeBuildRevision(ctx, repoPath, path)
 		report.BuildRevision = strings.TrimSpace(buildRevision)
-		if strings.TrimSpace(repo.Revision) != "" && report.BuildRevision != strings.TrimSpace(repo.Revision) {
+		if err != nil || report.BuildRevision == "" {
+			report.Fresh = false
+			report.StaleReason = "runtime binary does not report a build revision"
+			return report
+		}
+		if report.BuildRevision != strings.TrimSpace(repo.Revision) {
 			report.Fresh = false
 			report.StaleReason = "runtime binary was built from a different git revision"
 			return report
 		}
 	}
-	if repoCommitTime, err := statusRepoCommitTime(ctx, repoPath); err == nil {
-		report.SourceCommitAt = repoCommitTime.UTC().Format(time.RFC3339)
+	if !repoCommitTime.IsZero() {
 		if info.ModTime().Before(repoCommitTime) {
 			report.Fresh = false
 			report.StaleReason = "runtime binary is older than the current git HEAD"
