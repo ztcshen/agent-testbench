@@ -432,7 +432,7 @@ func runSandboxStart(ctx context.Context, args []string) error {
 		return err
 	}
 	defer closeCLIStore(runtime)
-	if resolvedOutputFormat == "stream-json" {
+	if resolvedOutputFormat == cliOutputFormatStreamJSON {
 		ctx = contextWithAgentEventStream(ctx, os.Stdout)
 	}
 	catalog, err := runtime.GetProfileCatalog(ctx)
@@ -459,13 +459,14 @@ func runSandboxStart(ctx context.Context, args []string) error {
 	if err := validateSandboxStartSelection(report, filters); err != nil {
 		return err
 	}
-	if resolvedOutputFormat == "stream-json" {
+	switch resolvedOutputFormat {
+	case cliOutputFormatStreamJSON:
 		agentEmitRunCompleted(ctx, "sandbox.start", sandboxStartStatus(report), sandboxStartTarget(report), "sandbox start completed", sandboxStartError(report), report)
-	} else if resolvedOutputFormat == "json" {
+	case cliOutputFormatJSON:
 		if err := writeIndentedJSON(report); err != nil {
 			return err
 		}
-	} else {
+	default:
 		printSandboxStartReport(report)
 	}
 	if !report.OK {

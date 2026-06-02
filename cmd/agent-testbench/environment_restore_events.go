@@ -13,6 +13,19 @@ import (
 
 type agentEventStreamContextKey struct{}
 
+const (
+	cliOutputFormatText       = "text"
+	cliOutputFormatJSON       = "json"
+	cliOutputFormatStreamJSON = "stream-json"
+
+	agentCommandStatusStarted   = "started"
+	agentCommandStatusRunning   = "running"
+	agentCommandStatusCompleted = "completed"
+	agentCommandStatusFailed    = "failed"
+
+	dockerComposeCommandVersion = "version"
+)
+
 type agentEventStream struct {
 	writer  io.Writer
 	mu      sync.Mutex
@@ -55,12 +68,11 @@ func contextWithAgentEventStream(ctx context.Context, writer io.Writer) context.
 }
 
 func agentEventStreamFromContext(ctx context.Context) *agentEventStream {
-	stream, _ := ctx.Value(agentEventStreamContextKey{}).(*agentEventStream)
+	stream, ok := ctx.Value(agentEventStreamContextKey{}).(*agentEventStream)
+	if !ok {
+		return nil
+	}
 	return stream
-}
-
-func environmentRestoreHasEventStream(ctx context.Context) bool {
-	return agentHasEventStream(ctx)
 }
 
 func agentHasEventStream(ctx context.Context) bool {
@@ -192,15 +204,12 @@ func agentEmitStep(ctx context.Context, eventType string, phase string, status s
 	})
 }
 
-func environmentRestoreEmitCommand(ctx context.Context, status string, workdir string, command []string, started time.Time, message string, errText string) {
-	agentEmitCommand(ctx, status, workdir, command, started, message, errText)
-}
-
 func agentEmitCommand(ctx context.Context, status string, workdir string, command []string, started time.Time, message string, errText string) {
 	eventType := "tool_observation"
-	if status == "started" {
+	switch status {
+	case agentCommandStatusStarted:
 		eventType = "tool_call_started"
-	} else if status == "completed" || status == "failed" {
+	case agentCommandStatusCompleted, agentCommandStatusFailed:
 		eventType = "tool_call_completed"
 	}
 	elapsedMs := int64(0)
@@ -248,7 +257,7 @@ func runAgentObservedCommand(ctx context.Context, options agentObservedCommandOp
 		cmd.Stdin = bytes.NewBufferString(options.Input)
 	}
 	started := time.Now()
-	agentEmitCommand(ctx, "started", options.Workdir, options.Command, started, "", "")
+	agentEmitCommand(ctx, agentCommandStatusStarted, options.Workdir, options.Command, started, "", "")
 	resultCh := make(chan agentObservedCommandResult, 1)
 	go func() {
 		out, err := cmd.CombinedOutput()
@@ -274,14 +283,14 @@ func runAgentObservedCommand(ctx context.Context, options agentObservedCommandOp
 	for {
 		select {
 		case result := <-resultCh:
-			status := "completed"
+			status := agentCommandStatusCompleted
 			if result.Error != "" {
-				status = "failed"
+				status = agentCommandStatusFailed
 			}
 			agentEmitCommand(ctx, status, options.Workdir, options.Command, started, result.Output, result.Error)
 			return result
 		case <-ticker.C:
-			agentEmitCommand(ctx, "running", options.Workdir, options.Command, started, "command still running", "")
+			agentEmitCommand(ctx, agentCommandStatusRunning, options.Workdir, options.Command, started, "command still running", "")
 		}
 	}
 }
@@ -301,7 +310,7 @@ func restoreCommandTarget(command []string) string {
 	if len(command) >= 2 && command[0] == "docker" && command[1] == "compose" {
 		for _, part := range command[2:] {
 			switch part {
-			case "build", "config", "down", "exec", "images", "ps", "pull", "up", "version":
+			case "build", "config", "down", "exec", "images", "ps", "pull", "up", dockerComposeCommandVersion:
 				return "docker compose " + part
 			}
 		}

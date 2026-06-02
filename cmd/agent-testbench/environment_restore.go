@@ -158,23 +158,23 @@ func parseEnvironmentRestoreCommandOptions(args []string) (environmentRestoreCom
 			AssumeCleanDocker:     *assumeCleanDocker,
 		},
 		OutputFormat: resolvedOutputFormat,
-		JSONOutput:   resolvedOutputFormat == "json",
+		JSONOutput:   resolvedOutputFormat == cliOutputFormatJSON,
 	}, nil
 }
 
 func resolveCLIOutputFormat(outputFormat string, jsonOutput bool) (string, error) {
 	outputFormat = strings.TrimSpace(outputFormat)
 	if outputFormat == "" {
-		outputFormat = "text"
+		outputFormat = cliOutputFormatText
 	}
 	if jsonOutput {
-		if outputFormat != "text" && outputFormat != "json" {
+		if outputFormat != cliOutputFormatText && outputFormat != cliOutputFormatJSON {
 			return "", errors.New("--json cannot be combined with --output-format " + outputFormat)
 		}
-		outputFormat = "json"
+		outputFormat = cliOutputFormatJSON
 	}
 	switch outputFormat {
-	case "text", "json", "stream-json":
+	case cliOutputFormatText, cliOutputFormatJSON, cliOutputFormatStreamJSON:
 		return outputFormat, nil
 	default:
 		return "", errors.New("--output-format must be text, json, or stream-json")
@@ -224,7 +224,7 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if options.OutputFormat == "stream-json" {
+	if options.OutputFormat == cliOutputFormatStreamJSON {
 		ctx = contextWithEnvironmentRestoreEventStream(ctx, os.Stdout)
 	} else if options.Execute && !options.JSONOutput {
 		ctx = contextWithEnvironmentRestoreProgress(ctx, os.Stderr)
@@ -247,7 +247,7 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if options.OutputFormat == "stream-json" {
+	if options.OutputFormat == cliOutputFormatStreamJSON {
 		environmentRestoreEmitRunCompleted(ctx, report)
 	} else if options.JSONOutput {
 		if encodeErr := writeIndentedJSON(report); encodeErr != nil {

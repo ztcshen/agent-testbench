@@ -166,7 +166,7 @@ func environmentRestorePreflightRequiresGit(packageSpec environmentRestorePackag
 
 func environmentRestoreAddComposePreflight(report *environmentRestorePreflight, compose map[string]any, specs []environmentRestoreRepoSpec, workspace string, execute bool, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool) {
 	report.Tools = append(report.Tools, environmentRestoreTool("docker", true))
-	report.Tools = append(report.Tools, environmentRestoreCommandTool("docker compose", true, "docker", "compose", "version"))
+	report.Tools = append(report.Tools, environmentRestoreCommandTool("docker compose", true, "docker", "compose", dockerComposeCommandVersion))
 	report.HeavySteps = append(report.HeavySteps, environmentRestoreComposeHeavySteps(compose, cleanupOptions)...)
 	environmentRestoreCheckComposeBindMounts(report, compose, workspace)
 	environmentRestoreCheckComposeImages(report, compose, workspace, execute)

@@ -302,7 +302,7 @@ func runEnvironmentMigrationTargetCommand(ctx context.Context, args []string, co
 	if err != nil {
 		return err
 	}
-	if opts.OutputFormat == "stream-json" {
+	if opts.OutputFormat == cliOutputFormatStreamJSON {
 		ctx = contextWithAgentEventStream(ctx, os.Stdout)
 	}
 	report, command, err := prepareEnvironmentMigrationTarget(ctx, opts)
@@ -321,7 +321,7 @@ func runEnvironmentMigrationTargetCommand(ctx context.Context, args []string, co
 			}
 		}
 	}
-	if opts.OutputFormat == "stream-json" {
+	if opts.OutputFormat == cliOutputFormatStreamJSON {
 		agentEmitRunCompleted(ctx, environmentMigrationRunPhase(baseline), statusText(report.OK), opts.EnvID, environmentMigrationRunMessage(baseline, "completed"), environmentMigrationReportError(report), report)
 	} else if opts.JSONOutput {
 		return writeIndentedJSON(report)
@@ -382,7 +382,7 @@ func parseEnvironmentMigrationTargetOptions(args []string, commandName string) (
 		ThroughVersion: strings.TrimSpace(*throughVersion),
 		Execute:        *execute,
 		OutputFormat:   resolvedOutputFormat,
-		JSONOutput:     resolvedOutputFormat == "json",
+		JSONOutput:     resolvedOutputFormat == cliOutputFormatJSON,
 	}, nil
 }
 
