@@ -322,15 +322,45 @@ exit 0
 		Service: "s3-seed",
 		Expect:  "completed",
 	}, time.Second, workspace, []string{"-f", filepath.Join(workspace, "compose.yml")})
-	if !check.OK || check.State != "exited" || check.ExitCode != 0 {
+	if !check.OK || check.State != environmentRestoreDockerStateExited || check.ExitCode != 0 {
 		t.Fatalf("explicit one-shot compose service should pass via exit code: %#v", check)
 	}
 	normal := waitEnvironmentRestoreComposeServiceHealthCheck(context.Background(), environmentRestoreHealthCheckReport{
 		Kind:    "compose-service",
 		Service: "app",
 	}, 20*time.Millisecond, workspace, []string{"-f", filepath.Join(workspace, "compose.yml")})
-	if normal.OK || normal.State != "exited" || normal.ExitCode != 0 {
+	if normal.OK || normal.State != environmentRestoreDockerStateExited || normal.ExitCode != 0 {
 		t.Fatalf("non-one-shot exited service should not pass: %#v", normal)
+	}
+}
+
+func TestEnvironmentRestoreAcceptsExplicitCompletedOneShotContainerHealth(t *testing.T) {
+	fakeBin := t.TempDir()
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	writeFile(t, filepath.Join(fakeBin, "docker"), `#!/usr/bin/env bash
+if [ "$1" = "inspect" ]; then
+  printf 'exited  0\n'
+  exit 0
+fi
+exit 0
+`)
+	if err := os.Chmod(filepath.Join(fakeBin, "docker"), 0o755); err != nil {
+		t.Fatalf("chmod fake docker: %v", err)
+	}
+	check := waitEnvironmentRestoreContainerHealthCheck(context.Background(), environmentRestoreHealthCheckReport{
+		Kind:      "container",
+		Container: "seed-job",
+		OneShot:   true,
+	}, 200*time.Millisecond)
+	if !check.OK || check.State != environmentRestoreDockerStateExited || check.ExitCode != 0 {
+		t.Fatalf("explicit one-shot container should pass via exit code: %#v", check)
+	}
+	normal := waitEnvironmentRestoreContainerHealthCheck(context.Background(), environmentRestoreHealthCheckReport{
+		Kind:      "container",
+		Container: "app",
+	}, 200*time.Millisecond)
+	if normal.OK || normal.State != environmentRestoreDockerStateExited || normal.ExitCode != 0 {
+		t.Fatalf("non-one-shot exited container should not pass: %#v", normal)
 	}
 }
 

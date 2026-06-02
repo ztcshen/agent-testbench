@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
+
+const environmentRestoreDockerStateExited = "exited"
 
 func waitEnvironmentRestoreHealthChecks(ctx context.Context, checks []any, timeout time.Duration, workspace string, composeBaseArgs []string) []environmentRestoreHealthCheckReport {
 	out := make([]environmentRestoreHealthCheckReport, 0, len(checks))
@@ -186,30 +189,58 @@ func waitEnvironmentRestoreComposeServiceHealthCheck(ctx context.Context, check 
 		if hasExitCode {
 			check.ExitCode = exitCode
 		}
-		return state == "running" && (health == "" || health == "healthy") || environmentRestoreComposeServiceCompleted(check, state, exitCode, hasExitCode)
+		return state == "running" && (health == "" || health == "healthy") || environmentRestoreExitedCompleted(check, state, exitCode, hasExitCode)
 	})
 }
 
-func environmentRestoreComposeServiceCompleted(check *environmentRestoreHealthCheckReport, state string, exitCode int, hasExitCode bool) bool {
-	if state != "exited" || !hasExitCode || exitCode != 0 {
+func environmentRestoreExitedCompleted(check *environmentRestoreHealthCheckReport, state string, exitCode int, hasExitCode bool) bool {
+	if state != environmentRestoreDockerStateExited || !hasExitCode || exitCode != 0 {
 		return false
 	}
 	return check.OneShot || check.Expect == "completed" || check.Expect == "service_completed_successfully"
 }
 
 func waitEnvironmentRestoreContainerHealthCheck(ctx context.Context, check environmentRestoreHealthCheckReport, timeout time.Duration) environmentRestoreHealthCheckReport {
-	command := []string{"docker", "inspect", "--format", "{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}", check.Container}
+	command := []string{"docker", "inspect", "--format", "{{.State.Status}}\t{{if .State.Health}}{{.State.Health.Status}}{{end}}\t{{.State.ExitCode}}", check.Container}
 	return waitEnvironmentRestoreCommand(ctx, check, timeout, "", command, func(check *environmentRestoreHealthCheckReport, output string) bool {
 		check.Output = truncateReportText(output, 200)
-		fields := strings.Fields(output)
-		if len(fields) > 0 {
-			check.State = strings.TrimSpace(fields[0])
+		state, health, exitCode, hasExitCode := parseContainerHealth(output)
+		check.State = state
+		check.Health = health
+		if hasExitCode {
+			check.ExitCode = exitCode
 		}
-		if len(fields) > 1 {
-			check.Health = strings.TrimSpace(fields[1])
-		}
-		return check.State == "running" && (check.Health == "" || check.Health == "healthy")
+		return check.State == "running" && (check.Health == "" || check.Health == "healthy") || environmentRestoreExitedCompleted(check, check.State, exitCode, hasExitCode)
 	})
+}
+
+func parseContainerHealth(output string) (string, string, int, bool) {
+	parts := strings.Split(strings.TrimSpace(output), "\t")
+	if len(parts) >= 3 {
+		exitCode, ok := parseHealthExitCode(parts[2])
+		return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), exitCode, ok
+	}
+	fields := strings.Fields(output)
+	if len(fields) == 0 {
+		return "", "", 0, false
+	}
+	state := strings.TrimSpace(fields[0])
+	if len(fields) == 1 {
+		return state, "", 0, false
+	}
+	if exitCode, ok := parseHealthExitCode(fields[len(fields)-1]); ok {
+		health := ""
+		if len(fields) > 2 {
+			health = strings.TrimSpace(fields[1])
+		}
+		return state, health, exitCode, true
+	}
+	return state, strings.TrimSpace(fields[1]), 0, false
+}
+
+func parseHealthExitCode(value string) (int, bool) {
+	exitCode, err := strconv.Atoi(strings.TrimSpace(value))
+	return exitCode, err == nil
 }
 
 func waitEnvironmentRestoreCommand(ctx context.Context, check environmentRestoreHealthCheckReport, timeout time.Duration, workspace string, command []string, ok func(*environmentRestoreHealthCheckReport, string) bool) environmentRestoreHealthCheckReport {
