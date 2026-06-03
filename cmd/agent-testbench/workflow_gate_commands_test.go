@@ -126,6 +126,50 @@ func TestWorkflowGateCountsEvidenceStoredUnderCaseRunID(t *testing.T) {
 	}
 }
 
+func TestWorkflowGateDoesNotUseStepEvidenceForAPIWorkflowSteps(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	storePath := filepath.Join(dir, "store.sqlite")
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	started := time.Date(2026, 6, 3, 8, 0, 0, 0, time.UTC)
+	runID := "run.workflow.step-evidence-api"
+	if _, err := s.CreateRun(ctx, store.Run{
+		ID:          runID,
+		WorkflowID:  "workflow.api-step-evidence",
+		Status:      store.StatusPassed,
+		SummaryJSON: `{"steps":[{"stepId":"step.submit","caseId":"case.submit","status":"passed"}]}`,
+		StartedAt:   started,
+		FinishedAt:  started.Add(time.Second),
+		CreatedAt:   started,
+		UpdatedAt:   started.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if _, err := s.RecordEvidence(ctx, store.EvidenceRecord{
+		ID:        runID + ".step.submit",
+		RunID:     runID,
+		StepID:    "step.submit",
+		Kind:      "workflow-step-note",
+		MediaType: "application/json",
+		Summary:   `{"note":"not case-run scoped"}`,
+		CreatedAt: started,
+	}); err != nil {
+		t.Fatalf("record workflow-run step evidence: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	out := runCLIFails(t, "workflow", "gate", "--store", "sqlite://"+storePath, "--run", runID, "--require-passed", "--require-steps", "--require-evidence", "--json")
+	report := decodeWorkflowGateFullReport(t, out)
+	if report.Gates.EvidenceComplete || report.Counts.EvidenceComplete != 0 {
+		t.Fatalf("API workflow step should not use workflow-run step evidence as case evidence: %#v", report)
+	}
+}
+
 func writeWorkflowGateFailureStore(t *testing.T) workflowGateFailureFixture {
 	t.Helper()
 	ctx := context.Background()
@@ -389,5 +433,26 @@ func TestWorkflowGateNextActionsQuoteDynamicIDs(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("workflow gate action missing %q:\n%s", want, joined)
 		}
+	}
+}
+
+func TestWorkflowGateNextActionsInspectTaskStepMissingEvidence(t *testing.T) {
+	report := workflowGateReport{
+		RunID: "workflow-run-1",
+		Gates: workflowGateGates{
+			StepsPresent: true,
+		},
+		MissingEvidence: []workflowGateStep{
+			{Kind: cliCommandTask, StepID: "postcondition", TaskRunID: "task-run-1"},
+		},
+	}
+
+	actions := workflowGateNextActions(report, workflowGateOptions{RequireEvidence: true})
+	joined := strings.Join(actions, "\n")
+	if !strings.Contains(joined, "agent-testbench workflow step --run 'workflow-run-1' --step 'postcondition' --json") {
+		t.Fatalf("task missing evidence should suggest inspecting workflow step: %#v", actions)
+	}
+	if strings.Contains(joined, "Workflow gate passed") {
+		t.Fatalf("missing task evidence should not report no action needed: %#v", actions)
 	}
 }

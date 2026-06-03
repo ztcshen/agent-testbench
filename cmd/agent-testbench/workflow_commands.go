@@ -37,6 +37,8 @@ func runWorkflow(args []string) error {
 		return runWorkflowStep(context.Background(), args[1:])
 	case "latest-step":
 		return runWorkflowLatestStep(context.Background(), args[1:])
+	case cliCommandTask:
+		return runWorkflowTask(context.Background(), args[1:])
 	case "gate":
 		return runWorkflowGate(context.Background(), args[1:])
 	case "report":
@@ -344,8 +346,10 @@ type workflowGateGates struct {
 
 type workflowGateStep struct {
 	StepID        string `json:"stepId,omitempty"`
+	Kind          string `json:"kind,omitempty"`
 	CaseID        string `json:"caseId,omitempty"`
 	CaseRunID     string `json:"caseRunId,omitempty"`
+	TaskRunID     string `json:"taskRunId,omitempty"`
 	Status        string `json:"status,omitempty"`
 	EvidenceCount int    `json:"evidenceCount"`
 }
@@ -413,11 +417,13 @@ func workflowGateSteps(summaryJSON string) []map[string]any {
 	return out
 }
 
-func workflowGateStepFrom(step map[string]any, caseRunByID map[string]store.APICaseRun, caseRunsByStep map[string][]store.APICaseRun, caseRunsByCase map[string][]store.APICaseRun, evidenceCountByCaseRun map[string]int) workflowGateStep {
+func workflowGateStepFrom(step map[string]any, caseRunByID map[string]store.APICaseRun, caseRunsByStep map[string][]store.APICaseRun, caseRunsByCase map[string][]store.APICaseRun, evidenceCountByCaseRun map[string]int, evidenceCountByStep map[string]int) workflowGateStep {
 	out := workflowGateStep{
 		StepID:    firstNonEmpty(valueString(step["stepId"]), valueString(step["id"])),
+		Kind:      valueString(step["kind"]),
 		CaseID:    valueString(step["caseId"]),
 		CaseRunID: valueString(step["caseRunId"]),
+		TaskRunID: valueString(step["taskRunId"]),
 		Status:    valueString(step["status"]),
 	}
 	if out.CaseRunID != "" {
@@ -445,7 +451,14 @@ func workflowGateStepFrom(step map[string]any, caseRunByID map[string]store.APIC
 		out.Status = "unknown"
 	}
 	out.EvidenceCount = evidenceCountByCaseRun[out.CaseRunID]
+	if out.EvidenceCount == 0 && workflowGateStepAllowsStepEvidence(out) {
+		out.EvidenceCount = evidenceCountByStep[out.StepID]
+	}
 	return out
+}
+
+func workflowGateStepAllowsStepEvidence(step workflowGateStep) bool {
+	return step.StepID != "" && (step.Kind == cliCommandTask || step.TaskRunID != "")
 }
 
 func apiCaseRunStepID(item store.APICaseRun) string {
@@ -475,6 +488,10 @@ func workflowGateNextActions(report workflowGateReport, options workflowGateOpti
 			}
 			if item.CaseRunID != "" {
 				actions = append(actions, "agent-testbench case evidence --case-run "+quoteCommandValue(item.CaseRunID)+" --json")
+				continue
+			}
+			if item.StepID != "" {
+				actions = append(actions, "agent-testbench workflow step --run "+quoteCommandValue(report.RunID)+" --step "+quoteCommandValue(item.StepID)+" --json")
 			}
 		}
 	}

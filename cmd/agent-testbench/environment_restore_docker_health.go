@@ -189,15 +189,22 @@ func waitEnvironmentRestoreComposeServiceHealthCheck(ctx context.Context, check 
 		if hasExitCode {
 			check.ExitCode = exitCode
 		}
+		if environmentRestoreRequiresCompletedExit(check) {
+			return environmentRestoreExitedCompleted(check, state, exitCode, hasExitCode)
+		}
 		return state == "running" && (health == "" || health == "healthy") || environmentRestoreExitedCompleted(check, state, exitCode, hasExitCode)
 	})
+}
+
+func environmentRestoreRequiresCompletedExit(check *environmentRestoreHealthCheckReport) bool {
+	return check.OneShot || check.Expect == "completed" || check.Expect == "service_completed_successfully"
 }
 
 func environmentRestoreExitedCompleted(check *environmentRestoreHealthCheckReport, state string, exitCode int, hasExitCode bool) bool {
 	if state != environmentRestoreDockerStateExited || !hasExitCode || exitCode != 0 {
 		return false
 	}
-	return check.OneShot || check.Expect == "completed" || check.Expect == "service_completed_successfully"
+	return environmentRestoreRequiresCompletedExit(check)
 }
 
 func waitEnvironmentRestoreContainerHealthCheck(ctx context.Context, check environmentRestoreHealthCheckReport, timeout time.Duration) environmentRestoreHealthCheckReport {
@@ -209,6 +216,9 @@ func waitEnvironmentRestoreContainerHealthCheck(ctx context.Context, check envir
 		check.Health = health
 		if hasExitCode {
 			check.ExitCode = exitCode
+		}
+		if environmentRestoreRequiresCompletedExit(check) {
+			return environmentRestoreExitedCompleted(check, check.State, exitCode, hasExitCode)
 		}
 		return check.State == "running" && (check.Health == "" || check.Health == "healthy") || environmentRestoreExitedCompleted(check, check.State, exitCode, hasExitCode)
 	})

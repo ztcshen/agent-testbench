@@ -34,6 +34,9 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	if !strings.Contains(out, "agent-testbench workflow gate") {
 		t.Fatalf("top-level help should expose workflow orchestration gates:\n%s", out)
 	}
+	if !strings.Contains(out, "agent-testbench workflow task run") || !strings.Contains(out, "--step STEP=TASK_NAME_OR_ID") {
+		t.Fatalf("top-level help should expose workflow task trigger/postcondition steps:\n%s", out)
+	}
 	if !strings.Contains(out, "agent-testbench workflow register") || !strings.Contains(out, "agent-testbench workflow binding register") {
 		t.Fatalf("top-level help should expose Store-first workflow upsert commands:\n%s", out)
 	}
@@ -116,6 +119,11 @@ func TestCommandsCommandEmitsSearchableCommandCatalog(t *testing.T) {
 	textOut := runCLI(t, "commands", "--filter", "workflow gate")
 	if !strings.Contains(textOut, "workflow gate") || !strings.Contains(textOut, "--require-evidence") {
 		t.Fatalf("commands text output = %q", textOut)
+	}
+
+	taskOut := runCLI(t, "commands", "--filter", "workflow task run", "--json")
+	if !strings.Contains(taskOut, `"command": "workflow task run"`) || !strings.Contains(taskOut, `STEP=TASK_NAME_OR_ID`) {
+		t.Fatalf("command catalog missing workflow task run: %s", taskOut)
 	}
 }
 

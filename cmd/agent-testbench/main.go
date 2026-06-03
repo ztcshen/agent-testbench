@@ -390,6 +390,7 @@ func buildWorkflowGateReport(ctx context.Context, runtime store.Store, options w
 	}
 	caseRunIndex := indexWorkflowGateCaseRuns(caseRuns)
 	evidenceCountByCaseRun := indexWorkflowGateEvidence(evidence)
+	evidenceCountByStep := indexWorkflowGateEvidenceByStep(evidence)
 
 	report := workflowGateReport{
 		RunID:           run.ID,
@@ -404,7 +405,7 @@ func buildWorkflowGateReport(ctx context.Context, runtime store.Store, options w
 	report.Counts.Steps = len(steps)
 	report.Counts.CaseRuns = len(caseRuns)
 	for _, rawStep := range steps {
-		step := workflowGateStepFrom(rawStep, caseRunIndex.byID, caseRunIndex.byStep, caseRunIndex.byCase, evidenceCountByCaseRun)
+		step := workflowGateStepFrom(rawStep, caseRunIndex.byID, caseRunIndex.byStep, caseRunIndex.byCase, evidenceCountByCaseRun, evidenceCountByStep)
 		addWorkflowGateStep(&report, step)
 	}
 	report.Gates = workflowGateGates{
@@ -475,6 +476,16 @@ func indexWorkflowGateEvidence(evidence []store.EvidenceRecord) map[string]int {
 	for _, record := range evidence {
 		if strings.TrimSpace(record.CaseRunID) != "" {
 			out[record.CaseRunID]++
+		}
+	}
+	return out
+}
+
+func indexWorkflowGateEvidenceByStep(evidence []store.EvidenceRecord) map[string]int {
+	out := map[string]int{}
+	for _, record := range evidence {
+		if strings.TrimSpace(record.StepID) != "" {
+			out[record.StepID]++
 		}
 	}
 	return out

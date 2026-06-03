@@ -194,6 +194,7 @@ func runSandboxServiceRegister(ctx context.Context, args []string) error {
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
 	id := flags.String("id", "", "Service id")
+	fromEnvironment := flags.String("from-environment", "", "Copy missing service startup metadata from an environment component graph")
 	displayName := flags.String("display-name", "", "Service display name")
 	kind := flags.String("kind", "", "Service kind")
 	servicePort := flags.Int("service-port", 0, "Service port")
@@ -214,7 +215,7 @@ func runSandboxServiceRegister(ctx context.Context, args []string) error {
 		return err
 	}
 	defer closeCLIStore(runtime)
-	response, err := controlplane.RegisterSandboxService(ctx, runtime, controlplane.SandboxServiceRegistrationRequest{
+	request := controlplane.SandboxServiceRegistrationRequest{
 		ID:             *id,
 		DisplayName:    *displayName,
 		Kind:           *kind,
@@ -223,7 +224,11 @@ func runSandboxServiceRegister(ctx context.Context, args []string) error {
 		StartupCommand: *startupCommand,
 		HealthURL:      *healthURL,
 		Status:         *status,
-	})
+	}
+	if err := hydrateSandboxServiceRegistrationFromEnvironment(ctx, runtime, strings.TrimSpace(*fromEnvironment), &request); err != nil {
+		return err
+	}
+	response, err := controlplane.RegisterSandboxService(ctx, runtime, request)
 	if err != nil {
 		return err
 	}

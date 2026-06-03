@@ -240,10 +240,11 @@ Durable feedback registered by local Codex sessions. Use
 ## 2026-06-02 - workflow runner needs first-class MQ and Kafka trigger steps
 - Area: workflow
 - Severity: P1
-- Status: backlog
+- Status: fixed
 - Source: local message-driven workflow smoke feedback
 - Evidence: Workflow register/upsert can create a dedicated workflow, but workflow bindings are still API-case oriented. Non-HTTP message triggers must currently live outside workflow report execution.
-- Suggestion: Current slice added `task run --shell` for Store-backed non-HTTP trigger commands, but workflow-native MQ/Kafka steps still need a schema-level workflow step model that can bind task triggers, copy trigger Evidence into workflow reports, and participate in `workflow gate`.
+- Suggestion: `workflow task run --workflow ID --step STEP=TASK_NAME_OR_ID` now runs Store-backed task steps in workflow order, records a workflow run summary with task run ids/status, stores per-step task Evidence under the workflow run, and lets `workflow gate --require-evidence` count task-step Evidence. MQ/Kafka trigger commands remain generic shell/CLI tasks rather than protocol-specific hardcoding.
+- Verification: `go test ./cmd/agent-testbench -run TestWorkflowTaskRunRecordsShellTriggerAndPostconditionSteps -count=1`; `go test ./cmd/agent-testbench -run TestCommandsCommandEmitsSearchableCommandCatalog -count=1`
 
 ## 2026-06-02 - task run cannot cover non-HTTP sandbox trigger commands for MQ smoke
 - Area: workflow
@@ -275,18 +276,20 @@ Durable feedback registered by local Codex sessions. Use
 ## 2026-06-02 - Workflow report can pass before async MQ consumer completes
 - Area: workflow
 - Severity: P1
-- Status: backlog
+- Status: fixed
 - Source: local message-driven workflow smoke feedback
 - Evidence: A workflow report could pass immediately after a publish/trigger request while the asynchronous consumer later failed on a downstream fixture dependency.
-- Suggestion: Add Store-backed async postconditions/evidence checks for MQ workflows, such as consumer DB status/log predicates and required external dependency health gates; report should distinguish trigger-case passed from end-to-end workflow passed. This should build on the new shell task trigger path and the existing evidence/log/DB diagnostics rather than treating a publish response as full workflow success.
+- Suggestion: Message workflows can now model the publish trigger and downstream consumer postcondition as ordered workflow task steps. The workflow run only passes when each task step passes, and `workflow gate --require-evidence` fails unless the trigger/postcondition steps wrote Evidence, so a publish response alone no longer has to stand in for end-to-end success.
+- Verification: `go test ./cmd/agent-testbench -run TestWorkflowTaskRunRecordsShellTriggerAndPostconditionSteps -count=1`
 
 ## 2026-06-02 - Need first-class object storage fixture support for sandbox workflows
 - Area: environment
 - Severity: P2
-- Status: backlog
+- Status: fixed
 - Source: local message-driven workflow smoke feedback
 - Evidence: A message-driven workflow could reach the application consumer but fail when it attempted to download an expected object-storage fixture from an unavailable external endpoint.
-- Suggestion: Provide a Store-first object-storage component/asset type, e.g. a generic S3-compatible service plus bucket/object fixtures and config-key wiring, so workflows can declare object paths without custom compose/manual seeding. Existing component assets can materialize files into the restore workspace, but the missing piece is a first-class object-storage semantic layer and health/seed verification.
+- Suggestion: Restore now recognizes object-storage dependency assets by capability/kind, reads bucket/key metadata from the Store asset, and seeds the object content through the provider component's generic `objectStorage.seedCommand` metadata. The applied asset report records `plan-seed-object-storage` / `seed-object-storage`, target path, bytes, command, attempts, and errors without hardcoding a concrete storage vendor.
+- Verification: `go test ./cmd/agent-testbench -run TestEnvironmentRestoreSeedsObjectStorageEdgeAsset -count=1`
 
 ## 2026-06-02 - Docker restore can hang on completed one-shot seed service when docker compose ps returns empty
 - Area: environment
@@ -294,5 +297,16 @@ Durable feedback registered by local Codex sessions. Use
 - Status: fixed
 - Source: local Docker-backed object fixture restore feedback
 - Evidence: A one-shot seed service could complete successfully and disappear from default `docker compose ps --format json SERVICE` output, causing restore health polling to wait until timeout even though the seed container exited 0.
-- Suggestion: Compose-service health checks now use `docker compose ps -a --format json SERVICE` and treat `State=exited` with `ExitCode=0` as a successful completed one-shot service while preserving `running`/`healthy` behavior for normal services.
-- Verification: `go test ./cmd/agent-testbench -run TestEnvironmentRestoreAcceptsCompletedOneShotComposeServiceHealth -count=1`
+- Suggestion: Compose-service health checks now use `docker compose ps -a --format json SERVICE`; restore also infers one-shot services from Compose `depends_on` entries with `condition: service_completed_successfully`, then treats `State=exited` with `ExitCode=0` as successful only for those completed services or explicitly marked one-shot checks.
+- Verification: `go test ./cmd/agent-testbench -run 'TestEnvironmentRestore(AcceptsComposeDependencyCompletedOneShotService|AcceptsExplicitCompletedOneShotComposeServiceHealth|EffectiveHealthChecksUseStartedComposeServices|EffectiveHealthChecksCoverBusinessURLService)' -count=1`; `go test ./cmd/agent-testbench -run TestEnvironmentRestoreRunsMixedHealthProbes -count=1`
+- Regression evidence 2026-06-03: a private validation `environment restore ... --execute --pull --clean-docker-state --allow-destructive-docker-cleanup` run returned code 2 after all core services were healthy because an object seed compose-service check stayed `ok=false` with `state=exited`; a follow-up task showed `docker inspect` status `exited 0` and seed logs ended with an object-storage seed success line.
+- Resolution 2026-06-03: Added a restore-level regression test using the actual `docker compose ps -a --format json` shape from the run and verified the health evaluator accepts completed one-shot services during `environment restore`.
+
+## 2026-06-02 - Workflow retest blocked by unconfigured required service startup metadata
+- Area: environment
+- Severity: P2
+- Status: fixed
+- Source: operator workflow retest run.20260602T110642.520569000Z
+- Evidence: a private validation workflow report failed at a message-triggered step because the local test endpoint connection was refused; related port probes were refused; docker ps could not connect to the Docker daemon; `sandbox start --workflow ... --dry-run` correctly returned `ok=false` because a required service had empty startup command metadata.
+- Suggestion: `sandbox service register --from-environment ENV_ID --id SERVICE_ID` now copies missing startup metadata from the matching environment component graph, using component `startupCommand` / `startCommand` metadata while preserving explicit CLI values. This gives workflow-required services a Store-first repair path before rerunning `sandbox start --workflow`.
+- Verification: `go test ./cmd/agent-testbench -run TestSandboxServiceRegisterRepairsStartupCommandFromEnvironmentComponent -count=1`

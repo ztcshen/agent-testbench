@@ -185,9 +185,12 @@ Inspect registered sandbox services without executing startup commands:
 
 When a workflow-scoped sandbox start reports a service with an empty startup
 command, treat the workflow as blocked. Repair the Store service entry with
-`sandbox service register --id SERVICE_ID --startup-command ...`, or rerun the
+`sandbox service register --id SERVICE_ID --startup-command ...`. If the
+startup metadata is already recorded on an Environment Catalog component, copy
+it back into the service registry with
+`sandbox service register --id SERVICE_ID --from-environment ENV_ID`. Rerun the
 environment restore path that owns the generated startup files and component
-assets, before claiming the workflow is startable.
+assets before claiming the workflow is startable.
 
 Add a Store-first SQL edge migration for incremental DDL/ALTER work:
 
