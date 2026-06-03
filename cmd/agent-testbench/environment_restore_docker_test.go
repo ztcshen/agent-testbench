@@ -339,6 +339,10 @@ func TestEnvironmentRestoreAcceptsExplicitCompletedOneShotContainerHealth(t *tes
 	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	writeFile(t, filepath.Join(fakeBin, "docker"), `#!/usr/bin/env bash
 if [ "$1" = "inspect" ]; then
+  if [ "${@: -1}" = "seed-running" ]; then
+    printf 'running healthy 0\n'
+    exit 0
+  fi
   printf 'exited  0\n'
   exit 0
 fi
@@ -354,6 +358,14 @@ exit 0
 	}, 2*time.Second)
 	if !check.OK || check.State != environmentRestoreDockerStateExited || check.ExitCode != 0 {
 		t.Fatalf("explicit one-shot container should pass via exit code: %#v", check)
+	}
+	running := waitEnvironmentRestoreContainerHealthCheck(context.Background(), environmentRestoreHealthCheckReport{
+		Kind:      "container",
+		Container: "seed-running",
+		Expect:    "service_completed_successfully",
+	}, 20*time.Millisecond)
+	if running.OK || running.State != "running" {
+		t.Fatalf("completed one-shot container should not pass while still running: %#v", running)
 	}
 	normal := waitEnvironmentRestoreContainerHealthCheck(context.Background(), environmentRestoreHealthCheckReport{
 		Kind:      "container",

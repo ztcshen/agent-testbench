@@ -7,15 +7,18 @@ import (
 	"agent-testbench/internal/store"
 )
 
-func environmentRestoreEffectiveHealthChecks(checks []any, compose map[string]any, graph store.EnvironmentComponentGraph) []any {
+const composeServicesHeader = "services:"
+
+func environmentRestoreEffectiveHealthChecks(checks []any, compose map[string]any, graph store.EnvironmentComponentGraph, workspace string) []any {
 	set := environmentRestoreHealthCheckSet{
 		covered: map[string]bool{},
 		seen:    map[string]bool{},
 	}
 	startedServices := environmentRestoreStartedServices(compose)
 	hasServiceAllowList := len(startedServices) > 0
+	completedServices := environmentRestoreCompletedDependencyServices(compose, workspace)
 	for _, raw := range checks {
-		set.add(raw)
+		set.add(environmentRestoreApplyCompletedExpectation(raw, completedServices))
 	}
 	for _, component := range graph.Components {
 		if !environmentRestoreShouldAddComponentHealth(component, startedServices, hasServiceAllowList) {
@@ -23,21 +26,33 @@ func environmentRestoreEffectiveHealthChecks(checks []any, compose map[string]an
 		}
 		item, errText := environmentRestoreNormalizeComponentHealthCheck(component)
 		if errText == "" {
-			set.add(item)
+			set.add(environmentRestoreApplyCompletedExpectation(item, completedServices))
 		}
 	}
 	for _, service := range stringSliceFromAny(compose["services"]) {
 		if set.covered[service] {
 			continue
 		}
-		set.out = append(set.out, map[string]any{
+		item := map[string]any{
 			"id":      "compose-service-" + safeReportID(service),
 			"kind":    "compose-service",
 			"service": service,
-		})
-		set.covered[service] = true
+		}
+		set.add(environmentRestoreApplyCompletedExpectation(item, completedServices))
 	}
 	return set.out
+}
+
+func environmentRestoreRefreshCompletedExpectations(checks []any, compose map[string]any, workspace string) []any {
+	completedServices := environmentRestoreCompletedDependencyServices(compose, workspace)
+	if len(completedServices) == 0 {
+		return checks
+	}
+	out := make([]any, 0, len(checks))
+	for _, raw := range checks {
+		out = append(out, environmentRestoreApplyCompletedExpectation(raw, completedServices))
+	}
+	return out
 }
 
 type environmentRestoreHealthCheckSet struct {
@@ -208,4 +223,169 @@ func environmentRestoreHealthCheckSignature(item map[string]any) string {
 	default:
 		return ""
 	}
+}
+
+func environmentRestoreApplyCompletedExpectation(raw any, completedServices map[string]bool) any {
+	item, ok := raw.(map[string]any)
+	if !ok || len(completedServices) == 0 {
+		return raw
+	}
+	kind := strings.TrimSpace(valueString(item["kind"]))
+	if kind == "" {
+		kind = strings.TrimSpace(valueString(item["type"]))
+	}
+	service := strings.TrimSpace(valueString(item["service"]))
+	if kind != "compose-service" || service == "" || !completedServices[service] {
+		return raw
+	}
+	if strings.TrimSpace(valueString(item["expect"])) == "" {
+		item["expect"] = "service_completed_successfully"
+	}
+	return item
+}
+
+func environmentRestoreCompletedDependencyServices(compose map[string]any, workspace string) map[string]bool {
+	out := map[string]bool{}
+	for _, content := range environmentRestoreComposeFileContents(compose, workspace) {
+		for service := range parseComposeCompletedDependencyServices(content) {
+			out[service] = true
+		}
+	}
+	return out
+}
+
+func parseComposeCompletedDependencyServices(content string) map[string]bool {
+	out := map[string]bool{}
+	state := composeCompletedDependencyParseState{}
+	for _, line := range strings.Split(content, "\n") {
+		service := state.completedDependency(line)
+		if service != "" {
+			out[service] = true
+		}
+	}
+	return out
+}
+
+type composeCompletedDependencyParseState struct {
+	inServices        bool
+	servicesIndent    int
+	serviceIndent     int
+	currentService    string
+	inDependsOn       bool
+	dependsIndent     int
+	currentDependency string
+	dependencyIndent  int
+}
+
+func (state *composeCompletedDependencyParseState) completedDependency(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		return ""
+	}
+	indent := leadingSpaceCount(line)
+	if !state.inServices {
+		if trimmed == composeServicesHeader {
+			state.inServices = true
+			state.servicesIndent = indent
+			state.serviceIndent = -1
+		}
+		return ""
+	}
+	if indent <= state.servicesIndent {
+		state.reset()
+		return ""
+	}
+	if state.enterService(trimmed, indent) {
+		return ""
+	}
+	if state.currentService == "" || indent <= state.serviceIndent {
+		state.inDependsOn = false
+		return ""
+	}
+	if strings.TrimSuffix(trimmed, ":") == "depends_on" {
+		state.inDependsOn = true
+		state.dependsIndent = indent
+		state.currentDependency = ""
+		state.dependencyIndent = -1
+		return ""
+	}
+	if state.inDependsOn && indent <= state.dependsIndent {
+		state.inDependsOn = false
+		return ""
+	}
+	if !state.inDependsOn {
+		return ""
+	}
+	return state.completedDependencyInDependsOn(trimmed, indent)
+}
+
+func (state *composeCompletedDependencyParseState) reset() {
+	state.inServices = false
+	state.currentService = ""
+	state.inDependsOn = false
+	state.currentDependency = ""
+	state.serviceIndent = -1
+	state.dependencyIndent = -1
+}
+
+func (state *composeCompletedDependencyParseState) enterService(trimmed string, indent int) bool {
+	if strings.HasPrefix(trimmed, "-") || !strings.HasSuffix(trimmed, ":") {
+		return false
+	}
+	if state.serviceIndent >= 0 && indent != state.serviceIndent {
+		return false
+	}
+	state.serviceIndent = indent
+	state.currentService = cleanComposeScalar(strings.TrimSpace(strings.TrimSuffix(trimmed, ":")))
+	state.inDependsOn = false
+	state.currentDependency = ""
+	state.dependencyIndent = -1
+	return true
+}
+
+func (state *composeCompletedDependencyParseState) completedDependencyInDependsOn(trimmed string, indent int) string {
+	if strings.HasPrefix(trimmed, "-") {
+		state.currentDependency = ""
+		return ""
+	}
+	if dependency, condition, ok := composeFlowStyleDependencyCondition(trimmed); ok {
+		state.currentDependency = ""
+		if condition == "service_completed_successfully" {
+			return dependency
+		}
+		return ""
+	}
+	if strings.HasSuffix(trimmed, ":") && (state.dependencyIndent < 0 || indent == state.dependencyIndent) {
+		state.currentDependency = cleanComposeScalar(strings.TrimSpace(strings.TrimSuffix(trimmed, ":")))
+		state.dependencyIndent = indent
+		return ""
+	}
+	if state.currentDependency == "" || indent <= state.dependencyIndent || !strings.HasPrefix(trimmed, "condition:") {
+		return ""
+	}
+	condition := cleanComposeScalar(strings.TrimSpace(strings.TrimPrefix(trimmed, "condition:")))
+	if condition == "service_completed_successfully" {
+		return state.currentDependency
+	}
+	return ""
+}
+
+func composeFlowStyleDependencyCondition(trimmed string) (string, string, bool) {
+	dependency, rest, ok := strings.Cut(trimmed, ":")
+	if !ok || !strings.Contains(rest, "condition") {
+		return "", "", false
+	}
+	rest = strings.TrimSpace(rest)
+	if !strings.HasPrefix(rest, "{") || !strings.HasSuffix(rest, "}") {
+		return "", "", false
+	}
+	fields := strings.Split(strings.Trim(rest, "{}"), ",")
+	for _, field := range fields {
+		key, value, ok := strings.Cut(field, ":")
+		if !ok || cleanComposeScalar(key) != "condition" {
+			continue
+		}
+		return cleanComposeScalar(dependency), cleanComposeScalar(value), true
+	}
+	return "", "", false
 }

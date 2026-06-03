@@ -55,6 +55,7 @@ func environmentRestoreUseExistingContainers(ctx context.Context, graph store.En
 			return report
 		}
 	}
+	healthChecks = environmentRestoreRefreshCompletedExpectations(healthChecks, compose, workspace)
 	report.HealthChecks = waitEnvironmentRestoreHealthChecks(ctx, environmentRestoreAdoptedContainerHealthChecks(healthChecks, compose, workspace), healthTimeout, workspace, nil)
 	for _, check := range report.HealthChecks {
 		if !check.OK {

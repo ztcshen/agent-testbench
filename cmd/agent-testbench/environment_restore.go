@@ -311,7 +311,7 @@ func environmentRestoreBuildPlanFromEnvironment(env store.Environment, workflowI
 		Compose:              compose,
 		ComponentGraph:       graph,
 		PackageSpec:          environmentRestorePackageSpecFromCompose(compose, workspace),
-		HealthChecks:         environmentRestoreEffectiveHealthChecks(jsonArrayString(env.HealthChecksJSON), compose, graph),
+		HealthChecks:         environmentRestoreEffectiveHealthChecks(jsonArrayString(env.HealthChecksJSON), compose, graph, workspace),
 		ComponentGraphReport: environmentRestoreComponentGraphReport(env.ID, graph),
 		ComponentStartupPlan: controlplane.EnvironmentComponentStartupPlanReport(env.ID, graph),
 		AttemptedAt:          time.Now().UTC(),

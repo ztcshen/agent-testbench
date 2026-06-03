@@ -97,7 +97,7 @@ func TestEnvironmentRestoreEffectiveHealthChecksUseStartedComposeServices(t *tes
 			{ComponentID: "db", ComposeService: "db", HealthCheckJSON: `{"type":"compose-service","service":"db"}`},
 		},
 	}
-	effective := environmentRestoreEffectiveHealthChecks(checks, compose, graph)
+	effective := environmentRestoreEffectiveHealthChecks(checks, compose, graph, "")
 	if !restoreHealthChecksContain(effective, "url", "", "http://127.0.0.1:28080/health") {
 		t.Fatalf("explicit URL health check missing: %#v", effective)
 	}
@@ -122,7 +122,7 @@ func TestEnvironmentRestoreEffectiveHealthChecksCoverBusinessURLService(t *testi
 			},
 		},
 	}
-	effective := environmentRestoreEffectiveHealthChecks(nil, compose, graph)
+	effective := environmentRestoreEffectiveHealthChecks(nil, compose, graph, "")
 	if !restoreHealthChecksContain(effective, "url", "app", "http://127.0.0.1:18080/actuator/health") {
 		t.Fatalf("business URL health check missing service binding: %#v", effective)
 	}

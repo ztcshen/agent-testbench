@@ -38,6 +38,7 @@ func environmentRestoreDocker(ctx context.Context, graph store.EnvironmentCompon
 			return report
 		}
 	}
+	healthChecks = environmentRestoreRefreshCompletedExpectations(healthChecks, compose, workspace)
 	report.HealthChecks = waitEnvironmentRestoreHealthChecks(ctx, healthChecks, healthTimeout, workspace, composeBaseArgs)
 	for _, check := range report.HealthChecks {
 		if !check.OK {

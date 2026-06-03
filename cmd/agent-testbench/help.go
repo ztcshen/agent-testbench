@@ -56,7 +56,7 @@ Usage:
   agent-testbench runtime mysql endpoints [--include-tables] [--json]
   agent-testbench sandbox start [--store NAME_OR_DSN] [--service ID | --workflow ID] [--kind KIND] [--timeout-seconds N] [--dry-run] [--output-format text|json|stream-json] [--json]
   agent-testbench sandbox service list [--store NAME_OR_DSN] [--environment ENV_ID] [--include-components] [--service ID] [--kind KIND] [--status STATUS] [--json]
-  agent-testbench sandbox service register --id ID [--store NAME_OR_DSN] [--display-name NAME] [--kind KIND] [--service-port N] [--startup-command TEXT] [--health-url URL] [--json]
+  agent-testbench sandbox service register --id ID [--store NAME_OR_DSN] [--from-environment ENV_ID] [--display-name NAME] [--kind KIND] [--service-port N] [--startup-command TEXT] [--health-url URL] [--json]
   agent-testbench sandbox interface register --id ID --service-id ID --path PATH [--store NAME_OR_DSN] [--method METHOD] [--case-id ID] [--case-title TEXT] [--required-for-admission] [--json]
   agent-testbench template-package install --from PATH [--profile-home PATH] [--force]
   agent-testbench template-package inspect --template-package PATH_OR_ID [--profile-home PATH]
@@ -98,6 +98,7 @@ Usage:
   agent-testbench workflow run --run ID [--store NAME_OR_DSN] [--json]
   agent-testbench workflow step --run ID --step ID [--store NAME_OR_DSN] [--json]
   agent-testbench workflow latest-step --workflow ID --step ID [--store NAME_OR_DSN] [--json]
+  agent-testbench workflow task run --workflow ID --step STEP=TASK_NAME_OR_ID [--step STEP=TASK_NAME_OR_ID]... [--store NAME_OR_DSN] [--json]
   agent-testbench workflow gate --run ID [--store NAME_OR_DSN] [--require-passed] [--require-steps] [--require-evidence] [--json]
   agent-testbench workflow report --workflow ID [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--base-url URL] [--output-dir PATH] [--json]
   agent-testbench workflow acceptance start --server-url URL --workflow ID --request-id ID [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
@@ -150,6 +151,7 @@ Examples:
   agent-testbench update --release latest
   agent-testbench commands --filter "case gate"
   agent-testbench commands --area workflow --filter "gate"
+  agent-testbench workflow task run --workflow workflow.message-smoke --step trigger=publish-message --step postcondition=consumer-check --store local --json
   agent-testbench logs agent-testbench -n 80
   agent-testbench task run catalog-smoke --command "commands --json" --store local --json
   agent-testbench watch catalog-smoke --command "commands --json" --store local --interval 5m --limit 3
