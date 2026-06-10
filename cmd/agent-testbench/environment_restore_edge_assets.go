@@ -52,7 +52,18 @@ type environmentRestoreAppliedAsset struct {
 	Error                string   `json:"error,omitempty"`
 }
 
+type environmentRestoreApplyAssetOptions struct {
+	UseExistingContainers bool
+	CompletedServices     map[string]bool
+}
+
 func environmentRestoreApplyEdgeAssets(ctx context.Context, graph store.EnvironmentComponentGraph, compose map[string]any, workspace string, execute bool, composeBaseArgs []string) []environmentRestoreAppliedAsset {
+	return environmentRestoreApplyEdgeAssetsWithOptions(ctx, graph, compose, workspace, execute, composeBaseArgs, environmentRestoreApplyAssetOptions{
+		CompletedServices: environmentRestoreCompletedDependencyServices(compose, workspace),
+	})
+}
+
+func environmentRestoreApplyEdgeAssetsWithOptions(ctx context.Context, graph store.EnvironmentComponentGraph, compose map[string]any, workspace string, execute bool, composeBaseArgs []string, options environmentRestoreApplyAssetOptions) []environmentRestoreAppliedAsset {
 	if len(graph.Dependencies) == 0 || len(graph.Assets) == 0 {
 		return nil
 	}
@@ -91,7 +102,7 @@ func environmentRestoreApplyEdgeAssets(ctx context.Context, graph store.Environm
 				continue
 			}
 			appliedAssetTargets[dedupeKey] = true
-			item := environmentRestoreApplyEdgeAsset(ctx, dep, asset, componentByID, generated, workspace, execute, composeBaseArgs)
+			item := environmentRestoreApplyEdgeAsset(ctx, dep, asset, componentByID, generated, workspace, execute, composeBaseArgs, options)
 			out = append(out, item)
 		}
 	}
@@ -110,10 +121,9 @@ func environmentRestoreApplyEdgeAssets(ctx context.Context, graph store.Environm
 	return out
 }
 
-func environmentRestoreApplyEdgeAsset(ctx context.Context, dep store.ComponentDependency, asset store.ComponentConfigAsset, components map[string]store.EnvironmentComponent, generated map[string]string, workspace string, execute bool, composeBaseArgs []string) environmentRestoreAppliedAsset {
+func environmentRestoreApplyEdgeAsset(ctx context.Context, dep store.ComponentDependency, asset store.ComponentConfigAsset, components map[string]store.EnvironmentComponent, generated map[string]string, workspace string, execute bool, composeBaseArgs []string, options environmentRestoreApplyAssetOptions) environmentRestoreAppliedAsset {
 	targetComponentID := firstNonEmpty(strings.TrimSpace(asset.TargetComponentID), strings.TrimSpace(dep.ProviderComponentID))
 	targetService := environmentRestoreComponentComposeService(components[targetComponentID], targetComponentID)
-	content, contentErr := environmentRestoreEdgeAssetContent(asset, workspace)
 	item := environmentRestoreAppliedAsset{
 		AssetID:              strings.TrimSpace(asset.AssetID),
 		OwnerComponentID:     strings.TrimSpace(asset.OwnerComponentID),
@@ -122,7 +132,6 @@ func environmentRestoreApplyEdgeAsset(ctx context.Context, dep store.ComponentDe
 		DependencyConsumer:   strings.TrimSpace(dep.ConsumerComponentID),
 		DependencyProvider:   strings.TrimSpace(dep.ProviderComponentID),
 		TargetPath:           strings.TrimSpace(asset.TargetPath),
-		Bytes:                len(content),
 		ApplyOrder:           asset.ApplyOrder,
 		Action:               "plan-apply-edge-asset",
 		OK:                   true,
@@ -133,18 +142,27 @@ func environmentRestoreApplyEdgeAsset(ctx context.Context, dep store.ComponentDe
 		return item
 	}
 	if environmentMigrationIsAsset(asset) {
+		content, contentErr := environmentRestoreEdgeAssetContent(asset, workspace)
+		item.Bytes = len(content)
 		return environmentRestoreApplyMigrationEdgeAsset(ctx, dep, asset, content, contentErr, workspace, execute, composeBaseArgs, item)
 	}
 	if environmentRestoreIsObjectStorageAsset(asset, dep) {
-		return environmentRestoreApplyObjectStorageEdgeAsset(ctx, dep, asset, components[targetComponentID], content, contentErr, workspace, execute, item)
+		content, contentErr := environmentRestoreEdgeAssetContent(asset, workspace)
+		item.Bytes = len(content)
+		return environmentRestoreApplyObjectStorageEdgeAsset(ctx, dep, asset, components[targetComponentID], content, contentErr, workspace, execute, options, item)
 	}
 	if environmentRestoreIsMySQLSQLAsset(asset, dep) {
-		return environmentRestoreApplyMySQLSQLEdgeAsset(ctx, content, contentErr, workspace, execute, composeBaseArgs, item)
+		if execute && options.UseExistingContainers {
+			return environmentRestoreApplyMySQLSQLEdgeAsset(ctx, "", nil, workspace, execute, composeBaseArgs, options, item)
+		}
+		content, contentErr := environmentRestoreEdgeAssetContent(asset, workspace)
+		item.Bytes = len(content)
+		return environmentRestoreApplyMySQLSQLEdgeAsset(ctx, content, contentErr, workspace, execute, composeBaseArgs, options, item)
 	}
 	return environmentRestoreApplyGeneratedEdgeAsset(asset, generated, workspace, execute, item)
 }
 
-func environmentRestoreApplyObjectStorageEdgeAsset(ctx context.Context, dep store.ComponentDependency, asset store.ComponentConfigAsset, provider store.EnvironmentComponent, content string, contentErr error, workspace string, execute bool, item environmentRestoreAppliedAsset) environmentRestoreAppliedAsset {
+func environmentRestoreApplyObjectStorageEdgeAsset(ctx context.Context, dep store.ComponentDependency, asset store.ComponentConfigAsset, provider store.EnvironmentComponent, content string, contentErr error, workspace string, execute bool, options environmentRestoreApplyAssetOptions, item environmentRestoreAppliedAsset) environmentRestoreAppliedAsset {
 	bucket, key := environmentRestoreObjectStorageAssetLocation(asset)
 	content, contentErr = environmentRestoreObjectStorageAssetContent(asset, content, contentErr)
 	item.TargetPath = environmentRestoreObjectStorageTargetPath(bucket, key)
@@ -171,6 +189,11 @@ func environmentRestoreApplyObjectStorageEdgeAsset(ctx context.Context, dep stor
 	})
 	item.Command = command
 	if len(command) == 0 {
+		if !options.UseExistingContainers && environmentRestoreObjectStorageSeedSatisfiedByCompose(item.TargetComposeService, options.CompletedServices) {
+			item.Action = "object-storage-seed-satisfied-by-compose"
+			item.Status = "compose-service-completed"
+			return item
+		}
 		item.OK = false
 		item.Error = "object storage asset requires provider objectStorage.seedCommand metadata"
 		return item
@@ -185,6 +208,11 @@ func environmentRestoreApplyObjectStorageEdgeAsset(ctx context.Context, dep stor
 		}
 	}
 	return item
+}
+
+func environmentRestoreObjectStorageSeedSatisfiedByCompose(service string, completedServices map[string]bool) bool {
+	service = strings.TrimSpace(service)
+	return service != "" && completedServices[service]
 }
 
 func environmentRestoreObjectStorageAssetContent(asset store.ComponentConfigAsset, content string, contentErr error) (string, error) {
@@ -352,12 +380,19 @@ func environmentRestoreApplyMigrationEdgeAsset(ctx context.Context, dep store.Co
 	return item
 }
 
-func environmentRestoreApplyMySQLSQLEdgeAsset(ctx context.Context, content string, contentErr error, workspace string, execute bool, composeBaseArgs []string, item environmentRestoreAppliedAsset) environmentRestoreAppliedAsset {
+func environmentRestoreApplyMySQLSQLEdgeAsset(ctx context.Context, content string, contentErr error, workspace string, execute bool, composeBaseArgs []string, options environmentRestoreApplyAssetOptions, item environmentRestoreAppliedAsset) environmentRestoreAppliedAsset {
 	item.Action = "plan-apply-mysql-sql"
 	item.Command = environmentRestoreMySQLApplyCommand(composeBaseArgs, item.TargetComposeService)
 	if len(composeBaseArgs) == 0 || item.TargetComposeService == "" {
 		item.OK = false
 		item.Error = "mysql edge asset requires a Docker Compose target service"
+		return item
+	}
+	if execute && options.UseExistingContainers {
+		item.Action = "skip-mysql-sql-use-existing-containers"
+		item.Command = nil
+		item.Status = "skipped"
+		item.Error = "plain MySQL SQL bootstrap asset was not re-applied to existing containers; convert it to an environment migration asset or rerun restore with a clean Docker state when it must be applied"
 		return item
 	}
 	if contentErr != nil {

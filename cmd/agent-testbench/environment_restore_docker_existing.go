@@ -47,7 +47,10 @@ func environmentRestoreUseExistingContainers(ctx context.Context, graph store.En
 		report.Output = append(report.Output, "generated compose env file: "+envFile)
 	}
 	report.Action = "use-existing-containers"
-	report.AppliedAssets = environmentRestoreApplyEdgeAssets(ctx, graph, compose, workspace, execute, composeBaseArgs)
+	report.AppliedAssets = environmentRestoreApplyEdgeAssetsWithOptions(ctx, graph, compose, workspace, execute, composeBaseArgs, environmentRestoreApplyAssetOptions{
+		UseExistingContainers: true,
+		CompletedServices:     environmentRestoreCompletedDependencyServices(compose, workspace),
+	})
 	for _, asset := range report.AppliedAssets {
 		if !asset.OK {
 			report.OK = false

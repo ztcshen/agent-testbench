@@ -197,6 +197,207 @@ func TestEnvironmentRestoreSeedsObjectStorageEdgeAsset(t *testing.T) {
 	}
 }
 
+func TestEnvironmentRestoreAcceptsComposeManagedObjectStorageSeed(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	for _, entry := range fixture.DockerEnv {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			t.Fatalf("invalid fake docker env entry %q", entry)
+		}
+		t.Setenv(key, value)
+	}
+	fixture.writeDockerTool(t, `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
+if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
+  printf 'Docker Compose version v2.0.0\n'
+  exit 0
+fi
+if [ "$1" = "manifest" ] && [ "$2" = "inspect" ]; then
+  exit 0
+fi
+if [ "$1" = "compose" ] && [[ "$*" == *" ps -a --format json "* ]]; then
+  service="${@: -1}"
+  if [ "$service" = "object-seed" ]; then
+    printf '[{"Name":"demo-object-seed","Service":"object-seed","State":"exited","ExitCode":0}]\n'
+  else
+    printf '{"Name":"demo-%s","Service":"%s","State":"running","Health":"healthy"}\n' "$service" "$service"
+  fi
+  exit 0
+fi
+exit 0
+`)
+	healthURL := newHealthyTestURL(t)
+	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+		ID: "env.object.compose.seed",
+		ComposeJSON: `{
+			"composeFile":"compose.yml",
+			"services":["object-seed","worker"],
+			"generatedFiles":{
+				"compose.yml":"services:\n  worker:\n    image: alpine:3.20\n    depends_on:\n      object-seed:\n        condition: service_completed_successfully\n  object-seed:\n    image: minio/mc:RELEASE.2024-05-09T17-04-24Z\n"
+			},
+			"skipPull":true,
+			"skipBuild":true
+		}`,
+		HealthChecksJSON:       `[{"kind":"compose-service","service":"object-seed"}]`,
+		VerificationWorkflowID: "workflow.object-compose-seed",
+	}, fixture.Workspace, true, false, false, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{}, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "object-store", Kind: "middleware", Role: "object-storage", ComposeService: "object-seed", Required: true, HealthCheckJSON: `{"kind":"compose-service","service":"object-seed"}`},
+			{ComponentID: "worker", Kind: "app", Role: "worker", ComposeService: "worker", Required: true, HealthCheckJSON: `{"kind":"url","url":"` + healthURL + `"}`},
+		},
+		Dependencies: []store.ComponentDependency{
+			{ConsumerComponentID: "worker", ProviderComponentID: "object-store", Capability: objectStorageCapability, Required: true, ProfileJSON: `{"assetIds":["object.fixture"]}`},
+		},
+		Assets: []store.ComponentConfigAsset{
+			{OwnerComponentID: "worker", AssetID: "object.fixture", AssetKind: "object-storage-object", TargetComponentID: "object-store", ContentInline: "fixture-body", SummaryJSON: `{"bucket":"fixtures","key":"cases/input.json"}`},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build restore report: %v", err)
+	}
+	if !report.OK || !report.Docker.OK || len(report.Docker.AppliedAssets) != 1 {
+		t.Fatalf("compose-managed object seed restore = %#v", report.Docker)
+	}
+	item := report.Docker.AppliedAssets[0]
+	if item.Action != "object-storage-seed-satisfied-by-compose" || !item.OK || item.TargetComposeService != "object-seed" {
+		t.Fatalf("compose-managed object seed asset = %#v", item)
+	}
+}
+
+func TestEnvironmentRestoreUseExistingContainersSkipsPlainMySQLSQLAssets(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	for _, entry := range fixture.DockerEnv {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			t.Fatalf("invalid fake docker env entry %q", entry)
+		}
+		t.Setenv(key, value)
+	}
+	fixture.writeDockerTool(t, `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
+if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
+  printf 'Docker Compose version v2.0.0\n'
+  exit 0
+fi
+if [ "$1" = "compose" ] && [[ "$*" == *" ps -a --format json "* ]]; then
+  service="${@: -1}"
+  printf '{"Name":"demo-%s","Service":"%s","State":"running","Health":"healthy"}\n' "$service" "$service"
+  exit 0
+fi
+if [ "$1" = "inspect" ]; then
+  printf 'running\thealthy\t0\n'
+  exit 0
+fi
+exit 0
+`)
+	healthURL := newHealthyTestURL(t)
+	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+		ID: "env.existing.mysql.asset",
+		ComposeJSON: `{
+			"composeFile":"compose.yml",
+			"services":["mysql","app"],
+			"generatedFiles":{
+				"compose.yml":"services:\n  mysql:\n    image: mysql:8\n    container_name: sandbox-mysql\n  app:\n    image: alpine:3.20\n    container_name: sandbox-app\n"
+			},
+			"skipPull":true,
+			"skipBuild":true
+		}`,
+		HealthChecksJSON:       `[{"kind":"compose-service","service":"mysql"},{"kind":"compose-service","service":"app"}]`,
+		VerificationWorkflowID: "workflow.existing-mysql-asset",
+	}, fixture.Workspace, true, false, false, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{
+		UseExistingContainers: true,
+	}, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "mysql", Kind: "middleware", Role: "database", ComposeService: "mysql", Required: true, HealthCheckJSON: `{"kind":"compose-service","service":"mysql"}`},
+			{ComponentID: "app", Kind: "app", Role: "service", ComposeService: "app", Required: true, HealthCheckJSON: `{"kind":"url","url":"` + healthURL + `"}`},
+		},
+		Dependencies: []store.ComponentDependency{
+			{ConsumerComponentID: "app", ProviderComponentID: "mysql", Capability: "sql", Required: true, ProfileJSON: `{"assetIds":["app.schema"]}`},
+		},
+		Assets: []store.ComponentConfigAsset{
+			{OwnerComponentID: "app", AssetID: "app.schema", AssetKind: "mysql-ddl", TargetComponentID: "mysql", TargetPath: "compose/mysql/init/app.sql"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build restore report: %v", err)
+	}
+	if !report.OK || !report.Docker.OK || len(report.Docker.AppliedAssets) != 1 {
+		t.Fatalf("existing-container restore should skip risky SQL asset and continue: %#v", report.Docker)
+	}
+	item := report.Docker.AppliedAssets[0]
+	if item.Action != "skip-mysql-sql-use-existing-containers" || !item.OK || !strings.Contains(item.Error, "environment migration") {
+		t.Fatalf("existing-container SQL asset item = %#v", item)
+	}
+	rawDockerCalls, err := os.ReadFile(fixture.DockerCallsPath)
+	if err != nil {
+		t.Fatalf("read fake docker calls: %v", err)
+	}
+	if strings.Contains(string(rawDockerCalls), "exec -T mysql sh -lc") {
+		t.Fatalf("plain SQL asset should not be re-applied to existing containers:\n%s", rawDockerCalls)
+	}
+}
+
+func TestEnvironmentRestoreUseExistingContainersRequiresObjectStorageSeedCommand(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	for _, entry := range fixture.DockerEnv {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			t.Fatalf("invalid fake docker env entry %q", entry)
+		}
+		t.Setenv(key, value)
+	}
+	fixture.writeDockerTool(t, `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
+if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
+  printf 'Docker Compose version v2.0.0\n'
+  exit 0
+fi
+if [ "$1" = "inspect" ]; then
+  printf 'running	healthy	0\n'
+  exit 0
+fi
+exit 0
+`)
+	healthURL := newHealthyTestURL(t)
+	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+		ID: "env.existing.object.seed",
+		ComposeJSON: `{
+			"composeFile":"compose.yml",
+			"services":["object-seed","worker"],
+			"generatedFiles":{
+				"compose.yml":"services:\n  worker:\n    image: alpine:3.20\n    container_name: sandbox-worker\n    depends_on:\n      object-seed:\n        condition: service_completed_successfully\n  object-seed:\n    image: minio/mc:RELEASE.2024-05-09T17-04-24Z\n    container_name: sandbox-object-seed\n"
+			},
+			"skipPull":true,
+			"skipBuild":true
+		}`,
+		HealthChecksJSON:       `[{"kind":"compose-service","service":"object-seed"}]`,
+		VerificationWorkflowID: "workflow.existing-object-seed",
+	}, fixture.Workspace, true, false, false, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{
+		UseExistingContainers: true,
+	}, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "object-store", Kind: "middleware", Role: "object-storage", ComposeService: "object-seed", Required: true, HealthCheckJSON: `{"kind":"compose-service","service":"object-seed"}`},
+			{ComponentID: "worker", Kind: "app", Role: "worker", ComposeService: "worker", Required: true, HealthCheckJSON: `{"kind":"url","url":"` + healthURL + `"}`},
+		},
+		Dependencies: []store.ComponentDependency{
+			{ConsumerComponentID: "worker", ProviderComponentID: "object-store", Capability: objectStorageCapability, Required: true, ProfileJSON: `{"assetIds":["object.fixture"]}`},
+		},
+		Assets: []store.ComponentConfigAsset{
+			{OwnerComponentID: "worker", AssetID: "object.fixture", AssetKind: "object-storage-object", TargetComponentID: "object-store", ContentInline: "fixture-body", SummaryJSON: `{"bucket":"fixtures","key":"cases/input.json"}`},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build restore report: %v", err)
+	}
+	if report.OK || report.Docker.OK || len(report.Docker.AppliedAssets) != 1 {
+		t.Fatalf("existing-container object seed should require an explicit seed command: %#v", report.Docker)
+	}
+	item := report.Docker.AppliedAssets[0]
+	if item.Action == "object-storage-seed-satisfied-by-compose" || !strings.Contains(item.Error, "objectStorage.seedCommand") {
+		t.Fatalf("existing-container object seed asset = %#v", item)
+	}
+}
+
 func TestEnvironmentRestoreSeedsS3ObjectAssetKindWithoutCapability(t *testing.T) {
 	workspace := t.TempDir()
 	seedPath := filepath.Join(workspace, "seeded-s3-object.txt")
@@ -518,6 +719,7 @@ func TestEnvironmentRestoreEdgeAssetContentRejectsParentPath(t *testing.T) {
 		t.TempDir(),
 		false,
 		[]string{"-f", "compose.yml"},
+		environmentRestoreApplyAssetOptions{},
 	)
 	if item.OK || !strings.Contains(item.Error, "target path is required") {
 		t.Fatalf("parent path edge asset should be rejected: %#v", item)

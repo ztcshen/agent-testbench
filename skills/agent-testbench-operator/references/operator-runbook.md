@@ -183,6 +183,12 @@ Inspect registered sandbox services without executing startup commands:
 ./skills/agent-testbench-operator/scripts/atb.sh sandbox start --store STORE_NAME --workflow WORKFLOW_ID --dry-run --json
 ```
 
+After any `sandbox start --json` pass, inspect the report's `runtime` block.
+If `runtime.activeMatchesRuntime=false` or `runtime.fresh=false`, treat the
+sandbox result as incomplete validation until `.runtime/bin/agent-testbench` is
+rebuilt or the wrapper resolves to it. Report the active path, expected runtime
+path, and repair command with the workflow result.
+
 When a workflow-scoped sandbox start reports a service with an empty startup
 command, treat the workflow as blocked. Repair the Store service entry with
 `sandbox service register --id SERVICE_ID --startup-command ...`. If the
@@ -215,6 +221,10 @@ Review before writes, then execute against a restored workspace:
 
 Use `environment migration baseline` instead of `apply` when the target
 database already contains the schema and only needs history rows recorded.
+When `environment restore --use-existing-containers` adopts an already-running
+database, plain MySQL SQL bootstrap assets are skipped rather than reapplied;
+convert repeatable changes to migration assets, baseline existing schema, or
+rerun a clean restore when bootstrap SQL must be replayed.
 
 ## Maintaining This Skill
 
