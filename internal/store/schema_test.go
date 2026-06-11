@@ -5,11 +5,31 @@ import (
 	"encoding/json"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"agent-testbench/internal/store/schema"
 	"agent-testbench/internal/store/sqlite"
 )
+
+func TestStoreSchemaChangesAreContiguous(t *testing.T) {
+	changes := schema.All()
+	if len(changes) != schema.CurrentVersion {
+		t.Fatalf("schema.All() length = %d, want CurrentVersion %d", len(changes), schema.CurrentVersion)
+	}
+	for i, change := range changes {
+		wantVersion := i + 1
+		if change.Version != wantVersion {
+			t.Fatalf("schema change at index %d has version %d, want %d", i, change.Version, wantVersion)
+		}
+		if strings.TrimSpace(change.Name) == "" {
+			t.Fatalf("schema change %d has empty name", change.Version)
+		}
+		if strings.TrimSpace(change.SQL) == "" {
+			t.Fatalf("schema change %d has empty SQL", change.Version)
+		}
+	}
+}
 
 func TestSQLiteSchemaUpgradesAreIdempotent(t *testing.T) {
 	ctx := context.Background()

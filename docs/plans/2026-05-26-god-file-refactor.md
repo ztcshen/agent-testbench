@@ -127,6 +127,122 @@ npm run test:frontend
 npm run build:frontend
 ```
 
+## 2026-06-11 Slice: Split Sandbox And Restore Asset Command Files
+
+**Scope:** Behavior-preserving split inside `cmd/agent-testbench` only. This
+slice does not change public CLI commands, flags, JSON fields, HTTP routes, or
+Store schema.
+
+**Responsibility boundary:**
+
+- `sandbox_commands.go`: top-level `sandbox` command dispatch only.
+- `sandbox_catalog_commands.go`: `sandbox service` / `sandbox interface`
+  catalog registration and listing.
+- `sandbox_start_commands.go`: `sandbox start` report, selection, event, and
+  startup orchestration.
+- `environment_restore_edge_assets.go`: dependency-edge asset dispatch,
+  migration edge asset handling, generated-file verification, and shared edge
+  asset content loading.
+- `environment_restore_mysql_assets.go`: plain MySQL SQL edge asset detection,
+  apply command construction, and retry policy.
+- `environment_restore_object_storage_assets.go`: object-storage asset
+  detection, location metadata, seed command rendering, empty-object handling,
+  and retry policy.
+- Environment restore Docker tests are split by compose/preflight behavior,
+  health behavior, MySQL asset behavior, and object-storage asset behavior.
+
+**Non-goals for this slice:**
+
+- Do not introduce a new package boundary for `cmd/agent-testbench`; the
+  package-level line/file-count blocking remains a separate architectural task.
+- Do not abstract common test setup unless a duplicate-code gate reports a real
+  clone.
+- Do not change command output or runtime behavior.
+
+**Verification evidence captured locally:**
+
+```bash
+go test ./cmd/agent-testbench -run 'TestSandbox' -count=1
+go test ./cmd/agent-testbench -run 'TestEnvironmentRestore(.*Asset|.*ObjectStorage|AcceptsComposeManagedObjectStorageSeed|UseExistingContainers)' -count=1
+go test ./cmd/agent-testbench -run 'TestEnvironmentRestore(Preflight|ExecutesDocker|StreamJSON|RunsMixedHealth|FailsWhenHealth|HealthWait|CommandHealth|HonorsCompose|AcceptsExplicit|SupportsMultipleCompose|RejectsMissingHostBind|Rewrites|ReportsUnavailable|AcceptsLocal|DoesNotPull)' -count=1
+go test ./cmd/agent-testbench -count=1
+go test ./...
+./bin/agent-testbench.sh commands --json >/tmp/agent-testbench-commands-after-all-splits.json
+diff -u /tmp/agent-testbench-commands-before-sandbox-split.json /tmp/agent-testbench-commands-after-all-splits.json
+AGENT_TESTBENCH_SMOKE_STORE_DSN='sqlite:///tmp/agent-testbench-release-smoke.sqlite' AGENT_TESTBENCH_SKIP_GO_LINT=1 npm run release-check -- --scope <changed-files>
+```
+
+Expected: tests pass, command catalog diff is empty, jscpd reports `0` clones,
+and scoped release-check passes. `make quality` should no longer report
+file-size blocking for the touched sandbox and environment restore asset/test
+files; package-level `cmd/agent-testbench` size/file-count blocking is accepted
+as the remaining larger follow-up.
+
+## 2026-06-12 Slice: Split Store Schema Migration Catalog
+
+**Scope:** Behavior-preserving split inside `internal/store/schema` plus one
+schema invariant test. This slice does not change any migration version, SQL
+text, Store table/column/index definition, or backend migration behavior.
+
+**Responsibility boundary:**
+
+- `schema.go`: public `Change`, `CurrentVersion`, ordered migration assembly,
+  core runtime/template/profile/evidence migration entries, and `All()`.
+- `environment_catalog.go`: environment catalog, component graph, and workflow
+  environment-link migration entries.
+- `agent_tasks.go`: agent task registry migration entry.
+- `internal/store/schema_test.go`: invariant that `schema.All()` stays
+  contiguous from version 1 through `CurrentVersion`, with non-empty names and
+  SQL bodies.
+
+**Verification evidence captured locally:**
+
+```bash
+go test ./internal/store ./internal/store/schema ./internal/store/sqlstore ./internal/store/sqlite -count=1
+go test ./internal/store -run 'TestStoreSchemaChangesAreContiguous|TestSQLiteSchema' -count=1
+npm run guard:duplicates -- internal/store/schema internal/store/schema_test.go
+python3 - <<'PY'
+# Compared HEAD's single-file migration list to the split files by extracting
+# (Version, Name, SQL) tuples. Expected: schema changes identical: 19 changes.
+PY
+```
+
+Expected: Store schema tests pass, split files stay below the schema surface
+warning threshold, jscpd reports `0` clones, and the extracted migration tuples
+match HEAD exactly.
+
+## 2026-06-12 Slice: Split PostgreSQL Store Adapter Surface
+
+**Scope:** Behavior-preserving split inside `internal/store/postgres`. This
+slice does not change exported method signatures, SQL behavior, schema
+lifecycle semantics, or backend selection.
+
+**Responsibility boundary:**
+
+- `store.go`: PostgreSQL config parsing, opening, upgrade-on-open, DB pinging,
+  and close behavior.
+- `store_delegates.go`: `Store` methods that delegate directly to the shared
+  `sqlstore.Store` implementation.
+- `schema_lifecycle.go`: PostgreSQL schema status, upgrade, and DB opener
+  lifecycle helpers.
+
+**Impact note:** Quality gate reports public function/type touchpoints because
+exported `Store` methods and schema lifecycle functions moved files. The
+downstream contract is unchanged: names, parameters, return types, and method
+bodies are preserved.
+
+**Verification evidence captured locally:**
+
+```bash
+go test ./internal/store/postgres ./internal/store -run 'Test.*Postgres|TestParseConfigFromURL|TestOpenUsesConfiguredSQLDriver|TestSchemaStatusAndUpgradeUseConfiguredSQLDriver' -count=1
+npm run guard:duplicates -- internal/store/postgres
+make quality
+```
+
+Expected: PostgreSQL adapter tests pass, jscpd reports `0` clones, and
+`make quality` no longer reports `internal/store/postgres/store.go` as a
+too-many-functions file.
+
 ---
 
 ## Task 1: Split CLI Environment Restore from `main.go`
