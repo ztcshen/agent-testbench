@@ -1,3 +1,4 @@
+// Package schema defines ordered Store schema migration changes.
 package schema
 
 var agentTaskChanges = []Change{

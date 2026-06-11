@@ -1,3 +1,4 @@
+// Package postgres adapts the shared SQL Store to PostgreSQL.
 package postgres
 
 import (
