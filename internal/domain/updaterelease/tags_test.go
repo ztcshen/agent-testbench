@@ -35,6 +35,14 @@ func TestLatestTagFromRemoteOutputRejectsPartialNumericTags(t *testing.T) {
 	}
 }
 
+func TestLatestTagFromRemoteOutputKeepsStableBuildMetadata(t *testing.T) {
+	out := "a\trefs/tags/v1.9.0\nb\trefs/tags/v1.10.0+build.5\nc\trefs/tags/v2.0.0-rc1\n"
+
+	if got := LatestTagFromRemoteOutput(out); got != "v1.10.0+build.5" {
+		t.Fatalf("latest tag = %q, want v1.10.0+build.5", got)
+	}
+}
+
 func TestCompareTagsOrdersPrereleasePartsNumerically(t *testing.T) {
 	if CompareTags("v2.0.0-rc10", "v2.0.0-rc2") <= 0 {
 		t.Fatal("rc10 should sort after rc2")

@@ -186,11 +186,11 @@ func environmentRestoreApplyEdgeAsset(ctx context.Context, dep store.ComponentDe
 	}
 	if environmentRestoreIsMySQLSQLAsset(asset, dep) {
 		if execute && options.UseExistingContainers {
-			return environmentRestoreApplyMySQLSQLEdgeAsset("", nil, compose, workspace, execute, composeBaseArgs, options, item)
+			return environmentRestoreApplyMySQLSQLEdgeAsset(ctx, "", nil, compose, workspace, execute, composeBaseArgs, options, item)
 		}
 		content, contentErr := environmentRestoreEdgeAssetContent(asset, workspace)
 		item.Bytes = len(content)
-		return environmentRestoreApplyMySQLSQLEdgeAsset(content, contentErr, compose, workspace, execute, composeBaseArgs, options, item)
+		return environmentRestoreApplyMySQLSQLEdgeAsset(ctx, content, contentErr, compose, workspace, execute, composeBaseArgs, options, item)
 	}
 	return environmentRestoreApplyGeneratedEdgeAsset(asset, generated, workspace, execute, item)
 }

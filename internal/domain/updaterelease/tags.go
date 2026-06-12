@@ -191,11 +191,17 @@ func parseTag(tag string) tagVersion {
 	if trimmed == "" {
 		return tagVersion{}
 	}
-	versionPart := trimmed
+	versionPart := ""
 	prerelease := ""
-	if index := strings.IndexAny(trimmed, "-+_"); index >= 0 {
-		versionPart = trimmed[:index]
-		prerelease = trimmed[index+1:]
+	releasePart := trimmed
+	if index := strings.Index(releasePart, "+"); index >= 0 {
+		releasePart = releasePart[:index]
+	}
+	if index := strings.IndexAny(releasePart, "-_"); index >= 0 {
+		versionPart = releasePart[:index]
+		prerelease = releasePart[index+1:]
+	} else {
+		versionPart = releasePart
 	}
 	rawParts := strings.Split(versionPart, ".")
 	parts := make([]int, 0, len(rawParts))

@@ -117,6 +117,23 @@ func TestEnvironmentRestoreEdgeAssetsAvoidNonSQLMySQLAndDuplicateApply(t *testin
 	}
 }
 
+func TestEnvironmentRestoreMySQLSQLAssetWithoutTargetPathFallsBackToExec(t *testing.T) {
+	item := environmentRestoreApplyEdgeAsset(context.Background(),
+		store.ComponentDependency{ConsumerComponentID: "app", ProviderComponentID: "mysql", Capability: "sql", ProfileJSON: `{"assetIds":["inline.schema"]}`},
+		store.ComponentConfigAsset{OwnerComponentID: "app", AssetID: "inline.schema", AssetKind: "mysql-ddl", TargetComponentID: "mysql", ContentInline: "create database app;\n"},
+		map[string]store.EnvironmentComponent{"mysql": {ComponentID: "mysql", ComposeService: "mysql"}},
+		nil,
+		nil,
+		t.TempDir(),
+		false,
+		[]string{"-f", "compose.yml"},
+		environmentRestoreApplyAssetOptions{},
+	)
+	if !item.OK || item.Action != "apply-mysql-sql" || item.Error != "" || len(item.Command) == 0 {
+		t.Fatalf("targetless mysql SQL asset should fall back to exec: %#v", item)
+	}
+}
+
 func TestEnvironmentRestoreEdgeAssetsRequireMySQLProviderSignal(t *testing.T) {
 	workspace := t.TempDir()
 	graph := store.EnvironmentComponentGraph{
@@ -337,6 +354,36 @@ func TestEnvironmentRestoreRejectsUnMountedMySQLInitDBProjection(t *testing.T) {
 	}
 }
 
+func TestEnvironmentRestoreAcceptsLongFormMySQLInitDBMount(t *testing.T) {
+	workspace := t.TempDir()
+	graph := store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "mysql", Kind: "middleware", Role: "database", ComposeService: "mysql"},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app"},
+		},
+		Dependencies: []store.ComponentDependency{
+			{ConsumerComponentID: "app", ProviderComponentID: "mysql", Capability: "sql", ProfileJSON: `{"assetIds":["schema.one"]}`},
+		},
+		Assets: []store.ComponentConfigAsset{
+			{OwnerComponentID: "app", AssetID: "schema.one", AssetKind: "mysql-ddl", TargetComponentID: "mysql", TargetPath: "compose/mysql/init/app.sql", ContentInline: "create database app_one;\n"},
+		},
+	}
+
+	failures := environmentRestoreProjectMySQLInitDBAssets(graph, map[string]any{
+		"composeFile": "compose.yml",
+		"generatedFiles": map[string]any{
+			"compose.yml": "services:\n  mysql:\n    image: mysql:8\n    volumes:\n      - type: bind\n        source: ./compose/mysql/init\n        target: /docker-entrypoint-initdb.d\n",
+		},
+	}, nil, workspace)
+	if len(failures) != 0 {
+		t.Fatalf("long-form initdb mount should project without failures: %#v", failures)
+	}
+	projected, err := os.ReadFile(filepath.Join(workspace, "compose", "mysql", "init", "app.sql"))
+	if err != nil || string(projected) != "create database app_one;\n" {
+		t.Fatalf("long-form initdb projected SQL = %q err=%v", projected, err)
+	}
+}
+
 func environmentRestoreMySQLInitDBMountedCompose() map[string]any {
 	return map[string]any{
 		"composeFile": "compose.yml",
@@ -362,5 +409,38 @@ func TestEnvironmentRestoreRetriesMySQLAssetUntilServiceReady(t *testing.T) {
 	}
 	if got := strings.Count(string(calls), "apply"); got != 2 {
 		t.Fatalf("mysql command calls = %d, want 2\n%s", got, calls)
+	}
+}
+
+func TestEnvironmentRestoreMySQLApplyUsesCallerContext(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	for _, entry := range fixture.DockerEnv {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			t.Fatalf("invalid fake docker env entry %q", entry)
+		}
+		t.Setenv(key, value)
+	}
+	fixture.writeDockerTool(t, `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
+printf "ERROR 2003 (HY000): Can't connect to MySQL server on 'mysql' (111)\n" >&2
+exit 1
+`)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	item := environmentRestoreApplyEdgeAsset(ctx,
+		store.ComponentDependency{ConsumerComponentID: "app", ProviderComponentID: "mysql", Capability: "sql", ProfileJSON: `{"assetIds":["inline.schema"]}`},
+		store.ComponentConfigAsset{OwnerComponentID: "app", AssetID: "inline.schema", AssetKind: "mysql-ddl", TargetComponentID: "mysql", ContentInline: "create database app;\n"},
+		map[string]store.EnvironmentComponent{"mysql": {ComponentID: "mysql", ComposeService: "mysql"}},
+		nil,
+		nil,
+		fixture.Workspace,
+		true,
+		[]string{"-f", "compose.yml"},
+		environmentRestoreApplyAssetOptions{},
+	)
+	if item.OK || item.Attempts != 1 || !strings.Contains(item.Error, context.Canceled.Error()) {
+		t.Fatalf("mysql apply should stop on caller context cancellation: %#v", item)
 	}
 }

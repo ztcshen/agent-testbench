@@ -10,9 +10,12 @@ import (
 	"agent-testbench/internal/store"
 )
 
-const environmentRestoreActionProjectMySQLInitDB = "project-mysql-initdb"
+const (
+	environmentRestoreActionApplyMySQLSQL      = "apply-mysql-sql"
+	environmentRestoreActionProjectMySQLInitDB = "project-mysql-initdb"
+)
 
-func environmentRestoreApplyMySQLSQLEdgeAsset(content string, contentErr error, compose map[string]any, workspace string, execute bool, composeBaseArgs []string, options environmentRestoreApplyAssetOptions, item environmentRestoreAppliedAsset) environmentRestoreAppliedAsset {
+func environmentRestoreApplyMySQLSQLEdgeAsset(ctx context.Context, content string, contentErr error, compose map[string]any, workspace string, execute bool, composeBaseArgs []string, options environmentRestoreApplyAssetOptions, item environmentRestoreAppliedAsset) environmentRestoreAppliedAsset {
 	item.Action = environmentRestoreActionProjectMySQLInitDB
 	item.Command = nil
 	if len(composeBaseArgs) == 0 || item.TargetComposeService == "" {
@@ -27,10 +30,14 @@ func environmentRestoreApplyMySQLSQLEdgeAsset(content string, contentErr error, 
 		item.Error = "plain MySQL SQL bootstrap asset was not re-applied to existing containers; convert it to an environment migration asset or rerun restore with a clean Docker state when it must be applied"
 		return item
 	}
-	if ok, errText := environmentRestoreGeneratedFileTargetOK(item.TargetPath, workspace); !ok {
-		item.OK = false
-		item.Error = errText
-		return item
+	targetPathOK := false
+	if strings.TrimSpace(item.TargetPath) != "" {
+		if ok, errText := environmentRestoreGeneratedFileTargetOK(item.TargetPath, workspace); !ok {
+			item.OK = false
+			item.Error = errText
+			return item
+		}
+		targetPathOK = true
 	}
 	if contentErr != nil {
 		item.OK = false
@@ -42,12 +49,12 @@ func environmentRestoreApplyMySQLSQLEdgeAsset(content string, contentErr error, 
 		item.Error = "mysql edge asset requires SQL content"
 		return item
 	}
-	mounted := environmentRestoreMySQLInitDBMountsTarget(compose, workspace, item.TargetComposeService, item.TargetPath)
+	mounted := targetPathOK && environmentRestoreMySQLInitDBMountsTarget(compose, workspace, item.TargetComposeService, item.TargetPath)
 	if !mounted {
-		item.Action = "apply-mysql-sql"
+		item.Action = environmentRestoreActionApplyMySQLSQL
 		item.Command = environmentRestoreMySQLApplyCommand(composeBaseArgs, item.TargetComposeService)
 		if execute {
-			attempts, errText := runRestoreMySQLCommandWithInputRetry(context.Background(), workspace, item.Command, content)
+			attempts, errText := runRestoreMySQLCommandWithInputRetry(ctx, workspace, item.Command, content)
 			item.Attempts = attempts
 			if errText != "" {
 				item.OK = false
@@ -99,36 +106,137 @@ func environmentRestoreMySQLInitDBMountsTarget(compose map[string]any, workspace
 }
 
 func environmentRestoreComposeContentMountsMySQLInitDB(content string, composeDir string, compose map[string]any, workspace string, service string, targetPath string) bool {
-	currentService := ""
-	inServices := false
+	scanner := environmentRestoreComposeMountScanner{
+		composeDir: composeDir,
+		compose:    compose,
+		workspace:  workspace,
+		service:    service,
+		targetPath: targetPath,
+	}
 	for _, line := range strings.Split(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		indent := len(line) - len(strings.TrimLeft(line, " "))
-		if indent == 0 {
-			inServices = trimmed == "services:"
-			currentService = ""
-			continue
-		}
-		if inServices && indent == 2 && strings.HasSuffix(trimmed, ":") && !strings.HasPrefix(trimmed, "-") {
-			currentService = strings.TrimSuffix(trimmed, ":")
-			continue
-		}
-		if !inServices || currentService != service || !strings.HasPrefix(trimmed, "-") {
-			continue
-		}
-		source, target, ok := parseComposeShortVolume(strings.TrimSpace(strings.TrimPrefix(trimmed, "-")))
-		if !ok || !environmentRestoreIsMySQLInitDBTarget(target) {
-			continue
-		}
-		sourcePath, sourceOK := environmentRestoreStartupAssetPath(source, composeDir, compose, workspace)
-		if sourceOK && environmentRestoreMountSourceCoversTarget(sourcePath, targetPath) {
+		if scanner.processLine(line) {
 			return true
 		}
 	}
+	return scanner.flushVolume()
+}
+
+type environmentRestoreComposeMountScanner struct {
+	composeDir     string
+	compose        map[string]any
+	workspace      string
+	service        string
+	targetPath     string
+	currentService string
+	inServices     bool
+	volume         environmentRestoreComposeVolumeCandidate
+}
+
+func (scanner *environmentRestoreComposeMountScanner) processLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		return false
+	}
+	indent := len(line) - len(strings.TrimLeft(line, " "))
+	if indent == 0 {
+		return scanner.processRootLine(trimmed)
+	}
+	if scanner.isServiceHeader(indent, trimmed) {
+		return scanner.processServiceHeader(trimmed)
+	}
+	if !scanner.inTargetService() {
+		return false
+	}
+	return scanner.processTargetServiceLine(indent, trimmed)
+}
+
+func (scanner *environmentRestoreComposeMountScanner) processRootLine(trimmed string) bool {
+	if scanner.flushVolume() {
+		return true
+	}
+	scanner.inServices = trimmed == "services:"
+	scanner.currentService = ""
 	return false
+}
+
+func (scanner *environmentRestoreComposeMountScanner) isServiceHeader(indent int, trimmed string) bool {
+	return scanner.inServices && indent == 2 && strings.HasSuffix(trimmed, ":") && !strings.HasPrefix(trimmed, "-")
+}
+
+func (scanner *environmentRestoreComposeMountScanner) processServiceHeader(trimmed string) bool {
+	if scanner.flushVolume() {
+		return true
+	}
+	scanner.currentService = strings.TrimSuffix(trimmed, ":")
+	return false
+}
+
+func (scanner *environmentRestoreComposeMountScanner) inTargetService() bool {
+	return scanner.inServices && scanner.currentService == scanner.service
+}
+
+func (scanner *environmentRestoreComposeMountScanner) processTargetServiceLine(indent int, trimmed string) bool {
+	if scanner.volume.active && indent <= scanner.volume.indent && !strings.HasPrefix(trimmed, "-") && scanner.flushVolume() {
+		return true
+	}
+	if !strings.HasPrefix(trimmed, "-") {
+		if scanner.volume.active && indent > scanner.volume.indent {
+			scanner.volume.applyKeyValue(trimmed)
+		}
+		return false
+	}
+	if scanner.flushVolume() {
+		return true
+	}
+	return scanner.processVolumeItem(indent, strings.TrimSpace(strings.TrimPrefix(trimmed, "-")))
+}
+
+func (scanner *environmentRestoreComposeMountScanner) processVolumeItem(indent int, entry string) bool {
+	source, target, ok := parseComposeShortVolume(entry)
+	if !ok || !environmentRestoreIsMySQLInitDBTarget(target) {
+		scanner.volume = newEnvironmentRestoreComposeVolumeCandidate(indent, entry)
+		return false
+	}
+	sourcePath, sourceOK := environmentRestoreStartupAssetPath(source, scanner.composeDir, scanner.compose, scanner.workspace)
+	return sourceOK && environmentRestoreMountSourceCoversTarget(sourcePath, scanner.targetPath)
+}
+
+func (scanner *environmentRestoreComposeMountScanner) flushVolume() bool {
+	defer func() {
+		scanner.volume = environmentRestoreComposeVolumeCandidate{}
+	}()
+	if !environmentRestoreIsMySQLInitDBTarget(scanner.volume.target) {
+		return false
+	}
+	sourcePath, sourceOK := environmentRestoreStartupAssetPath(scanner.volume.source, scanner.composeDir, scanner.compose, scanner.workspace)
+	return sourceOK && environmentRestoreMountSourceCoversTarget(sourcePath, scanner.targetPath)
+}
+
+type environmentRestoreComposeVolumeCandidate struct {
+	active bool
+	indent int
+	source string
+	target string
+}
+
+func newEnvironmentRestoreComposeVolumeCandidate(indent int, entry string) environmentRestoreComposeVolumeCandidate {
+	volume := environmentRestoreComposeVolumeCandidate{active: true, indent: indent}
+	volume.applyKeyValue(entry)
+	return volume
+}
+
+func (volume *environmentRestoreComposeVolumeCandidate) applyKeyValue(line string) {
+	key, value, ok := strings.Cut(line, ":")
+	if !ok {
+		return
+	}
+	value = strings.Trim(strings.TrimSpace(value), `"'`)
+	switch strings.TrimSpace(key) {
+	case "source":
+		volume.source = value
+	case "target":
+		volume.target = value
+	}
 }
 
 func environmentRestoreIsMySQLInitDBTarget(target string) bool {
