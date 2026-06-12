@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"agent-testbench/internal/domain/casesuite"
 	"agent-testbench/internal/domain/profile"
@@ -507,31 +506,4 @@ func addWorkflowGateStep(report *workflowGateReport, step workflowGateStep) {
 		return
 	}
 	report.MissingEvidence = append(report.MissingEvidence, step)
-}
-
-func executeCaseSuiteQualityReport(ctx context.Context, bundle profile.Bundle, sourceStore store.Store, sourceStoreURL string, filters caseListFilter, cases []profile.APICase, outputDir string) (caseSuiteQualityReport, error) {
-	started := time.Now()
-	plan, err := casesuite.QualityPlan(ctx, bundle, sourceStore, caseSuiteFilter(filters), cases)
-	if err != nil {
-		return caseSuiteQualityReport{}, err
-	}
-	report := caseSuiteQualityReport{
-		OK:             true,
-		ProfileID:      bundle.ID,
-		Title:          "Case Suite Quality Report",
-		ElapsedMs:      time.Since(started).Milliseconds(),
-		GeneratedAt:    time.Now().UTC(),
-		Filters:        normalizeCaseListFilter(filters),
-		Counts:         plan.Counts,
-		QualityPlan:    plan,
-		Warnings:       append([]string(nil), plan.Warnings...),
-		SourceStoreURL: sourceStoreURL,
-	}
-	if sourceStore == nil {
-		report.Warnings = append(report.Warnings, "source Store was not available; report used profile bundle only")
-	}
-	if err := writeCaseSuiteQualityReportFiles(outputDir, &report); err != nil {
-		return caseSuiteQualityReport{}, err
-	}
-	return report, nil
 }
