@@ -5,11 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"hash/crc32"
-	"os"
-	"os/exec"
 	"strings"
 	"time"
 
+	"agent-testbench/internal/runner/taskexec"
 	"agent-testbench/internal/store"
 )
 
@@ -83,7 +82,7 @@ func upsertTask(ctx context.Context, runtime store.Store, name string, command s
 
 func executeAndRecordTaskRun(ctx context.Context, runtime store.Store, task store.AgentTask, command string) (store.AgentTaskRun, error) {
 	started := time.Now().UTC()
-	output, exitCode, execErr := executeTaskCommand(ctx, task.Kind, command)
+	output, exitCode, execErr := taskexec.Execute(ctx, task.Kind, command)
 	finished := time.Now().UTC()
 	status := store.StatusPassed
 	errorText := ""
@@ -108,104 +107,6 @@ func executeAndRecordTaskRun(ctx context.Context, runtime store.Store, task stor
 		return store.AgentTaskRun{}, recordErr
 	}
 	return run, execErr
-}
-
-func executeTaskCommand(ctx context.Context, kind string, command string) (string, int, error) {
-	if strings.TrimSpace(kind) == "shell" {
-		return executeShellTaskCommand(ctx, command)
-	}
-	return executeAgentTestBenchCommand(ctx, command)
-}
-
-func executeAgentTestBenchCommand(ctx context.Context, command string) (string, int, error) {
-	args, err := splitCommandLine(command)
-	if err != nil {
-		return "", -1, err
-	}
-	if len(args) == 0 {
-		return "", -1, errors.New("task command is empty")
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		return "", -1, err
-	}
-	cmd := exec.CommandContext(ctx, exe, args...)
-	cmd.Env = os.Environ()
-	out, err := cmd.CombinedOutput()
-	if err == nil {
-		return string(out), 0, nil
-	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return string(out), exitErr.ExitCode(), err
-	}
-	return string(out), -1, err
-}
-
-func executeShellTaskCommand(ctx context.Context, command string) (string, int, error) {
-	command = strings.TrimSpace(command)
-	if command == "" {
-		return "", -1, errors.New("task command is empty")
-	}
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
-	cmd.Env = os.Environ()
-	out, err := cmd.CombinedOutput()
-	if err == nil {
-		return string(out), 0, nil
-	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return string(out), exitErr.ExitCode(), err
-	}
-	return string(out), -1, err
-}
-
-func splitCommandLine(command string) ([]string, error) {
-	args := []string{}
-	var b strings.Builder
-	var quote rune
-	escaped := false
-	for _, r := range command {
-		if escaped {
-			b.WriteRune(r)
-			escaped = false
-			continue
-		}
-		if r == '\\' {
-			escaped = true
-			continue
-		}
-		if quote != 0 {
-			if r == quote {
-				quote = 0
-				continue
-			}
-			b.WriteRune(r)
-			continue
-		}
-		if r == '\'' || r == '"' {
-			quote = r
-			continue
-		}
-		if r == ' ' || r == '\t' || r == '\n' {
-			if b.Len() > 0 {
-				args = append(args, b.String())
-				b.Reset()
-			}
-			continue
-		}
-		b.WriteRune(r)
-	}
-	if escaped {
-		b.WriteRune('\\')
-	}
-	if quote != 0 {
-		return nil, errors.New("unterminated quote in task command")
-	}
-	if b.Len() > 0 {
-		args = append(args, b.String())
-	}
-	return args, nil
 }
 
 func taskScheduleValue(interval string, cron string) (string, error) {

@@ -6,9 +6,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 
+	"agent-testbench/internal/domain/apicasecommand"
 	"agent-testbench/internal/domain/profile"
 	"agent-testbench/internal/domain/profilecatalog"
 	"agent-testbench/internal/store"
@@ -98,7 +98,7 @@ func incompleteCaseReportForStore(ctx context.Context, bundle profile.Bundle, s 
 			Reason:           reason,
 			Source:           "profile:" + bundle.ID,
 			Message:          "no passed Store run found for this API Case",
-			SuggestedCommand: apiCaseSuggestedCommand(item),
+			SuggestedCommand: apicasecommand.SuggestedRunCommand(item),
 		})
 	}
 	return incompleteCaseReport{
@@ -131,21 +131,6 @@ func apiCaseRunStatusByCase(ctx context.Context, s store.Store) (map[string]bool
 		}
 	}
 	return passed, latest, nil
-}
-
-func apiCaseSuggestedCommand(item profile.APICase) string {
-	casePath := strings.TrimSpace(item.CasePath)
-	if casePath == "" {
-		return ""
-	}
-	parts := []string{"agent-testbench case run --case " + strconv.Quote(casePath)}
-	if strings.TrimSpace(item.BaseURL) != "" {
-		parts = append(parts, "--base-url "+strconv.Quote(item.BaseURL))
-	}
-	if strings.TrimSpace(item.EvidenceDir) != "" {
-		parts = append(parts, "--evidence-dir "+strconv.Quote(item.EvidenceDir))
-	}
-	return strings.Join(parts, " ")
 }
 
 func printIncompleteCaseReport(report incompleteCaseReport) {

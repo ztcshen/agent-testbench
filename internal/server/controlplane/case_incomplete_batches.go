@@ -3,9 +3,9 @@ package controlplane
 import (
 	"context"
 	"net/http"
-	"strconv"
 	"strings"
 
+	"agent-testbench/internal/domain/apicasecommand"
 	"agent-testbench/internal/domain/profile"
 	"agent-testbench/internal/store"
 )
@@ -41,7 +41,7 @@ func handleCaseIncompleteBatches(w http.ResponseWriter, r *http.Request, bundle 
 			"reason":           reason,
 			"source":           "profile:" + bundle.ID,
 			"message":          "no passed Store run found for this API Case",
-			"suggestedCommand": apiCaseSuggestedCommand(item),
+			"suggestedCommand": apicasecommand.SuggestedRunCommand(item),
 		})
 	}
 	writeJSON(w, map[string]any{
@@ -84,23 +84,4 @@ func visitLatestAPICaseRuns(ctx context.Context, runtime store.Store, visit func
 		}
 	}
 	return nil
-}
-
-func apiCaseSuggestedCommand(item profile.APICase) string {
-	casePath := strings.TrimSpace(item.CasePath)
-	if casePath == "" {
-		return ""
-	}
-	parts := []string{"agent-testbench case run --case " + strconv.Quote(casePath)}
-	parts = appendShellFlag(parts, "--base-url", item.BaseURL)
-	parts = appendShellFlag(parts, "--evidence-dir", item.EvidenceDir)
-	return strings.Join(parts, " ")
-}
-
-func appendShellFlag(parts []string, flag string, value string) []string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return parts
-	}
-	return append(parts, flag+" "+strconv.Quote(value))
 }
