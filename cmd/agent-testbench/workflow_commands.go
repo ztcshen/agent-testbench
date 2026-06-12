@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 
+	"agent-testbench/internal/domain/commandline"
 	"agent-testbench/internal/server/controlplane"
 	"agent-testbench/internal/store"
 )
@@ -468,17 +469,17 @@ func apiCaseRunStepID(item store.APICaseRun) string {
 func workflowGateNextActions(report workflowGateReport, options workflowGateOptions) []string {
 	actions := []string{}
 	if !report.Gates.StepsPresent {
-		return []string{"agent-testbench workflow run --run " + quoteCommandValue(report.RunID) + " --json"}
+		return []string{"agent-testbench workflow run --run " + commandline.ShellQuote(report.RunID) + " --json"}
 	}
 	for index, item := range report.FailedSteps {
 		if index >= 3 {
 			break
 		}
 		if item.StepID != "" {
-			actions = append(actions, "agent-testbench workflow step --run "+quoteCommandValue(report.RunID)+" --step "+quoteCommandValue(item.StepID)+" --json")
+			actions = append(actions, "agent-testbench workflow step --run "+commandline.ShellQuote(report.RunID)+" --step "+commandline.ShellQuote(item.StepID)+" --json")
 		}
 		if item.CaseRunID != "" {
-			actions = append(actions, "agent-testbench case diagnose --case-run "+quoteCommandValue(item.CaseRunID)+" --json")
+			actions = append(actions, "agent-testbench case diagnose --case-run "+commandline.ShellQuote(item.CaseRunID)+" --json")
 		}
 	}
 	if options.RequireEvidence {
@@ -487,11 +488,11 @@ func workflowGateNextActions(report workflowGateReport, options workflowGateOpti
 				break
 			}
 			if item.CaseRunID != "" {
-				actions = append(actions, "agent-testbench case evidence --case-run "+quoteCommandValue(item.CaseRunID)+" --json")
+				actions = append(actions, "agent-testbench case evidence --case-run "+commandline.ShellQuote(item.CaseRunID)+" --json")
 				continue
 			}
 			if item.StepID != "" {
-				actions = append(actions, "agent-testbench workflow step --run "+quoteCommandValue(report.RunID)+" --step "+quoteCommandValue(item.StepID)+" --json")
+				actions = append(actions, "agent-testbench workflow step --run "+commandline.ShellQuote(report.RunID)+" --step "+commandline.ShellQuote(item.StepID)+" --json")
 			}
 		}
 	}

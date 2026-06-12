@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"agent-testbench/internal/domain/commandline"
 	"agent-testbench/internal/domain/profilecatalog"
 	"agent-testbench/internal/domain/workflowaudit"
 	"agent-testbench/internal/store"
@@ -226,8 +227,8 @@ func upsertWorkflowCatalogWorkflow(ctx context.Context, runtime store.Store, opt
 			After:  profileImportCountsFromCatalog(catalog),
 		},
 		NextActions: []string{
-			"agent-testbench workflow binding register --workflow " + quoteCommandValue(workflow.ID) + " --step STEP --node NODE --case CASE --audit --json",
-			"agent-testbench workflow discover --filter " + quoteCommandValue(workflow.ID) + " --json",
+			"agent-testbench workflow binding register --workflow " + commandline.ShellQuote(workflow.ID) + " --step STEP --node NODE --case CASE --audit --json",
+			"agent-testbench workflow discover --filter " + commandline.ShellQuote(workflow.ID) + " --json",
 		},
 	}
 	if options.Audit {
@@ -283,8 +284,8 @@ func upsertWorkflowCatalogBinding(ctx context.Context, runtime store.Store, opti
 			After:  profileImportCountsFromCatalog(catalog),
 		},
 		NextActions: []string{
-			"agent-testbench workflow plan --workflow " + quoteCommandValue(binding.WorkflowID) + " --json",
-			"agent-testbench workflow audit --workflow " + quoteCommandValue(binding.WorkflowID) + " --json",
+			"agent-testbench workflow plan --workflow " + commandline.ShellQuote(binding.WorkflowID) + " --json",
+			"agent-testbench workflow audit --workflow " + commandline.ShellQuote(binding.WorkflowID) + " --json",
 		},
 	}
 	if options.Audit {

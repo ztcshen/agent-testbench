@@ -145,11 +145,3 @@ func printIncompleteCaseReport(report incompleteCaseReport) {
 		fmt.Printf("Warning: %s\n", warning)
 	}
 }
-
-func quoteCommandValue(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return `''`
-	}
-	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
-}
