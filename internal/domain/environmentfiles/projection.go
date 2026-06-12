@@ -12,11 +12,13 @@ import (
 )
 
 const (
-	KindComposeFile  = "compose-file"
-	KindEnvFile      = "env-file"
-	KindGeneratedEnv = "generated-compose-env"
-	KindGenerated    = "generated-file"
-	KindAsset        = "component-asset"
+	KindComposeFile       = "compose-file"
+	KindEnvFile           = "env-file"
+	KindComposeConfigFile = "compose-config-file"
+	KindComposeSecretFile = "compose-secret-file"
+	KindGeneratedEnv      = "generated-compose-env"
+	KindGenerated         = "generated-file"
+	KindAsset             = "component-asset"
 )
 
 type ProjectionReport struct {
@@ -63,6 +65,7 @@ func FromCompose(compose map[string]any, summary map[string]any, graph store.Env
 	}
 	builder.addReferencedFiles(KindComposeFile, composeFiles(compose))
 	builder.addReferencedFiles(KindEnvFile, stringSlice(compose["envFiles"]))
+	builder.addComposeContentReferences(composeFiles(compose))
 	if len(stringMap(compose["env"])) > 0 {
 		builder.add(ProjectionFile{
 			Path:           filepath.ToSlash(filepath.Join(".agent-testbench", "restore.env")),
@@ -107,6 +110,22 @@ func (b *projectionBuilder) addReferencedFiles(kind string, paths []string) {
 	}
 }
 
+func (b *projectionBuilder) addComposeContentReferences(paths []string) {
+	for _, composeFile := range paths {
+		cleanCompose := cleanPath(composeFile)
+		if cleanCompose == "" {
+			continue
+		}
+		content := b.generated[cleanCompose]
+		if content == "" {
+			continue
+		}
+		for _, ref := range composeContentFileReferences(content, cleanCompose) {
+			b.add(b.referencedFile(ref.path, ref.kind))
+		}
+	}
+}
+
 func (b *projectionBuilder) referencedFile(path string, kind string) ProjectionFile {
 	if _, ok := b.generated[path]; ok {
 		return b.generatedFile(path, kind, true)
@@ -141,6 +160,150 @@ func (b *projectionBuilder) referencedFile(path string, kind string) ProjectionF
 		file.Error = "startup file summary exists but compose.generatedFiles content is missing"
 	}
 	return file
+}
+
+type composeContentFileReference struct {
+	kind string
+	path string
+}
+
+func composeContentFileReferences(content string, composeFile string) []composeContentFileReference {
+	scanner := composeReferenceScanner{composeDir: filepath.Dir(cleanPath(composeFile))}
+	for _, line := range strings.Split(content, "\n") {
+		scanner.processLine(line)
+	}
+	return scanner.refs
+}
+
+type composeReferenceScanner struct {
+	composeDir      string
+	topSection      string
+	currentResource string
+	blockKind       string
+	blockIndent     int
+	refs            []composeContentFileReference
+}
+
+func (s *composeReferenceScanner) processLine(line string) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		return
+	}
+	indent := len(line) - len(strings.TrimLeft(line, " "))
+	if indent == 0 {
+		s.blockKind = ""
+		s.currentResource = ""
+		s.topSection = sectionKey(trimmed)
+		return
+	}
+	if s.blockKind != "" && indent <= s.blockIndent {
+		s.blockKind = ""
+	}
+	if s.blockKind != "" {
+		s.addBlockReference(trimmed)
+	}
+	s.addInlineEnvFileReference(trimmed, indent)
+	s.addComposeResourceReference(trimmed, indent)
+}
+
+func (s *composeReferenceScanner) addInlineEnvFileReference(trimmed string, indent int) {
+	key, value, ok := splitComposeKeyValue(trimmed)
+	if !ok || key != "env_file" {
+		return
+	}
+	if value == "" {
+		s.blockKind = KindEnvFile
+		s.blockIndent = indent
+		return
+	}
+	for _, path := range inlineComposePathValues(value) {
+		s.addReference(KindEnvFile, path)
+	}
+}
+
+func (s *composeReferenceScanner) addBlockReference(trimmed string) {
+	item := strings.TrimSpace(strings.TrimPrefix(trimmed, "-"))
+	if item == trimmed && !strings.HasPrefix(item, "path:") {
+		return
+	}
+	if strings.HasPrefix(item, "path:") {
+		_, value, ok := splitComposeKeyValue(item)
+		if ok {
+			s.addReference(s.blockKind, value)
+		}
+		return
+	}
+	for _, path := range inlineComposePathValues(item) {
+		s.addReference(s.blockKind, path)
+	}
+}
+
+func (s *composeReferenceScanner) addComposeResourceReference(trimmed string, indent int) {
+	switch {
+	case (s.topSection == "configs" || s.topSection == "secrets") && indent == 2 && strings.HasSuffix(trimmed, ":"):
+		s.currentResource = sectionKey(trimmed)
+	case (s.topSection == "configs" || s.topSection == "secrets") && indent > 2:
+		key, value, ok := splitComposeKeyValue(trimmed)
+		if !ok || key != "file" || s.currentResource == "" {
+			return
+		}
+		kind := KindComposeConfigFile
+		if s.topSection == "secrets" {
+			kind = KindComposeSecretFile
+		}
+		s.addReference(kind, value)
+	}
+}
+
+func (s *composeReferenceScanner) addReference(kind string, path string) {
+	path = cleanComposeReferencedPath(path, s.composeDir)
+	if path == "" {
+		return
+	}
+	s.refs = append(s.refs, composeContentFileReference{kind: kind, path: path})
+}
+
+func sectionKey(value string) string {
+	return strings.TrimSpace(strings.TrimSuffix(value, ":"))
+}
+
+func splitComposeKeyValue(value string) (string, string, bool) {
+	key, rawValue, ok := strings.Cut(value, ":")
+	if !ok {
+		return "", "", false
+	}
+	return strings.TrimSpace(key), strings.Trim(strings.TrimSpace(rawValue), `"'`), true
+}
+
+func inlineComposePathValues(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.HasPrefix(value, "{") {
+		return nil
+	}
+	if strings.HasPrefix(value, "[") && strings.HasSuffix(value, "]") {
+		value = strings.TrimSuffix(strings.TrimPrefix(value, "["), "]")
+		parts := strings.Split(value, ",")
+		out := make([]string, 0, len(parts))
+		for _, part := range parts {
+			part = strings.Trim(strings.TrimSpace(part), `"'`)
+			if part != "" {
+				out = append(out, part)
+			}
+		}
+		return out
+	}
+	return []string{strings.Trim(value, `"'`)}
+}
+
+func cleanComposeReferencedPath(path string, composeDir string) string {
+	path = strings.TrimSpace(path)
+	if path == "" || strings.HasPrefix(path, "$") || strings.HasPrefix(path, "~") || filepath.IsAbs(path) {
+		return ""
+	}
+	if composeDir == "." || composeDir == "" {
+		return cleanPath(path)
+	}
+	return cleanPath(filepath.Join(composeDir, path))
 }
 
 func (b *projectionBuilder) generatedFile(path string, kind string, required bool) ProjectionFile {

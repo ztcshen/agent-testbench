@@ -90,6 +90,42 @@ func TestProjectionReportAcceptsComponentAssetForReferencedFile(t *testing.T) {
 	}
 }
 
+func TestProjectionReportDiscoversComposeNativeFileReferences(t *testing.T) {
+	env := store.Environment{
+		ComposeJSON: `{
+			"composeFile":"compose/docker-compose.yml",
+			"generatedFiles":{
+				"compose/docker-compose.yml":"services:\n  app:\n    image: alpine:3.20\n    env_file:\n      - ./app.env\n      - path: ./extra.env\n        required: true\n    configs:\n      - source: app_config\n        target: /etc/app/config.yml\n    secrets:\n      - db_password\nconfigs:\n  app_config:\n    file: ./config/app.yml\nsecrets:\n  db_password:\n    file: ./secrets/db.txt\n",
+				"compose/config/app.yml":"mode: test\n"
+			}
+		}`,
+	}
+	graph := store.EnvironmentComponentGraph{
+		Assets: []store.ComponentConfigAsset{{
+			OwnerComponentID: "db",
+			AssetID:          "db.password",
+			AssetKind:        "compose-secret",
+			TargetPath:       "compose/secrets/db.txt",
+			ContentInline:    "secret\n",
+		}},
+	}
+
+	report := FromEnvironment(env, graph)
+	if report.OK || report.Counts.Referenced != 5 || report.Counts.Missing != 2 {
+		t.Fatalf("compose-native projection report = %#v", report)
+	}
+	if !projectionContains(report, KindComposeConfigFile, "compose/config/app.yml", "compose.generatedFiles", true) {
+		t.Fatalf("compose config file should be Store-backed by generatedFiles: %#v", report.Files)
+	}
+	if !projectionContains(report, KindComposeSecretFile, "compose/secrets/db.txt", "component_config_assets", true) {
+		t.Fatalf("compose secret file should be Store-backed by component asset: %#v", report.Files)
+	}
+	if !projectionContains(report, KindEnvFile, "compose/app.env", "workspace-file", false) ||
+		!projectionContains(report, KindEnvFile, "compose/extra.env", "workspace-file", false) {
+		t.Fatalf("compose env_file gaps should be visible: %#v", report.Missing)
+	}
+}
+
 func projectionContains(report ProjectionReport, kind string, path string, source string, ok bool) bool {
 	for _, file := range report.Files {
 		if file.Kind == kind && file.Path == path && file.Source == source && file.OK == ok {

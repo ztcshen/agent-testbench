@@ -165,8 +165,9 @@ must not hand-edit local copies as the canonical configuration. Asset
 file permissions at execution time.
 Environment inspect, bootstrap, and restore JSON expose a derived
 `fileProjection` report. It explains how `composeFiles`, Compose `envFiles`,
-generated restore env files, `compose.generatedFiles`, `summary.startupFiles`,
-and component config assets relate, and marks any referenced file that lacks a
+generated restore env files, `compose.generatedFiles`, native Compose
+`env_file`/`configs`/`secrets` file references, `summary.startupFiles`, and
+component config assets relate, and marks any referenced file that lacks a
 Store-backed content source or explicit environment package projection.
 For already-registered environments, `environment startup-file put ENV_ID
 --file TARGET=SOURCE_FILE` updates only `compose.generatedFiles` and preserves

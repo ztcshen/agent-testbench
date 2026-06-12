@@ -211,6 +211,9 @@ For restore cleanup, `--allow-destructive-docker-cleanup` is only the operator
 approval step. Restore still blocks `docker compose down` when the cleanup
 linkage proof is incomplete: project name, Store component graph, required
 component services, and Store-projected compose/env files must all line up.
+When inspecting or bootstrapping an environment, use `fileProjection` to verify
+that Compose `env_file`, config file, and secret file references discovered
+inside Store-backed compose files also have Store-backed projection sources.
 
 After any `sandbox start --json` pass, inspect the report's `runtime` block.
 If `runtime.activeMatchesRuntime=false` or `runtime.fresh=false`, treat the

@@ -145,6 +145,23 @@ func TestEnvironmentRestoreSQLStoreRejectsMissingComposeStartupAssets(t *testing
 	}
 }
 
+func TestEnvironmentRestoreSQLStoreRejectsComposeNativeFileProjectionGaps(t *testing.T) {
+	for _, backend := range environmentRestoreReadinessProductStoreBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			report := buildEnvironmentRestoreSQLReadinessReport(t, backend, environmentRestoreSQLStoreStartupEnv("native.file.gaps", "app", environmentRestoreReadinessGeneratedComposeWithNativeFileGap(), environmentRestoreReadinessSQLHealth))
+			if report.Readiness.OK {
+				t.Fatalf("%s readiness should block missing native Compose file projections: %#v", backend.name, report.Readiness)
+			}
+			if !restoreTypedReadinessHasItem(report.Readiness.Items, "file-projection", false, "env-file:compose/app.env") {
+				t.Fatalf("%s readiness should expose missing env_file projection: %#v", backend.name, report.Readiness.Items)
+			}
+			if report.FileProjection.OK || len(report.FileProjection.Missing) != 1 {
+				t.Fatalf("%s fileProjection should show one native file gap: %#v", backend.name, report.FileProjection)
+			}
+		})
+	}
+}
+
 func TestEnvironmentRestoreSQLStoreAcceptsStoreGeneratedComposeStartupAssets(t *testing.T) {
 	for _, backend := range environmentRestoreReadinessProductStoreBackends() {
 		t.Run(backend.name, func(t *testing.T) {
@@ -258,4 +275,8 @@ func environmentRestoreReadinessGeneratedComposeMissingAssets() string {
 
 func environmentRestoreReadinessGeneratedComposeWithAssets() string {
 	return `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  mysql:\n    image: mysql:8\n    volumes:\n      - ./mysql/init:/docker-entrypoint-initdb.d\n  app:\n    image: alpine:3.20\n    command: [\"/bin/sh\", \"/sandbox/compose/scripts/run-app.sh\"]\n    volumes:\n      - ${DOCKER_APP_REPO:-/tmp/app}:/workspace/app\n      - ${SANDBOX_ROOT:-/tmp/sandbox}:/sandbox\n","compose/mysql/init/schema.sql":"create database app;\n","compose/scripts/run-app.sh":"#!/bin/sh\nexit 0\n"},"env":{"DOCKER_APP_REPO":"$AGENT_TESTBENCH_WORKSPACE/app","SANDBOX_ROOT":"$AGENT_TESTBENCH_WORKSPACE"}}`
+}
+
+func environmentRestoreReadinessGeneratedComposeWithNativeFileGap() string {
+	return `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  app:\n    image: alpine:3.20\n    env_file:\n      - ./app.env\n    configs:\n      - source: app_config\n        target: /etc/app/config.yml\nconfigs:\n  app_config:\n    file: ./config/app.yml\n","compose/config/app.yml":"mode: test\n"}}`
 }

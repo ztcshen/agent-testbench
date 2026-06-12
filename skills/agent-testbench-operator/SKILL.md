@@ -182,10 +182,11 @@ For Docker-native config/secret/env projections, Store asset `summary_json` may
 carry projection metadata such as `{"dockerNative":{"fileMode":"0600"}}`; do not
 patch generated workspace files by hand as the durable configuration.
 When inspecting or bootstrapping an environment, check the JSON `fileProjection`
-report. A referenced compose or env file is not repair-complete until it is
-backed by `compose.generatedFiles`, a component config asset, generated Compose
-env metadata, or an explicit environment package projection; summary-only
-`startupFiles` entries are repair hints, not durable file content.
+report. A referenced compose file, Compose `env_file`, config file, or secret
+file is not repair-complete until it is backed by `compose.generatedFiles`, a
+component config asset, generated Compose env metadata, or an explicit
+environment package projection; summary-only `startupFiles` entries are repair
+hints, not durable file content.
 
 ## Report Back
 
