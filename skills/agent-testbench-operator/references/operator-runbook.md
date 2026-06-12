@@ -219,10 +219,13 @@ Compose-managed containers.
 For restore cleanup, `--allow-destructive-docker-cleanup` is only the operator
 approval step. Restore still blocks `docker compose down` when the cleanup
 linkage proof is incomplete: project name, Store component graph, required
-component services, and the full `fileProjection` report for compose/env/native
-Compose file references must all line up. When blocked, inspect
-`docker.cleanup.linkage.repairPlan`; every item is Store-backed and blocking,
-and points to the missing fact such as the Compose project name, component graph,
+component services, Store-backed Compose env injection, and the full
+`fileProjection` report for compose/env/native Compose file references must all
+line up. Inspect `docker.cleanup.linkage.envInjection` for the Store
+`compose.env` keys and generated env file used by the Compose command. When
+blocked, inspect `docker.cleanup.linkage.repairPlan`; every item is
+Store-backed and blocking, and points to the missing fact such as the Compose
+project name, component graph,
 component `composeService`, Compose service registration, or a missing
 Store-projected Compose env/config/secret/include/extends file.
 When inspecting or bootstrapping an environment, use `fileProjection` to verify

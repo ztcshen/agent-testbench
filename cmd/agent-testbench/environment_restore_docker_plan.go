@@ -47,6 +47,7 @@ type environmentRestoreDockerCleanupLinkageReport struct {
 	OK                       bool                                        `json:"ok"`
 	ComposeProject           string                                      `json:"composeProject,omitempty"`
 	ComposeServices          []string                                    `json:"composeServices,omitempty"`
+	EnvInjection             environmentRestoreDockerEnvInjectionReport  `json:"envInjection,omitempty"`
 	RequiredComponents       []string                                    `json:"requiredComponents,omitempty"`
 	MissingComposeProject    bool                                        `json:"missingComposeProject,omitempty"`
 	MissingComponentGraph    bool                                        `json:"missingComponentGraph,omitempty"`
@@ -56,6 +57,12 @@ type environmentRestoreDockerCleanupLinkageReport struct {
 	StoreAssets              int                                         `json:"storeAssets,omitempty"`
 	Error                    string                                      `json:"error,omitempty"`
 	RepairPlan               []environmentRestoreDockerCleanupRepairItem `json:"repairPlan,omitempty"`
+}
+
+type environmentRestoreDockerEnvInjectionReport struct {
+	GeneratedEnvFile string   `json:"generatedEnvFile,omitempty"`
+	StoreEnvKeys     []string `json:"storeEnvKeys,omitempty"`
+	EnvFiles         []string `json:"envFiles,omitempty"`
 }
 
 type environmentRestoreDockerCleanupRepairItem struct {

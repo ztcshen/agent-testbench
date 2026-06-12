@@ -38,6 +38,7 @@ func TestEnvironmentRestorePlansDockerCleanupWithoutExecuting(t *testing.T) {
 		"--compose-generated-file", "compose.yml="+composeSource,
 		"--compose-project-name", "demo",
 		"--compose-service", "web",
+		"--compose-env", "APP_MODE=test",
 		"--verification-workflow", "workflow.core-10",
 	)
 	seedCleanupLinkedGraph(t, storePath, "env.cleanup.plan", "web")
@@ -55,7 +56,11 @@ func TestEnvironmentRestorePlansDockerCleanupWithoutExecuting(t *testing.T) {
 				Commands       [][]string `json:"commands"`
 				Warning        string     `json:"warning"`
 				Linkage        struct {
-					OK bool `json:"ok"`
+					OK           bool `json:"ok"`
+					EnvInjection struct {
+						GeneratedEnvFile string   `json:"generatedEnvFile"`
+						StoreEnvKeys     []string `json:"storeEnvKeys"`
+					} `json:"envInjection"`
 				} `json:"linkage"`
 			} `json:"cleanup"`
 		} `json:"docker"`
@@ -68,8 +73,15 @@ func TestEnvironmentRestorePlansDockerCleanupWithoutExecuting(t *testing.T) {
 		t.Fatalf("cleanup dry-run report = %#v", report.Docker.Cleanup)
 	}
 	command := strings.Join(cleanup.Commands[0], " ")
-	if !strings.Contains(command, "compose -f "+filepath.Join(workspace, "compose.yml")+" -p demo down --remove-orphans --rmi all") {
+	if !strings.Contains(command, "compose -f "+filepath.Join(workspace, "compose.yml")) ||
+		!strings.Contains(command, "-p demo down --remove-orphans --rmi all") {
 		t.Fatalf("cleanup command = %#v", cleanup.Commands[0])
+	}
+	if !strings.Contains(command, "--env-file "+filepath.Join(workspace, ".agent-testbench", "restore.env")) {
+		t.Fatalf("cleanup command should use generated compose env file: %#v", cleanup.Commands[0])
+	}
+	if cleanup.Linkage.EnvInjection.GeneratedEnvFile != filepath.Join(workspace, ".agent-testbench", "restore.env") || !stringSliceContains(cleanup.Linkage.EnvInjection.StoreEnvKeys, "APP_MODE") {
+		t.Fatalf("cleanup linkage env injection = %#v", cleanup.Linkage.EnvInjection)
 	}
 	allCommands := strings.Join(append(cleanup.BackupCommands[0], cleanup.Commands[0]...), " ")
 	if strings.Contains(allCommands, "--volumes") || strings.Contains(allCommands, "system prune") {

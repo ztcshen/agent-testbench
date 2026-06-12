@@ -13,6 +13,7 @@ func environmentRestoreDockerCleanupLinkage(compose map[string]any, graph store.
 	report := environmentRestoreDockerCleanupLinkageReport{
 		OK:             true,
 		ComposeProject: strings.TrimSpace(valueString(compose["projectName"])),
+		EnvInjection:   environmentRestoreCleanupEnvInjection(compose, workspace),
 		StoreAssets:    len(graph.Assets),
 	}
 	if report.ComposeProject == "" {
@@ -55,6 +56,23 @@ func environmentRestoreDockerCleanupLinkage(compose map[string]any, graph store.
 	if !report.OK {
 		report.RepairPlan = environmentRestoreCleanupLinkageRepairPlan(report)
 		report.Error = environmentRestoreCleanupLinkageError(report)
+	}
+	return report
+}
+
+func environmentRestoreCleanupEnvInjection(compose map[string]any, workspace string) environmentRestoreDockerEnvInjectionReport {
+	report := environmentRestoreDockerEnvInjectionReport{
+		EnvFiles: dedupeStrings(stringSliceFromAny(compose["envFiles"])),
+	}
+	sort.Strings(report.EnvFiles)
+	for key := range stringMapFromAny(compose["env"]) {
+		if strings.TrimSpace(key) != "" {
+			report.StoreEnvKeys = append(report.StoreEnvKeys, strings.TrimSpace(key))
+		}
+	}
+	sort.Strings(report.StoreEnvKeys)
+	if len(report.StoreEnvKeys) > 0 {
+		report.GeneratedEnvFile = environmentRestoreGeneratedEnvFilePath(workspace)
 	}
 	return report
 }

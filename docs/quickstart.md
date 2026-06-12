@@ -654,7 +654,8 @@ to the recorded target Compose project; the sandbox SQL control-plane Store
 must stay outside that Docker environment. The allow flag is still not enough
 by itself: destructive cleanup also requires a complete Store-to-Compose
 linkage proof, including a recorded Compose project name, Store component graph,
-required component-to-service mapping, and Store-projected compose/env files.
+required component-to-service mapping, Store-backed Compose env injection, and
+Store-projected compose/env files.
 If that proof is missing, restore blocks with `cleanup-linkage-blocked` and
 reports `docker.cleanup.linkage.repairPlan` items instead of running
 `docker compose down`. Those repair items name the missing Store-backed fact,

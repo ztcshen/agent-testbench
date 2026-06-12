@@ -170,11 +170,13 @@ linkage proof used by restore cleanup passes.
 Destructive restore cleanup still requires more than
 `--allow-destructive-docker-cleanup`: the cleanup linkage proof must show a
 recorded Compose project name, Store component graph, required component
-services, and a complete `fileProjection` report for compose/env/native Compose
-file references before `docker compose down` can run. When cleanup is blocked,
-read `docker.cleanup.linkage.repairPlan`; each item names the missing
-Store-backed fact and a command hint for repairing the Store metadata or file
-projection before retrying.
+services, Store-backed Compose env injection, and a complete `fileProjection`
+report for compose/env/native Compose file references before `docker compose
+down` can run. Inspect `docker.cleanup.linkage.envInjection` to confirm
+Store-backed `compose.env` keys and generated env files used by the Compose
+command. When cleanup is blocked, read `docker.cleanup.linkage.repairPlan`;
+each item names the missing Store-backed fact and a command hint for repairing
+the Store metadata or file projection before retrying.
 
 Plan or apply Store-first SQL edge migrations:
 
