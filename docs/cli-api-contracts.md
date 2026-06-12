@@ -163,6 +163,11 @@ must not hand-edit local copies as the canonical configuration. Asset
 `summary_json` can also carry Docker-native projection metadata such as
 `{"dockerNative":{"fileMode":"0600"}}`; the Store value is projected to local
 file permissions at execution time.
+Environment inspect, bootstrap, and restore JSON expose a derived
+`fileProjection` report. It explains how `composeFiles`, Compose `envFiles`,
+generated restore env files, `compose.generatedFiles`, `summary.startupFiles`,
+and component config assets relate, and marks any referenced file that lacks a
+Store-backed content source or explicit environment package projection.
 For already-registered environments, `environment startup-file put ENV_ID
 --file TARGET=SOURCE_FILE` updates only `compose.generatedFiles` and preserves
 the existing workflow, services, repositories, and health checks.

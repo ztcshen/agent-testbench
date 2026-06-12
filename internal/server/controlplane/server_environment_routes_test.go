@@ -392,9 +392,18 @@ func registerComposeOptionsEnvironment(t *testing.T, serverURL string) {
 func requireComposeOptionsBootstrapPlan(t *testing.T, serverURL string) {
 	t.Helper()
 	optionsBootstrap := decodeJSONResponse(t, serverURL+"/api/environments/env.compose.options.api/bootstrap", http.StatusOK)
-	optionsDocker := optionsBootstrap["plan"].(map[string]any)["restore"].(map[string]any)["docker"].(map[string]any)
+	plan := optionsBootstrap["plan"].(map[string]any)
+	optionsDocker := plan["restore"].(map[string]any)["docker"].(map[string]any)
 	if optionsDocker["projectName"] != "demo" || optionsDocker["skipPull"] != true || optionsDocker["skipBuild"] != true || len(optionsDocker["commands"].([]any)) != 1 {
 		t.Fatalf("compose options bootstrap docker plan = %#v", optionsDocker)
+	}
+	projection := plan["fileProjection"].(map[string]any)
+	if projection["ok"] != false || len(projection["missing"].([]any)) != 2 {
+		t.Fatalf("compose options bootstrap should expose local file projection gaps: %#v", projection)
+	}
+	restoreProjection := plan["restore"].(map[string]any)["fileProjection"].(map[string]any)
+	if restoreProjection["ok"] != false {
+		t.Fatalf("restore bootstrap should carry file projection gaps: %#v", restoreProjection)
 	}
 }
 

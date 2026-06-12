@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"agent-testbench/internal/domain/environmentfiles"
 	"agent-testbench/internal/domain/environmentsource"
 	"agent-testbench/internal/server/controlplane"
 	"agent-testbench/internal/store"
@@ -34,6 +35,7 @@ type environmentRestoreReport struct {
 	Compose              map[string]any                               `json:"compose"`
 	HealthChecks         []any                                        `json:"healthChecks"`
 	Preflight            environmentRestorePreflight                  `json:"preflight"`
+	FileProjection       environmentfiles.ProjectionReport            `json:"fileProjection"`
 	Readiness            environmentRestoreReadiness                  `json:"readiness"`
 	Docker               environmentRestoreDockerReport               `json:"docker"`
 	Workflow             environmentRestoreWorkflowRun                `json:"workflow"`
@@ -170,6 +172,7 @@ func newEnvironmentRestoreReport(env store.Environment, plan environmentRestoreB
 		ComponentGraph:       plan.ComponentGraphReport,
 		ComponentStartupPlan: plan.ComponentStartupPlan,
 		Preflight:            environmentRestorePreflightReport(plan.PackageSpec, plan.Specs, plan.Compose, plan.Workspace, execute, cleanupOptions, prepareReposOnly),
+		FileProjection:       environmentRestoreFileProjection(env, plan),
 		SourcePolicy:         environmentsource.SourcePolicyReport(plan.Specs, plan.RemoteOnly),
 		Workflow: environmentRestoreWorkflowRun{
 			OK:         !workflowOptions.Run,
@@ -190,6 +193,19 @@ func newEnvironmentRestoreReport(env store.Environment, plan environmentRestoreB
 		report.OK = false
 	}
 	return report
+}
+
+func environmentRestoreFileProjection(env store.Environment, plan environmentRestoreBuildPlan) environmentfiles.ProjectionReport {
+	compose := plan.Compose
+	if plan.RemoteOnly {
+		compose = map[string]any{}
+		for key, value := range plan.Compose {
+			if key != "package" {
+				compose[key] = value
+			}
+		}
+	}
+	return environmentfiles.FromCompose(compose, jsonObjectString(env.SummaryJSON), plan.ComponentGraph)
 }
 
 func environmentRestoreAddSourceReports(ctx context.Context, report *environmentRestoreReport, plan environmentRestoreBuildPlan, execute bool, pull bool) {

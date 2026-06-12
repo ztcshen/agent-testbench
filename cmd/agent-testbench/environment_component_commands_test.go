@@ -286,3 +286,77 @@ func TestEnvironmentStartupFilePutMergesGeneratedFilesWithoutReRegistering(t *te
 		t.Fatalf("startup-file summary = %#v", payload.Environment.Summary.StartupFiles)
 	}
 }
+
+func TestEnvironmentInspectAndBootstrapExposeFileProjectionGaps(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	sourceCompose := filepath.Join(t.TempDir(), "source-compose.yml")
+	sourceEnv := filepath.Join(t.TempDir(), "runtime.env")
+	writeFile(t, sourceCompose, "services:\n  web:\n    image: alpine:3.20\n")
+	writeFile(t, sourceEnv, "APP_MODE=test\n")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.file.projection",
+		"--compose-file", "compose/docker-compose.yml",
+		"--compose-generated-file", "compose/docker-compose.yml="+sourceCompose,
+		"--compose-env-file", "compose/runtime.env",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	inspectOut := runCLI(t, "environment", "inspect", "--store", "sqlite://"+storePath, "--json", "env.file.projection")
+	var inspectPayload struct {
+		FileProjection struct {
+			OK      bool `json:"ok"`
+			Missing []struct {
+				Path   string `json:"path"`
+				Kind   string `json:"kind"`
+				Source string `json:"source"`
+			} `json:"missing"`
+		} `json:"fileProjection"`
+	}
+	if err := json.Unmarshal([]byte(inspectOut), &inspectPayload); err != nil {
+		t.Fatalf("decode inspect file projection: %v\n%s", err, inspectOut)
+	}
+	if inspectPayload.FileProjection.OK || len(inspectPayload.FileProjection.Missing) != 1 || inspectPayload.FileProjection.Missing[0].Path != "compose/runtime.env" || inspectPayload.FileProjection.Missing[0].Kind != "env-file" {
+		t.Fatalf("inspect file projection should expose missing env file: %#v", inspectPayload.FileProjection)
+	}
+
+	bootstrapOut := runCLI(t, "environment", "bootstrap", "--store", "sqlite://"+storePath, "--json", "env.file.projection")
+	var bootstrapPayload struct {
+		Plan struct {
+			FileProjection struct {
+				OK bool `json:"ok"`
+			} `json:"fileProjection"`
+			Restore struct {
+				FileProjection struct {
+					OK bool `json:"ok"`
+				} `json:"fileProjection"`
+			} `json:"restore"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal([]byte(bootstrapOut), &bootstrapPayload); err != nil {
+		t.Fatalf("decode bootstrap file projection: %v\n%s", err, bootstrapOut)
+	}
+	if bootstrapPayload.Plan.FileProjection.OK || bootstrapPayload.Plan.Restore.FileProjection.OK {
+		t.Fatalf("bootstrap should carry missing file projection: %#v", bootstrapPayload.Plan)
+	}
+
+	runCLI(t, "environment", "startup-file", "put",
+		"--store", "sqlite://"+storePath,
+		"--file", "compose/runtime.env="+sourceEnv,
+		"--json",
+		"env.file.projection",
+	)
+	repairedOut := runCLI(t, "environment", "inspect", "--store", "sqlite://"+storePath, "--json", "env.file.projection")
+	var repairedPayload struct {
+		FileProjection struct {
+			OK      bool  `json:"ok"`
+			Missing []any `json:"missing"`
+		} `json:"fileProjection"`
+	}
+	if err := json.Unmarshal([]byte(repairedOut), &repairedPayload); err != nil {
+		t.Fatalf("decode repaired inspect file projection: %v\n%s", err, repairedOut)
+	}
+	if !repairedPayload.FileProjection.OK || len(repairedPayload.FileProjection.Missing) != 0 {
+		t.Fatalf("repaired file projection should pass: %#v", repairedPayload.FileProjection)
+	}
+}

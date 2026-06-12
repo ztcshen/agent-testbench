@@ -462,6 +462,14 @@ workflow. Use `--workflow-output-dir` when you want a fixed local report
 directory. When `composeFile` is recorded, the
 file must exist under `--workspace` after optional repository preparation;
 restore fails before invoking Docker if it is missing.
+`environment inspect`, `environment bootstrap`, and `environment restore`
+include `fileProjection` in JSON output. The report lists each referenced
+`composeFiles` and Compose `envFiles` entry, generated `.agent-testbench`
+Compose env file, Store `generatedFiles` item, and component config asset with
+its source and projection rule. A referenced file is ready only when it can be
+traced to `compose.generatedFiles`, a component config asset, generated Compose
+env metadata, or an explicit environment package source; summary-only
+`startupFiles` entries without stored file content are reported as repair gaps.
 
 Store remains the source of truth for configuration even when Docker-native
 runtime features are used. Component assets with kinds such as
@@ -479,11 +487,12 @@ The restore report also includes `readiness`, the final pre-Docker review gate
 for a colleague-machine simulation. It checks that the sandbox SQL Store
 is outside the target Docker environment, the restore is anchored to a
 verification workflow, all recorded component repositories can be cloned or
-validated before Docker, a Compose/start plan exists, recorded Compose services
-cover the required component graph services and middleware images, at least one
-health probe is recorded, cleanup commands are reviewable when requested, and
-the operator pause is preserved before container/image deletion or long
-downloads. If a workflow
+validated before Docker, all referenced startup files have Store-backed
+projection rules, a Compose/start plan exists, recorded Compose services cover
+the required component graph services and middleware images, at least one health
+probe is recorded, cleanup commands are reviewable when requested, and the
+operator pause is preserved before container/image deletion or long downloads.
+If a workflow
 needs several application services, those services should appear as repository
 items or existing checkout items and must pass before Docker pull/build/up can
 start. Middleware such as config services or databases normally appears through the recorded

@@ -65,6 +65,9 @@ func TestEnvironmentRestoreSQLStoreUsesStoreGeneratedStartupFiles(t *testing.T) 
 			if !restoreTypedReadinessHasItem(report.Readiness.Items, "store-startup-files", true, "generated from Store metadata") {
 				t.Fatalf("%s readiness should accept Store generated startup files: %#v", backend.name, report.Readiness.Items)
 			}
+			if !restoreTypedReadinessHasItem(report.Readiness.Items, "file-projection", true, "Store-backed projection") {
+				t.Fatalf("%s readiness should expose Store-backed file projection: %#v", backend.name, report.Readiness.Items)
+			}
 		})
 	}
 }
@@ -120,6 +123,9 @@ func TestEnvironmentRestoreSQLStoreRejectsLocalStartupFilesWithoutStoreGenerated
 			}
 			if !restoreTypedReadinessHasItem(report.Readiness.Items, "store-startup-files", false, "missing generatedFiles") {
 				t.Fatalf("%s readiness should reject local startup files without Store content: %#v", backend.name, report.Readiness.Items)
+			}
+			if !restoreTypedReadinessHasItem(report.Readiness.Items, "file-projection", false, "compose-file:compose/docker-compose.yml") {
+				t.Fatalf("%s readiness should expose missing file projection: %#v", backend.name, report.Readiness.Items)
 			}
 		})
 	}

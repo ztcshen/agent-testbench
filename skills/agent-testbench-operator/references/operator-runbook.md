@@ -257,6 +257,11 @@ replayed.
 For Docker-native config/secret/env projections, Store asset `summary_json` may
 carry projection metadata such as `{"dockerNative":{"fileMode":"0600"}}`; do not
 patch generated workspace files by hand as the durable configuration.
+Use `environment inspect --json` or `environment bootstrap --json` to review
+`fileProjection` before restore. Missing entries mean a referenced Compose file
+or env file is still local/summary-only and must be repaired with
+`environment startup-file put`, a component config asset, or an explicit
+environment package projection before claiming the environment is reproducible.
 
 ## Maintaining This Skill
 
