@@ -411,7 +411,7 @@ func cleanComposeReferencedPath(path string, composeDir string, env map[string]s
 		return "", ""
 	}
 	if strings.Contains(path, "$") {
-		resolved, ok := interpolateComposePath(path, env)
+		resolved, ok := InterpolateComposeText(path, env)
 		if !ok {
 			return cleanComposePathWithDir(path, composeDir), "compose file reference contains variables that are not resolved by Store-backed compose.env"
 		}
@@ -427,52 +427,53 @@ func cleanComposePathWithDir(path string, composeDir string) string {
 	return cleanPath(filepath.Join(composeDir, path))
 }
 
-func interpolateComposePath(path string, env map[string]string) (string, bool) {
+// InterpolateComposeText resolves Compose-style variable expressions from env.
+func InterpolateComposeText(value string, env map[string]string) (string, bool) {
 	var out strings.Builder
-	for i := 0; i < len(path); {
-		if path[i] != '$' {
-			out.WriteByte(path[i])
+	for i := 0; i < len(value); {
+		if value[i] != '$' {
+			out.WriteByte(value[i])
 			i++
 			continue
 		}
-		if i+1 >= len(path) {
-			out.WriteByte(path[i])
+		if i+1 >= len(value) {
+			out.WriteByte(value[i])
 			i++
 			continue
 		}
-		if path[i+1] == '$' {
+		if value[i+1] == '$' {
 			out.WriteByte('$')
 			i += 2
 			continue
 		}
-		if path[i+1] == '{' {
-			end := strings.IndexByte(path[i+2:], '}')
+		if value[i+1] == '{' {
+			end := strings.IndexByte(value[i+2:], '}')
 			if end < 0 {
-				return path, false
+				return value, false
 			}
-			expr := path[i+2 : i+2+end]
-			value, ok := resolveComposeVariableExpression(expr, env)
+			expr := value[i+2 : i+2+end]
+			replacement, ok := resolveComposeVariableExpression(expr, env)
 			if !ok {
-				return path, false
+				return value, false
 			}
-			out.WriteString(value)
+			out.WriteString(replacement)
 			i += end + 3
 			continue
 		}
 		nameEnd := i + 1
-		for nameEnd < len(path) && composeVariableNameByte(path[nameEnd]) {
+		for nameEnd < len(value) && composeVariableNameByte(value[nameEnd]) {
 			nameEnd++
 		}
 		if nameEnd == i+1 {
-			out.WriteByte(path[i])
+			out.WriteByte(value[i])
 			i++
 			continue
 		}
-		value, ok := env[path[i+1:nameEnd]]
+		replacement, ok := env[value[i+1:nameEnd]]
 		if !ok {
-			return path, false
+			return value, false
 		}
-		out.WriteString(value)
+		out.WriteString(replacement)
 		i = nameEnd
 	}
 	return out.String(), true

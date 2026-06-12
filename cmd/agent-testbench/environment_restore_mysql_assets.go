@@ -154,7 +154,7 @@ func (scanner *environmentRestoreComposeMountScanner) processRootLine(trimmed st
 	if scanner.flushVolume() {
 		return true
 	}
-	scanner.inServices = trimmed == "services:"
+	scanner.inServices = trimmed == composeServicesHeader
 	scanner.currentService = ""
 	return false
 }

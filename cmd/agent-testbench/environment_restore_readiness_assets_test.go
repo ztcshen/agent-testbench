@@ -176,6 +176,51 @@ func TestEnvironmentRestoreSQLStoreAcceptsStoreGeneratedComposeStartupAssets(t *
 	}
 }
 
+func TestEnvironmentRestoreStartupAssetsTreatRepoCheckoutAsCovered(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	compose := map[string]any{
+		"composeFiles": []any{"compose/docker-compose.yml"},
+		"generatedFiles": map[string]any{
+			"compose/docker-compose.yml": strings.Join([]string{
+				"services:",
+				"  app:",
+				"    image: alpine:3.20",
+				"    volumes:",
+				"      - ${DOCKER_APP_REPO}:/workspace/app",
+			}, "\n") + "\n",
+		},
+		"env": map[string]any{
+			"DOCKER_APP_REPO": "$AGENT_TESTBENCH_WORKSPACE/app",
+		},
+	}
+	assets := environmentRestoreStartupAssets(compose, []environmentRestoreRepoSpec{{
+		Checkout: filepath.Join(workspace, "app"),
+	}}, workspace)
+	if len(assets) != 0 {
+		t.Fatalf("repo checkout bind mount should be covered, got %#v", assets)
+	}
+}
+
+func TestEnvironmentRestoreStartupAssetsParsesShortVolumeDefaultInterpolation(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	compose := map[string]any{
+		"composeFiles": []any{"compose/docker-compose.yml"},
+		"generatedFiles": map[string]any{
+			"compose/docker-compose.yml": strings.Join([]string{
+				"services:",
+				"  app:",
+				"    image: alpine:3.20",
+				"    volumes:",
+				"      - ${CONFIG_DIR:-./config}:/etc/config",
+			}, "\n") + "\n",
+		},
+	}
+	assets := environmentRestoreStartupAssets(compose, nil, workspace)
+	if len(assets) != 1 || assets[0].Path != filepath.Clean("compose/config") || assets[0].OK {
+		t.Fatalf("default interpolation bind mount should be a missing startup asset, got %#v", assets)
+	}
+}
+
 func TestEnvironmentRestoreMaterializesComponentAssetsAsStartupFiles(t *testing.T) {
 	for _, backend := range environmentRestoreReadinessProductStoreBackends() {
 		t.Run(backend.name, func(t *testing.T) {
