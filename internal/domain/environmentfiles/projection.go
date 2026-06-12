@@ -1,3 +1,5 @@
+// Package environmentfiles derives Store-backed file projection readiness for
+// Environment Catalog compose, env, generated file, and component asset data.
 package environmentfiles
 
 import (
@@ -312,7 +314,13 @@ func projectionKey(kind string, path string) string {
 
 func jsonObject(raw string) map[string]any {
 	out := map[string]any{}
-	_ = json.Unmarshal([]byte(strings.TrimSpace(raw)), &out)
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return out
+	}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return map[string]any{}
+	}
 	return out
 }
 
