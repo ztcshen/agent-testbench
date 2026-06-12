@@ -225,10 +225,16 @@ func environmentRestoreAddCleanupReadiness(builder *environmentRestoreReadinessB
 	cleanupDetail := "Docker cleanup not requested"
 	if cleanupOptions.Requested || report.Docker.Cleanup.Requested {
 		cleanupOK = report.Docker.Cleanup.Requested && len(report.Docker.Cleanup.BackupCommands) > 0 && len(report.Docker.Cleanup.Commands) > 0
+		if report.Docker.Cleanup.Linkage.Error != "" {
+			cleanupOK = false
+			cleanupDetail = report.Docker.Cleanup.Linkage.Error
+		}
 		if report.Executed && !report.Docker.Cleanup.Allowed {
 			cleanupOK = false
 		}
-		cleanupDetail = "Compose-scoped cleanup must be reviewed before simulating a clean colleague machine"
+		if cleanupDetail == "Docker cleanup not requested" {
+			cleanupDetail = "Compose-scoped cleanup must be reviewed before simulating a clean colleague machine"
+		}
 	}
 	builder.add("docker-cleanup-review", true, cleanupOK, cleanupDetail)
 }

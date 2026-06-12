@@ -328,19 +328,26 @@ func environmentRestoreMissingComposeFile(compose map[string]any, workspace stri
 }
 
 func environmentRestoreMaybeRunWorkflow(ctx context.Context, env *store.Environment, report *environmentRestoreReport, plan environmentRestoreBuildPlan, workflowOptions environmentRestoreWorkflowOptions) {
-	if report.OK && workflowOptions.Run {
-		report.Workflow = environmentRestoreRunWorkflow(ctx, plan.WorkflowID, plan.Workspace, workflowOptions)
-		if !report.Workflow.OK {
-			report.OK = false
-		}
-		if report.Workflow.RunID != "" {
-			env.LastVerificationRunID = report.Workflow.RunID
-			env.LastVerificationStatus = statusText(report.Workflow.OK)
-			env.EvidenceComplete = report.Workflow.OK && report.Workflow.Acceptance.OK
-			env.TopologyComplete = report.Workflow.OK && report.Workflow.Acceptance.OK
-			env.Verified = false
-			env.Status = "verification-recorded"
-		}
+	if !workflowOptions.Run {
+		return
+	}
+	if !report.OK {
+		environmentRestoreEmitStep(ctx, "step_completed", "workflow.acceptance", "skipped", plan.WorkflowID, "acceptance workflow skipped because environment restore is not ready", report.Error)
+		return
+	}
+	environmentRestoreEmitPhaseStarted(ctx, "workflow.acceptance", plan.WorkflowID, "running environment acceptance workflow")
+	report.Workflow = environmentRestoreRunWorkflow(ctx, plan.WorkflowID, plan.Workspace, workflowOptions)
+	environmentRestoreEmitPhaseCompleted(ctx, "workflow.acceptance", plan.WorkflowID, report.Workflow.OK, report.Workflow.Action, report.Workflow.Error)
+	if !report.Workflow.OK {
+		report.OK = false
+	}
+	if report.Workflow.RunID != "" {
+		env.LastVerificationRunID = report.Workflow.RunID
+		env.LastVerificationStatus = statusText(report.Workflow.OK)
+		env.EvidenceComplete = report.Workflow.OK && report.Workflow.Acceptance.OK
+		env.TopologyComplete = report.Workflow.OK && report.Workflow.Acceptance.OK
+		env.Verified = false
+		env.Status = "verification-recorded"
 	}
 }
 

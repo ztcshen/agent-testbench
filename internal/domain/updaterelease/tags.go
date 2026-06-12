@@ -9,6 +9,7 @@ import (
 
 func LatestTagFromRemoteOutput(out string) string {
 	tags := TagsFromRemoteOutput(out)
+	tags = stableReleaseTags(tags)
 	if len(tags) == 0 {
 		return ""
 	}
@@ -35,6 +36,17 @@ func TagsFromRemoteOutput(out string) []string {
 		tags = append(tags, tag)
 	}
 	return tags
+}
+
+func stableReleaseTags(tags []string) []string {
+	out := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		version := parseTag(tag)
+		if version.valid && version.prerelease == "" {
+			out = append(out, tag)
+		}
+	}
+	return out
 }
 
 func CompareTags(a string, b string) int {

@@ -57,12 +57,16 @@ func TestSourcePolicyReportRequiresRemoteComponentReposWhenRemoteOnly(t *testing
 	report := SourcePolicyReport([]RepoSpec{
 		{ServiceID: "api", URL: "git@example.com:team/api.git"},
 		{ServiceID: "worker", URL: "../worker"},
+		{ServiceID: "checkout-only", Checkout: "/tmp/local-checkout"},
 	}, true)
 
-	if report.OK || !report.RemoteOnly || len(report.Violations) != 1 {
-		t.Fatalf("expected one remote-only violation, got %#v", report)
+	if report.OK || !report.RemoteOnly || len(report.Violations) != 2 {
+		t.Fatalf("expected remote-only violations, got %#v", report)
 	}
 	if report.Violations[0] != "component worker must use a remote Git URL, got local path/source: ../worker" {
 		t.Fatalf("unexpected violation: %q", report.Violations[0])
+	}
+	if report.Violations[1] != "component checkout-only must use a remote Git URL, got checkout-only source: /tmp/local-checkout" {
+		t.Fatalf("unexpected checkout-only violation: %q", report.Violations[1])
 	}
 }

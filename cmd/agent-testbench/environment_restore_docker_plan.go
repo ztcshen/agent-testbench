@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"agent-testbench/internal/store"
 )
 
 type environmentRestoreDockerReport struct {
@@ -24,16 +26,31 @@ type environmentRestoreDockerReport struct {
 }
 
 type environmentRestoreDockerCleanupReport struct {
-	Requested           bool       `json:"requested,omitempty"`
-	Allowed             bool       `json:"allowed,omitempty"`
-	IncludeImages       bool       `json:"includeImages,omitempty"`
-	Action              string     `json:"action,omitempty"`
-	FixedContainerNames []string   `json:"fixedContainerNames,omitempty"`
-	BackupCommands      [][]string `json:"backupCommands,omitempty"`
-	Commands            [][]string `json:"commands,omitempty"`
-	Output              []string   `json:"output,omitempty"`
-	Error               string     `json:"error,omitempty"`
-	Warning             string     `json:"warning,omitempty"`
+	Requested           bool                                         `json:"requested,omitempty"`
+	Allowed             bool                                         `json:"allowed,omitempty"`
+	IncludeImages       bool                                         `json:"includeImages,omitempty"`
+	Action              string                                       `json:"action,omitempty"`
+	Linkage             environmentRestoreDockerCleanupLinkageReport `json:"linkage,omitempty"`
+	FixedContainerNames []string                                     `json:"fixedContainerNames,omitempty"`
+	BackupCommands      [][]string                                   `json:"backupCommands,omitempty"`
+	Commands            [][]string                                   `json:"commands,omitempty"`
+	Output              []string                                     `json:"output,omitempty"`
+	Error               string                                       `json:"error,omitempty"`
+	Warning             string                                       `json:"warning,omitempty"`
+}
+
+type environmentRestoreDockerCleanupLinkageReport struct {
+	OK                       bool     `json:"ok"`
+	ComposeProject           string   `json:"composeProject,omitempty"`
+	ComposeServices          []string `json:"composeServices,omitempty"`
+	RequiredComponents       []string `json:"requiredComponents,omitempty"`
+	MissingComposeProject    bool     `json:"missingComposeProject,omitempty"`
+	MissingComponentGraph    bool     `json:"missingComponentGraph,omitempty"`
+	MissingComponentServices []string `json:"missingComponentServices,omitempty"`
+	MissingComposeServices   []string `json:"missingComposeServices,omitempty"`
+	MissingProjectedFiles    []string `json:"missingProjectedFiles,omitempty"`
+	StoreAssets              int      `json:"storeAssets,omitempty"`
+	Error                    string   `json:"error,omitempty"`
 }
 
 type environmentRestoreHealthCheckReport struct {
@@ -55,12 +72,12 @@ type environmentRestoreHealthCheckReport struct {
 	Error      string `json:"error,omitempty"`
 }
 
-func environmentRestoreDockerPlan(compose map[string]any, workspace string, cleanupOptions environmentRestoreDockerCleanupOptions) (environmentRestoreDockerReport, []string) {
+func environmentRestoreDockerPlan(graph store.EnvironmentComponentGraph, compose map[string]any, workspace string, cleanupOptions environmentRestoreDockerCleanupOptions) (environmentRestoreDockerReport, []string) {
 	report := environmentRestoreDockerReport{OK: true, Workdir: workspace}
 	composeFiles := environmentRestoreComposeFiles(compose)
 	startCommand := strings.TrimSpace(valueString(compose["startCommand"]))
 	if strings.TrimSpace(valueString(compose["composeFile"])) != "" {
-		baseArgs := environmentRestorePlanComposeCommands(&report, compose, workspace, composeFiles, cleanupOptions)
+		baseArgs := environmentRestorePlanComposeCommands(&report, graph, compose, workspace, composeFiles, cleanupOptions)
 		return report, baseArgs
 	}
 	if startCommand != "" {
@@ -72,13 +89,16 @@ func environmentRestoreDockerPlan(compose map[string]any, workspace string, clea
 	return report, nil
 }
 
-func environmentRestorePlanComposeCommands(report *environmentRestoreDockerReport, compose map[string]any, workspace string, composeFiles []string, cleanupOptions environmentRestoreDockerCleanupOptions) []string {
+func environmentRestorePlanComposeCommands(report *environmentRestoreDockerReport, graph store.EnvironmentComponentGraph, compose map[string]any, workspace string, composeFiles []string, cleanupOptions environmentRestoreDockerCleanupOptions) []string {
 	report.Action = "plan-docker-compose"
 	resolvedComposeFiles := environmentRestoreResolvedComposeFiles(workspace, composeFiles)
 	report.ComposeFile = strings.Join(resolvedComposeFiles, ",")
 	baseArgs := environmentRestoreComposeBaseArgs(compose, workspace, resolvedComposeFiles)
 	services := stringSliceFromAny(compose["services"])
 	report.Cleanup = environmentRestoreDockerCleanupPlan(baseArgs, cleanupOptions, environmentRestoreContainerNameConflicts(compose, workspace))
+	if report.Cleanup.Requested {
+		report.Cleanup.Linkage = environmentRestoreDockerCleanupLinkage(compose, graph, workspace, composeFiles)
+	}
 	imageServices, buildServices := environmentRestoreComposeCommandServices(compose, workspace, composeFiles, services)
 	imageServices = environmentRestoreFilterSkippedPullServices(imageServices, stringSliceFromAny(compose["skipPullServices"]))
 	if !boolFromReportAny(compose["skipPull"]) && len(imageServices) > 0 {
@@ -194,6 +214,13 @@ func environmentRestoreRunCleanup(ctx context.Context, report *environmentRestor
 		report.OK = false
 		report.Cleanup.Action = "cleanup-blocked"
 		report.Cleanup.Error = "Docker cleanup requested during --execute; rerun with --allow-destructive-docker-cleanup after reviewing cleanup commands"
+		report.Error = report.Cleanup.Error
+		return false
+	}
+	if !report.Cleanup.Linkage.OK {
+		report.OK = false
+		report.Cleanup.Action = "cleanup-linkage-blocked"
+		report.Cleanup.Error = firstNonEmpty(report.Cleanup.Linkage.Error, "Docker cleanup requires complete Store-to-Compose environment linkage")
 		report.Error = report.Cleanup.Error
 		return false
 	}

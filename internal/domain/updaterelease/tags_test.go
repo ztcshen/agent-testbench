@@ -2,6 +2,14 @@ package updaterelease
 
 import "testing"
 
+func TestLatestTagFromRemoteOutputIgnoresPrereleases(t *testing.T) {
+	out := "aaa refs/tags/v1.9.0\nbbb refs/tags/v2.0.0-rc1\nccc refs/tags/v1.10.0\n"
+
+	if got := LatestTagFromRemoteOutput(out); got != "v1.10.0" {
+		t.Fatalf("latest stable release tag = %q", got)
+	}
+}
+
 func TestTagsFromRemoteOutputDeduplicatesPeeledTags(t *testing.T) {
 	out := "abc\trefs/tags/v1.0.0\nabc\trefs/tags/v1.0.0^{}\ndef\trefs/heads/main\nghi\trefs/tags/v1.1.0\n"
 

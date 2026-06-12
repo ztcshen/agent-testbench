@@ -350,3 +350,24 @@ Durable feedback registered by local Codex sessions. Use
 - Evidence: An environment-bound private workflow had 11 steps in the Store. Direct `sandbox start --workflow` runs reported passed for the registered application services, but service health stayed `000`; several application services exited or failed to reach required upstream dependencies, and some required dependency services had no startup metadata or Store registration. `environment discover` returned no environments. A prior workflow batch completed 11/11 with 0 passed because upstream services were unavailable.
 - Suggestion: `sandbox start --workflow` now rejects workflows that are bound to an Environment Catalog entry and tells operators to use `environment restore ENV_ID --store STORE_NAME_OR_DSN --workspace WORKSPACE --execute --run-workflow --server-url URL`, keeping environment startup, health checks, workflow execution, Evidence, and verification on the environment lifecycle gate.
 - Verification: `go test ./cmd/agent-testbench -run 'TestSandbox(Start|Service|Register)' -count=1`; `go test ./cmd/agent-testbench -run TestSandboxStartRejectsEnvironmentBoundWorkflow -count=1`
+## 2026-06-12 - Restore stream-json lacks long-running phase events
+- Area: environment
+- Severity: P2
+- Status: new
+- Source: user screenshot report 2026-06-12
+- Evidence: environment restore --output-format stream-json can run for a long time without events, leaving operators unable to tell whether it is blocked in compose, health checks, or migration.
+- Suggestion: Emit step_started/heartbeat/progress events for compose preparation, Docker compose execution, health waiting, migration application, and workflow verification so stream-json always shows the active phase.
+## 2026-06-12 - Environment registration file relationships are hard to reason about
+- Area: environment
+- Severity: P2
+- Status: new
+- Source: user screenshot report 2026-06-12
+- Evidence: environment register mixes composeFiles, generatedFiles, and startupFiles references; operators can end up referencing files that are not materialized as durable Store-backed assets.
+- Suggestion: Normalize the registration model so every referenced compose/startup/generated file has an explicit Store-backed asset record, projection kind, ownership, and inspectable restore-readiness status.
+## 2026-06-12 - Compose down cleanup can break partially linked environments
+- Area: environment
+- Severity: P1
+- Status: new
+- Source: user screenshot report 2026-06-12
+- Evidence: An environment was cleaned with docker compose down --remove-orphans, but application containers were not connected through a complete environment link, causing startup chains such as env variable injection to break.
+- Suggestion: Before destructive compose cleanup, require a complete environment linkage/preflight proof for all app containers, env injection paths, and compose project boundaries; otherwise block down/remove-orphans and provide a repair plan.

@@ -58,7 +58,9 @@ func runEnvironmentMigrationTargetCommand(ctx context.Context, args []string, co
 	if opts.OutputFormat == cliOutputFormatStreamJSON {
 		agentEmitRunCompleted(ctx, environmentMigrationRunPhase(baseline), statusText(report.OK), opts.EnvID, environmentMigrationRunMessage(baseline, "completed"), environmentMigrationReportError(report), report)
 	} else if opts.JSONOutput {
-		return writeIndentedJSON(report)
+		if err := writeIndentedJSON(report); err != nil {
+			return err
+		}
 	} else {
 		if baseline {
 			printEnvironmentMigrationReport("Environment Migration Baseline", report)
@@ -226,6 +228,9 @@ func executeEnvironmentMigrationTarget(ctx context.Context, opts environmentMigr
 			item.Status = status
 		}
 		agentEmitStep(ctx, "step_completed", "environment.migration", environmentMigrationItemStatus(*item), item.AssetID, environmentMigrationItemMessage(baseline, "completed", *item), item.Error)
+		if !item.OK {
+			break
+		}
 	}
 }
 

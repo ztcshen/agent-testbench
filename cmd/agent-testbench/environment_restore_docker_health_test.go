@@ -65,6 +65,21 @@ func TestEnvironmentRestoreStreamJSONEmitsAgentEvents(t *testing.T) {
 	if valueString(events[0]["type"]) != "run_started" || valueString(events[0]["status"]) != "running" {
 		t.Fatalf("first stream event = %#v", events[0])
 	}
+	for _, phase := range []string{
+		"docker.prepare",
+		"docker.compose.validate",
+		"docker.native-assets",
+		"docker.compose.execute",
+		"docker.edge-assets",
+		"docker.health",
+	} {
+		if !agentStreamHasEvent(events, "step_started", phase, "running", "") {
+			t.Fatalf("stream missing %s start: %#v", phase, events)
+		}
+		if !agentStreamHasEvent(events, "step_completed", phase, "passed", "") {
+			t.Fatalf("stream missing %s completion: %#v", phase, events)
+		}
+	}
 	if !agentStreamHasEvent(events, "tool_call_started", "command", "started", "docker compose up") {
 		t.Fatalf("stream missing docker compose command start: %#v", events)
 	}
@@ -75,6 +90,40 @@ func TestEnvironmentRestoreStreamJSONEmitsAgentEvents(t *testing.T) {
 	report := mapFromReportAny(last["report"])
 	if valueString(last["type"]) != "run_completed" || valueString(last["status"]) != "passed" || !boolFromReportAny(report["ok"]) {
 		t.Fatalf("last stream event = %#v", last)
+	}
+}
+
+func TestEnvironmentRestoreStreamJSONSkipsWorkflowWhenDockerIsNotReady(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	fixture.writeWorkspaceFile(t, "compose.yml", "services: {}\n")
+
+	runCLI(t, "environment", "register",
+		"--store", fixture.StoreDSN,
+		"--id", "env.stream.workflow-gate",
+		"--compose-file", "compose.yml",
+		"--health-command", "echo nope && exit 7",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIFailsWithEnv(t, fixture.DockerEnv, "environment", "restore",
+		"--store", fixture.StoreDSN,
+		"--workspace", fixture.Workspace,
+		"--execute",
+		"--health-timeout-seconds", "1",
+		"--run-workflow",
+		"--server-url", "http://127.0.0.1:1",
+		"--output-format", "stream-json",
+		"env.stream.workflow-gate",
+	)
+	events := decodeAgentStreamEvents(t, agentStreamJSONEventLines(out))
+	if !agentStreamHasEvent(events, "step_completed", "docker.health", "failed", "") {
+		t.Fatalf("stream missing failed docker health completion: %#v", events)
+	}
+	if !agentStreamHasEvent(events, "step_completed", "workflow.acceptance", "skipped", "workflow.core-10") {
+		t.Fatalf("stream missing skipped workflow gate: %#v", events)
+	}
+	if agentStreamHasEvent(events, "step_started", "workflow.acceptance", "running", "workflow.core-10") {
+		t.Fatalf("workflow should not start when Docker health is not ready: %#v", events)
 	}
 }
 

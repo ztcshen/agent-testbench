@@ -145,11 +145,23 @@ running:
 ./skills/agent-testbench-operator/scripts/atb.sh environment migration apply ENV_ID --store STORE_NAME --edge OWNER:PROVIDER --database DB_NAME --workspace WORKSPACE --execute --output-format stream-json
 ```
 
+During `environment restore --output-format stream-json`, watch the
+`docker.prepare`, `docker.compose.validate`, `docker.cleanup`,
+`docker.native-assets`, `docker.compose.execute`, `docker.edge-assets`,
+`docker.health`, and `workflow.acceptance` phases. If Docker restore or health
+does not pass, `--run-workflow` must remain skipped instead of invoking the
+acceptance workflow.
+
 `environment status` is a read-only Compose inspection path: it can materialize
 Store-backed compose/env files, then uses `docker compose ps` without
 pull/build/up/down. `environment stop` defaults to `docker compose stop
 SERVICE...`; both commands require recorded or discoverable Compose services
 for their default service-scoped behavior.
+Destructive restore cleanup still requires more than
+`--allow-destructive-docker-cleanup`: the cleanup linkage proof must show a
+recorded Compose project name, Store component graph, required component
+services, and Store-projected compose/env files before `docker compose down`
+can run.
 
 Plan or apply Store-first SQL edge migrations:
 

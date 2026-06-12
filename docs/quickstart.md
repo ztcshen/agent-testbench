@@ -446,6 +446,13 @@ refs that already exist locally and will not fetch or compare `origin`. Add
 `--run-workflow` with `--execute` to run the recorded verification workflow
 after Docker health checks pass; the run, case runs, Evidence indexes, and
 Environment Catalog verification run status are written to the selected Store.
+If Docker restore or health does not pass, `--run-workflow` is skipped and the
+stream-json output emits a `workflow.acceptance` skipped event instead of
+calling the acceptance runner. With `--output-format stream-json`, restore also
+emits Docker phase events for preparation, Compose validation, cleanup gates,
+Docker-native Store asset projection, Compose execution, post-start edge
+assets, and health waits so agents can locate long-running or blocked phases
+without inspecting local runtime files.
 Restore records Evidence completeness from the workflow result but does not
 mark SkyWalking topology complete or publish the environment as verified; real
 topology collection and `publish-verified` remain separate gates. Use
@@ -627,7 +634,12 @@ state snapshot for human inspection, not a backup of volumes, databases, or
 runtime data. During `--execute`, requested cleanup is blocked unless
 `--allow-destructive-docker-cleanup` is also present. This cleanup applies only
 to the recorded target Compose project; the sandbox SQL control-plane Store
-must stay outside that Docker environment.
+must stay outside that Docker environment. The allow flag is still not enough
+by itself: destructive cleanup also requires a complete Store-to-Compose
+linkage proof, including a recorded Compose project name, Store component graph,
+required component-to-service mapping, and Store-projected compose/env files.
+If that proof is missing, restore blocks with `cleanup-linkage-blocked` and
+reports the repair items instead of running `docker compose down`.
 
 When you want to evaluate a new colleague machine without touching the current
 machine's running target containers, use `--assume-clean-docker` on a dry-run.

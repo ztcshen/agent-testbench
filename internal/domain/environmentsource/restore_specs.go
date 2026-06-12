@@ -113,16 +113,25 @@ func SourcePolicyReport(specs []RepoSpec, remoteOnly bool) SourcePolicy {
 	if !remoteOnly {
 		return report
 	}
-	addViolation := func(label string, rawURL string) {
+	addViolation := func(label string, rawURL string, checkout string) {
 		rawURL = strings.TrimSpace(rawURL)
-		if rawURL == "" || IsRemoteGitURL(rawURL) {
+		checkout = strings.TrimSpace(checkout)
+		if IsRemoteGitURL(rawURL) {
+			return
+		}
+		if rawURL == "" && checkout != "" {
+			report.OK = false
+			report.Violations = append(report.Violations, label+" must use a remote Git URL, got checkout-only source: "+checkout)
+			return
+		}
+		if rawURL == "" {
 			return
 		}
 		report.OK = false
 		report.Violations = append(report.Violations, label+" must use a remote Git URL, got local path/source: "+rawURL)
 	}
 	for _, spec := range specs {
-		addViolation("component "+spec.ServiceID, spec.URL)
+		addViolation("component "+spec.ServiceID, spec.URL, spec.Checkout)
 	}
 	return report
 }

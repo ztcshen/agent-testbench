@@ -193,12 +193,22 @@ Inspect or stop an Environment Catalog target without rerunning heavy restore:
 `environment status` materializes Store-backed compose/env files when needed and
 uses `docker compose ps` only, with per-service state and an aggregate health
 summary. It must not be treated as a restore or workflow verification run.
+For long restore execution, prefer `environment restore --output-format
+stream-json`; phase events identify `docker.prepare`,
+`docker.compose.validate`, `docker.cleanup`, `docker.native-assets`,
+`docker.compose.execute`, `docker.edge-assets`, `docker.health`, and
+`workflow.acceptance`. If Docker restore or health does not pass, the workflow
+acceptance phase must be skipped rather than started.
 If no recorded or discoverable Compose services are available, status fails
 instead of reporting an empty success. `environment stop` defaults to `docker
 compose stop SERVICE...` and preserves containers, volumes, and images; the
 default path also requires recorded or discoverable services so it cannot widen
 into an accidental whole-project stop. Use `--down --remove-orphans` only after
 explicitly deciding to remove Compose-managed containers.
+For restore cleanup, `--allow-destructive-docker-cleanup` is only the operator
+approval step. Restore still blocks `docker compose down` when the cleanup
+linkage proof is incomplete: project name, Store component graph, required
+component services, and Store-projected compose/env files must all line up.
 
 After any `sandbox start --json` pass, inspect the report's `runtime` block.
 If `runtime.activeMatchesRuntime=false` or `runtime.fresh=false`, treat the

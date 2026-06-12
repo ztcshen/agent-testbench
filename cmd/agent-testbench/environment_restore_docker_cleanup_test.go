@@ -8,19 +8,39 @@ import (
 	"testing"
 )
 
+func seedCleanupLinkedGraph(t *testing.T, storePath string, envID string, service string) {
+	t.Helper()
+	graphPath := filepath.Join(t.TempDir(), "component-graph.json")
+	graph := strings.ReplaceAll(`{
+		"components": [
+			{"componentId":"SERVICE","kind":"app","role":"business-service","composeService":"SERVICE","required":true,"healthCheckJson":"{\"kind\":\"url\",\"url\":\"HEALTH_URL\"}"}
+		]
+	}`, "SERVICE", service)
+	graph = strings.ReplaceAll(graph, "HEALTH_URL", newHealthyTestURL(t))
+	writeFile(t, graphPath, graph)
+	runCLI(t, "environment", "components", "replace",
+		"--store", "sqlite://"+storePath,
+		"--file", graphPath,
+		envID,
+	)
+}
+
 func TestEnvironmentRestorePlansDockerCleanupWithoutExecuting(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	fakeDockerEnv, _ := fakeDockerCommand(t)
-	writeFile(t, filepath.Join(workspace, "compose.yml"), "services: {}\n")
+	composeSource := filepath.Join(t.TempDir(), "compose.yml")
+	writeFile(t, composeSource, "services:\n  web:\n    image: alpine:3.20\n")
 	runCLI(t, "environment", "register",
 		"--store", "sqlite://"+storePath,
 		"--id", "env.cleanup.plan",
 		"--compose-file", "compose.yml",
+		"--compose-generated-file", "compose.yml="+composeSource,
 		"--compose-project-name", "demo",
 		"--compose-service", "web",
 		"--verification-workflow", "workflow.core-10",
 	)
+	seedCleanupLinkedGraph(t, storePath, "env.cleanup.plan", "web")
 
 	out := runCLIWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--clean-docker-state", "--clean-docker-images", "--json", "env.cleanup.plan")
 	var report struct {
@@ -34,6 +54,9 @@ func TestEnvironmentRestorePlansDockerCleanupWithoutExecuting(t *testing.T) {
 				BackupCommands [][]string `json:"backupCommands"`
 				Commands       [][]string `json:"commands"`
 				Warning        string     `json:"warning"`
+				Linkage        struct {
+					OK bool `json:"ok"`
+				} `json:"linkage"`
 			} `json:"cleanup"`
 		} `json:"docker"`
 	}
@@ -41,7 +64,7 @@ func TestEnvironmentRestorePlansDockerCleanupWithoutExecuting(t *testing.T) {
 		t.Fatalf("decode cleanup dry-run json: %v\n%s", err, out)
 	}
 	cleanup := report.Docker.Cleanup
-	if !report.OK || !cleanup.Requested || cleanup.Allowed || !cleanup.IncludeImages || cleanup.Action != "plan-cleanup" || len(cleanup.BackupCommands) != 3 || len(cleanup.Commands) != 1 {
+	if !report.OK || !cleanup.Requested || cleanup.Allowed || !cleanup.IncludeImages || cleanup.Action != "plan-cleanup" || !cleanup.Linkage.OK || len(cleanup.BackupCommands) != 3 || len(cleanup.Commands) != 1 {
 		t.Fatalf("cleanup dry-run report = %#v", report.Docker.Cleanup)
 	}
 	command := strings.Join(cleanup.Commands[0], " ")
@@ -116,20 +139,50 @@ func TestEnvironmentRestoreBlocksDockerCleanupWithoutExplicitAllow(t *testing.T)
 	}
 }
 
+func TestEnvironmentRestoreBlocksAllowedDockerCleanupWithoutCompleteLinkage(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	fakeDockerEnv, dockerCallsPath := fakeDockerCommand(t)
+	writeFile(t, filepath.Join(workspace, "compose.yml"), "services:\n  web:\n    image: alpine:3.20\n")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.cleanup.linkage.block",
+		"--compose-file", "compose.yml",
+		"--compose-service", "web",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIFailsWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--clean-docker-state", "--allow-destructive-docker-cleanup", "--json", "env.cleanup.linkage.block")
+	if !strings.Contains(out, "cleanup-linkage-blocked") || !strings.Contains(out, "Store-to-Compose environment linkage") || !strings.Contains(out, "projectName") {
+		t.Fatalf("cleanup linkage block output = %q", out)
+	}
+	if raw, err := os.ReadFile(dockerCallsPath); err == nil {
+		calls := string(raw)
+		if strings.Contains(calls, " down ") || strings.Contains(calls, " up -d") {
+			t.Fatalf("linkage-blocked cleanup should not run down/up:\n%s", calls)
+		}
+	}
+}
+
 func TestEnvironmentRestoreRunsAllowedDockerCleanupBeforeStartup(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	fakeDockerEnv, dockerCallsPath := fakeDockerCommand(t)
-	writeFile(t, filepath.Join(workspace, "compose.yml"), "services: {}\n")
+	composeSource := filepath.Join(t.TempDir(), "compose.yml")
+	writeFile(t, composeSource, "services:\n  web:\n    image: alpine:3.20\n")
 	runCLI(t, "environment", "register",
 		"--store", "sqlite://"+storePath,
 		"--id", "env.cleanup.execute",
 		"--compose-file", "compose.yml",
+		"--compose-generated-file", "compose.yml="+composeSource,
+		"--compose-project-name", "demo",
+		"--compose-service", "web",
 		"--compose-skip-pull",
 		"--compose-skip-build",
 		"--health-url", newHealthyTestURL(t),
 		"--verification-workflow", "workflow.core-10",
 	)
+	seedCleanupLinkedGraph(t, storePath, "env.cleanup.execute", "web")
 
 	out := runCLIWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--clean-docker-state", "--clean-docker-images", "--allow-destructive-docker-cleanup", "--json", "env.cleanup.execute")
 	var report struct {
@@ -152,7 +205,7 @@ func TestEnvironmentRestoreRunsAllowedDockerCleanupBeforeStartup(t *testing.T) {
 	}
 	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
 	joined := strings.Join(lines, "\n")
-	for _, want := range []string{"compose -f " + filepath.Join(workspace, "compose.yml") + " ps", "compose -f " + filepath.Join(workspace, "compose.yml") + " images", "compose -f " + filepath.Join(workspace, "compose.yml") + " config", "compose -f " + filepath.Join(workspace, "compose.yml") + " down --remove-orphans --rmi all", "compose -f " + filepath.Join(workspace, "compose.yml") + " up -d"} {
+	for _, want := range []string{"compose -f " + filepath.Join(workspace, "compose.yml") + " -p demo ps", "compose -f " + filepath.Join(workspace, "compose.yml") + " -p demo images", "compose -f " + filepath.Join(workspace, "compose.yml") + " -p demo config", "compose -f " + filepath.Join(workspace, "compose.yml") + " -p demo down --remove-orphans --rmi all", "compose -f " + filepath.Join(workspace, "compose.yml") + " -p demo up -d web"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("cleanup docker calls missing %q:\n%s", want, joined)
 		}
@@ -195,12 +248,14 @@ fi
 		"--id", "env.cleanup.fixed-container",
 		"--compose-file", "compose.yml",
 		"--compose-generated-file", "compose.yml="+composeSource,
+		"--compose-project-name", "demo-fixed",
 		"--compose-service", "kafka",
 		"--compose-skip-pull",
 		"--compose-skip-build",
 		"--health-compose-service", "kafka",
 		"--verification-workflow", "workflow.core-10",
 	)
+	seedCleanupLinkedGraph(t, strings.TrimPrefix(fixture.StoreDSN, "sqlite://"), "env.cleanup.fixed-container", "kafka")
 
 	out := runCLIWithEnv(t, fixture.DockerEnv, "environment", "restore", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--execute", "--clean-docker-state", "--allow-destructive-docker-cleanup", "--json", "env.cleanup.fixed-container")
 	if !strings.Contains(out, `"ok": true`) || !strings.Contains(out, "fixedContainerNames") {
@@ -212,9 +267,9 @@ fi
 	}
 	joined := string(raw)
 	for _, want := range []string{
-		"compose -f " + filepath.Join(fixture.Workspace, "compose.yml") + " down --remove-orphans",
+		"compose -f " + filepath.Join(fixture.Workspace, "compose.yml") + " -p demo-fixed down --remove-orphans",
 		"rm -f sandbox-kafka",
-		"compose -f " + filepath.Join(fixture.Workspace, "compose.yml") + " up -d kafka",
+		"compose -f " + filepath.Join(fixture.Workspace, "compose.yml") + " -p demo-fixed up -d kafka",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("cleanup docker calls missing %q:\n%s", want, joined)
@@ -250,12 +305,14 @@ fi
 		"--id", "env.cleanup.fixed-container-missing",
 		"--compose-file", "compose.yml",
 		"--compose-generated-file", "compose.yml="+composeSource,
+		"--compose-project-name", "demo-fixed-missing",
 		"--compose-service", "kafka",
 		"--compose-skip-pull",
 		"--compose-skip-build",
 		"--health-compose-service", "kafka",
 		"--verification-workflow", "workflow.core-10",
 	)
+	seedCleanupLinkedGraph(t, strings.TrimPrefix(fixture.StoreDSN, "sqlite://"), "env.cleanup.fixed-container-missing", "kafka")
 
 	out := runCLIWithEnv(t, fixture.DockerEnv, "environment", "restore", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--execute", "--clean-docker-state", "--allow-destructive-docker-cleanup", "--json", "env.cleanup.fixed-container-missing")
 	if !strings.Contains(out, `"ok": true`) {
