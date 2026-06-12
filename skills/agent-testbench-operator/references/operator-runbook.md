@@ -230,7 +230,11 @@ Variable paths are resolved from Store-backed `compose.env`; if required
 variables are not present there, the projection gap should be repaired in Store
 instead of relying on a local shell. For `extends.file`, only the named
 `extends.service` in the referenced file is inspected, so unrelated services in
-shared compose fragments should not block readiness.
+shared compose fragments should not block readiness. When
+`fileProjection.ok=false`, use `fileProjection.repairPlan` to see the blocking
+Store-backed fixes for summary-only startup files, unresolved Compose
+variables, and unprojected Compose env/config/secret/include/extends file
+references.
 
 After any `sandbox start --json` pass, inspect the report's `runtime` block.
 If `runtime.activeMatchesRuntime=false` or `runtime.fresh=false`, treat the

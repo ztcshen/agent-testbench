@@ -198,7 +198,10 @@ component config asset, generated Compose env metadata, or an explicit
 environment package projection; summary-only `startupFiles` entries are repair
 hints, not durable file content. Dynamic Compose file paths are resolved only
 from Store-backed `compose.env`, and `extends.file` scans only the named
-`extends.service` instead of every service in the referenced file.
+`extends.service` instead of every service in the referenced file. When
+`fileProjection.ok=false`, read `fileProjection.repairPlan`; it groups blocking
+Store repairs for summary-only startup files, unresolved Compose variables, and
+unprojected Compose env/config/secret/include/extends file references.
 
 ## Report Back
 

@@ -30,16 +30,28 @@ const (
 )
 
 type ProjectionReport struct {
-	OK      bool             `json:"ok"`
-	Files   []ProjectionFile `json:"files"`
-	Missing []ProjectionFile `json:"missing,omitempty"`
-	Counts  ProjectionCounts `json:"counts"`
+	OK         bool                   `json:"ok"`
+	Files      []ProjectionFile       `json:"files"`
+	Missing    []ProjectionFile       `json:"missing,omitempty"`
+	RepairPlan []ProjectionRepairItem `json:"repairPlan,omitempty"`
+	Counts     ProjectionCounts       `json:"counts"`
 }
 
 type ProjectionCounts struct {
 	Referenced  int `json:"referenced"`
 	StoreBacked int `json:"storeBacked"`
 	Missing     int `json:"missing"`
+	RepairItems int `json:"repairItems,omitempty"`
+}
+
+type ProjectionRepairItem struct {
+	Name          string   `json:"name"`
+	Target        string   `json:"target"`
+	Missing       []string `json:"missing,omitempty"`
+	Action        string   `json:"action"`
+	CommandHint   string   `json:"commandHint"`
+	StoreBacked   bool     `json:"storeBacked"`
+	BlocksRestore bool     `json:"blocksRestore"`
 }
 
 type ProjectionFile struct {
@@ -584,7 +596,91 @@ func (b *projectionBuilder) report() ProjectionReport {
 			report.Missing = append(report.Missing, file)
 		}
 	}
+	if !report.OK {
+		report.RepairPlan = projectionRepairPlan(report.Missing)
+		report.Counts.RepairItems = len(report.RepairPlan)
+	}
 	return report
+}
+
+func projectionRepairPlan(missing []ProjectionFile) []ProjectionRepairItem {
+	summaryStartup := []string{}
+	unresolvedVariables := []string{}
+	unprojectedFiles := []string{}
+	for _, file := range missing {
+		target := projectionRepairTarget(file)
+		switch file.Source {
+		case "summary.startupFiles":
+			summaryStartup = append(summaryStartup, target)
+		case "compose.interpolation":
+			unresolvedVariables = append(unresolvedVariables, target)
+		default:
+			unprojectedFiles = append(unprojectedFiles, target)
+		}
+	}
+	items := []ProjectionRepairItem{}
+	if len(summaryStartup) > 0 {
+		items = append(items, ProjectionRepairItem{
+			Name:          "startup-file-content",
+			Target:        "compose.generatedFiles",
+			Missing:       dedupeSortedProjectionTargets(summaryStartup),
+			Action:        "store the referenced startup file content in compose.generatedFiles; summary.startupFiles is only a repair hint",
+			CommandHint:   "environment startup-file put ENV_ID --file PATH=LOCAL_FILE",
+			StoreBacked:   true,
+			BlocksRestore: true,
+		})
+	}
+	if len(unresolvedVariables) > 0 {
+		items = append(items, ProjectionRepairItem{
+			Name:          "compose-env-variable",
+			Target:        "compose.env",
+			Missing:       dedupeSortedProjectionTargets(unresolvedVariables),
+			Action:        "record required Compose path variables in Store-backed compose.env so file references resolve reproducibly",
+			CommandHint:   "environment register --id ENV_ID --compose-env KEY=VALUE --verification-workflow WORKFLOW_ID",
+			StoreBacked:   true,
+			BlocksRestore: true,
+		})
+	}
+	if len(unprojectedFiles) > 0 {
+		items = append(items, ProjectionRepairItem{
+			Name:          "compose-file-projection",
+			Target:        "fileProjection.missing",
+			Missing:       dedupeSortedProjectionTargets(unprojectedFiles),
+			Action:        "store every referenced Compose env/config/secret/include/extends file as a generated file, component asset, or environment package projection",
+			CommandHint:   "environment startup-file put ENV_ID --file PATH=LOCAL_FILE",
+			StoreBacked:   true,
+			BlocksRestore: true,
+		})
+	}
+	return items
+}
+
+func projectionRepairTarget(file ProjectionFile) string {
+	kind := strings.TrimSpace(file.Kind)
+	if kind == "" {
+		kind = "file"
+	}
+	return kind + ":" + filepath.ToSlash(cleanPath(file.Path))
+}
+
+func dedupeSortedProjectionTargets(values []string) []string {
+	out := dedupeProjectionTargets(values)
+	sort.Strings(out)
+	return out
+}
+
+func dedupeProjectionTargets(values []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
 }
 
 func projectionFilesFromAssets(assets []store.ComponentConfigAsset) []ProjectionFile {

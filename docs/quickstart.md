@@ -471,6 +471,10 @@ its source and projection rule. A referenced file is ready only when it can be
 traced to `compose.generatedFiles`, a component config asset, generated Compose
 env metadata, or an explicit environment package source; summary-only
 `startupFiles` entries without stored file content are reported as repair gaps.
+When `fileProjection.ok=false`, `fileProjection.repairPlan` groups the
+Store-backed repairs needed for summary-only startup files, unresolved Compose
+variables, and unprojected Compose env/config/secret/include/extends file
+references.
 
 Store remains the source of truth for configuration even when Docker-native
 runtime features are used. Component assets with kinds such as

@@ -30,11 +30,14 @@ func TestProjectionReportExplainsStoreBackedFilesAndGaps(t *testing.T) {
 	}
 
 	report := FromEnvironment(env, graph)
-	if report.OK || report.Counts.Referenced != 3 || report.Counts.Missing != 1 {
+	if report.OK || report.Counts.Referenced != 3 || report.Counts.Missing != 1 || report.Counts.RepairItems != 1 {
 		t.Fatalf("projection report = %#v", report)
 	}
 	if len(report.Missing) != 1 || report.Missing[0].Path != "runtime.env" || report.Missing[0].Source != "summary.startupFiles" {
 		t.Fatalf("missing projection = %#v", report.Missing)
+	}
+	if len(report.RepairPlan) != 1 || report.RepairPlan[0].Name != "startup-file-content" || report.RepairPlan[0].Target != "compose.generatedFiles" || !report.RepairPlan[0].BlocksRestore {
+		t.Fatalf("startup repair plan = %#v", report.RepairPlan)
 	}
 	if !projectionContains(report, KindComposeFile, "compose.yml", "compose.generatedFiles", true) {
 		t.Fatalf("compose file projection missing: %#v", report.Files)
@@ -192,6 +195,10 @@ func TestProjectionReportDiscoversComposeNativeReferenceVariants(t *testing.T) {
 		if !projectionContains(report, "", path, "compose.interpolation", false) {
 			t.Fatalf("unresolved dynamic path %s should be visible: %#v", path, report.Missing)
 		}
+	}
+	if !projectionRepairContains(report, "compose-env-variable", "compose.env", "compose-config-file:compose/config/${PROFILE}.yml") ||
+		!projectionRepairContains(report, "compose-env-variable", "compose.env", "env-file:compose/env/${TARGET}.env") {
+		t.Fatalf("compose interpolation repair plan missing: %#v", report.RepairPlan)
 	}
 	for _, file := range report.Files {
 		switch file.Path {
@@ -391,6 +398,20 @@ func projectionPathContains(report ProjectionReport, path string) bool {
 	for _, file := range report.Files {
 		if file.Path == path {
 			return true
+		}
+	}
+	return false
+}
+
+func projectionRepairContains(report ProjectionReport, name string, target string, missing string) bool {
+	for _, item := range report.RepairPlan {
+		if item.Name != name || item.Target != target {
+			continue
+		}
+		for _, value := range item.Missing {
+			if value == missing {
+				return true
+			}
 		}
 	}
 	return false

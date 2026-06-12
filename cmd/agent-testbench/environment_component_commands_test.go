@@ -311,6 +311,12 @@ func TestEnvironmentInspectAndBootstrapExposeFileProjectionGaps(t *testing.T) {
 				Kind   string `json:"kind"`
 				Source string `json:"source"`
 			} `json:"missing"`
+			RepairPlan []struct {
+				Name          string   `json:"name"`
+				Target        string   `json:"target"`
+				Missing       []string `json:"missing"`
+				BlocksRestore bool     `json:"blocksRestore"`
+			} `json:"repairPlan"`
 		} `json:"fileProjection"`
 	}
 	if err := json.Unmarshal([]byte(inspectOut), &inspectPayload); err != nil {
@@ -319,16 +325,25 @@ func TestEnvironmentInspectAndBootstrapExposeFileProjectionGaps(t *testing.T) {
 	if inspectPayload.FileProjection.OK || len(inspectPayload.FileProjection.Missing) != 1 || inspectPayload.FileProjection.Missing[0].Path != "compose/runtime.env" || inspectPayload.FileProjection.Missing[0].Kind != "env-file" {
 		t.Fatalf("inspect file projection should expose missing env file: %#v", inspectPayload.FileProjection)
 	}
+	if len(inspectPayload.FileProjection.RepairPlan) != 1 ||
+		inspectPayload.FileProjection.RepairPlan[0].Name != "compose-file-projection" ||
+		inspectPayload.FileProjection.RepairPlan[0].Target != "fileProjection.missing" ||
+		!stringSliceContains(inspectPayload.FileProjection.RepairPlan[0].Missing, "env-file:compose/runtime.env") ||
+		!inspectPayload.FileProjection.RepairPlan[0].BlocksRestore {
+		t.Fatalf("inspect file projection repair plan = %#v", inspectPayload.FileProjection.RepairPlan)
+	}
 
 	bootstrapOut := runCLI(t, "environment", "bootstrap", "--store", "sqlite://"+storePath, "--json", "env.file.projection")
 	var bootstrapPayload struct {
 		Plan struct {
 			FileProjection struct {
-				OK bool `json:"ok"`
+				OK         bool  `json:"ok"`
+				RepairPlan []any `json:"repairPlan"`
 			} `json:"fileProjection"`
 			Restore struct {
 				FileProjection struct {
-					OK bool `json:"ok"`
+					OK         bool  `json:"ok"`
+					RepairPlan []any `json:"repairPlan"`
 				} `json:"fileProjection"`
 			} `json:"restore"`
 		} `json:"plan"`
@@ -338,6 +353,9 @@ func TestEnvironmentInspectAndBootstrapExposeFileProjectionGaps(t *testing.T) {
 	}
 	if bootstrapPayload.Plan.FileProjection.OK || bootstrapPayload.Plan.Restore.FileProjection.OK {
 		t.Fatalf("bootstrap should carry missing file projection: %#v", bootstrapPayload.Plan)
+	}
+	if len(bootstrapPayload.Plan.FileProjection.RepairPlan) != 1 || len(bootstrapPayload.Plan.Restore.FileProjection.RepairPlan) != 1 {
+		t.Fatalf("bootstrap should carry file projection repair plans: %#v", bootstrapPayload.Plan)
 	}
 
 	runCLI(t, "environment", "startup-file", "put",
