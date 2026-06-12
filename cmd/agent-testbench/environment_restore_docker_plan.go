@@ -23,14 +23,6 @@ type environmentRestoreDockerReport struct {
 	HealthChecks  []environmentRestoreHealthCheckReport `json:"healthChecks,omitempty"`
 }
 
-type environmentRestoreGeneratedFile struct {
-	Path   string `json:"path"`
-	Bytes  int    `json:"bytes"`
-	Action string `json:"action"`
-	OK     bool   `json:"ok"`
-	Error  string `json:"error,omitempty"`
-}
-
 type environmentRestoreDockerCleanupReport struct {
 	Requested           bool       `json:"requested,omitempty"`
 	Allowed             bool       `json:"allowed,omitempty"`
@@ -316,89 +308,6 @@ func environmentRestoreResolvedComposeFiles(workspace string, files []string) []
 	return out
 }
 
-func prepareEnvironmentRestoreGeneratedFiles(compose map[string]any, workspace string, execute bool) []environmentRestoreGeneratedFile {
-	files := stringMapFromAny(compose["generatedFiles"])
-	if len(files) == 0 {
-		return nil
-	}
-	paths := environmentRestoreGeneratedFilePaths(compose, files)
-	out := make([]environmentRestoreGeneratedFile, 0, len(paths))
-	for _, path := range paths {
-		content := files[path]
-		report := environmentRestoreGeneratedFile{
-			Path:   restoreWorkspacePath(workspace, path),
-			Bytes:  len(content),
-			Action: "plan-write",
-			OK:     true,
-		}
-		if ok, errText := environmentRestoreGeneratedFileTargetOK(path, workspace); !ok {
-			report.OK = false
-			report.Error = errText
-			out = append(out, report)
-			continue
-		}
-		if execute {
-			report.Action = "write"
-			if err := os.MkdirAll(filepath.Dir(report.Path), 0o755); err != nil {
-				report.OK = false
-				report.Error = err.Error()
-			} else if err := os.WriteFile(report.Path, []byte(content), 0o644); err != nil {
-				report.OK = false
-				report.Error = err.Error()
-			}
-		}
-		out = append(out, report)
-	}
-	return out
-}
-
-func environmentRestoreGeneratedFilePaths(compose map[string]any, files map[string]string) []string {
-	paths := make([]string, 0, len(files))
-	seen := map[string]bool{}
-	for _, path := range stringSliceFromAny(compose["generatedFileOrder"]) {
-		clean := filepath.Clean(strings.TrimSpace(path))
-		if clean == "." || clean == "" || seen[clean] {
-			continue
-		}
-		if _, exists := files[clean]; !exists {
-			continue
-		}
-		paths = append(paths, clean)
-		seen[clean] = true
-	}
-	remaining := make([]string, 0, len(files)-len(paths))
-	for path := range files {
-		clean := filepath.Clean(strings.TrimSpace(path))
-		if clean == "." || clean == "" || seen[clean] {
-			continue
-		}
-		remaining = append(remaining, clean)
-	}
-	sort.Strings(remaining)
-	paths = append(paths, remaining...)
-	return paths
-}
-
-func environmentRestoreGeneratedFileTargetOK(path string, workspace string) (bool, string) {
-	raw := strings.TrimSpace(path)
-	if raw == "" {
-		return false, "generated file path is empty"
-	}
-	if filepath.IsAbs(raw) {
-		return false, "generated file path must be relative to the restore workspace: " + raw
-	}
-	clean := filepath.Clean(raw)
-	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
-		return false, "generated file path must stay inside the restore workspace: " + raw
-	}
-	target := restoreWorkspacePath(workspace, clean)
-	rel, err := filepath.Rel(workspace, target)
-	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return false, "generated file path must stay inside the restore workspace: " + raw
-	}
-	return true, ""
-}
-
 func environmentRestoreComposeBaseArgs(compose map[string]any, workspace string, composeFiles []string) []string {
 	args := []string{}
 	for _, composeFile := range composeFiles {
@@ -417,10 +326,6 @@ func environmentRestoreComposeBaseArgs(compose map[string]any, workspace string,
 		args = append(args, "--profile", profile)
 	}
 	return args
-}
-
-func environmentRestoreGeneratedEnvFilePath(workspace string) string {
-	return filepath.Join(workspace, ".agent-testbench", "restore.env")
 }
 
 func environmentRestoreComposeCommandServices(compose map[string]any, workspace string, composeFiles []string, selected []string) ([]string, []string) {
@@ -527,74 +432,4 @@ func environmentRestoreComposeBuildServicesFromText(content string) (map[string]
 		}
 	}
 	return known, builds
-}
-
-func writeEnvironmentRestoreGeneratedEnvFile(workspace string, compose map[string]any) (string, error) {
-	values := stringMapFromAny(compose["env"])
-	if len(values) == 0 {
-		return "", nil
-	}
-	path := environmentRestoreGeneratedEnvFilePath(workspace)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", err
-	}
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	var b strings.Builder
-	for _, key := range keys {
-		value := strings.ReplaceAll(values[key], "$AGENT_TESTBENCH_WORKSPACE", workspace)
-		b.WriteString(key)
-		b.WriteString("=")
-		b.WriteString(value)
-		b.WriteString("\n")
-	}
-	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
-		return "", err
-	}
-	return path, nil
-}
-
-func stringMapFromAny(value any) map[string]string {
-	out := map[string]string{}
-	switch typed := value.(type) {
-	case map[string]string:
-		for key, value := range typed {
-			if strings.TrimSpace(key) != "" {
-				out[strings.TrimSpace(key)] = strings.TrimSpace(value)
-			}
-		}
-	case map[string]any:
-		for key, value := range typed {
-			if strings.TrimSpace(key) != "" {
-				out[strings.TrimSpace(key)] = strings.TrimSpace(valueString(value))
-			}
-		}
-	}
-	return out
-}
-
-func stringSliceFromAny(value any) []string {
-	values, ok := value.([]any)
-	if !ok {
-		if typed, ok := value.([]string); ok {
-			out := make([]string, 0, len(typed))
-			for _, item := range typed {
-				if strings.TrimSpace(item) != "" {
-					out = append(out, strings.TrimSpace(item))
-				}
-			}
-			return out
-		}
-		return nil
-	}
-	out := make([]string, 0, len(values))
-	for _, item := range values {
-		if value := strings.TrimSpace(valueString(item)); value != "" {
-			out = append(out, value)
-		}
-	}
-	return out
 }
