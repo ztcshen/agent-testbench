@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"agent-testbench/internal/domain/updaterelease"
 )
 
 func TestUpdateCheckReportsRemoteRevisionWithoutMutatingCheckout(t *testing.T) {
@@ -166,7 +168,7 @@ func TestUpdateReleaseCheckPeelsAnnotatedTag(t *testing.T) {
 func TestUpdateReleaseTagComparisonUsesVersionOrder(t *testing.T) {
 	tags := []string{"v0.9.9", "v0.10.0-rc1", "v0.10.0", "legacy", "v0.10.0-rc.2", "v0.10.0-rc.10"}
 	sort.SliceStable(tags, func(i int, j int) bool {
-		return compareUpdateReleaseTags(tags[i], tags[j]) > 0
+		return updaterelease.CompareTags(tags[i], tags[j]) > 0
 	})
 	if strings.Join(tags, ",") != "v0.10.0,v0.10.0-rc.10,v0.10.0-rc.2,v0.10.0-rc1,v0.9.9,legacy" {
 		t.Fatalf("unexpected release tag order: %v", tags)
