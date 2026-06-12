@@ -21,6 +21,11 @@ const (
 	KindAsset             = "component-asset"
 )
 
+const (
+	assetKindComposeConfig = "compose-config"
+	assetKindComposeSecret = "compose-secret"
+)
+
 type ProjectionReport struct {
 	OK      bool             `json:"ok"`
 	Files   []ProjectionFile `json:"files"`
@@ -417,10 +422,10 @@ func projectionFileFromAsset(asset store.ComponentConfigAsset) ProjectionFile {
 
 func assetProjectionRule(kind string) string {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "compose-config", "docker-config":
-		return "compose-config"
-	case "compose-secret", "docker-secret":
-		return "compose-secret"
+	case assetKindComposeConfig, "docker-config":
+		return assetKindComposeConfig
+	case assetKindComposeSecret, "docker-secret":
+		return assetKindComposeSecret
 	case "env-file", "compose-env-file":
 		return "compose-env-file"
 	case "mysql-sql", "mysql-initdb":

@@ -21,7 +21,7 @@ func TestProjectionReportExplainsStoreBackedFilesAndGaps(t *testing.T) {
 		Assets: []store.ComponentConfigAsset{{
 			OwnerComponentID: "app",
 			AssetID:          "app.secret",
-			AssetKind:        "compose-secret",
+			AssetKind:        assetKindComposeSecret,
 			TargetPath:       ".agent-testbench/restore/secrets/app.key",
 			ContentInline:    "secret",
 		}},
@@ -104,7 +104,7 @@ func TestProjectionReportDiscoversComposeNativeFileReferences(t *testing.T) {
 		Assets: []store.ComponentConfigAsset{{
 			OwnerComponentID: "db",
 			AssetID:          "db.password",
-			AssetKind:        "compose-secret",
+			AssetKind:        assetKindComposeSecret,
 			TargetPath:       "compose/secrets/db.txt",
 			ContentInline:    "secret\n",
 		}},
