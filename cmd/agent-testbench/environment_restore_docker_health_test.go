@@ -129,7 +129,9 @@ func TestEnvironmentRestoreStreamJSONSkipsWorkflowWhenDockerIsNotReady(t *testin
 		"--verification-workflow", "workflow.core-10",
 	)
 
-	out := runCLIFailsWithEnv(t, fixture.DockerEnv, "environment", "restore",
+	env := append([]string{}, fixture.DockerEnv...)
+	env = append(env, "AGENT_TESTBENCH_HEALTH_PROGRESS_INTERVAL_MS=1")
+	out := runCLIFailsWithEnv(t, env, "environment", "restore",
 		"--store", fixture.StoreDSN,
 		"--workspace", fixture.Workspace,
 		"--execute",
@@ -142,6 +144,12 @@ func TestEnvironmentRestoreStreamJSONSkipsWorkflowWhenDockerIsNotReady(t *testin
 	events := decodeAgentStreamEvents(t, agentStreamJSONEventLines(out))
 	if !agentStreamHasEvent(events, "step_completed", "docker.health", "failed", "") {
 		t.Fatalf("stream missing failed docker health completion: %#v", events)
+	}
+	if !agentStreamHasEvent(events, "tool_observation", "docker.health", "waiting", "command health-01") {
+		t.Fatalf("stream missing docker health waiting observation: %#v", events)
+	}
+	if agentStreamHasEvent(events, "tool_observation", "health.wait", "waiting", "") {
+		t.Fatalf("stream should report health waiting under docker.health: %#v", events)
 	}
 	if !agentStreamHasEvent(events, "step_completed", "workflow.acceptance", "skipped", "workflow.core-10") {
 		t.Fatalf("stream missing skipped workflow gate: %#v", events)

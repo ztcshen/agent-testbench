@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -310,25 +311,27 @@ type environmentRestoreHealthProgress struct {
 	ctx       context.Context
 	target    string
 	timeout   time.Duration
+	interval  time.Duration
 	lastPrint time.Time
 }
 
 func newEnvironmentRestoreHealthProgress(ctx context.Context, check environmentRestoreHealthCheckReport, timeout time.Duration) environmentRestoreHealthProgress {
 	return environmentRestoreHealthProgress{
-		ctx:     ctx,
-		target:  environmentRestoreHealthProgressTarget(check),
-		timeout: timeout,
+		ctx:      ctx,
+		target:   environmentRestoreHealthProgressTarget(check),
+		timeout:  timeout,
+		interval: environmentRestoreHealthProgressIntervalValue(),
 	}
 }
 
 func (p *environmentRestoreHealthProgress) start() {
 	environmentRestoreProgressf(p.ctx, "restore health checking: %s timeout=%s\n", p.target, p.timeout)
-	environmentRestoreEmitStep(p.ctx, "step_started", "health.wait", "running", p.target, "health check started", "")
+	environmentRestoreEmitStep(p.ctx, "step_started", "docker.health", "running", p.target, "health check started", "")
 	p.lastPrint = time.Now()
 }
 
 func (p *environmentRestoreHealthProgress) waiting(lastErr string, deadline time.Time) {
-	if time.Since(p.lastPrint) < 2*time.Second {
+	if time.Since(p.lastPrint) < p.interval {
 		return
 	}
 	remaining := time.Until(deadline).Round(time.Second)
@@ -338,7 +341,7 @@ func (p *environmentRestoreHealthProgress) waiting(lastErr string, deadline time
 	environmentRestoreProgressf(p.ctx, "restore health waiting: %s last=%s remaining=%s\n", p.target, lastErr, remaining)
 	environmentRestoreEmitEvent(p.ctx, agentStreamEvent{
 		Type:        "tool_observation",
-		Phase:       "health.wait",
+		Phase:       "docker.health",
 		Status:      agentCommandStatusWaiting,
 		Target:      p.target,
 		Message:     truncateReportText(lastErr, 200),
@@ -359,7 +362,16 @@ func (p *environmentRestoreHealthProgress) done(ok bool, detail string) {
 		status = "passed"
 		errText = ""
 	}
-	environmentRestoreEmitStep(p.ctx, "step_completed", "health.wait", status, p.target, detail, errText)
+	environmentRestoreEmitStep(p.ctx, "step_completed", "docker.health", status, p.target, detail, errText)
+}
+
+func environmentRestoreHealthProgressIntervalValue() time.Duration {
+	if raw := strings.TrimSpace(os.Getenv("AGENT_TESTBENCH_HEALTH_PROGRESS_INTERVAL_MS")); raw != "" {
+		if millis, err := strconv.Atoi(raw); err == nil && millis > 0 {
+			return time.Duration(millis) * time.Millisecond
+		}
+	}
+	return 2 * time.Second
 }
 
 func environmentRestoreHealthProgressTarget(check environmentRestoreHealthCheckReport) string {
