@@ -1,4 +1,4 @@
-package store_test
+package storecontract
 
 import (
 	"time"
