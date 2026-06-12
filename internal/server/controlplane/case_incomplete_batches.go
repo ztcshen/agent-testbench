@@ -1,13 +1,13 @@
 package controlplane
 
 import (
-	"context"
 	"net/http"
 	"strings"
 
 	"agent-testbench/internal/domain/apicasecommand"
 	"agent-testbench/internal/domain/profile"
 	"agent-testbench/internal/store"
+	"agent-testbench/internal/store/apicaserunstate"
 )
 
 func handleCaseIncompleteBatches(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store) {
@@ -20,7 +20,7 @@ func handleCaseIncompleteBatches(w http.ResponseWriter, r *http.Request, bundle 
 		})
 		return
 	}
-	passed, latest, err := apiCaseRunStatusByCase(r.Context(), runtime)
+	passed, latest, err := apicaserunstate.StatusByCase(r.Context(), runtime)
 	if err != nil {
 		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 		return
@@ -50,38 +50,4 @@ func handleCaseIncompleteBatches(w http.ResponseWriter, r *http.Request, bundle 
 		"items":    items,
 		"warnings": []string{},
 	})
-}
-
-func apiCaseRunStatusByCase(ctx context.Context, runtime store.Store) (map[string]bool, map[string]string, error) {
-	passed := map[string]bool{}
-	latest := map[string]string{}
-	err := visitLatestAPICaseRuns(ctx, runtime, func(item store.APICaseRun) {
-		if latest[item.CaseID] == "" {
-			latest[item.CaseID] = item.Status
-		}
-		if strings.EqualFold(item.Status, store.StatusPassed) {
-			passed[item.CaseID] = true
-		}
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	return passed, latest, nil
-}
-
-func visitLatestAPICaseRuns(ctx context.Context, runtime store.Store, visit func(store.APICaseRun)) error {
-	runs, err := runtime.ListRuns(ctx)
-	if err != nil {
-		return err
-	}
-	for i := len(runs) - 1; i >= 0; i-- {
-		caseRuns, err := runtime.ListAPICaseRuns(ctx, runs[i].ID)
-		if err != nil {
-			return err
-		}
-		for _, item := range caseRuns {
-			visit(item)
-		}
-	}
-	return nil
 }

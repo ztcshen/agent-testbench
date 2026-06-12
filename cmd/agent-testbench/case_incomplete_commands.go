@@ -12,6 +12,7 @@ import (
 	"agent-testbench/internal/domain/profile"
 	"agent-testbench/internal/domain/profilecatalog"
 	"agent-testbench/internal/store"
+	"agent-testbench/internal/store/apicaserunstate"
 )
 
 func runCaseIncompleteBatches(ctx context.Context, args []string) error {
@@ -79,7 +80,7 @@ type incompleteCaseItem struct {
 }
 
 func incompleteCaseReportForStore(ctx context.Context, bundle profile.Bundle, s store.Store) (incompleteCaseReport, error) {
-	passed, latest, err := apiCaseRunStatusByCase(ctx, s)
+	passed, latest, err := apicaserunstate.StatusByCase(ctx, s)
 	if err != nil {
 		return incompleteCaseReport{}, err
 	}
@@ -107,30 +108,6 @@ func incompleteCaseReportForStore(ctx context.Context, bundle profile.Bundle, s 
 		Items:    items,
 		Warnings: []string{},
 	}, nil
-}
-
-func apiCaseRunStatusByCase(ctx context.Context, s store.Store) (map[string]bool, map[string]string, error) {
-	runs, err := s.ListRuns(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	passed := map[string]bool{}
-	latest := map[string]string{}
-	for i := len(runs) - 1; i >= 0; i-- {
-		caseRuns, err := s.ListAPICaseRuns(ctx, runs[i].ID)
-		if err != nil {
-			return nil, nil, err
-		}
-		for _, item := range caseRuns {
-			if latest[item.CaseID] == "" {
-				latest[item.CaseID] = item.Status
-			}
-			if strings.EqualFold(item.Status, store.StatusPassed) {
-				passed[item.CaseID] = true
-			}
-		}
-	}
-	return passed, latest, nil
 }
 
 func printIncompleteCaseReport(report incompleteCaseReport) {
