@@ -12,7 +12,7 @@ import (
 
 const environmentRestoreActionProjectMySQLInitDB = "project-mysql-initdb"
 
-func environmentRestoreApplyMySQLSQLEdgeAsset(ctx context.Context, content string, contentErr error, workspace string, execute bool, composeBaseArgs []string, options environmentRestoreApplyAssetOptions, item environmentRestoreAppliedAsset) environmentRestoreAppliedAsset {
+func environmentRestoreApplyMySQLSQLEdgeAsset(content string, contentErr error, workspace string, execute bool, composeBaseArgs []string, options environmentRestoreApplyAssetOptions, item environmentRestoreAppliedAsset) environmentRestoreAppliedAsset {
 	item.Action = environmentRestoreActionProjectMySQLInitDB
 	item.Command = nil
 	if len(composeBaseArgs) == 0 || item.TargetComposeService == "" {

@@ -12,6 +12,8 @@ import (
 	"agent-testbench/internal/store"
 )
 
+const environmentStopActionComposeStop = "compose-stop"
+
 type environmentStopOptions struct {
 	environmentLifecycleOptions
 	Down          bool
@@ -119,7 +121,7 @@ func environmentStopDocker(ctx context.Context, compose map[string]any, workspac
 		return environmentStopDockerReport{OK: false, Action: "no-compose-plan", Error: "environment stop requires a recorded composeFile"}
 	}
 	command := append([]string{"docker", "compose"}, composeBaseArgs...)
-	action := "compose-stop"
+	action := environmentStopActionComposeStop
 	if options.Down {
 		action = "compose-down"
 		command = append(command, "down")
@@ -129,7 +131,7 @@ func environmentStopDocker(ctx context.Context, compose map[string]any, workspac
 	} else {
 		services := environmentLifecycleComposeServices(compose, workspace)
 		if len(services) == 0 {
-			return environmentStopDockerReport{OK: false, Action: "compose-stop", Error: "environment stop found no compose services; record compose services or provide a compose file with services"}
+			return environmentStopDockerReport{OK: false, Action: environmentStopActionComposeStop, Error: "environment stop found no compose services; record compose services or provide a compose file with services"}
 		}
 		command = append(command, "stop")
 		command = append(command, services...)

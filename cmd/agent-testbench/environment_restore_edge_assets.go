@@ -186,11 +186,11 @@ func environmentRestoreApplyEdgeAsset(ctx context.Context, dep store.ComponentDe
 	}
 	if environmentRestoreIsMySQLSQLAsset(asset, dep) {
 		if execute && options.UseExistingContainers {
-			return environmentRestoreApplyMySQLSQLEdgeAsset(ctx, "", nil, workspace, execute, composeBaseArgs, options, item)
+			return environmentRestoreApplyMySQLSQLEdgeAsset("", nil, workspace, execute, composeBaseArgs, options, item)
 		}
 		content, contentErr := environmentRestoreEdgeAssetContent(asset, workspace)
 		item.Bytes = len(content)
-		return environmentRestoreApplyMySQLSQLEdgeAsset(ctx, content, contentErr, workspace, execute, composeBaseArgs, options, item)
+		return environmentRestoreApplyMySQLSQLEdgeAsset(content, contentErr, workspace, execute, composeBaseArgs, options, item)
 	}
 	return environmentRestoreApplyGeneratedEdgeAsset(asset, generated, workspace, execute, item)
 }
@@ -265,7 +265,7 @@ func environmentRestoreGeneratedEdgeAssetAction(asset store.ComponentConfigAsset
 	switch strings.ToLower(strings.TrimSpace(asset.AssetKind)) {
 	case "compose-config", "docker-config":
 		return "project-compose-config"
-	case "compose-secret", "docker-secret":
+	case environmentRestoreAssetKindComposeSecret, environmentRestoreAssetKindDockerSecret:
 		return "project-compose-secret"
 	case "env-file", "compose-env-file":
 		return "project-env-file"

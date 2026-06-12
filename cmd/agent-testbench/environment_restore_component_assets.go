@@ -12,6 +12,11 @@ import (
 	"agent-testbench/internal/store"
 )
 
+const (
+	environmentRestoreAssetKindComposeSecret = "compose-secret"
+	environmentRestoreAssetKindDockerSecret  = "docker-secret"
+)
+
 func environmentRestoreOrderedComponentAssets(envID string, g store.EnvironmentComponentGraph) []store.ComponentConfigAsset {
 	out := append([]store.ComponentConfigAsset{}, g.Assets...)
 	if len(out) == 0 {
@@ -105,7 +110,7 @@ func environmentRestoreComposeWithComponentAssets(envID string, compose map[stri
 
 func environmentRestoreComponentAssetFileMode(asset store.ComponentConfigAsset) os.FileMode {
 	kind := strings.ToLower(strings.TrimSpace(asset.AssetKind))
-	if asset.Sensitive || kind == "compose-secret" || kind == "docker-secret" {
+	if asset.Sensitive || kind == environmentRestoreAssetKindComposeSecret || kind == environmentRestoreAssetKindDockerSecret {
 		return 0o600
 	}
 	if mode := environmentRestoreComponentAssetSummaryFileMode(asset); mode != 0 {
@@ -116,11 +121,12 @@ func environmentRestoreComponentAssetFileMode(asset store.ComponentConfigAsset) 
 
 func environmentRestoreComponentAssetSummaryFileMode(asset store.ComponentConfigAsset) os.FileMode {
 	summary := jsonObjectString(asset.SummaryJSON)
-	candidates := []any{
+	candidates := make([]any, 0, 9)
+	candidates = append(candidates,
 		summary["fileMode"],
 		summary["mode"],
 		summary["permissions"],
-	}
+	)
 	for _, key := range []string{"dockerNative", "projection"} {
 		nested := jsonObjectFromAny(summary[key])
 		candidates = append(candidates, nested["fileMode"], nested["mode"], nested["permissions"])
