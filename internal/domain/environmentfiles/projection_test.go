@@ -1,6 +1,7 @@
 package environmentfiles
 
 import (
+	"encoding/json"
 	"testing"
 
 	"agent-testbench/internal/store"
@@ -124,6 +125,78 @@ func TestProjectionReportDiscoversComposeNativeFileReferences(t *testing.T) {
 		!projectionContains(report, KindEnvFile, "compose/extra.env", "workspace-file", false) {
 		t.Fatalf("compose env_file gaps should be visible: %#v", report.Missing)
 	}
+}
+
+func TestProjectionReportDiscoversComposeNativeReferenceVariants(t *testing.T) {
+	composeContent := `include:
+  - ./base.yml # shared base
+  - path:
+      - ./fragments/cache.yml
+    env_file: ./include.env
+services:
+  app:
+    image: alpine:3.20
+    extends:
+      file: ./common.yml # service defaults
+      service: app-base
+    env_file:
+      - path: ./app.env # app env
+        required: false
+        format: raw
+      - ./extra.env # extra env
+configs:
+    app_config:
+        file: ./config/app.yml # app config
+secrets:
+    db_password:
+        file: ./secrets/db.txt # db secret
+`
+	env := store.Environment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
+		"composeFile": "compose/docker-compose.yml",
+		"generatedFiles": map[string]string{
+			"compose/docker-compose.yml":  composeContent,
+			"compose/base.yml":            "services: {}\n",
+			"compose/fragments/cache.yml": "services: {}\n",
+			"compose/common.yml":          "services: {}\n",
+			"compose/config/app.yml":      "mode: test\n",
+			"compose/secrets/db.txt":      "secret\n",
+		},
+	})}
+
+	report := FromEnvironment(env, store.EnvironmentComponentGraph{})
+	if report.OK || report.Counts.Referenced != 9 || report.Counts.Missing != 3 {
+		t.Fatalf("compose variant projection report = %#v", report)
+	}
+	for _, path := range []string{"compose/base.yml", "compose/fragments/cache.yml", "compose/common.yml"} {
+		if !projectionContains(report, KindComposeFile, path, "compose.generatedFiles", true) {
+			t.Fatalf("compose file reference %s should be Store-backed: %#v", path, report.Files)
+		}
+	}
+	if !projectionContains(report, KindComposeConfigFile, "compose/config/app.yml", "compose.generatedFiles", true) {
+		t.Fatalf("indented config file should be Store-backed: %#v", report.Files)
+	}
+	if !projectionContains(report, KindComposeSecretFile, "compose/secrets/db.txt", "compose.generatedFiles", true) {
+		t.Fatalf("indented secret file should be Store-backed: %#v", report.Files)
+	}
+	for _, path := range []string{"compose/include.env", "compose/app.env", "compose/extra.env"} {
+		if !projectionContains(report, KindEnvFile, path, "workspace-file", false) {
+			t.Fatalf("env file gap %s should be visible: %#v", path, report.Missing)
+		}
+	}
+	for _, file := range report.Files {
+		if file.Path == "compose/required: false" || file.Path == "compose/format: raw" {
+			t.Fatalf("env_file metadata should not be collected as a path: %#v", report.Files)
+		}
+	}
+}
+
+func projectionTestComposeJSON(t *testing.T, value map[string]any) string {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal compose JSON: %v", err)
+	}
+	return string(data)
 }
 
 func projectionContains(report ProjectionReport, kind string, path string, source string, ok bool) bool {

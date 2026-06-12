@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"agent-testbench/internal/store"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -173,131 +175,117 @@ type composeContentFileReference struct {
 }
 
 func composeContentFileReferences(content string, composeFile string) []composeContentFileReference {
-	scanner := composeReferenceScanner{composeDir: filepath.Dir(cleanPath(composeFile))}
-	for _, line := range strings.Split(content, "\n") {
-		scanner.processLine(line)
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
+		return nil
 	}
-	return scanner.refs
+	collector := composeReferenceCollector{composeDir: filepath.Dir(cleanPath(composeFile))}
+	collector.collect(doc)
+	return collector.refs
 }
 
-type composeReferenceScanner struct {
-	composeDir      string
-	topSection      string
-	currentResource string
-	blockKind       string
-	blockIndent     int
-	refs            []composeContentFileReference
+type composeReferenceCollector struct {
+	composeDir string
+	refs       []composeContentFileReference
 }
 
-func (s *composeReferenceScanner) processLine(line string) {
-	trimmed := strings.TrimSpace(line)
-	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-		return
-	}
-	indent := len(line) - len(strings.TrimLeft(line, " "))
-	if indent == 0 {
-		s.blockKind = ""
-		s.currentResource = ""
-		s.topSection = sectionKey(trimmed)
-		return
-	}
-	if s.blockKind != "" && indent <= s.blockIndent {
-		s.blockKind = ""
-	}
-	if s.blockKind != "" {
-		s.addBlockReference(trimmed)
-	}
-	s.addInlineEnvFileReference(trimmed, indent)
-	s.addComposeResourceReference(trimmed, indent)
-}
-
-func (s *composeReferenceScanner) addInlineEnvFileReference(trimmed string, indent int) {
-	key, value, ok := splitComposeKeyValue(trimmed)
-	if !ok || key != "env_file" {
-		return
-	}
-	if value == "" {
-		s.blockKind = KindEnvFile
-		s.blockIndent = indent
-		return
-	}
-	for _, path := range inlineComposePathValues(value) {
-		s.addReference(KindEnvFile, path)
-	}
-}
-
-func (s *composeReferenceScanner) addBlockReference(trimmed string) {
-	item := strings.TrimSpace(strings.TrimPrefix(trimmed, "-"))
-	if item == trimmed && !strings.HasPrefix(item, "path:") {
-		return
-	}
-	if strings.HasPrefix(item, "path:") {
-		_, value, ok := splitComposeKeyValue(item)
-		if ok {
-			s.addReference(s.blockKind, value)
+func (c *composeReferenceCollector) collect(doc map[string]any) {
+	c.collectInclude(doc["include"])
+	c.collectComposeResourceFiles(KindComposeConfigFile, doc["configs"])
+	c.collectComposeResourceFiles(KindComposeSecretFile, doc["secrets"])
+	for _, service := range composeMap(doc["services"]) {
+		serviceMap := composeMap(service)
+		c.addReferences(KindEnvFile, serviceMap["env_file"])
+		if extendsFile, ok := composeMap(serviceMap["extends"])["file"]; ok {
+			c.addReferences(KindComposeFile, extendsFile)
 		}
+	}
+}
+
+func (c *composeReferenceCollector) collectInclude(value any) {
+	for _, item := range composeList(value) {
+		itemMap := composeMap(item)
+		if len(itemMap) == 0 {
+			c.addReferences(KindComposeFile, item)
+			continue
+		}
+		c.addReferences(KindComposeFile, itemMap["path"])
+		c.addReferences(KindEnvFile, itemMap["env_file"])
+	}
+}
+
+func (c *composeReferenceCollector) collectComposeResourceFiles(kind string, value any) {
+	for _, resource := range composeMap(value) {
+		if file, ok := composeMap(resource)["file"]; ok {
+			c.addReferences(kind, file)
+		}
+	}
+}
+
+func (c *composeReferenceCollector) addReferences(kind string, value any) {
+	if path := composeString(value); path != "" {
+		c.addReference(kind, path)
 		return
 	}
-	for _, path := range inlineComposePathValues(item) {
-		s.addReference(s.blockKind, path)
+	for _, item := range composeList(value) {
+		itemMap := composeMap(item)
+		if len(itemMap) == 0 {
+			c.addReferences(kind, item)
+			continue
+		}
+		if path, ok := itemMap["path"]; ok {
+			c.addReferences(kind, path)
+		}
 	}
 }
 
-func (s *composeReferenceScanner) addComposeResourceReference(trimmed string, indent int) {
-	switch {
-	case (s.topSection == "configs" || s.topSection == "secrets") && indent == 2 && strings.HasSuffix(trimmed, ":"):
-		s.currentResource = sectionKey(trimmed)
-	case (s.topSection == "configs" || s.topSection == "secrets") && indent > 2:
-		key, value, ok := splitComposeKeyValue(trimmed)
-		if !ok || key != "file" || s.currentResource == "" {
-			return
-		}
-		kind := KindComposeConfigFile
-		if s.topSection == "secrets" {
-			kind = KindComposeSecretFile
-		}
-		s.addReference(kind, value)
-	}
-}
-
-func (s *composeReferenceScanner) addReference(kind string, path string) {
-	path = cleanComposeReferencedPath(path, s.composeDir)
+func (c *composeReferenceCollector) addReference(kind string, path string) {
+	path = cleanComposeReferencedPath(path, c.composeDir)
 	if path == "" {
 		return
 	}
-	s.refs = append(s.refs, composeContentFileReference{kind: kind, path: path})
+	c.refs = append(c.refs, composeContentFileReference{kind: kind, path: path})
 }
 
-func sectionKey(value string) string {
-	return strings.TrimSpace(strings.TrimSuffix(value, ":"))
-}
-
-func splitComposeKeyValue(value string) (string, string, bool) {
-	key, rawValue, ok := strings.Cut(value, ":")
-	if !ok {
-		return "", "", false
-	}
-	return strings.TrimSpace(key), strings.Trim(strings.TrimSpace(rawValue), `"'`), true
-}
-
-func inlineComposePathValues(value string) []string {
-	value = strings.TrimSpace(value)
-	if value == "" || strings.HasPrefix(value, "{") {
-		return nil
-	}
-	if strings.HasPrefix(value, "[") && strings.HasSuffix(value, "]") {
-		value = strings.TrimSuffix(strings.TrimPrefix(value, "["), "]")
-		parts := strings.Split(value, ",")
-		out := make([]string, 0, len(parts))
-		for _, part := range parts {
-			part = strings.Trim(strings.TrimSpace(part), `"'`)
-			if part != "" {
-				out = append(out, part)
+func composeMap(value any) map[string]any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return typed
+	case map[any]any:
+		out := make(map[string]any, len(typed))
+		for key, value := range typed {
+			if keyString, ok := key.(string); ok {
+				out[keyString] = value
 			}
 		}
 		return out
+	default:
+		return nil
 	}
-	return []string{strings.Trim(value, `"'`)}
+}
+
+func composeList(value any) []any {
+	switch typed := value.(type) {
+	case []any:
+		return typed
+	case []string:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, item)
+		}
+		return out
+	case nil:
+		return nil
+	default:
+		return []any{value}
+	}
+}
+
+func composeString(value any) string {
+	if text, ok := value.(string); ok {
+		return strings.TrimSpace(text)
+	}
+	return ""
 }
 
 func cleanComposeReferencedPath(path string, composeDir string) string {
