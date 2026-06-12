@@ -270,6 +270,52 @@ func TestProjectionReportRejectsEmptyRemoteAssetRef(t *testing.T) {
 	}
 }
 
+func TestProjectionReportScansComponentBackedComposeFileReferences(t *testing.T) {
+	env := store.Environment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
+		"composeFile": "compose/docker-compose.yml",
+	})}
+	graph := store.EnvironmentComponentGraph{
+		Assets: []store.ComponentConfigAsset{
+			{
+				OwnerComponentID: "compose",
+				AssetID:          "compose.main",
+				AssetKind:        KindComposeFile,
+				TargetPath:       "compose/docker-compose.yml",
+				ContentInline: strings.Join([]string{
+					"services:",
+					"  app:",
+					"    image: alpine:3.20",
+					"    env_file: ./app.env",
+					"configs:",
+					"  app_config:",
+					"    file: ./config/app.yml",
+				}, "\n") + "\n",
+			},
+			{
+				OwnerComponentID: "app",
+				AssetID:          "app.config",
+				AssetKind:        assetKindComposeConfig,
+				TargetPath:       "compose/config/app.yml",
+				ContentInline:    "mode: test\n",
+			},
+		},
+	}
+
+	report := FromEnvironment(env, graph)
+	if report.OK || report.Counts.Missing != 1 {
+		t.Fatalf("component-backed compose projection report = %#v", report)
+	}
+	if !projectionContains(report, KindComposeFile, "compose/docker-compose.yml", "component_config_assets", true) {
+		t.Fatalf("component-backed compose file should satisfy composeFiles: %#v", report.Files)
+	}
+	if !projectionContains(report, KindComposeConfigFile, "compose/config/app.yml", "component_config_assets", true) {
+		t.Fatalf("nested config file should be discovered from component-backed compose content: %#v", report.Files)
+	}
+	if !projectionContains(report, KindEnvFile, "compose/app.env", "workspace-file", false) {
+		t.Fatalf("nested env_file gap should be discovered from component-backed compose content: %#v", report.Missing)
+	}
+}
+
 func TestProjectionReportLimitsExtendsScanToReferencedService(t *testing.T) {
 	env := store.Environment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
 		"composeFile": "compose/docker-compose.yml",

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 func environmentRestoreContainerNames(compose map[string]any, workspace string) []string {
@@ -114,6 +116,20 @@ func environmentRestoreComposeFileContents(compose map[string]any, workspace str
 
 func parseComposeImageReferences(content string) map[string]string {
 	out := map[string]string{}
+	var doc struct {
+		Services map[string]struct {
+			Image string `yaml:"image"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal([]byte(content), &doc); err == nil {
+		for service, config := range doc.Services {
+			image := cleanComposeScalar(config.Image)
+			if service != "" && image != "" {
+				out[service] = image
+			}
+		}
+		return out
+	}
 	walkComposeServiceLines(content, func(service string, trimmed string) {
 		if strings.HasPrefix(trimmed, "image:") {
 			image := cleanComposeScalar(strings.TrimSpace(strings.TrimPrefix(trimmed, "image:")))

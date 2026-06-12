@@ -71,6 +71,7 @@ func FromCompose(compose map[string]any, summary map[string]any, graph store.Env
 		startupFiles:  startupFileSet(summary),
 		packageSource: strings.TrimSpace(valueString(jsonObjectFromAny(compose["package"])["url"])) != "",
 		assetByPath:   projectionFilesByPath(assetFiles),
+		assetContent:  projectionAssetContentByPath(graph.Assets),
 	}
 	builder.addReferencedFiles(KindComposeFile, composeFiles(compose))
 	builder.addReferencedFiles(KindEnvFile, stringSlice(compose["envFiles"]))
@@ -106,6 +107,7 @@ type projectionBuilder struct {
 	startupFiles  map[string]bool
 	packageSource bool
 	assetByPath   map[string]ProjectionFile
+	assetContent  map[string]string
 	files         []ProjectionFile
 	seen          map[string]bool
 }
@@ -136,6 +138,9 @@ func (b *projectionBuilder) addComposeContentReferences(paths []string) {
 		}
 		scanned[scanKey] = true
 		content := b.generated[cleanCompose]
+		if content == "" {
+			content = b.assetContent[cleanCompose]
+		}
 		if content == "" {
 			continue
 		}
@@ -601,6 +606,22 @@ func projectionFilesByPath(files []ProjectionFile) map[string]ProjectionFile {
 			continue
 		}
 		out[file.Path] = file
+	}
+	return out
+}
+
+func projectionAssetContentByPath(assets []store.ComponentConfigAsset) map[string]string {
+	out := map[string]string{}
+	for _, asset := range assets {
+		path := cleanPath(asset.TargetPath)
+		content := strings.TrimSpace(asset.ContentInline)
+		if path == "" || content == "" {
+			continue
+		}
+		if _, exists := out[path]; exists {
+			continue
+		}
+		out[path] = asset.ContentInline
 	}
 	return out
 }
