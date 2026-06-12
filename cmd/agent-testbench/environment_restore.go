@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"agent-testbench/internal/domain/environmentsource"
 	"agent-testbench/internal/server/controlplane"
 	"agent-testbench/internal/store"
 )
@@ -302,7 +303,7 @@ func environmentRestoreBuildPlanFromEnvironment(env store.Environment, workflowI
 		graph = componentGraphs[0]
 	}
 	compose := environmentRestoreComposeWithComponentAssets(env.ID, jsonObjectString(env.ComposeJSON), graph)
-	specs := environmentRestoreRepoSpecs(env, workspace)
+	specs := environmentsource.RepoSpecs(env.ReposJSON, env.ServicesJSON, workspace)
 	compose = environmentRestoreComposeWithRepoCheckouts(compose, specs)
 	return environmentRestoreBuildPlan{
 		WorkflowID:           workflowID,
@@ -310,7 +311,7 @@ func environmentRestoreBuildPlanFromEnvironment(env store.Environment, workflowI
 		Specs:                specs,
 		Compose:              compose,
 		ComponentGraph:       graph,
-		PackageSpec:          environmentRestorePackageSpecFromCompose(compose, workspace),
+		PackageSpec:          environmentsource.PackageSpecFromCompose(compose, workspace),
 		HealthChecks:         environmentRestoreEffectiveHealthChecks(jsonArrayString(env.HealthChecksJSON), compose, graph, workspace),
 		ComponentGraphReport: environmentRestoreComponentGraphReport(env.ID, graph),
 		ComponentStartupPlan: controlplane.EnvironmentComponentStartupPlanReport(env.ID, graph),
@@ -332,7 +333,7 @@ func newEnvironmentRestoreReport(env store.Environment, plan environmentRestoreB
 		ComponentGraph:       plan.ComponentGraphReport,
 		ComponentStartupPlan: plan.ComponentStartupPlan,
 		Preflight:            environmentRestorePreflightReport(plan.PackageSpec, plan.Specs, plan.Compose, plan.Workspace, execute, cleanupOptions, prepareReposOnly),
-		SourcePolicy:         environmentRestoreSourcePolicyReport(plan.PackageSpec, plan.Specs, plan.RemoteOnly),
+		SourcePolicy:         environmentsource.SourcePolicyReport(plan.Specs, plan.RemoteOnly),
 		Workflow: environmentRestoreWorkflowRun{
 			OK:         !workflowOptions.Run,
 			Action:     "not-requested",

@@ -2,6 +2,7 @@ package environmentsource
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,7 +47,41 @@ func stringValue(value any) string {
 		return item
 	case []byte:
 		return string(item)
-	default:
+	case nil:
 		return ""
+	default:
+		return fmt.Sprint(value)
 	}
+}
+
+func jsonObjectString(raw string) map[string]any {
+	out := map[string]any{}
+	if err := decodeJSON(raw, "{}", &out); err != nil || out == nil {
+		return map[string]any{}
+	}
+	return out
+}
+
+func jsonArrayString(raw string) []any {
+	out := []any{}
+	if err := decodeJSON(raw, "[]", &out); err != nil || out == nil {
+		return []any{}
+	}
+	return out
+}
+
+func decodeJSON(raw string, fallback string, target any) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		raw = fallback
+	}
+	return json.Unmarshal([]byte(raw), target)
+}
+
+func mapFromAny(value any) map[string]any {
+	typed, ok := value.(map[string]any)
+	if !ok || typed == nil {
+		return map[string]any{}
+	}
+	return typed
 }

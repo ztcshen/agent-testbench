@@ -13,12 +13,6 @@ import (
 	"agent-testbench/internal/store"
 )
 
-type environmentRestoreSourcePolicy struct {
-	RemoteOnly bool     `json:"remoteOnly"`
-	OK         bool     `json:"ok"`
-	Violations []string `json:"violations,omitempty"`
-}
-
 type environmentRestorePackageReport struct {
 	Configured bool     `json:"configured"`
 	URL        string   `json:"url,omitempty"`
@@ -31,13 +25,6 @@ type environmentRestorePackageReport struct {
 	OK         bool     `json:"ok"`
 	Output     string   `json:"output,omitempty"`
 	Error      string   `json:"error,omitempty"`
-}
-
-type environmentRestorePackageSpec struct {
-	URL      string
-	Branch   string
-	Ref      string
-	Checkout string
 }
 
 type environmentRestoreRepoReport struct {
@@ -54,91 +41,9 @@ type environmentRestoreRepoReport struct {
 	Error     string   `json:"error,omitempty"`
 }
 
-type environmentRestoreRepoSpec struct {
-	ServiceID string
-	URL       string
-	Branch    string
-	Ref       string
-	Checkout  string
-}
-
-func environmentRestoreRepoSpecs(env store.Environment, workspace string) []environmentRestoreRepoSpec {
-	repoMap := jsonObjectString(env.ReposJSON)
-	services := jsonArrayString(env.ServicesJSON)
-	specByID := map[string]environmentRestoreRepoSpec{}
-	for id, raw := range repoMap {
-		spec := environmentRestoreRepoSpec{ServiceID: strings.TrimSpace(id)}
-		if item, ok := raw.(map[string]any); ok {
-			spec.URL = strings.TrimSpace(valueString(item["url"]))
-			spec.Branch = strings.TrimSpace(valueString(item["branch"]))
-			spec.Ref = strings.TrimSpace(valueString(item["ref"]))
-			spec.Checkout = strings.TrimSpace(valueString(item["checkout"]))
-		}
-		if spec.ServiceID != "" {
-			specByID[spec.ServiceID] = spec
-		}
-	}
-	for _, raw := range services {
-		item, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		id := strings.TrimSpace(valueString(item["id"]))
-		if id == "" {
-			continue
-		}
-		spec := specByID[id]
-		spec.ServiceID = id
-		if value := strings.TrimSpace(valueString(item["repo"])); value != "" {
-			spec.URL = value
-		}
-		if value := strings.TrimSpace(valueString(item["branch"])); value != "" {
-			spec.Branch = value
-		}
-		if value := strings.TrimSpace(valueString(item["ref"])); value != "" {
-			spec.Ref = value
-		}
-		if value := strings.TrimSpace(valueString(item["checkout"])); value != "" {
-			spec.Checkout = value
-		}
-		specByID[id] = spec
-	}
-	ids := make([]string, 0, len(specByID))
-	for id := range specByID {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	out := make([]environmentRestoreRepoSpec, 0, len(ids))
-	for _, id := range ids {
-		spec := specByID[id]
-		if spec.Checkout == "" {
-			spec.Checkout = filepath.Join(workspace, safeCheckoutDirName(id))
-		} else if !filepath.IsAbs(spec.Checkout) {
-			spec.Checkout = filepath.Join(workspace, spec.Checkout)
-		}
-		out = append(out, spec)
-	}
-	return out
-}
-
-func environmentRestorePackageSpecFromCompose(compose map[string]any, workspace string) environmentRestorePackageSpec {
-	pkg := mapFromReportAny(compose["package"])
-	spec := environmentRestorePackageSpec{
-		URL:    strings.TrimSpace(valueString(pkg["url"])),
-		Branch: strings.TrimSpace(valueString(pkg["branch"])),
-		Ref:    strings.TrimSpace(valueString(pkg["ref"])),
-	}
-	checkout := strings.TrimSpace(valueString(pkg["checkout"]))
-	if checkout == "" {
-		checkout = "."
-	}
-	if filepath.IsAbs(checkout) {
-		spec.Checkout = checkout
-	} else {
-		spec.Checkout = filepath.Join(workspace, checkout)
-	}
-	return spec
-}
+type environmentRestoreSourcePolicy = environmentsource.SourcePolicy
+type environmentRestorePackageSpec = environmentsource.PackageSpec
+type environmentRestoreRepoSpec = environmentsource.RepoSpec
 
 func environmentRestorePackage(ctx context.Context, spec environmentRestorePackageSpec, execute bool, pull bool, storeGeneratedRestore bool) environmentRestorePackageReport {
 	report := environmentRestorePackageReport{
@@ -184,28 +89,6 @@ func environmentRestoreRequiresRemoteSources(storeURL string) bool {
 	default:
 		return false
 	}
-}
-
-func environmentRestoreSourcePolicyReport(_ environmentRestorePackageSpec, specs []environmentRestoreRepoSpec, remoteOnly bool) environmentRestoreSourcePolicy {
-	report := environmentRestoreSourcePolicy{
-		RemoteOnly: remoteOnly,
-		OK:         true,
-	}
-	if !remoteOnly {
-		return report
-	}
-	addViolation := func(label string, rawURL string) {
-		rawURL = strings.TrimSpace(rawURL)
-		if rawURL == "" || environmentRestoreIsRemoteGitURL(rawURL) {
-			return
-		}
-		report.OK = false
-		report.Violations = append(report.Violations, label+" must use a remote Git URL, got local path/source: "+rawURL)
-	}
-	for _, spec := range specs {
-		addViolation("component "+spec.ServiceID, spec.URL)
-	}
-	return report
 }
 
 func environmentRestoreComponentGraphReport(envID string, graph store.EnvironmentComponentGraph) environmentRestoreComponentGraph {
@@ -586,13 +469,4 @@ func restoreGitCloneArgs(spec environmentRestoreRepoSpec) []string {
 	}
 	args = append(args, strings.TrimSpace(spec.URL), strings.TrimSpace(spec.Checkout))
 	return args
-}
-
-func safeCheckoutDirName(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "service"
-	}
-	replacer := strings.NewReplacer("/", "-", "\\", "-", ":", "-", " ", "-")
-	return replacer.Replace(value)
 }
