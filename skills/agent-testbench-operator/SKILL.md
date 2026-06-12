@@ -140,8 +140,16 @@ running:
 ```bash
 ./skills/agent-testbench-operator/scripts/atb.sh environment restore ENV_ID --store STORE_NAME --workspace WORKSPACE --execute --output-format stream-json
 ./skills/agent-testbench-operator/scripts/atb.sh environment restore ENV_ID --store STORE_NAME --workspace WORKSPACE --execute --run-workflow --server-url SERVER_URL --output-format stream-json
+./skills/agent-testbench-operator/scripts/atb.sh environment status ENV_ID --store STORE_NAME --workspace WORKSPACE --json
+./skills/agent-testbench-operator/scripts/atb.sh environment stop ENV_ID --store STORE_NAME --workspace WORKSPACE --json
 ./skills/agent-testbench-operator/scripts/atb.sh environment migration apply ENV_ID --store STORE_NAME --edge OWNER:PROVIDER --database DB_NAME --workspace WORKSPACE --execute --output-format stream-json
 ```
+
+`environment status` is a read-only Compose inspection path: it can materialize
+Store-backed compose/env files, then uses `docker compose ps` without
+pull/build/up/down. `environment stop` defaults to `docker compose stop
+SERVICE...`; both commands require recorded or discoverable Compose services
+for their default service-scoped behavior.
 
 Plan or apply Store-first SQL edge migrations:
 
@@ -152,9 +160,14 @@ Plan or apply Store-first SQL edge migrations:
 
 When adopting already-running containers with `environment restore
 --use-existing-containers`, plain MySQL SQL bootstrap assets are intentionally
-not reapplied. Use `environment migration add/plan/apply` or
-`environment migration baseline` for incremental SQL work against an existing
-database; use a clean restore when bootstrap SQL must be replayed from scratch.
+not reapplied. During clean Docker restore, bootstrap SQL is projected from the
+Store into MySQL initdb files before Compose starts. Use `environment migration
+add/plan/apply` or `environment migration baseline` for incremental SQL work
+against an existing database; use a clean restore when bootstrap SQL must be
+replayed from scratch.
+For Docker-native config/secret/env projections, Store asset `summary_json` may
+carry projection metadata such as `{"dockerNative":{"fileMode":"0600"}}`; do not
+patch generated workspace files by hand as the durable configuration.
 
 ## Report Back
 

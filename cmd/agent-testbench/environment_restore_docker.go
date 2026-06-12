@@ -26,6 +26,9 @@ func environmentRestoreDocker(ctx context.Context, graph store.EnvironmentCompon
 	if !environmentRestoreRunCleanup(ctx, &report, workspace) {
 		return report
 	}
+	if !environmentRestoreProjectDockerNativeAssets(&report, graph, compose, workspace, execute) {
+		return report
+	}
 	environmentRestoreMarkDockerExecuting(&report)
 	if !environmentRestoreRunCommands(ctx, &report, workspace) {
 		return report

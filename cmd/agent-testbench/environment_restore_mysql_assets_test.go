@@ -58,15 +58,19 @@ func TestEnvironmentRestoreAppliesAssetsBoundToDependencyEdges(t *testing.T) {
 	for _, asset := range report.Docker.AppliedAssets {
 		actions[asset.AssetID] = asset.Action
 	}
-	if actions["app.mysql.schema"] != "apply-mysql-sql" || actions["app.apollo.config"] != "verify-generated-file" {
+	if actions["app.mysql.schema"] != "project-mysql-initdb" || actions["app.apollo.config"] != "verify-generated-file" {
 		t.Fatalf("edge asset actions = %#v assets=%#v", actions, report.Docker.AppliedAssets)
+	}
+	projectedSQL, err := os.ReadFile(filepath.Join(workspace, "compose", "mysql", "init", "app.sql"))
+	if err != nil || string(projectedSQL) != "create database if not exists app;\n" {
+		t.Fatalf("projected mysql initdb SQL = %q err=%v", projectedSQL, err)
 	}
 	dockerCalls, err := os.ReadFile(dockerCallsPath)
 	if err != nil {
 		t.Fatalf("read fake docker calls: %v", err)
 	}
 	if !strings.Contains(string(dockerCalls), "compose -f "+filepath.Join(workspace, "compose.yml")+" up -d mysql apollo app") ||
-		!strings.Contains(string(dockerCalls), "compose -f "+filepath.Join(workspace, "compose.yml")+" exec -T mysql sh -lc") ||
+		strings.Contains(string(dockerCalls), "compose -f "+filepath.Join(workspace, "compose.yml")+" exec -T mysql sh -lc") ||
 		strings.Contains(string(dockerCalls), "-proot") {
 		t.Fatalf("edge asset docker calls:\n%s", dockerCalls)
 	}
@@ -108,11 +112,8 @@ func TestEnvironmentRestoreEdgeAssetsAvoidNonSQLMySQLAndDuplicateApply(t *testin
 	if actions["mysql.config"] != "project-generated-file" || commands["mysql.config"] != "" {
 		t.Fatalf("non-SQL MySQL asset should not run through mysql client: actions=%#v commands=%#v", actions, commands)
 	}
-	if actions["shared.schema"] != "plan-apply-mysql-sql" || strings.Contains(commands["shared.schema"], "-proot") || !strings.Contains(commands["shared.schema"], "MYSQL_ROOT_PASSWORD") {
-		t.Fatalf("SQL MySQL asset command should use container env credentials: actions=%#v commands=%#v", actions, commands)
-	}
-	if strings.Contains(commands["shared.schema"], "MYSQL_DATABASE") || !strings.Contains(commands["shared.schema"], "AGENT_TESTBENCH_MYSQL_APPLY_DATABASE") {
-		t.Fatalf("SQL MySQL asset command should not force MYSQL_DATABASE by default: %#v", commands)
+	if actions["shared.schema"] != "project-mysql-initdb" || commands["shared.schema"] != "" {
+		t.Fatalf("SQL MySQL asset should project to native initdb without an exec command: actions=%#v commands=%#v", actions, commands)
 	}
 }
 
@@ -146,7 +147,7 @@ func TestEnvironmentRestoreEdgeAssetsRequireMySQLProviderSignal(t *testing.T) {
 	if actionsByTarget["postgres.schema@postgres"] == "plan-apply-mysql-sql" {
 		t.Fatalf("postgres SQL asset should not use MySQL apply: %#v", actionsByTarget)
 	}
-	if actionsByTarget["shared.schema@mysql.primary"] != "plan-apply-mysql-sql" {
+	if actionsByTarget["shared.schema@mysql.primary"] != "project-mysql-initdb" {
 		t.Fatalf("shared schema should use MySQL apply for MySQL target: %#v", actionsByTarget)
 	}
 	if actionsByTarget["shared.schema@postgres"] == "plan-apply-mysql-sql" {
@@ -227,6 +228,71 @@ exit 0
 	}
 }
 
+func TestEnvironmentRestoreRejectsDuplicateMySQLInitDBTargets(t *testing.T) {
+	graph := store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "mysql", Kind: "middleware", Role: "database", ComposeService: "mysql"},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app"},
+		},
+		Dependencies: []store.ComponentDependency{
+			{ConsumerComponentID: "app", ProviderComponentID: "mysql", Capability: "sql", ProfileJSON: `{"assetIds":["schema.one","schema.two"]}`},
+		},
+		Assets: []store.ComponentConfigAsset{
+			{OwnerComponentID: "app", AssetID: "schema.one", AssetKind: "mysql-ddl", TargetComponentID: "mysql", TargetPath: "compose/mysql/init/app.sql", ContentInline: "create database app_one;\n"},
+			{OwnerComponentID: "app", AssetID: "schema.two", AssetKind: "mysql-ddl", TargetComponentID: "mysql", TargetPath: "compose/mysql/init/app.sql", ContentInline: "create database app_two;\n"},
+		},
+	}
+
+	failures := environmentRestoreProjectMySQLInitDBAssets(graph, nil, t.TempDir())
+	if len(failures) != 1 || failures[0].OK || !strings.Contains(failures[0].Error, "shared by multiple Store assets") {
+		t.Fatalf("duplicate initdb target failures = %#v", failures)
+	}
+}
+
+func TestEnvironmentRestoreRejectsMySQLInitDBGeneratedFileConflict(t *testing.T) {
+	graph := store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "mysql", Kind: "middleware", Role: "database", ComposeService: "mysql"},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app"},
+		},
+		Dependencies: []store.ComponentDependency{
+			{ConsumerComponentID: "app", ProviderComponentID: "mysql", Capability: "sql", ProfileJSON: `{"assetIds":["schema.one"]}`},
+		},
+		Assets: []store.ComponentConfigAsset{
+			{OwnerComponentID: "app", AssetID: "schema.one", AssetKind: "mysql-ddl", TargetComponentID: "mysql", TargetPath: "compose/mysql/init/app.sql", ContentInline: "create database app_one;\n"},
+		},
+	}
+
+	failures := environmentRestoreProjectMySQLInitDBAssets(graph, map[string]string{
+		"compose/mysql/init/app.sql": "create database from_generated_file;\n",
+	}, t.TempDir())
+	if len(failures) != 1 || failures[0].OK || !strings.Contains(failures[0].Error, "conflicts with generated Store file") {
+		t.Fatalf("generated initdb conflict failures = %#v", failures)
+	}
+}
+
+func TestEnvironmentRestoreAllowsEquivalentGeneratedMySQLInitDBTarget(t *testing.T) {
+	graph := store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "mysql", Kind: "middleware", Role: "database", ComposeService: "mysql"},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app"},
+		},
+		Dependencies: []store.ComponentDependency{
+			{ConsumerComponentID: "app", ProviderComponentID: "mysql", Capability: "sql", ProfileJSON: `{"assetIds":["schema.one"]}`},
+		},
+		Assets: []store.ComponentConfigAsset{
+			{OwnerComponentID: "app", AssetID: "schema.one", AssetKind: "mysql-ddl", TargetComponentID: "mysql", TargetPath: "compose/mysql/init/app.sql", ContentInline: "create database app_one;\n"},
+		},
+	}
+
+	failures := environmentRestoreProjectMySQLInitDBAssets(graph, map[string]string{
+		"compose/mysql/init/app.sql": "create database app_one;",
+	}, t.TempDir())
+	if len(failures) != 0 {
+		t.Fatalf("equivalent generated initdb target should not fail: %#v", failures)
+	}
+}
+
 func TestEnvironmentRestoreEdgeAssetContentRejectsParentPath(t *testing.T) {
 	item := environmentRestoreApplyEdgeAsset(context.Background(),
 		store.ComponentDependency{ConsumerComponentID: "app", ProviderComponentID: "mysql", Capability: "sql", ProfileJSON: `{"assetIds":["bad.schema"]}`},
@@ -238,7 +304,7 @@ func TestEnvironmentRestoreEdgeAssetContentRejectsParentPath(t *testing.T) {
 		[]string{"-f", "compose.yml"},
 		environmentRestoreApplyAssetOptions{},
 	)
-	if item.OK || !strings.Contains(item.Error, "target path is required") {
+	if item.OK || !strings.Contains(item.Error, "must stay inside the restore workspace") {
 		t.Fatalf("parent path edge asset should be rejected: %#v", item)
 	}
 }

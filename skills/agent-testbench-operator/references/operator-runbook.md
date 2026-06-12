@@ -183,6 +183,23 @@ Inspect registered sandbox services without executing startup commands:
 ./skills/agent-testbench-operator/scripts/atb.sh sandbox start --store STORE_NAME --workflow WORKFLOW_ID --dry-run --json
 ```
 
+Inspect or stop an Environment Catalog target without rerunning heavy restore:
+
+```bash
+./skills/agent-testbench-operator/scripts/atb.sh environment status ENV_ID --store STORE_NAME --workspace WORKSPACE --json
+./skills/agent-testbench-operator/scripts/atb.sh environment stop ENV_ID --store STORE_NAME --workspace WORKSPACE --json
+```
+
+`environment status` materializes Store-backed compose/env files when needed and
+uses `docker compose ps` only, with per-service state and an aggregate health
+summary. It must not be treated as a restore or workflow verification run.
+If no recorded or discoverable Compose services are available, status fails
+instead of reporting an empty success. `environment stop` defaults to `docker
+compose stop SERVICE...` and preserves containers, volumes, and images; the
+default path also requires recorded or discoverable services so it cannot widen
+into an accidental whole-project stop. Use `--down --remove-orphans` only after
+explicitly deciding to remove Compose-managed containers.
+
 After any `sandbox start --json` pass, inspect the report's `runtime` block.
 If `runtime.activeMatchesRuntime=false` or `runtime.fresh=false`, treat the
 sandbox result as incomplete validation until `.runtime/bin/agent-testbench` is
@@ -222,9 +239,14 @@ Review before writes, then execute against a restored workspace:
 Use `environment migration baseline` instead of `apply` when the target
 database already contains the schema and only needs history rows recorded.
 When `environment restore --use-existing-containers` adopts an already-running
-database, plain MySQL SQL bootstrap assets are skipped rather than reapplied;
-convert repeatable changes to migration assets, baseline existing schema, or
-rerun a clean restore when bootstrap SQL must be replayed.
+database, plain MySQL SQL bootstrap assets are skipped rather than reapplied.
+Clean Docker restore projects bootstrap SQL from the Store into MySQL initdb
+files before Compose starts. Convert repeatable changes to migration assets,
+baseline existing schema, or rerun a clean restore when bootstrap SQL must be
+replayed.
+For Docker-native config/secret/env projections, Store asset `summary_json` may
+carry projection metadata such as `{"dockerNative":{"fileMode":"0600"}}`; do not
+patch generated workspace files by hand as the durable configuration.
 
 ## Maintaining This Skill
 

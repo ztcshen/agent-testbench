@@ -57,47 +57,26 @@ func environmentRestoreApplyEdgeAssets(ctx context.Context, graph store.Environm
 }
 
 func environmentRestoreApplyEdgeAssetsWithOptions(ctx context.Context, graph store.EnvironmentComponentGraph, compose map[string]any, workspace string, execute bool, composeBaseArgs []string, options environmentRestoreApplyAssetOptions) []environmentRestoreAppliedAsset {
-	if len(graph.Dependencies) == 0 || len(graph.Assets) == 0 {
+	if len(graph.Dependencies) == 0 {
 		return nil
 	}
-	assetsByID := map[string]store.ComponentConfigAsset{}
-	for _, asset := range graph.Assets {
-		if id := strings.TrimSpace(asset.AssetID); id != "" {
-			assetsByID[id] = asset
-		}
-	}
-	componentByID := map[string]store.EnvironmentComponent{}
-	for _, component := range graph.Components {
-		if id := strings.TrimSpace(component.ComponentID); id != "" {
-			componentByID[id] = component
-		}
-	}
+	componentByID := environmentRestoreComponentMap(graph.Components)
 	generated := stringMapFromAny(compose["generatedFiles"])
 	out := []environmentRestoreAppliedAsset{}
-	appliedAssetTargets := map[string]bool{}
-	for _, dep := range graph.Dependencies {
-		for _, assetID := range environmentRestoreDependencyAssetIDs(dep) {
-			asset, ok := assetsByID[assetID]
-			if !ok {
-				out = append(out, environmentRestoreAppliedAsset{
-					AssetID:            assetID,
-					DependencyConsumer: dep.ConsumerComponentID,
-					DependencyProvider: dep.ProviderComponentID,
-					Action:             "missing-edge-asset",
-					OK:                 false,
-					Error:              "component dependency references missing config asset: " + assetID,
-				})
-				continue
-			}
-			targetComponentID := firstNonEmpty(strings.TrimSpace(asset.TargetComponentID), strings.TrimSpace(dep.ProviderComponentID))
-			dedupeKey := assetID + "\x00" + targetComponentID
-			if appliedAssetTargets[dedupeKey] {
-				continue
-			}
-			appliedAssetTargets[dedupeKey] = true
-			item := environmentRestoreApplyEdgeAsset(ctx, dep, asset, componentByID, generated, workspace, execute, composeBaseArgs, options)
-			out = append(out, item)
+	for _, ref := range environmentRestoreDependencyAssetRefs(graph) {
+		if !ref.Found {
+			out = append(out, environmentRestoreAppliedAsset{
+				AssetID:            ref.AssetID,
+				DependencyConsumer: ref.Dependency.ConsumerComponentID,
+				DependencyProvider: ref.Dependency.ProviderComponentID,
+				Action:             "missing-edge-asset",
+				OK:                 false,
+				Error:              "component dependency references missing config asset: " + ref.AssetID,
+			})
+			continue
 		}
+		item := environmentRestoreApplyEdgeAsset(ctx, ref.Dependency, ref.Asset, componentByID, generated, workspace, execute, composeBaseArgs, options)
+		out = append(out, item)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].DependencyProvider != out[j].DependencyProvider {
@@ -111,6 +90,67 @@ func environmentRestoreApplyEdgeAssetsWithOptions(ctx context.Context, graph sto
 		}
 		return out[i].AssetID < out[j].AssetID
 	})
+	return out
+}
+
+type environmentRestoreDependencyAssetRef struct {
+	Dependency        store.ComponentDependency
+	AssetID           string
+	Asset             store.ComponentConfigAsset
+	Found             bool
+	TargetComponentID string
+}
+
+func environmentRestoreDependencyAssetRefs(graph store.EnvironmentComponentGraph) []environmentRestoreDependencyAssetRef {
+	assetsByID := environmentRestoreAssetMap(graph.Assets)
+	out := []environmentRestoreDependencyAssetRef{}
+	appliedAssetTargets := map[string]bool{}
+	for _, dep := range graph.Dependencies {
+		for _, assetID := range environmentRestoreDependencyAssetIDs(dep) {
+			asset, ok := assetsByID[assetID]
+			if !ok {
+				out = append(out, environmentRestoreDependencyAssetRef{
+					Dependency: dep,
+					AssetID:    assetID,
+					Found:      false,
+				})
+				continue
+			}
+			targetComponentID := firstNonEmpty(strings.TrimSpace(asset.TargetComponentID), strings.TrimSpace(dep.ProviderComponentID))
+			dedupeKey := assetID + "\x00" + targetComponentID
+			if appliedAssetTargets[dedupeKey] {
+				continue
+			}
+			appliedAssetTargets[dedupeKey] = true
+			out = append(out, environmentRestoreDependencyAssetRef{
+				Dependency:        dep,
+				AssetID:           assetID,
+				Asset:             asset,
+				Found:             true,
+				TargetComponentID: targetComponentID,
+			})
+		}
+	}
+	return out
+}
+
+func environmentRestoreAssetMap(assets []store.ComponentConfigAsset) map[string]store.ComponentConfigAsset {
+	out := map[string]store.ComponentConfigAsset{}
+	for _, asset := range assets {
+		if id := strings.TrimSpace(asset.AssetID); id != "" {
+			out[id] = asset
+		}
+	}
+	return out
+}
+
+func environmentRestoreComponentMap(components []store.EnvironmentComponent) map[string]store.EnvironmentComponent {
+	out := map[string]store.EnvironmentComponent{}
+	for _, component := range components {
+		if id := strings.TrimSpace(component.ComponentID); id != "" {
+			out[id] = component
+		}
+	}
 	return out
 }
 
@@ -204,9 +244,11 @@ func environmentRestoreApplyGeneratedEdgeAsset(asset store.ComponentConfigAsset,
 		return item
 	}
 	if _, ok := generated[targetPath]; ok {
-		item.Action = "project-generated-file"
+		item.Action = environmentRestoreGeneratedEdgeAssetAction(asset)
 		if execute {
-			item.Action = "verify-generated-file"
+			if item.Action == "project-generated-file" {
+				item.Action = "verify-generated-file"
+			}
 			if _, err := os.Stat(restoreWorkspacePath(workspace, targetPath)); err != nil {
 				item.OK = false
 				item.Error = err.Error()
@@ -217,6 +259,19 @@ func environmentRestoreApplyGeneratedEdgeAsset(asset store.ComponentConfigAsset,
 	item.OK = false
 	item.Error = "edge asset must be generated from Store before target startup: " + targetPath
 	return item
+}
+
+func environmentRestoreGeneratedEdgeAssetAction(asset store.ComponentConfigAsset) string {
+	switch strings.ToLower(strings.TrimSpace(asset.AssetKind)) {
+	case "compose-config", "docker-config":
+		return "project-compose-config"
+	case "compose-secret", "docker-secret":
+		return "project-compose-secret"
+	case "env-file", "compose-env-file":
+		return "project-env-file"
+	default:
+		return "project-generated-file"
+	}
 }
 
 func environmentRestoreEdgeAssetContent(asset store.ComponentConfigAsset, workspace string) (string, error) {

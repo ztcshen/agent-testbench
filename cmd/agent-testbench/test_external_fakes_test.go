@@ -58,7 +58,28 @@ func fakeDockerCommand(t *testing.T) ([]string, string) {
 	dir := t.TempDir()
 	callsPath := filepath.Join(dir, "docker-calls.txt")
 	dockerPath := filepath.Join(dir, "docker")
-	writeFile(t, dockerPath, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$DOCKER_CALLS_FILE\"\nif [ \"$1\" = \"compose\" ] && [ \"$2\" = \"version\" ]; then\n  printf 'Docker Compose version v2.0.0\\n'\n  exit 0\nfi\nif [ \"$1\" = \"compose\" ]; then\n  prev=\"\"\n  service=\"\"\n  for arg in \"$@\"; do\n    if [ \"$prev\" = \"--format\" ] && [ \"$arg\" = \"json\" ]; then\n      service=\"__next__\"\n    elif [ \"$service\" = \"__next__\" ]; then\n      service=\"$arg\"\n    fi\n    prev=\"$arg\"\n  done\n  if [ -n \"$service\" ] && [ \"$service\" != \"__next__\" ]; then\n    printf '{\"Name\":\"%s\",\"Service\":\"%s\",\"State\":\"running\",\"Health\":\"healthy\"}\\n' \"$service\" \"$service\"\n  fi\nfi\n")
+	writeFile(t, dockerPath, `#!/bin/sh
+printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
+if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
+  printf 'Docker Compose version v2.0.0\n'
+  exit 0
+fi
+if [ "$1" = "compose" ]; then
+  prev=""
+  collect_services=0
+  for arg in "$@"; do
+    if [ "$prev" = "--format" ] && [ "$arg" = "json" ]; then
+      collect_services=1
+      prev="$arg"
+      continue
+    fi
+    if [ "$collect_services" = "1" ] && [ "${arg#-}" = "$arg" ]; then
+      printf '{"Name":"%s","Service":"%s","State":"running","Health":"healthy"}\n' "$arg" "$arg"
+    fi
+    prev="$arg"
+  done
+fi
+`)
 	if err := os.Chmod(dockerPath, 0o755); err != nil {
 		t.Fatalf("chmod fake docker: %v", err)
 	}

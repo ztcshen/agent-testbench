@@ -276,14 +276,6 @@ func environmentRestorePrepareReposOnlyDockerReport(plan environmentRestoreBuild
 }
 
 func environmentRestoreSkippedDockerReport(report environmentRestoreReport, workspace string) environmentRestoreDockerReport {
-	if !report.Preflight.OK {
-		return environmentRestoreDockerReport{
-			OK:      false,
-			Action:  "skipped-due-to-preflight",
-			Workdir: workspace,
-			Error:   "restore preflight did not pass",
-		}
-	}
 	if !report.SourcePolicy.OK {
 		return environmentRestoreDockerReport{
 			OK:      false,
@@ -292,12 +284,47 @@ func environmentRestoreSkippedDockerReport(report environmentRestoreReport, work
 			Error:   "remote Git source policy did not pass",
 		}
 	}
+	if !report.Preflight.OK {
+		if missing := environmentRestoreMissingComposeFile(report.Compose, workspace); missing != "" {
+			return environmentRestoreDockerReport{
+				OK:          false,
+				Action:      "missing-compose-file",
+				ComposeFile: missing,
+				Workdir:     workspace,
+				Error:       fmt.Sprintf("compose file is required before Docker execution: %s", missing),
+			}
+		}
+		return environmentRestoreDockerReport{
+			OK:      false,
+			Action:  "skipped-due-to-preflight",
+			Workdir: workspace,
+			Error:   "restore preflight did not pass",
+		}
+	}
 	return environmentRestoreDockerReport{
 		OK:      false,
 		Action:  "skipped-due-to-repository-error",
 		Workdir: workspace,
 		Error:   "repository preparation did not complete",
 	}
+}
+
+func environmentRestoreMissingComposeFile(compose map[string]any, workspace string) string {
+	generated := stringMapFromAny(compose["generatedFiles"])
+	for _, composeFile := range environmentRestoreComposeFiles(compose) {
+		clean := filepath.Clean(strings.TrimSpace(composeFile))
+		if clean == "" || clean == "." {
+			continue
+		}
+		if _, ok := generated[clean]; ok {
+			continue
+		}
+		resolved := restoreWorkspacePath(workspace, clean)
+		if stat, err := os.Stat(resolved); err != nil || stat.IsDir() {
+			return resolved
+		}
+	}
+	return ""
 }
 
 func environmentRestoreMaybeRunWorkflow(ctx context.Context, env *store.Environment, report *environmentRestoreReport, plan environmentRestoreBuildPlan, workflowOptions environmentRestoreWorkflowOptions) {

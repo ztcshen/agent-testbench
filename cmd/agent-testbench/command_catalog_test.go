@@ -127,6 +127,41 @@ func TestCommandsCommandEmitsSearchableCommandCatalog(t *testing.T) {
 	}
 }
 
+func TestCommandsCatalogIncludesEnvironmentLifecycleCommands(t *testing.T) {
+	out := runCLI(t, "commands", "--area", "environment", "--filter", "environment", "--json")
+
+	var report struct {
+		OK       bool `json:"ok"`
+		Commands []struct {
+			Command    string   `json:"command"`
+			Usage      string   `json:"usage"`
+			StoreAware bool     `json:"storeAware"`
+			Tags       []string `json:"tags"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode environment command catalog: %v\n%s", err, out)
+	}
+	commands := map[string]struct {
+		Usage      string
+		StoreAware bool
+		Tags       []string
+	}{}
+	for _, item := range report.Commands {
+		commands[item.Command] = struct {
+			Usage      string
+			StoreAware bool
+			Tags       []string
+		}{Usage: item.Usage, StoreAware: item.StoreAware, Tags: item.Tags}
+	}
+	for _, command := range []string{"environment status", "environment stop"} {
+		item, ok := commands[command]
+		if !report.OK || !ok || !item.StoreAware || !strings.Contains(item.Usage, "--workspace PATH") || !stringSliceContains(item.Tags, "store-first") {
+			t.Fatalf("environment lifecycle command %q catalog item = %#v report ok=%t", command, item, report.OK)
+		}
+	}
+}
+
 func TestCommandsCanFilterByArea(t *testing.T) {
 	out := runCLI(t, "commands", "--area", "workflow", "--filter", "gate", "--json")
 

@@ -22,10 +22,15 @@ func prepareEnvironmentRestoreGeneratedFiles(compose map[string]any, workspace s
 	if len(files) == 0 {
 		return nil
 	}
+	modes := environmentRestoreGeneratedFileModes(compose)
 	paths := environmentRestoreGeneratedFilePaths(compose, files)
 	out := make([]environmentRestoreGeneratedFile, 0, len(paths))
 	for _, path := range paths {
 		content := files[path]
+		mode := modes[path]
+		if mode == 0 {
+			mode = 0o644
+		}
 		report := environmentRestoreGeneratedFile{
 			Path:   restoreWorkspacePath(workspace, path),
 			Bytes:  len(content),
@@ -43,12 +48,34 @@ func prepareEnvironmentRestoreGeneratedFiles(compose map[string]any, workspace s
 			if err := os.MkdirAll(filepath.Dir(report.Path), 0o755); err != nil {
 				report.OK = false
 				report.Error = err.Error()
-			} else if err := os.WriteFile(report.Path, []byte(content), 0o644); err != nil {
+			} else if err := os.WriteFile(report.Path, []byte(content), mode); err != nil {
+				report.OK = false
+				report.Error = err.Error()
+			} else if err := os.Chmod(report.Path, mode); err != nil {
 				report.OK = false
 				report.Error = err.Error()
 			}
 		}
 		out = append(out, report)
+	}
+	return out
+}
+
+func environmentRestoreGeneratedFileModes(compose map[string]any) map[string]os.FileMode {
+	raw := stringMapFromAny(compose["generatedFileModes"])
+	out := map[string]os.FileMode{}
+	for path, value := range raw {
+		clean := filepath.Clean(strings.TrimSpace(path))
+		if clean == "." || clean == "" {
+			continue
+		}
+		modeText := strings.TrimSpace(value)
+		switch modeText {
+		case "0600", "600":
+			out[clean] = 0o600
+		case "0644", "644":
+			out[clean] = 0o644
+		}
 	}
 	return out
 }

@@ -456,6 +456,18 @@ directory. When `composeFile` is recorded, the
 file must exist under `--workspace` after optional repository preparation;
 restore fails before invoking Docker if it is missing.
 
+Store remains the source of truth for configuration even when Docker-native
+runtime features are used. Component assets with kinds such as
+`compose-config`, `compose-secret`, and `env-file` are materialized from the
+Store into the restore workspace before Compose starts, so Compose can consume
+them through native `configs`, `secrets`, and `env_file` declarations without
+making local files authoritative. Secret-like or sensitive assets are written
+with owner-only file permissions; asset `summary_json` can also declare
+projection metadata such as `{"dockerNative":{"fileMode":"0600"}}` so the file
+mode remains shared through Store. Plain MySQL bootstrap SQL on a dependency
+edge is likewise projected as a Store-backed initdb file before clean Docker
+startup; later schema changes should be versioned migration assets instead.
+
 The restore report also includes `readiness`, the final pre-Docker review gate
 for a colleague-machine simulation. It checks that the sandbox SQL Store
 is outside the target Docker environment, the restore is anchored to a
@@ -500,6 +512,33 @@ report; on timeout, inspect `docker.healthChecks` and
 status, and error. `--use-existing-containers` follows the same bounded health gate after
 adopting fixed-name containers, so it is safe to use for already-running local
 targets without starting new Compose services.
+
+Use environment lifecycle commands for quick state checks and non-destructive
+shutdowns instead of rerunning a full restore:
+
+```sh
+./bin/agent-testbench.sh environment status ENV_ID \
+  --store NAME_OR_DSN \
+  --workspace /tmp/agent-testbench-restore \
+  --json
+
+./bin/agent-testbench.sh environment stop ENV_ID \
+  --store NAME_OR_DSN \
+  --workspace /tmp/agent-testbench-restore \
+  --json
+```
+
+`environment status` writes Store-backed generated compose/env files when
+needed, then inspects recorded Compose services with `docker compose ps`; it
+reports per-service container state plus a health summary and does not run
+pull, build, up, stop, or down. It fails when no recorded or discoverable
+Compose services can be inspected. `environment stop` defaults to `docker
+compose stop SERVICE...`, preserving containers, volumes, and images, and
+records `summary.lastStop` on the Environment Catalog entry. The default stop
+path also requires recorded or discoverable services so it does not widen into
+an accidental whole-project stop. Use
+`environment stop --down --remove-orphans` only when you explicitly want Compose
+to remove the environment's containers.
 
 For sandbox diagnostics, prefer Store-backed read-only checks before inspecting
 containers or temporary files directly:
@@ -569,10 +608,13 @@ preconditions before running new SQL, and then records the applied version.
 `baseline` uses the same history table but records existing versions without
 running their SQL; use it when a target database already contains the schema.
 Regular `environment restore --execute` also applies versioned MySQL migration
-assets through this history path. When `environment restore
---use-existing-containers` adopts an already-running database, plain MySQL SQL
-bootstrap assets are skipped instead of replayed; use migrations, baseline, or a
-clean restore for changes that must be applied to the target database.
+assets through this history path. During a clean Docker restore, plain MySQL
+bootstrap SQL assets are materialized as Store-backed initdb files before
+Compose starts, so MySQL's native initialization path owns first-run bootstrap.
+When `environment restore --use-existing-containers` adopts an already-running
+database, plain MySQL SQL bootstrap assets are skipped instead of replayed; use
+migrations, baseline, or a clean restore for changes that must be applied to the
+target database.
 
 For a colleague-machine simulation, add `--clean-docker-state` during dry-run
 review to include a Compose-scoped cleanup plan before startup. Add
