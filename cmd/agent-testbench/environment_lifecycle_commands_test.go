@@ -293,6 +293,30 @@ func TestEnvironmentStatusFailsWhenNoComposeServicesCanBeInspected(t *testing.T)
 	}
 }
 
+func TestEnvironmentStatusRequiresRecordedComposeFileBeforeComposeOptions(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	runCLI(t, "environment", "register",
+		"--store", fixture.StoreDSN,
+		"--id", "env.status.no-compose-file",
+		"--compose-project-name", "demo",
+		"--compose-env", "APP_MODE=test",
+		"--compose-service", "web",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIFailsWithEnv(t, fixture.DockerEnv, "environment", "status", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--json", "env.status.no-compose-file")
+	if !strings.Contains(out, "requires a recorded composeFile") {
+		t.Fatalf("missing compose file status should fail clearly: %q", out)
+	}
+	dockerCalls, err := os.ReadFile(fixture.DockerCallsPath)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read fake docker calls: %v", err)
+	}
+	if strings.Contains(string(dockerCalls), " ps ") {
+		t.Fatalf("status without compose file must not inspect workspace default compose file:\n%s", dockerCalls)
+	}
+}
+
 func TestEnvironmentStatusPreservesComposePSErrorWithoutServiceHints(t *testing.T) {
 	fixture := newEnvironmentRestoreDockerCLIFixture(t)
 	fixture.writeDockerTool(t, `#!/usr/bin/env bash
@@ -335,6 +359,69 @@ exit 0
 	}
 	if report.OK || report.Docker.OK || len(report.Docker.Services) != 1 || report.Docker.Services[0].Service != "docker compose ps" || report.Docker.Services[0].OK || !strings.Contains(report.Docker.Services[0].Error, "missing required env file") || !strings.Contains(report.Docker.Error, "missing required env file") {
 		t.Fatalf("compose ps error status report = %#v", report)
+	}
+}
+
+func TestEnvironmentStatusRequiresCompletedExitForRunningOneShot(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	fixture.writeDockerTool(t, `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
+if [ "$1" = compose ] && [ "$2" = version ]; then
+  printf 'Docker Compose version v2.0.0\n'
+  exit 0
+fi
+if [ "$1" = compose ] && [[ "$*" == *" ps -a --format json"* ]]; then
+  printf '{"Name":"demo-seed","Service":"seed","State":"running","Health":"healthy"}\n'
+  exit 0
+fi
+exit 0
+`)
+	composeSource := filepath.Join(t.TempDir(), "compose.yml")
+	writeFile(t, composeSource, "services:\n  seed:\n    image: alpine:3.20\n")
+	runCLI(t, "environment", "register",
+		"--store", fixture.StoreDSN,
+		"--id", "env.status.oneshot.running",
+		"--compose-file", "compose.yml",
+		"--compose-generated-file", "compose.yml="+composeSource,
+		"--compose-service", "seed",
+		"--verification-workflow", "workflow.core-10",
+	)
+	runtime, err := openStore(context.Background(), fixture.StoreDSN)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer runtime.Close()
+	env, err := runtime.GetEnvironment(context.Background(), "env.status.oneshot.running")
+	if err != nil {
+		t.Fatalf("get environment: %v", err)
+	}
+	env.HealthChecksJSON = `[{"kind":"compose-service","service":"seed","expect":"service_completed_successfully"}]`
+	if _, err := runtime.UpsertEnvironment(context.Background(), env); err != nil {
+		t.Fatalf("upsert running one-shot health check: %v", err)
+	}
+
+	out := runCLIFailsWithEnv(t, fixture.DockerEnv, "environment", "status", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--json", "env.status.oneshot.running")
+	var report struct {
+		OK     bool `json:"ok"`
+		Docker struct {
+			Summary struct {
+				Ready  int `json:"ready"`
+				Failed int `json:"failed"`
+			} `json:"summary"`
+			Services []struct {
+				Service string `json:"service"`
+				State   string `json:"state"`
+				Health  string `json:"health"`
+				OK      bool   `json:"ok"`
+				Error   string `json:"error"`
+			} `json:"services"`
+		} `json:"docker"`
+	}
+	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
+		t.Fatalf("decode running one-shot status report: %v\n%s", err, out)
+	}
+	if report.OK || report.Docker.Summary.Ready != 0 || report.Docker.Summary.Failed != 1 || len(report.Docker.Services) != 1 || report.Docker.Services[0].OK || report.Docker.Services[0].State != "running" || !strings.Contains(report.Docker.Services[0].Error, "not ready") {
+		t.Fatalf("running one-shot status report = %#v", report)
 	}
 }
 
@@ -389,6 +476,30 @@ func TestEnvironmentStopDefaultsToComposeStopAndPersistsLastStop(t *testing.T) {
 	}
 	if strings.Contains(calls, " down") || strings.Contains(calls, "--rmi") || strings.Contains(calls, " -v") || strings.Contains(calls, "rm ") {
 		t.Fatalf("environment stop default must not remove containers, images, or volumes:\n%s", calls)
+	}
+}
+
+func TestEnvironmentStopRequiresRecordedComposeFileBeforeComposeOptions(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	runCLI(t, "environment", "register",
+		"--store", fixture.StoreDSN,
+		"--id", "env.stop.no-compose-file",
+		"--compose-project-name", "demo",
+		"--compose-env", "APP_MODE=test",
+		"--compose-service", "web",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIFailsWithEnv(t, fixture.DockerEnv, "environment", "stop", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--json", "env.stop.no-compose-file")
+	if !strings.Contains(out, "requires a recorded composeFile") {
+		t.Fatalf("missing compose file stop should fail clearly: %q", out)
+	}
+	dockerCalls, err := os.ReadFile(fixture.DockerCallsPath)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read fake docker calls: %v", err)
+	}
+	if strings.Contains(string(dockerCalls), " stop") || strings.Contains(string(dockerCalls), " down") {
+		t.Fatalf("stop without compose file must not operate on workspace default compose file:\n%s", dockerCalls)
 	}
 }
 

@@ -384,6 +384,36 @@ func TestEnvironmentRestoreAcceptsLongFormMySQLInitDBMount(t *testing.T) {
 	}
 }
 
+func TestEnvironmentRestoreAcceptsIndentedMySQLInitDBMount(t *testing.T) {
+	workspace := t.TempDir()
+	graph := store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "mysql", Kind: "middleware", Role: "database", ComposeService: "mysql"},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app"},
+		},
+		Dependencies: []store.ComponentDependency{
+			{ConsumerComponentID: "app", ProviderComponentID: "mysql", Capability: "sql", ProfileJSON: `{"assetIds":["schema.one"]}`},
+		},
+		Assets: []store.ComponentConfigAsset{
+			{OwnerComponentID: "app", AssetID: "schema.one", AssetKind: "mysql-ddl", TargetComponentID: "mysql", TargetPath: "compose/mysql/init/app.sql", ContentInline: "create database app_one;\n"},
+		},
+	}
+
+	failures := environmentRestoreProjectMySQLInitDBAssets(graph, map[string]any{
+		"composeFile": "compose.yml",
+		"generatedFiles": map[string]any{
+			"compose.yml": "services:\n    mysql:\n        image: mysql:8\n        volumes:\n            - ./compose/mysql/init:/docker-entrypoint-initdb.d\n",
+		},
+	}, nil, workspace)
+	if len(failures) != 0 {
+		t.Fatalf("indented initdb mount should project without failures: %#v", failures)
+	}
+	projected, err := os.ReadFile(filepath.Join(workspace, "compose", "mysql", "init", "app.sql"))
+	if err != nil || string(projected) != "create database app_one;\n" {
+		t.Fatalf("indented initdb projected SQL = %q err=%v", projected, err)
+	}
+}
+
 func environmentRestoreMySQLInitDBMountedCompose() map[string]any {
 	return map[string]any{
 		"composeFile": "compose.yml",

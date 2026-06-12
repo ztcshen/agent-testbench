@@ -83,14 +83,15 @@ func runEnvironmentStatus(ctx context.Context, args []string) error {
 }
 
 func environmentStatusDocker(ctx context.Context, compose map[string]any, workspace string, healthChecks []any) environmentStatusDockerReport {
-	report := environmentStatusDockerReport{OK: true, Action: "inspect-compose-services", ComposeFile: strings.Join(environmentRestoreResolvedComposeFiles(workspace, environmentRestoreComposeFiles(compose)), ",")}
-	composeBaseArgs := environmentRestoreComposeBaseArgs(compose, workspace, environmentRestoreResolvedComposeFiles(workspace, environmentRestoreComposeFiles(compose)))
-	if len(composeBaseArgs) == 0 {
+	composeFiles := environmentRestoreComposeFiles(compose)
+	report := environmentStatusDockerReport{OK: true, Action: "inspect-compose-services", ComposeFile: strings.Join(environmentRestoreResolvedComposeFiles(workspace, composeFiles), ",")}
+	if len(composeFiles) == 0 {
 		report.Action = "no-compose-plan"
 		report.Error = "environment status requires a recorded composeFile"
 		report.OK = false
 		return report
 	}
+	composeBaseArgs := environmentRestoreComposeBaseArgs(compose, workspace, environmentRestoreResolvedComposeFiles(workspace, composeFiles))
 	if !prepareEnvironmentLifecycleComposeFiles(&report, compose, workspace) {
 		return report
 	}
@@ -182,7 +183,11 @@ func environmentStatusApplyComposeServiceExpectation(check environmentRestoreHea
 	}
 	check.Expect = expected.Expect
 	check.OneShot = expected.OneShot
-	check.OK = check.State == "running" && (check.Health == "" || check.Health == "healthy") || environmentRestoreExitedCompleted(&check, check.State, check.ExitCode, check.HasExitCode)
+	if environmentRestoreRequiresCompletedExit(&expected) {
+		check.OK = environmentRestoreExitedCompleted(&check, check.State, check.ExitCode, check.HasExitCode)
+	} else {
+		check.OK = check.State == "running" && (check.Health == "" || check.Health == "healthy") || environmentRestoreExitedCompleted(&check, check.State, check.ExitCode, check.HasExitCode)
+	}
 	if !check.OK && check.Error == "" {
 		check.Error = "compose service is not ready"
 	}

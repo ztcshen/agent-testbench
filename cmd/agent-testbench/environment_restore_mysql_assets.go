@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"agent-testbench/internal/store"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -106,6 +108,9 @@ func environmentRestoreMySQLInitDBMountsTarget(compose map[string]any, workspace
 }
 
 func environmentRestoreComposeContentMountsMySQLInitDB(content string, composeDir string, compose map[string]any, workspace string, service string, targetPath string) bool {
+	if ok, parsed := environmentRestoreComposeYAMLMountsMySQLInitDB(content, composeDir, compose, workspace, service, targetPath); parsed {
+		return ok
+	}
 	scanner := environmentRestoreComposeMountScanner{
 		composeDir: composeDir,
 		compose:    compose,
@@ -119,6 +124,49 @@ func environmentRestoreComposeContentMountsMySQLInitDB(content string, composeDi
 		}
 	}
 	return scanner.flushVolume()
+}
+
+func environmentRestoreComposeYAMLMountsMySQLInitDB(content string, composeDir string, compose map[string]any, workspace string, service string, targetPath string) (bool, bool) {
+	var doc struct {
+		Services map[string]struct {
+			Volumes []any `yaml:"volumes"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
+		return false, false
+	}
+	serviceDef, ok := doc.Services[service]
+	if !ok {
+		return false, true
+	}
+	for _, volume := range serviceDef.Volumes {
+		if environmentRestoreComposeVolumeMountsMySQLInitDB(volume, composeDir, compose, workspace, targetPath) {
+			return true, true
+		}
+	}
+	return false, true
+}
+
+func environmentRestoreComposeVolumeMountsMySQLInitDB(volume any, composeDir string, compose map[string]any, workspace string, targetPath string) bool {
+	switch value := volume.(type) {
+	case string:
+		source, target, ok := parseComposeShortVolume(value)
+		return ok && environmentRestoreVolumeSourceMountsMySQLInitDB(source, target, composeDir, compose, workspace, targetPath)
+	case map[string]any:
+		source := valueString(firstNonNil(value["source"], value["src"]))
+		target := valueString(firstNonNil(value["target"], value["dst"], value["destination"]))
+		return environmentRestoreVolumeSourceMountsMySQLInitDB(source, target, composeDir, compose, workspace, targetPath)
+	default:
+		return false
+	}
+}
+
+func environmentRestoreVolumeSourceMountsMySQLInitDB(source string, target string, composeDir string, compose map[string]any, workspace string, targetPath string) bool {
+	if !environmentRestoreIsMySQLInitDBTarget(target) {
+		return false
+	}
+	sourcePath, sourceOK := environmentRestoreStartupAssetPath(source, composeDir, compose, workspace)
+	return sourceOK && environmentRestoreMountSourceCoversTarget(sourcePath, targetPath)
 }
 
 type environmentRestoreComposeMountScanner struct {
