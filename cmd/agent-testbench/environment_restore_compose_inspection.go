@@ -48,7 +48,7 @@ func parseComposeContainerNames(content string) map[string]string {
 		}
 		indent := len(line) - len(strings.TrimLeft(line, " "))
 		if indent == 0 {
-			inServices = trimmed == "services:"
+			inServices = trimmed == composeServicesHeader
 			currentService = ""
 			continue
 		}
@@ -180,7 +180,7 @@ func (state *composeBindMountParseState) bindSource(line string) (string, string
 }
 
 func (state *composeBindMountParseState) enterServices(trimmed string, indent int) {
-	if trimmed != "services:" {
+	if trimmed != composeServicesHeader {
 		return
 	}
 	state.inServices = true
@@ -239,7 +239,7 @@ func walkComposeServiceLines(content string, visit func(service string, trimmed 
 		}
 		indent := leadingSpaceCount(line)
 		if !inServices {
-			if trimmed == "services:" {
+			if trimmed == composeServicesHeader {
 				inServices = true
 				servicesIndent = indent
 			}

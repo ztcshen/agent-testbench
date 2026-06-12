@@ -1,3 +1,4 @@
+// Package mysqlruntime inspects local Docker and process metadata for MySQL runtime endpoints.
 package mysqlruntime
 
 import (

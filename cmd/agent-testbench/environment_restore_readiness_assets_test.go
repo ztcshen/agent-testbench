@@ -84,7 +84,7 @@ func TestEnvironmentRestoreStoreStartupFilesAcceptWrittenWorkspaceCompose(t *tes
 		Docker: environmentRestoreDockerReport{
 			Generated: []environmentRestoreGeneratedFile{{
 				Path:   composePath,
-				Action: "write",
+				Action: environmentRestoreGeneratedFileActionWrite,
 				OK:     true,
 			}},
 		},

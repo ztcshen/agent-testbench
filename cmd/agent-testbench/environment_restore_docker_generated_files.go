@@ -7,6 +7,8 @@ import (
 	"strings"
 )
 
+const environmentRestoreGeneratedFileActionWrite = "write"
+
 type environmentRestoreGeneratedFile struct {
 	Path   string `json:"path"`
 	Bytes  int    `json:"bytes"`
@@ -37,7 +39,7 @@ func prepareEnvironmentRestoreGeneratedFiles(compose map[string]any, workspace s
 			continue
 		}
 		if execute {
-			report.Action = "write"
+			report.Action = environmentRestoreGeneratedFileActionWrite
 			if err := os.MkdirAll(filepath.Dir(report.Path), 0o755); err != nil {
 				report.OK = false
 				report.Error = err.Error()
