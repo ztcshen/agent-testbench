@@ -231,6 +231,51 @@ func TestEnvironmentStatusFailsWhenNoComposeServicesCanBeInspected(t *testing.T)
 	}
 }
 
+func TestEnvironmentStatusPreservesComposePSErrorWithoutServiceHints(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	fixture.writeDockerTool(t, `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
+if [ "$1" = compose ] && [ "$2" = version ]; then
+  printf 'Docker Compose version v2.0.0\n'
+  exit 0
+fi
+if [ "$1" = compose ] && [[ "$*" == *" ps -a --format json"* ]]; then
+  printf 'missing required env file\n' >&2
+  exit 1
+fi
+exit 0
+`)
+	composeSource := filepath.Join(t.TempDir(), "compose.yml")
+	writeFile(t, composeSource, "name: ps-error\n")
+	runCLI(t, "environment", "register",
+		"--store", fixture.StoreDSN,
+		"--id", "env.status.ps-error",
+		"--compose-file", "compose.yml",
+		"--compose-generated-file", "compose.yml="+composeSource,
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIFailsWithEnv(t, fixture.DockerEnv, "environment", "status", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--json", "env.status.ps-error")
+	var report struct {
+		OK     bool `json:"ok"`
+		Docker struct {
+			OK       bool `json:"ok"`
+			Services []struct {
+				Service string `json:"service"`
+				OK      bool   `json:"ok"`
+				Error   string `json:"error"`
+			} `json:"services"`
+			Error string `json:"error"`
+		} `json:"docker"`
+	}
+	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
+		t.Fatalf("decode compose ps error status report: %v\n%s", err, out)
+	}
+	if report.OK || report.Docker.OK || len(report.Docker.Services) != 1 || report.Docker.Services[0].Service != "docker compose ps" || report.Docker.Services[0].OK || !strings.Contains(report.Docker.Services[0].Error, "missing required env file") || !strings.Contains(report.Docker.Error, "missing required env file") {
+		t.Fatalf("compose ps error status report = %#v", report)
+	}
+}
+
 func TestEnvironmentStopDefaultsToComposeStopAndPersistsLastStop(t *testing.T) {
 	fixture := newEnvironmentRestoreDockerCLIFixture(t)
 	composeSource := filepath.Join(t.TempDir(), "compose.yml")

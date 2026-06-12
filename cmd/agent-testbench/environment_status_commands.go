@@ -119,6 +119,14 @@ func inspectEnvironmentComposeServices(ctx context.Context, services []string, w
 	out := make([]environmentRestoreHealthCheckReport, 0, len(services))
 	expectations := environmentStatusComposeServiceExpectations(healthChecks)
 	if errText != "" {
+		if len(services) == 0 {
+			return []environmentRestoreHealthCheckReport{{
+				Kind:    "compose-service",
+				Service: "docker compose ps",
+				Output:  truncateReportText(output, 200),
+				Error:   errText,
+			}}
+		}
 		for _, service := range services {
 			out = append(out, environmentRestoreHealthCheckReport{
 				Kind:    "compose-service",

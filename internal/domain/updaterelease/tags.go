@@ -200,13 +200,12 @@ func parseTag(tag string) tagVersion {
 	rawParts := strings.Split(versionPart, ".")
 	parts := make([]int, 0, len(rawParts))
 	for _, raw := range rawParts {
-		digits := leadingDigits(raw)
-		if digits == "" {
-			break
+		if !tagPartIsNumeric(raw) {
+			return tagVersion{}
 		}
-		value, err := strconv.Atoi(digits)
+		value, err := strconv.Atoi(raw)
 		if err != nil {
-			break
+			return tagVersion{}
 		}
 		parts = append(parts, value)
 	}
@@ -216,13 +215,16 @@ func parseTag(tag string) tagVersion {
 	return tagVersion{valid: true, parts: parts, prerelease: prerelease}
 }
 
-func leadingDigits(value string) string {
-	for index, item := range value {
+func tagPartIsNumeric(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, item := range value {
 		if item < '0' || item > '9' {
-			return value[:index]
+			return false
 		}
 	}
-	return value
+	return true
 }
 
 func tagPart(parts []int, index int) int {
