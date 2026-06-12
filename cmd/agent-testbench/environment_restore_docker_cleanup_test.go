@@ -164,6 +164,35 @@ func TestEnvironmentRestoreBlocksAllowedDockerCleanupWithoutCompleteLinkage(t *t
 	}
 }
 
+func TestEnvironmentRestoreBlocksDockerCleanupWhenComposeNativeProjectionMissing(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	fakeDockerEnv, dockerCallsPath := fakeDockerCommand(t)
+	composeSource := filepath.Join(t.TempDir(), "compose.yml")
+	writeFile(t, composeSource, "services:\n  web:\n    image: alpine:3.20\n    env_file:\n      - ./app.env\n")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.cleanup.native-file-gap",
+		"--compose-file", "compose.yml",
+		"--compose-generated-file", "compose.yml="+composeSource,
+		"--compose-project-name", "demo",
+		"--compose-service", "web",
+		"--verification-workflow", "workflow.core-10",
+	)
+	seedCleanupLinkedGraph(t, storePath, "env.cleanup.native-file-gap", "web")
+
+	out := runCLIFailsWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--clean-docker-state", "--allow-destructive-docker-cleanup", "--json", "env.cleanup.native-file-gap")
+	if !strings.Contains(out, "cleanup-linkage-blocked") || !strings.Contains(out, "env-file:app.env") {
+		t.Fatalf("cleanup should block missing Compose-native projection: %q", out)
+	}
+	if raw, err := os.ReadFile(dockerCallsPath); err == nil {
+		calls := string(raw)
+		if strings.Contains(calls, " down ") || strings.Contains(calls, " up -d") {
+			t.Fatalf("native projection gap should not run down/up:\n%s", calls)
+		}
+	}
+}
+
 func TestEnvironmentRestoreRunsAllowedDockerCleanupBeforeStartup(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	workspace := filepath.Join(t.TempDir(), "workspace")

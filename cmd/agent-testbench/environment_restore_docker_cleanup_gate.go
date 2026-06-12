@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"agent-testbench/internal/domain/environmentfiles"
 	"agent-testbench/internal/store"
 )
 
@@ -47,7 +48,7 @@ func environmentRestoreDockerCleanupLinkage(compose map[string]any, graph store.
 	report.RequiredComponents = dedupeStrings(report.RequiredComponents)
 	report.MissingComponentServices = dedupeStrings(report.MissingComponentServices)
 	report.MissingComposeServices = dedupeStrings(report.MissingComposeServices)
-	report.MissingProjectedFiles = environmentRestoreCleanupMissingProjectedFiles(compose, composeFiles)
+	report.MissingProjectedFiles = environmentRestoreCleanupMissingProjectedFiles(compose, graph, composeFiles)
 	if len(report.MissingProjectedFiles) > 0 {
 		report.OK = false
 	}
@@ -69,17 +70,18 @@ func environmentRestoreCleanupComposeServices(compose map[string]any, workspace 
 	return services
 }
 
-func environmentRestoreCleanupMissingProjectedFiles(compose map[string]any, composeFiles []string) []string {
-	generated := stringMapFromAny(compose["generatedFiles"])
-	missing := []string{}
-	for _, path := range append(append([]string{}, composeFiles...), stringSliceFromAny(compose["envFiles"])...) {
-		clean := filepath.Clean(strings.TrimSpace(path))
-		if clean == "." || clean == "" {
-			continue
-		}
-		if _, ok := generated[clean]; !ok {
-			missing = append(missing, clean)
-		}
+func environmentRestoreCleanupMissingProjectedFiles(compose map[string]any, graph store.EnvironmentComponentGraph, composeFiles []string) []string {
+	projectionCompose := map[string]any{}
+	for key, value := range compose {
+		projectionCompose[key] = value
+	}
+	if len(composeFiles) > 0 {
+		projectionCompose["composeFiles"] = composeFiles
+	}
+	projection := environmentfiles.FromCompose(projectionCompose, nil, graph)
+	missing := make([]string, 0, len(projection.Missing))
+	for _, file := range projection.Missing {
+		missing = append(missing, file.Kind+":"+filepath.ToSlash(file.Path))
 	}
 	return dedupeStrings(missing)
 }
