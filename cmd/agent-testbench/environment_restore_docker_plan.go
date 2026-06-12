@@ -44,17 +44,28 @@ type environmentRestoreDockerCleanupReport struct {
 }
 
 type environmentRestoreDockerCleanupLinkageReport struct {
-	OK                       bool     `json:"ok"`
-	ComposeProject           string   `json:"composeProject,omitempty"`
-	ComposeServices          []string `json:"composeServices,omitempty"`
-	RequiredComponents       []string `json:"requiredComponents,omitempty"`
-	MissingComposeProject    bool     `json:"missingComposeProject,omitempty"`
-	MissingComponentGraph    bool     `json:"missingComponentGraph,omitempty"`
-	MissingComponentServices []string `json:"missingComponentServices,omitempty"`
-	MissingComposeServices   []string `json:"missingComposeServices,omitempty"`
-	MissingProjectedFiles    []string `json:"missingProjectedFiles,omitempty"`
-	StoreAssets              int      `json:"storeAssets,omitempty"`
-	Error                    string   `json:"error,omitempty"`
+	OK                       bool                                        `json:"ok"`
+	ComposeProject           string                                      `json:"composeProject,omitempty"`
+	ComposeServices          []string                                    `json:"composeServices,omitempty"`
+	RequiredComponents       []string                                    `json:"requiredComponents,omitempty"`
+	MissingComposeProject    bool                                        `json:"missingComposeProject,omitempty"`
+	MissingComponentGraph    bool                                        `json:"missingComponentGraph,omitempty"`
+	MissingComponentServices []string                                    `json:"missingComponentServices,omitempty"`
+	MissingComposeServices   []string                                    `json:"missingComposeServices,omitempty"`
+	MissingProjectedFiles    []string                                    `json:"missingProjectedFiles,omitempty"`
+	StoreAssets              int                                         `json:"storeAssets,omitempty"`
+	Error                    string                                      `json:"error,omitempty"`
+	RepairPlan               []environmentRestoreDockerCleanupRepairItem `json:"repairPlan,omitempty"`
+}
+
+type environmentRestoreDockerCleanupRepairItem struct {
+	Name          string   `json:"name"`
+	Target        string   `json:"target"`
+	Missing       []string `json:"missing,omitempty"`
+	Action        string   `json:"action"`
+	CommandHint   string   `json:"commandHint,omitempty"`
+	StoreBacked   bool     `json:"storeBacked"`
+	BlocksCleanup bool     `json:"blocksCleanup"`
 }
 
 type environmentRestoreHealthCheckReport struct {

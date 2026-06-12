@@ -156,6 +156,36 @@ func TestEnvironmentRestoreBlocksAllowedDockerCleanupWithoutCompleteLinkage(t *t
 	if !strings.Contains(out, "cleanup-linkage-blocked") || !strings.Contains(out, "Store-to-Compose environment linkage") || !strings.Contains(out, "projectName") {
 		t.Fatalf("cleanup linkage block output = %q", out)
 	}
+	var report struct {
+		Docker struct {
+			Cleanup struct {
+				Linkage struct {
+					RepairPlan []struct {
+						Name          string `json:"name"`
+						Target        string `json:"target"`
+						CommandHint   string `json:"commandHint"`
+						StoreBacked   bool   `json:"storeBacked"`
+						BlocksCleanup bool   `json:"blocksCleanup"`
+					} `json:"repairPlan"`
+				} `json:"linkage"`
+			} `json:"cleanup"`
+		} `json:"docker"`
+	}
+	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
+		t.Fatalf("decode cleanup linkage block json: %v\n%s", err, out)
+	}
+	repairNames := map[string]bool{}
+	for _, item := range report.Docker.Cleanup.Linkage.RepairPlan {
+		repairNames[item.Name] = true
+		if !item.StoreBacked || !item.BlocksCleanup {
+			t.Fatalf("cleanup repair item should be Store-backed and blocking: %#v", item)
+		}
+	}
+	for _, want := range []string{"compose-project-name", "component-graph"} {
+		if !repairNames[want] {
+			t.Fatalf("cleanup linkage repair plan missing %q: %#v", want, report.Docker.Cleanup.Linkage.RepairPlan)
+		}
+	}
 	if raw, err := os.ReadFile(dockerCallsPath); err == nil {
 		calls := string(raw)
 		if strings.Contains(calls, " down ") || strings.Contains(calls, " up -d") {
@@ -184,6 +214,25 @@ func TestEnvironmentRestoreBlocksDockerCleanupWhenComposeNativeProjectionMissing
 	out := runCLIFailsWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--clean-docker-state", "--allow-destructive-docker-cleanup", "--json", "env.cleanup.native-file-gap")
 	if !strings.Contains(out, "cleanup-linkage-blocked") || !strings.Contains(out, "env-file:app.env") {
 		t.Fatalf("cleanup should block missing Compose-native projection: %q", out)
+	}
+	var report struct {
+		Docker struct {
+			Cleanup struct {
+				Linkage struct {
+					RepairPlan []struct {
+						Name    string   `json:"name"`
+						Target  string   `json:"target"`
+						Missing []string `json:"missing"`
+					} `json:"repairPlan"`
+				} `json:"linkage"`
+			} `json:"cleanup"`
+		} `json:"docker"`
+	}
+	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
+		t.Fatalf("decode native projection cleanup json: %v\n%s", err, out)
+	}
+	if len(report.Docker.Cleanup.Linkage.RepairPlan) != 1 || report.Docker.Cleanup.Linkage.RepairPlan[0].Name != "compose-file-projection" || report.Docker.Cleanup.Linkage.RepairPlan[0].Target != "fileProjection.missing" || !stringSliceContains(report.Docker.Cleanup.Linkage.RepairPlan[0].Missing, "env-file:app.env") {
+		t.Fatalf("native projection repair plan = %#v", report.Docker.Cleanup.Linkage.RepairPlan)
 	}
 	if raw, err := os.ReadFile(dockerCallsPath); err == nil {
 		calls := string(raw)

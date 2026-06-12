@@ -53,6 +53,7 @@ func environmentRestoreDockerCleanupLinkage(compose map[string]any, graph store.
 		report.OK = false
 	}
 	if !report.OK {
+		report.RepairPlan = environmentRestoreCleanupLinkageRepairPlan(report)
 		report.Error = environmentRestoreCleanupLinkageError(report)
 	}
 	return report
@@ -107,4 +108,62 @@ func environmentRestoreCleanupLinkageError(report environmentRestoreDockerCleanu
 		return "Docker cleanup requires complete Store-to-Compose environment linkage"
 	}
 	return "Docker cleanup requires complete Store-to-Compose environment linkage: " + strings.Join(reasons, "; ")
+}
+
+func environmentRestoreCleanupLinkageRepairPlan(report environmentRestoreDockerCleanupLinkageReport) []environmentRestoreDockerCleanupRepairItem {
+	items := []environmentRestoreDockerCleanupRepairItem{}
+	if report.MissingComposeProject {
+		items = append(items, environmentRestoreDockerCleanupRepairItem{
+			Name:          "compose-project-name",
+			Target:        "compose.projectName",
+			Action:        "record the environment's Compose project name in the Store before allowing destructive cleanup",
+			CommandHint:   "environment register --id ENV_ID --compose-project-name PROJECT --verification-workflow WORKFLOW_ID",
+			StoreBacked:   true,
+			BlocksCleanup: true,
+		})
+	}
+	if report.MissingComponentGraph {
+		items = append(items, environmentRestoreDockerCleanupRepairItem{
+			Name:          "component-graph",
+			Target:        "environment.componentGraph",
+			Action:        "replace the Store component graph with required target components before cleanup",
+			CommandHint:   "environment components replace ENV_ID --file component-graph.json",
+			StoreBacked:   true,
+			BlocksCleanup: true,
+		})
+	}
+	if len(report.MissingComponentServices) > 0 {
+		items = append(items, environmentRestoreDockerCleanupRepairItem{
+			Name:          "component-compose-service",
+			Target:        "componentGraph.components[].composeService",
+			Missing:       append([]string(nil), report.MissingComponentServices...),
+			Action:        "add composeService metadata to each required Store component so cleanup stays service-scoped",
+			CommandHint:   "environment components replace ENV_ID --file component-graph.json",
+			StoreBacked:   true,
+			BlocksCleanup: true,
+		})
+	}
+	if len(report.MissingComposeServices) > 0 {
+		items = append(items, environmentRestoreDockerCleanupRepairItem{
+			Name:          "compose-service",
+			Target:        "compose.services",
+			Missing:       append([]string(nil), report.MissingComposeServices...),
+			Action:        "align registered compose services or Store-backed compose files with required component composeService values",
+			CommandHint:   "environment register --id ENV_ID --compose-service SERVICE --verification-workflow WORKFLOW_ID",
+			StoreBacked:   true,
+			BlocksCleanup: true,
+		})
+	}
+	if len(report.MissingProjectedFiles) > 0 {
+		items = append(items, environmentRestoreDockerCleanupRepairItem{
+			Name:          "compose-file-projection",
+			Target:        "fileProjection.missing",
+			Missing:       append([]string(nil), report.MissingProjectedFiles...),
+			Action:        "store every referenced Compose env/config/secret/include/extends file as a generated file, component asset, or environment package projection",
+			CommandHint:   "environment startup-file put ENV_ID --file PATH=LOCAL_FILE",
+			StoreBacked:   true,
+			BlocksCleanup: true,
+		})
+	}
+	return items
 }

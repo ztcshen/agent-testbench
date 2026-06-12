@@ -649,7 +649,12 @@ by itself: destructive cleanup also requires a complete Store-to-Compose
 linkage proof, including a recorded Compose project name, Store component graph,
 required component-to-service mapping, and Store-projected compose/env files.
 If that proof is missing, restore blocks with `cleanup-linkage-blocked` and
-reports the repair items instead of running `docker compose down`.
+reports `docker.cleanup.linkage.repairPlan` items instead of running
+`docker compose down`. Those repair items name the missing Store-backed fact,
+such as `compose.projectName`, `environment.componentGraph`,
+`componentGraph.components[].composeService`, `compose.services`, or
+`fileProjection.missing`, plus a command hint for repairing the Store metadata
+or asset projection before retrying cleanup.
 
 When you want to evaluate a new colleague machine without touching the current
 machine's running target containers, use `--assume-clean-docker` on a dry-run.
