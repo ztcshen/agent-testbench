@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"agent-testbench/internal/domain/environmentsource"
 	"agent-testbench/internal/store"
 
 	"gopkg.in/yaml.v3"
@@ -66,6 +67,7 @@ func FromCompose(compose map[string]any, summary map[string]any, graph store.Env
 		compose:       compose,
 		generated:     stringMap(compose["generatedFiles"]),
 		generatedMode: stringMap(compose["generatedFileModes"]),
+		env:           stringMap(compose["env"]),
 		startupFiles:  startupFileSet(summary),
 		packageSource: strings.TrimSpace(valueString(jsonObjectFromAny(compose["package"])["url"])) != "",
 		assetByPath:   projectionFilesByPath(assetFiles),
@@ -100,6 +102,7 @@ type projectionBuilder struct {
 	compose       map[string]any
 	generated     map[string]string
 	generatedMode map[string]string
+	env           map[string]string
 	startupFiles  map[string]bool
 	packageSource bool
 	assetByPath   map[string]ProjectionFile
@@ -119,22 +122,31 @@ func (b *projectionBuilder) addReferencedFiles(kind string, paths []string) {
 
 func (b *projectionBuilder) addComposeContentReferences(paths []string) {
 	scanned := map[string]bool{}
-	for queue := append([]string{}, paths...); len(queue) > 0; {
-		composeFile := queue[0]
+	queue := make([]composeContentScanTarget, 0, len(paths))
+	for _, path := range paths {
+		queue = append(queue, composeContentScanTarget{path: path})
+	}
+	for len(queue) > 0 {
+		target := queue[0]
 		queue = queue[1:]
-		cleanCompose := cleanPath(composeFile)
-		if cleanCompose == "" || scanned[cleanCompose] {
+		cleanCompose := cleanPath(target.path)
+		scanKey := cleanCompose + "\x00" + strings.TrimSpace(target.service)
+		if cleanCompose == "" || scanned[scanKey] {
 			continue
 		}
-		scanned[cleanCompose] = true
+		scanned[scanKey] = true
 		content := b.generated[cleanCompose]
 		if content == "" {
 			continue
 		}
-		for _, ref := range composeContentFileReferences(content, cleanCompose) {
+		for _, ref := range composeContentFileReferences(content, cleanCompose, target.service, b.env) {
+			if ref.err != "" {
+				b.add(b.unresolvedReferenceFile(ref.path, ref.kind, ref.err))
+				continue
+			}
 			b.add(b.referencedFile(ref.path, ref.kind))
 			if ref.kind == KindComposeFile {
-				queue = append(queue, ref.path)
+				queue = append(queue, composeContentScanTarget{path: ref.path, service: ref.service})
 			}
 		}
 	}
@@ -176,37 +188,84 @@ func (b *projectionBuilder) referencedFile(path string, kind string) ProjectionF
 	return file
 }
 
-type composeContentFileReference struct {
-	kind string
-	path string
+func (b *projectionBuilder) unresolvedReferenceFile(path string, kind string, errorText string) ProjectionFile {
+	return ProjectionFile{
+		Path:        path,
+		Kind:        kind,
+		Source:      "compose.interpolation",
+		Required:    true,
+		StoreBacked: false,
+		OK:          false,
+		Error:       errorText,
+	}
 }
 
-func composeContentFileReferences(content string, composeFile string) []composeContentFileReference {
+type composeContentScanTarget struct {
+	path    string
+	service string
+}
+
+type composeContentFileReference struct {
+	kind    string
+	path    string
+	service string
+	err     string
+}
+
+func composeContentFileReferences(content string, composeFile string, service string, env map[string]string) []composeContentFileReference {
 	var doc map[string]any
 	if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
 		return nil
 	}
-	collector := composeReferenceCollector{composeDir: filepath.Dir(cleanPath(composeFile))}
+	collector := composeReferenceCollector{composeDir: filepath.Dir(cleanPath(composeFile)), service: strings.TrimSpace(service), env: env}
 	collector.collect(doc)
 	return collector.refs
 }
 
 type composeReferenceCollector struct {
 	composeDir string
+	service    string
+	env        map[string]string
 	refs       []composeContentFileReference
 }
 
 func (c *composeReferenceCollector) collect(doc map[string]any) {
+	if c.service != "" {
+		c.collectServiceOnly(doc)
+		return
+	}
 	c.collectInclude(doc["include"])
 	c.collectComposeResourceFiles(KindComposeConfigFile, doc["configs"])
 	c.collectComposeResourceFiles(KindComposeSecretFile, doc["secrets"])
 	for _, service := range composeMap(doc["services"]) {
 		serviceMap := composeMap(service)
 		c.addReferences(KindEnvFile, serviceMap["env_file"])
-		if extendsFile, ok := composeMap(serviceMap["extends"])["file"]; ok {
-			c.addReferences(KindComposeFile, extendsFile)
-		}
+		c.collectExtendsReference(serviceMap)
 	}
+}
+
+func (c *composeReferenceCollector) collectServiceOnly(doc map[string]any) {
+	serviceMap := composeMap(composeMap(doc["services"])[c.service])
+	if len(serviceMap) == 0 {
+		return
+	}
+	c.addReferences(KindEnvFile, serviceMap["env_file"])
+	c.collectServiceResourceFiles(KindComposeConfigFile, serviceMap["configs"], doc["configs"])
+	c.collectServiceResourceFiles(KindComposeSecretFile, serviceMap["secrets"], doc["secrets"])
+	c.collectExtendsReference(serviceMap)
+}
+
+func (c *composeReferenceCollector) collectExtendsReference(serviceMap map[string]any) {
+	extendsMap := composeMap(serviceMap["extends"])
+	if len(extendsMap) == 0 {
+		return
+	}
+	extendsFile, ok := extendsMap["file"]
+	if !ok {
+		return
+	}
+	service := strings.TrimSpace(composeString(extendsMap["service"]))
+	c.addReferencesWithService(KindComposeFile, extendsFile, service)
 }
 
 func (c *composeReferenceCollector) collectInclude(value any) {
@@ -229,32 +288,66 @@ func (c *composeReferenceCollector) collectComposeResourceFiles(kind string, val
 	}
 }
 
+func (c *composeReferenceCollector) collectServiceResourceFiles(kind string, serviceValue any, resources any) {
+	resourceMap := composeMap(resources)
+	for _, name := range composeServiceResourceNames(serviceValue) {
+		if file, ok := composeMap(resourceMap[name])["file"]; ok {
+			c.addReferences(kind, file)
+		}
+	}
+}
+
+func composeServiceResourceNames(value any) []string {
+	out := []string{}
+	if name := composeString(value); name != "" {
+		return []string{name}
+	}
+	for _, item := range composeList(value) {
+		itemMap := composeMap(item)
+		if len(itemMap) == 0 {
+			if name := composeString(item); name != "" {
+				out = append(out, name)
+			}
+			continue
+		}
+		if name := composeString(firstNonNil(itemMap["source"], itemMap["config"], itemMap["secret"])); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 func (c *composeReferenceCollector) addReferences(kind string, value any) {
+	c.addReferencesWithService(kind, value, "")
+}
+
+func (c *composeReferenceCollector) addReferencesWithService(kind string, value any, service string) {
 	if path := composeString(value); path != "" {
-		c.addReference(kind, path)
+		c.addReference(kind, path, service)
 		return
 	}
 	for _, item := range composeList(value) {
 		itemMap := composeMap(item)
 		if len(itemMap) == 0 {
-			c.addReferences(kind, item)
+			c.addReferencesWithService(kind, item, service)
 			continue
 		}
 		if kind == KindEnvFile && !composeBool(itemMap["required"], true) {
 			continue
 		}
 		if path, ok := itemMap["path"]; ok {
-			c.addReferences(kind, path)
+			c.addReferencesWithService(kind, path, service)
 		}
 	}
 }
 
-func (c *composeReferenceCollector) addReference(kind string, path string) {
-	path = cleanComposeReferencedPath(path, c.composeDir)
+func (c *composeReferenceCollector) addReference(kind string, path string, service string) {
+	resolvedPath, errText := cleanComposeReferencedPath(path, c.composeDir, c.env)
+	path = resolvedPath
 	if path == "" {
 		return
 	}
-	c.refs = append(c.refs, composeContentFileReference{kind: kind, path: path})
+	c.refs = append(c.refs, composeContentFileReference{kind: kind, path: path, service: strings.TrimSpace(service), err: errText})
 }
 
 func composeMap(value any) map[string]any {
@@ -307,15 +400,124 @@ func composeBool(value any, defaultValue bool) bool {
 	}
 }
 
-func cleanComposeReferencedPath(path string, composeDir string) string {
+func cleanComposeReferencedPath(path string, composeDir string, env map[string]string) (string, string) {
 	path = strings.TrimSpace(path)
-	if path == "" || strings.Contains(path, "$") || strings.HasPrefix(path, "~") || filepath.IsAbs(path) {
-		return ""
+	if path == "" || strings.HasPrefix(path, "~") || filepath.IsAbs(path) {
+		return "", ""
 	}
+	if strings.Contains(path, "$") {
+		resolved, ok := interpolateComposePath(path, env)
+		if !ok {
+			return cleanComposePathWithDir(path, composeDir), "compose file reference contains variables that are not resolved by Store-backed compose.env"
+		}
+		path = resolved
+	}
+	return cleanComposePathWithDir(path, composeDir), ""
+}
+
+func cleanComposePathWithDir(path string, composeDir string) string {
 	if composeDir == "." || composeDir == "" {
 		return cleanPath(path)
 	}
 	return cleanPath(filepath.Join(composeDir, path))
+}
+
+func interpolateComposePath(path string, env map[string]string) (string, bool) {
+	var out strings.Builder
+	for i := 0; i < len(path); {
+		if path[i] != '$' {
+			out.WriteByte(path[i])
+			i++
+			continue
+		}
+		if i+1 >= len(path) {
+			out.WriteByte(path[i])
+			i++
+			continue
+		}
+		if path[i+1] == '$' {
+			out.WriteByte('$')
+			i += 2
+			continue
+		}
+		if path[i+1] == '{' {
+			end := strings.IndexByte(path[i+2:], '}')
+			if end < 0 {
+				return path, false
+			}
+			expr := path[i+2 : i+2+end]
+			value, ok := resolveComposeVariableExpression(expr, env)
+			if !ok {
+				return path, false
+			}
+			out.WriteString(value)
+			i += end + 3
+			continue
+		}
+		nameEnd := i + 1
+		for nameEnd < len(path) && composeVariableNameByte(path[nameEnd]) {
+			nameEnd++
+		}
+		if nameEnd == i+1 {
+			out.WriteByte(path[i])
+			i++
+			continue
+		}
+		value, ok := env[path[i+1:nameEnd]]
+		if !ok {
+			return path, false
+		}
+		out.WriteString(value)
+		i = nameEnd
+	}
+	return out.String(), true
+}
+
+func resolveComposeVariableExpression(expr string, env map[string]string) (string, bool) {
+	nameEnd := 0
+	for nameEnd < len(expr) && composeVariableNameByte(expr[nameEnd]) {
+		nameEnd++
+	}
+	if nameEnd == 0 {
+		return "", false
+	}
+	name := expr[:nameEnd]
+	opArg := expr[nameEnd:]
+	value, exists := env[name]
+	switch {
+	case opArg == "":
+		return value, exists
+	case strings.HasPrefix(opArg, ":-"):
+		if !exists || value == "" {
+			return opArg[2:], true
+		}
+		return value, true
+	case strings.HasPrefix(opArg, "-"):
+		if !exists {
+			return opArg[1:], true
+		}
+		return value, true
+	case strings.HasPrefix(opArg, ":?"):
+		return value, exists && value != ""
+	case strings.HasPrefix(opArg, "?"):
+		return value, exists
+	case strings.HasPrefix(opArg, ":+"):
+		if exists && value != "" {
+			return opArg[2:], true
+		}
+		return "", true
+	case strings.HasPrefix(opArg, "+"):
+		if exists {
+			return opArg[1:], true
+		}
+		return "", true
+	default:
+		return "", false
+	}
+}
+
+func composeVariableNameByte(value byte) bool {
+	return value == '_' || value >= '0' && value <= '9' || value >= 'A' && value <= 'Z' || value >= 'a' && value <= 'z'
 }
 
 func (b *projectionBuilder) generatedFile(path string, kind string, required bool) ProjectionFile {
@@ -420,9 +622,9 @@ func projectionFileFromAsset(asset store.ComponentConfigAsset) ProjectionFile {
 		file.OK = false
 		file.Error = "component asset target must be relative to the restore workspace"
 	}
-	if strings.TrimSpace(asset.ContentInline) == "" && strings.TrimSpace(asset.RemoteRefJSON) == "" {
+	if strings.TrimSpace(asset.ContentInline) == "" && !environmentsource.ComponentAssetRemoteRefOK(asset.TargetPath, asset.RemoteRefJSON) {
 		file.OK = false
-		file.Error = "component asset must provide inline content or a remote ref"
+		file.Error = "component asset must provide inline content or a valid remote ref"
 	}
 	return file
 }

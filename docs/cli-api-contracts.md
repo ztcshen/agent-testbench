@@ -169,6 +169,11 @@ generated restore env files, `compose.generatedFiles`, native Compose
 `env_file`/`configs`/`secrets` file references, `summary.startupFiles`, and
 component config assets relate, and marks any referenced file that lacks a
 Store-backed content source or explicit environment package projection.
+Compose-native references that use variables are resolved only from
+Store-backed `compose.env`; unresolved required variables remain blocking
+projection gaps. Recursive `extends.file` inspection is limited to the named
+`extends.service` so unrelated services in a shared compose file do not block
+restore readiness.
 For already-registered environments, `environment startup-file put ENV_ID
 --file TARGET=SOURCE_FILE` updates only `compose.generatedFiles` and preserves
 the existing workflow, services, repositories, and health checks.

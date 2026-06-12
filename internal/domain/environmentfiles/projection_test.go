@@ -169,7 +169,7 @@ func TestProjectionReportDiscoversComposeNativeReferenceVariants(t *testing.T) {
 	})}
 
 	report := FromEnvironment(env, store.EnvironmentComponentGraph{})
-	if report.OK || report.Counts.Referenced != 9 || report.Counts.Missing != 3 {
+	if report.OK || report.Counts.Referenced != 11 || report.Counts.Missing != 5 {
 		t.Fatalf("compose variant projection report = %#v", report)
 	}
 	for _, path := range []string{"compose/base.yml", "compose/fragments/cache.yml", "compose/common.yml"} {
@@ -188,11 +188,137 @@ func TestProjectionReportDiscoversComposeNativeReferenceVariants(t *testing.T) {
 			t.Fatalf("env file gap %s should be visible: %#v", path, report.Missing)
 		}
 	}
+	for _, path := range []string{"compose/env/${TARGET}.env", "compose/config/${PROFILE}.yml"} {
+		if !projectionContains(report, "", path, "compose.interpolation", false) {
+			t.Fatalf("unresolved dynamic path %s should be visible: %#v", path, report.Missing)
+		}
+	}
 	for _, file := range report.Files {
 		switch file.Path {
-		case "compose/app.env", "compose/required: false", "compose/format: raw",
-			"compose/env/${TARGET}.env", "compose/config/${PROFILE}.yml":
+		case "compose/app.env", "compose/required: false", "compose/format: raw":
 			t.Fatalf("optional metadata or interpolated path should not be collected: %#v", report.Files)
+		}
+	}
+}
+
+func TestProjectionReportResolvesComposeNativeInterpolatedReferencesFromStoreEnv(t *testing.T) {
+	env := store.Environment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
+		"composeFile": "compose/docker-compose.yml",
+		"env": map[string]string{
+			"PROFILE": "prod",
+			"TARGET":  "blue",
+		},
+		"generatedFiles": map[string]string{
+			"compose/docker-compose.yml": strings.Join([]string{
+				"services:",
+				"  app:",
+				"    image: alpine:3.20",
+				"    env_file: ./env/${TARGET}.env",
+				"configs:",
+				"  app_config:",
+				"    file: ./config/${PROFILE}.yml",
+			}, "\n") + "\n",
+			"compose/env/blue.env":    "APP_MODE=test\n",
+			"compose/config/prod.yml": "mode: prod\n",
+		},
+	})}
+
+	report := FromEnvironment(env, store.EnvironmentComponentGraph{})
+	if !report.OK || report.Counts.Missing != 0 {
+		t.Fatalf("interpolated projection report = %#v", report)
+	}
+	if !projectionContains(report, KindEnvFile, "compose/env/blue.env", "compose.generatedFiles", true) {
+		t.Fatalf("env interpolation should resolve through compose.env: %#v", report.Files)
+	}
+	if !projectionContains(report, KindComposeConfigFile, "compose/config/prod.yml", "compose.generatedFiles", true) {
+		t.Fatalf("config interpolation should resolve through compose.env: %#v", report.Files)
+	}
+}
+
+func TestProjectionReportRejectsEmptyRemoteAssetRef(t *testing.T) {
+	env := store.Environment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
+		"composeFile": "compose/docker-compose.yml",
+		"generatedFiles": map[string]string{
+			"compose/docker-compose.yml": strings.Join([]string{
+				"services:",
+				"  app:",
+				"    image: alpine:3.20",
+				"    secrets:",
+				"      - db_password",
+				"secrets:",
+				"  db_password:",
+				"    file: ./secrets/db.txt",
+			}, "\n") + "\n",
+		},
+	})}
+	graph := store.EnvironmentComponentGraph{
+		Assets: []store.ComponentConfigAsset{{
+			OwnerComponentID: "db",
+			AssetID:          "db.password",
+			AssetKind:        assetKindComposeSecret,
+			TargetPath:       "compose/secrets/db.txt",
+			RemoteRefJSON:    "{}",
+		}},
+	}
+
+	report := FromEnvironment(env, graph)
+	if report.OK || report.Counts.Missing != 2 {
+		t.Fatalf("empty remote ref should fail projection readiness: %#v", report)
+	}
+	if !projectionContains(report, KindComposeSecretFile, "compose/secrets/db.txt", "component_config_assets", false) {
+		t.Fatalf("empty remote ref asset should be reported as not materializable: %#v", report.Files)
+	}
+}
+
+func TestProjectionReportLimitsExtendsScanToReferencedService(t *testing.T) {
+	env := store.Environment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
+		"composeFile": "compose/docker-compose.yml",
+		"generatedFiles": map[string]string{
+			"compose/docker-compose.yml": strings.Join([]string{
+				"services:",
+				"  app:",
+				"    image: alpine:3.20",
+				"    extends:",
+				"      file: ./common.yml",
+				"      service: app-base",
+			}, "\n") + "\n",
+			"compose/common.yml": strings.Join([]string{
+				"services:",
+				"  app-base:",
+				"    image: alpine:3.20",
+				"    env_file: ./base.env",
+				"    configs:",
+				"      - source: app_config",
+				"        target: /etc/app.yml",
+				"  unused:",
+				"    image: alpine:3.20",
+				"    env_file: ./unused.env",
+				"    configs:",
+				"      - source: unused_config",
+				"        target: /etc/unused.yml",
+				"configs:",
+				"  app_config:",
+				"    file: ./config/app.yml",
+				"  unused_config:",
+				"    file: ./config/unused.yml",
+			}, "\n") + "\n",
+			"compose/config/app.yml": "mode: app\n",
+		},
+	})}
+
+	report := FromEnvironment(env, store.EnvironmentComponentGraph{})
+	if report.OK || report.Counts.Missing != 1 {
+		t.Fatalf("extends projection report = %#v", report)
+	}
+	if !projectionContains(report, KindEnvFile, "compose/base.env", "workspace-file", false) {
+		t.Fatalf("referenced extends service env_file should be visible: %#v", report.Files)
+	}
+	if !projectionContains(report, KindComposeConfigFile, "compose/config/app.yml", "compose.generatedFiles", true) {
+		t.Fatalf("referenced extends service config should be collected: %#v", report.Files)
+	}
+	for _, path := range []string{"compose/unused.env", "compose/config/unused.yml"} {
+		if projectionPathContains(report, path) {
+			t.Fatalf("unreferenced extends service file %s should not block projection: %#v", path, report.Files)
 		}
 	}
 }
@@ -208,7 +334,16 @@ func projectionTestComposeJSON(t *testing.T, value map[string]any) string {
 
 func projectionContains(report ProjectionReport, kind string, path string, source string, ok bool) bool {
 	for _, file := range report.Files {
-		if file.Kind == kind && file.Path == path && file.Source == source && file.OK == ok {
+		if (kind == "" || file.Kind == kind) && file.Path == path && file.Source == source && file.OK == ok {
+			return true
+		}
+	}
+	return false
+}
+
+func projectionPathContains(report ProjectionReport, path string) bool {
+	for _, file := range report.Files {
+		if file.Path == path {
 			return true
 		}
 	}

@@ -189,7 +189,9 @@ report. A referenced compose file, Compose `env_file`, config file, or secret
 file is not repair-complete until it is backed by `compose.generatedFiles`, a
 component config asset, generated Compose env metadata, or an explicit
 environment package projection; summary-only `startupFiles` entries are repair
-hints, not durable file content.
+hints, not durable file content. Dynamic Compose file paths are resolved only
+from Store-backed `compose.env`, and `extends.file` scans only the named
+`extends.service` instead of every service in the referenced file.
 
 ## Report Back
 

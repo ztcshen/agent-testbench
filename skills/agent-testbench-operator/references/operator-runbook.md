@@ -218,6 +218,11 @@ Compose file references must all line up.
 When inspecting or bootstrapping an environment, use `fileProjection` to verify
 that Compose `env_file`, config file, and secret file references discovered
 inside Store-backed compose files also have Store-backed projection sources.
+Variable paths are resolved from Store-backed `compose.env`; if required
+variables are not present there, the projection gap should be repaired in Store
+instead of relying on a local shell. For `extends.file`, only the named
+`extends.service` in the referenced file is inspected, so unrelated services in
+shared compose fragments should not block readiness.
 
 After any `sandbox start --json` pass, inspect the report's `runtime` block.
 If `runtime.activeMatchesRuntime=false` or `runtime.fresh=false`, treat the
