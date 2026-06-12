@@ -118,17 +118,24 @@ func (b *projectionBuilder) addReferencedFiles(kind string, paths []string) {
 }
 
 func (b *projectionBuilder) addComposeContentReferences(paths []string) {
-	for _, composeFile := range paths {
+	scanned := map[string]bool{}
+	for queue := append([]string{}, paths...); len(queue) > 0; {
+		composeFile := queue[0]
+		queue = queue[1:]
 		cleanCompose := cleanPath(composeFile)
-		if cleanCompose == "" {
+		if cleanCompose == "" || scanned[cleanCompose] {
 			continue
 		}
+		scanned[cleanCompose] = true
 		content := b.generated[cleanCompose]
 		if content == "" {
 			continue
 		}
 		for _, ref := range composeContentFileReferences(content, cleanCompose) {
 			b.add(b.referencedFile(ref.path, ref.kind))
+			if ref.kind == KindComposeFile {
+				queue = append(queue, ref.path)
+			}
 		}
 	}
 }
@@ -233,6 +240,9 @@ func (c *composeReferenceCollector) addReferences(kind string, value any) {
 			c.addReferences(kind, item)
 			continue
 		}
+		if kind == KindEnvFile && !composeBool(itemMap["required"], true) {
+			continue
+		}
 		if path, ok := itemMap["path"]; ok {
 			c.addReferences(kind, path)
 		}
@@ -288,9 +298,18 @@ func composeString(value any) string {
 	return ""
 }
 
+func composeBool(value any, defaultValue bool) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	default:
+		return defaultValue
+	}
+}
+
 func cleanComposeReferencedPath(path string, composeDir string) string {
 	path = strings.TrimSpace(path)
-	if path == "" || strings.HasPrefix(path, "$") || strings.HasPrefix(path, "~") || filepath.IsAbs(path) {
+	if path == "" || strings.Contains(path, "$") || strings.HasPrefix(path, "~") || filepath.IsAbs(path) {
 		return ""
 	}
 	if composeDir == "." || composeDir == "" {

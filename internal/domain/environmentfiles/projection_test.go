@@ -2,6 +2,7 @@ package environmentfiles
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"agent-testbench/internal/store"
@@ -128,34 +129,38 @@ func TestProjectionReportDiscoversComposeNativeFileReferences(t *testing.T) {
 }
 
 func TestProjectionReportDiscoversComposeNativeReferenceVariants(t *testing.T) {
-	composeContent := `include:
-  - ./base.yml # shared base
-  - path:
-      - ./fragments/cache.yml
-    env_file: ./include.env
-services:
-  app:
-    image: alpine:3.20
-    extends:
-      file: ./common.yml # service defaults
-      service: app-base
-    env_file:
-      - path: ./app.env # app env
-        required: false
-        format: raw
-      - ./extra.env # extra env
-configs:
-    app_config:
-        file: ./config/app.yml # app config
-secrets:
-    db_password:
-        file: ./secrets/db.txt # db secret
-`
+	composeContent := strings.Join([]string{
+		"include:",
+		"  - ./base.yml # shared base",
+		"  - path:",
+		"      - ./fragments/cache.yml",
+		"    env_file: ./include.env",
+		"services:",
+		"  app:",
+		"    image: alpine:3.20",
+		"    extends:",
+		"      file: ./common.yml # service defaults",
+		"      service: app-base",
+		"    env_file:",
+		"      - path: ./app.env # app env",
+		"        required: false",
+		"        format: raw",
+		"      - ./extra.env # extra env",
+		"      - ./env/${TARGET}.env",
+		"configs:",
+		"    app_config:",
+		"        file: ./config/app.yml # app config",
+		"    dynamic_config:",
+		"        file: ./config/${PROFILE}.yml",
+		"secrets:",
+		"    db_password:",
+		"        file: ./secrets/db.txt # db secret",
+	}, "\n") + "\n"
 	env := store.Environment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
 		"composeFile": "compose/docker-compose.yml",
 		"generatedFiles": map[string]string{
 			"compose/docker-compose.yml":  composeContent,
-			"compose/base.yml":            "services: {}\n",
+			"compose/base.yml":            "services:\n  base:\n    image: alpine:3.20\n    env_file:\n      - ./base.env\n",
 			"compose/fragments/cache.yml": "services: {}\n",
 			"compose/common.yml":          "services: {}\n",
 			"compose/config/app.yml":      "mode: test\n",
@@ -178,14 +183,16 @@ secrets:
 	if !projectionContains(report, KindComposeSecretFile, "compose/secrets/db.txt", "compose.generatedFiles", true) {
 		t.Fatalf("indented secret file should be Store-backed: %#v", report.Files)
 	}
-	for _, path := range []string{"compose/include.env", "compose/app.env", "compose/extra.env"} {
+	for _, path := range []string{"compose/include.env", "compose/extra.env", "compose/base.env"} {
 		if !projectionContains(report, KindEnvFile, path, "workspace-file", false) {
 			t.Fatalf("env file gap %s should be visible: %#v", path, report.Missing)
 		}
 	}
 	for _, file := range report.Files {
-		if file.Path == "compose/required: false" || file.Path == "compose/format: raw" {
-			t.Fatalf("env_file metadata should not be collected as a path: %#v", report.Files)
+		switch file.Path {
+		case "compose/app.env", "compose/required: false", "compose/format: raw",
+			"compose/env/${TARGET}.env", "compose/config/${PROFILE}.yml":
+			t.Fatalf("optional metadata or interpolated path should not be collected: %#v", report.Files)
 		}
 	}
 }
