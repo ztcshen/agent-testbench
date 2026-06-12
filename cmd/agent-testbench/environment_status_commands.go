@@ -63,7 +63,8 @@ func runEnvironmentStatus(ctx context.Context, args []string) error {
 		VerificationWorkflow: plan.WorkflowID,
 		ComponentGraph:       environmentRestoreComponentGraphReport(env.ID, graph),
 	}
-	report.Docker = environmentStatusDocker(ctx, plan.Compose, plan.Workspace)
+	healthChecks := environmentRestoreEffectiveHealthChecks(jsonArrayString(env.HealthChecksJSON), plan.Compose, graph, plan.Workspace)
+	report.Docker = environmentStatusDocker(ctx, plan.Compose, plan.Workspace, healthChecks)
 	if !report.Docker.OK {
 		report.OK = false
 		report.Error = report.Docker.Error
@@ -81,7 +82,7 @@ func runEnvironmentStatus(ctx context.Context, args []string) error {
 	return nil
 }
 
-func environmentStatusDocker(ctx context.Context, compose map[string]any, workspace string) environmentStatusDockerReport {
+func environmentStatusDocker(ctx context.Context, compose map[string]any, workspace string, healthChecks []any) environmentStatusDockerReport {
 	report := environmentStatusDockerReport{OK: true, Action: "inspect-compose-services", ComposeFile: strings.Join(environmentRestoreResolvedComposeFiles(workspace, environmentRestoreComposeFiles(compose)), ",")}
 	composeBaseArgs := environmentRestoreComposeBaseArgs(compose, workspace, environmentRestoreResolvedComposeFiles(workspace, environmentRestoreComposeFiles(compose)))
 	if len(composeBaseArgs) == 0 {
@@ -94,7 +95,7 @@ func environmentStatusDocker(ctx context.Context, compose map[string]any, worksp
 		return report
 	}
 	services := environmentLifecycleComposeServices(compose, workspace)
-	for _, item := range inspectEnvironmentComposeServices(ctx, services, workspace, composeBaseArgs) {
+	for _, item := range inspectEnvironmentComposeServices(ctx, services, workspace, composeBaseArgs, healthChecks) {
 		report.Services = append(report.Services, environmentStatusServiceFromHealth(item))
 		if !item.OK {
 			report.OK = false
@@ -111,11 +112,12 @@ func environmentStatusDocker(ctx context.Context, compose map[string]any, worksp
 	return report
 }
 
-func inspectEnvironmentComposeServices(ctx context.Context, services []string, workspace string, composeBaseArgs []string) []environmentRestoreHealthCheckReport {
+func inspectEnvironmentComposeServices(ctx context.Context, services []string, workspace string, composeBaseArgs []string, healthChecks []any) []environmentRestoreHealthCheckReport {
 	command := append(append([]string{"docker", "compose"}, composeBaseArgs...), "ps", "-a", "--format", "json")
 	command = append(command, services...)
 	output, errText := runRestoreCommand(ctx, workspace, command)
 	out := make([]environmentRestoreHealthCheckReport, 0, len(services))
+	expectations := environmentStatusComposeServiceExpectations(healthChecks)
 	if errText != "" {
 		for _, service := range services {
 			out = append(out, environmentRestoreHealthCheckReport{
@@ -148,9 +150,38 @@ func inspectEnvironmentComposeServices(ctx context.Context, services []string, w
 			continue
 		}
 		check.Output = truncateReportText(output, 200)
+		check = environmentStatusApplyComposeServiceExpectation(check, expectations[service])
 		out = append(out, check)
 	}
 	return out
+}
+
+func environmentStatusComposeServiceExpectations(healthChecks []any) map[string]environmentRestoreHealthCheckReport {
+	out := map[string]environmentRestoreHealthCheckReport{}
+	for _, raw := range healthChecks {
+		check, ok := environmentRestoreHealthCheckFromAny(raw)
+		if !ok || check.Kind != "compose-service" || strings.TrimSpace(check.Service) == "" {
+			continue
+		}
+		out[check.Service] = check
+	}
+	return out
+}
+
+func environmentStatusApplyComposeServiceExpectation(check environmentRestoreHealthCheckReport, expected environmentRestoreHealthCheckReport) environmentRestoreHealthCheckReport {
+	if strings.TrimSpace(expected.Service) == "" {
+		return check
+	}
+	check.Expect = expected.Expect
+	check.OneShot = expected.OneShot
+	check.OK = check.State == "running" && (check.Health == "" || check.Health == "healthy") || environmentRestoreExitedCompleted(&check, check.State, check.ExitCode, check.ExitCode != 0 || check.State == environmentRestoreDockerStateExited)
+	if !check.OK && check.Error == "" {
+		check.Error = "compose service is not ready"
+	}
+	if check.OK {
+		check.Error = ""
+	}
+	return check
 }
 
 func parseComposeServiceStatusReports(output string) map[string]environmentRestoreHealthCheckReport {

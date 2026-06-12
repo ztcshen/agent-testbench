@@ -16,10 +16,11 @@ func TestRepoSpecsMergesServicesOverRepoMapAndResolvesCheckouts(t *testing.T) {
 	)
 	want := []RepoSpec{
 		{
-			ServiceID: "api",
-			URL:       "git@example.com:team/api.git",
-			Branch:    "main",
-			Checkout:  filepath.Join(workspace, "services/api"),
+			ServiceID:        "api",
+			URL:              "git@example.com:team/api.git",
+			Branch:           "main",
+			Checkout:         filepath.Join(workspace, "services/api"),
+			CheckoutExplicit: true,
 		},
 		{
 			ServiceID: "db",
@@ -57,7 +58,8 @@ func TestSourcePolicyReportRequiresRemoteComponentReposWhenRemoteOnly(t *testing
 	report := SourcePolicyReport([]RepoSpec{
 		{ServiceID: "api", URL: "git@example.com:team/api.git"},
 		{ServiceID: "worker", URL: "../worker"},
-		{ServiceID: "checkout-only", Checkout: "/tmp/local-checkout"},
+		{ServiceID: "image-only", Checkout: "/tmp/default-workspace/image-only"},
+		{ServiceID: "checkout-only", Checkout: "/tmp/local-checkout", CheckoutExplicit: true},
 	}, true)
 
 	if report.OK || !report.RemoteOnly || len(report.Violations) != 2 {

@@ -24,7 +24,7 @@ func TestEnvironmentRestoreAppliesAssetsBoundToDependencyEdges(t *testing.T) {
 		ComposeJSON: `{
 			"composeFile":"compose.yml",
 			"generatedFiles":{
-				"compose.yml":"services:\n  mysql:\n    image: mysql:8\n  apollo:\n    image: wiremock/wiremock\n  app:\n    image: alpine:3.20\n",
+				"compose.yml":"services:\n  mysql:\n    image: mysql:8\n    volumes:\n      - ./compose/mysql/init:/docker-entrypoint-initdb.d\n  apollo:\n    image: wiremock/wiremock\n  app:\n    image: alpine:3.20\n",
 				"compose/platform/apollo/mappings/app.json":"{\"request\":{\"url\":\"/configs/app\"},\"response\":{\"status\":200}}\n"
 			},
 			"services":["mysql","apollo","app"],
@@ -112,8 +112,8 @@ func TestEnvironmentRestoreEdgeAssetsAvoidNonSQLMySQLAndDuplicateApply(t *testin
 	if actions["mysql.config"] != "project-generated-file" || commands["mysql.config"] != "" {
 		t.Fatalf("non-SQL MySQL asset should not run through mysql client: actions=%#v commands=%#v", actions, commands)
 	}
-	if actions["shared.schema"] != "project-mysql-initdb" || commands["shared.schema"] != "" {
-		t.Fatalf("SQL MySQL asset should project to native initdb without an exec command: actions=%#v commands=%#v", actions, commands)
+	if actions["shared.schema"] != "apply-mysql-sql" || !strings.Contains(commands["shared.schema"], "exec -T mysql") {
+		t.Fatalf("unmounted SQL MySQL asset should fall back to mysql exec: actions=%#v commands=%#v", actions, commands)
 	}
 }
 
@@ -147,7 +147,7 @@ func TestEnvironmentRestoreEdgeAssetsRequireMySQLProviderSignal(t *testing.T) {
 	if actionsByTarget["postgres.schema@postgres"] == "plan-apply-mysql-sql" {
 		t.Fatalf("postgres SQL asset should not use MySQL apply: %#v", actionsByTarget)
 	}
-	if actionsByTarget["shared.schema@mysql.primary"] != "project-mysql-initdb" {
+	if actionsByTarget["shared.schema@mysql.primary"] != "apply-mysql-sql" {
 		t.Fatalf("shared schema should use MySQL apply for MySQL target: %#v", actionsByTarget)
 	}
 	if actionsByTarget["shared.schema@postgres"] == "plan-apply-mysql-sql" {
@@ -243,7 +243,7 @@ func TestEnvironmentRestoreRejectsDuplicateMySQLInitDBTargets(t *testing.T) {
 		},
 	}
 
-	failures := environmentRestoreProjectMySQLInitDBAssets(graph, nil, t.TempDir())
+	failures := environmentRestoreProjectMySQLInitDBAssets(graph, environmentRestoreMySQLInitDBMountedCompose(), nil, t.TempDir())
 	if len(failures) != 1 || failures[0].OK || !strings.Contains(failures[0].Error, "shared by multiple Store assets") {
 		t.Fatalf("duplicate initdb target failures = %#v", failures)
 	}
@@ -263,7 +263,7 @@ func TestEnvironmentRestoreRejectsMySQLInitDBGeneratedFileConflict(t *testing.T)
 		},
 	}
 
-	failures := environmentRestoreProjectMySQLInitDBAssets(graph, map[string]string{
+	failures := environmentRestoreProjectMySQLInitDBAssets(graph, environmentRestoreMySQLInitDBMountedCompose(), map[string]string{
 		"compose/mysql/init/app.sql": "create database from_generated_file;\n",
 	}, t.TempDir())
 	if len(failures) != 1 || failures[0].OK || !strings.Contains(failures[0].Error, "conflicts with generated Store file") {
@@ -285,7 +285,7 @@ func TestEnvironmentRestoreAllowsEquivalentGeneratedMySQLInitDBTarget(t *testing
 		},
 	}
 
-	failures := environmentRestoreProjectMySQLInitDBAssets(graph, map[string]string{
+	failures := environmentRestoreProjectMySQLInitDBAssets(graph, environmentRestoreMySQLInitDBMountedCompose(), map[string]string{
 		"compose/mysql/init/app.sql": "create database app_one;",
 	}, t.TempDir())
 	if len(failures) != 0 {
@@ -299,6 +299,7 @@ func TestEnvironmentRestoreEdgeAssetContentRejectsParentPath(t *testing.T) {
 		store.ComponentConfigAsset{OwnerComponentID: "app", AssetID: "bad.schema", AssetKind: "mysql-ddl", TargetComponentID: "mysql", TargetPath: ".."},
 		map[string]store.EnvironmentComponent{"mysql": {ComponentID: "mysql", ComposeService: "mysql"}},
 		nil,
+		nil,
 		t.TempDir(),
 		false,
 		[]string{"-f", "compose.yml"},
@@ -306,6 +307,42 @@ func TestEnvironmentRestoreEdgeAssetContentRejectsParentPath(t *testing.T) {
 	)
 	if item.OK || !strings.Contains(item.Error, "must stay inside the restore workspace") {
 		t.Fatalf("parent path edge asset should be rejected: %#v", item)
+	}
+}
+
+func TestEnvironmentRestoreRejectsUnMountedMySQLInitDBProjection(t *testing.T) {
+	graph := store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{
+			{ComponentID: "mysql", Kind: "middleware", Role: "database", ComposeService: "mysql"},
+			{ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app"},
+		},
+		Dependencies: []store.ComponentDependency{
+			{ConsumerComponentID: "app", ProviderComponentID: "mysql", Capability: "sql", ProfileJSON: `{"assetIds":["schema.one"]}`},
+		},
+		Assets: []store.ComponentConfigAsset{
+			{OwnerComponentID: "app", AssetID: "schema.one", AssetKind: "mysql-ddl", TargetComponentID: "mysql", TargetPath: "compose/mysql/init/app.sql", ContentInline: "create database app_one;\n"},
+		},
+	}
+
+	failures := environmentRestoreProjectMySQLInitDBAssets(graph, map[string]any{
+		"composeFile":     "compose.yml",
+		"generatedFiles":  map[string]any{"compose.yml": "services:\n  mysql:\n    image: mysql:8\n"},
+		"skipPull":        true,
+		"skipBuild":       true,
+		"services":        []any{"mysql"},
+		"generatedEnvKey": "ignored",
+	}, nil, t.TempDir())
+	if len(failures) != 1 || failures[0].OK || !strings.Contains(failures[0].Error, "not mounted") {
+		t.Fatalf("unmounted initdb target should fail native projection: %#v", failures)
+	}
+}
+
+func environmentRestoreMySQLInitDBMountedCompose() map[string]any {
+	return map[string]any{
+		"composeFile": "compose.yml",
+		"generatedFiles": map[string]any{
+			"compose.yml": "services:\n  mysql:\n    image: mysql:8\n    volumes:\n      - ./compose/mysql/init:/docker-entrypoint-initdb.d\n",
+		},
 	}
 }
 

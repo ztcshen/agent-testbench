@@ -75,7 +75,7 @@ func environmentRestoreApplyEdgeAssetsWithOptions(ctx context.Context, graph sto
 			})
 			continue
 		}
-		item := environmentRestoreApplyEdgeAsset(ctx, ref.Dependency, ref.Asset, componentByID, generated, workspace, execute, composeBaseArgs, options)
+		item := environmentRestoreApplyEdgeAsset(ctx, ref.Dependency, ref.Asset, componentByID, compose, generated, workspace, execute, composeBaseArgs, options)
 		out = append(out, item)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -154,7 +154,7 @@ func environmentRestoreComponentMap(components []store.EnvironmentComponent) map
 	return out
 }
 
-func environmentRestoreApplyEdgeAsset(ctx context.Context, dep store.ComponentDependency, asset store.ComponentConfigAsset, components map[string]store.EnvironmentComponent, generated map[string]string, workspace string, execute bool, composeBaseArgs []string, options environmentRestoreApplyAssetOptions) environmentRestoreAppliedAsset {
+func environmentRestoreApplyEdgeAsset(ctx context.Context, dep store.ComponentDependency, asset store.ComponentConfigAsset, components map[string]store.EnvironmentComponent, compose map[string]any, generated map[string]string, workspace string, execute bool, composeBaseArgs []string, options environmentRestoreApplyAssetOptions) environmentRestoreAppliedAsset {
 	targetComponentID := firstNonEmpty(strings.TrimSpace(asset.TargetComponentID), strings.TrimSpace(dep.ProviderComponentID))
 	targetService := environmentRestoreComponentComposeService(components[targetComponentID], targetComponentID)
 	item := environmentRestoreAppliedAsset{
@@ -186,11 +186,11 @@ func environmentRestoreApplyEdgeAsset(ctx context.Context, dep store.ComponentDe
 	}
 	if environmentRestoreIsMySQLSQLAsset(asset, dep) {
 		if execute && options.UseExistingContainers {
-			return environmentRestoreApplyMySQLSQLEdgeAsset("", nil, workspace, execute, composeBaseArgs, options, item)
+			return environmentRestoreApplyMySQLSQLEdgeAsset("", nil, compose, workspace, execute, composeBaseArgs, options, item)
 		}
 		content, contentErr := environmentRestoreEdgeAssetContent(asset, workspace)
 		item.Bytes = len(content)
-		return environmentRestoreApplyMySQLSQLEdgeAsset(content, contentErr, workspace, execute, composeBaseArgs, options, item)
+		return environmentRestoreApplyMySQLSQLEdgeAsset(content, contentErr, compose, workspace, execute, composeBaseArgs, options, item)
 	}
 	return environmentRestoreApplyGeneratedEdgeAsset(asset, generated, workspace, execute, item)
 }

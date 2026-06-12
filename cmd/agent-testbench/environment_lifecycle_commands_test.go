@@ -138,6 +138,68 @@ func TestEnvironmentStatusExposesLastRestoreSummary(t *testing.T) {
 	}
 }
 
+func TestEnvironmentStatusPreservesOneShotComposeExpectations(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	fixture.writeDockerTool(t, `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
+if [ "$1" = compose ] && [ "$2" = version ]; then
+  printf 'Docker Compose version v2.0.0\n'
+  exit 0
+fi
+if [ "$1" = compose ] && [[ "$*" == *" ps -a --format json"* ]]; then
+  printf '{"Name":"demo-seed","Service":"seed","State":"exited","ExitCode":0}\n'
+  exit 0
+fi
+exit 0
+`)
+	composeSource := filepath.Join(t.TempDir(), "compose.yml")
+	writeFile(t, composeSource, "services:\n  seed:\n    image: alpine:3.20\n")
+	runCLI(t, "environment", "register",
+		"--store", fixture.StoreDSN,
+		"--id", "env.status.oneshot",
+		"--compose-file", "compose.yml",
+		"--compose-generated-file", "compose.yml="+composeSource,
+		"--compose-service", "seed",
+		"--verification-workflow", "workflow.core-10",
+	)
+	runtime, err := openStore(context.Background(), fixture.StoreDSN)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer runtime.Close()
+	env, err := runtime.GetEnvironment(context.Background(), "env.status.oneshot")
+	if err != nil {
+		t.Fatalf("get environment: %v", err)
+	}
+	env.HealthChecksJSON = `[{"kind":"compose-service","service":"seed","expect":"service_completed_successfully"}]`
+	if _, err := runtime.UpsertEnvironment(context.Background(), env); err != nil {
+		t.Fatalf("upsert one-shot health check: %v", err)
+	}
+
+	out := runCLIWithEnv(t, fixture.DockerEnv, "environment", "status", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--json", "env.status.oneshot")
+	var report struct {
+		OK     bool `json:"ok"`
+		Docker struct {
+			Summary struct {
+				Ready  int `json:"ready"`
+				Failed int `json:"failed"`
+			} `json:"summary"`
+			Services []struct {
+				Service  string `json:"service"`
+				State    string `json:"state"`
+				ExitCode int    `json:"exitCode"`
+				OK       bool   `json:"ok"`
+			} `json:"services"`
+		} `json:"docker"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode one-shot status report: %v\n%s", err, out)
+	}
+	if !report.OK || report.Docker.Summary.Ready != 1 || report.Docker.Summary.Failed != 0 || len(report.Docker.Services) != 1 || !report.Docker.Services[0].OK || report.Docker.Services[0].State != "exited" || report.Docker.Services[0].ExitCode != 0 {
+		t.Fatalf("one-shot status report = %#v", report)
+	}
+}
+
 func TestEnvironmentStatusFailsWhenNoComposeServicesCanBeInspected(t *testing.T) {
 	fixture := newEnvironmentRestoreDockerCLIFixture(t)
 	composeSource := filepath.Join(t.TempDir(), "compose.yml")

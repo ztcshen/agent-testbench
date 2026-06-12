@@ -20,11 +20,12 @@ type PackageSpec struct {
 }
 
 type RepoSpec struct {
-	ServiceID string
-	URL       string
-	Branch    string
-	Ref       string
-	Checkout  string
+	ServiceID        string
+	URL              string
+	Branch           string
+	Ref              string
+	Checkout         string
+	CheckoutExplicit bool
 }
 
 func RepoSpecs(reposJSON string, servicesJSON string, workspace string) []RepoSpec {
@@ -38,6 +39,7 @@ func RepoSpecs(reposJSON string, servicesJSON string, workspace string) []RepoSp
 			spec.Branch = strings.TrimSpace(stringValue(item["branch"]))
 			spec.Ref = strings.TrimSpace(stringValue(item["ref"]))
 			spec.Checkout = strings.TrimSpace(stringValue(item["checkout"]))
+			spec.CheckoutExplicit = spec.Checkout != ""
 		}
 		if spec.ServiceID != "" {
 			specByID[spec.ServiceID] = spec
@@ -65,6 +67,7 @@ func RepoSpecs(reposJSON string, servicesJSON string, workspace string) []RepoSp
 		}
 		if value := strings.TrimSpace(stringValue(item["checkout"])); value != "" {
 			spec.Checkout = value
+			spec.CheckoutExplicit = true
 		}
 		specByID[id] = spec
 	}
@@ -113,13 +116,13 @@ func SourcePolicyReport(specs []RepoSpec, remoteOnly bool) SourcePolicy {
 	if !remoteOnly {
 		return report
 	}
-	addViolation := func(label string, rawURL string, checkout string) {
+	addViolation := func(label string, rawURL string, checkout string, checkoutExplicit bool) {
 		rawURL = strings.TrimSpace(rawURL)
 		checkout = strings.TrimSpace(checkout)
 		if IsRemoteGitURL(rawURL) {
 			return
 		}
-		if rawURL == "" && checkout != "" {
+		if rawURL == "" && checkout != "" && checkoutExplicit {
 			report.OK = false
 			report.Violations = append(report.Violations, label+" must use a remote Git URL, got checkout-only source: "+checkout)
 			return
@@ -131,7 +134,7 @@ func SourcePolicyReport(specs []RepoSpec, remoteOnly bool) SourcePolicy {
 		report.Violations = append(report.Violations, label+" must use a remote Git URL, got local path/source: "+rawURL)
 	}
 	for _, spec := range specs {
-		addViolation("component "+spec.ServiceID, spec.URL, spec.Checkout)
+		addViolation("component "+spec.ServiceID, spec.URL, spec.Checkout, spec.CheckoutExplicit)
 	}
 	return report
 }
