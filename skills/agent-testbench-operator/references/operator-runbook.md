@@ -198,9 +198,10 @@ stream-json`; phase events identify `docker.prepare`,
 `docker.compose.validate`, `docker.cleanup`, `docker.native-assets`,
 `docker.compose.execute`, `docker.edge-assets`, `docker.health`, and
 `workflow.acceptance`. If Docker restore or health does not pass, the workflow
-acceptance phase must be skipped rather than started. While acceptance is still
-running, watch `workflow.acceptance` waiting observations for the run id and
-remaining timeout.
+acceptance phase must be skipped rather than started. While Docker Compose
+startup commands are still running, watch `docker.compose.execute` waiting
+observations for the active command. While acceptance is still running, watch
+`workflow.acceptance` waiting observations for the run id and remaining timeout.
 For `environment migration apply|baseline --output-format stream-json`, watch
 `environment.migration` waiting observations to identify the active migration
 asset while MySQL execution is still running.

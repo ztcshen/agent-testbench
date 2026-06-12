@@ -22,6 +22,7 @@ const (
 	agentCommandStatusRunning   = "running"
 	agentCommandStatusCompleted = "completed"
 	agentCommandStatusFailed    = "failed"
+	agentCommandStatusWaiting   = "waiting"
 
 	dockerComposeCommandVersion = "version"
 )

@@ -179,7 +179,7 @@ func (p *environmentRestoreAcceptanceProgress) waiting(status string) {
 	environmentRestoreEmitEvent(p.ctx, agentStreamEvent{
 		Type:        "tool_observation",
 		Phase:       "workflow.acceptance",
-		Status:      "waiting",
+		Status:      agentCommandStatusWaiting,
 		Target:      p.runID,
 		Message:     message,
 		RemainingMs: remaining.Milliseconds(),

@@ -263,7 +263,7 @@ func runEnvironmentMigrationWithProgress(ctx context.Context, opts environmentMi
 			agentEmitEvent(ctx, agentStreamEvent{
 				Type:      "tool_observation",
 				Phase:     "environment.migration",
-				Status:    "waiting",
+				Status:    agentCommandStatusWaiting,
 				Target:    item.AssetID,
 				Message:   environmentMigrationItemMessage(baseline, "still running", item),
 				ElapsedMs: time.Since(started).Milliseconds(),

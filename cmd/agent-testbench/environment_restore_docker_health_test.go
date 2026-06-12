@@ -93,6 +93,30 @@ func TestEnvironmentRestoreStreamJSONEmitsAgentEvents(t *testing.T) {
 	}
 }
 
+func TestEnvironmentRestoreStreamJSONEmitsComposeExecuteWaitingObservation(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	fixture.writeWorkspaceFile(t, "compose.yml", "services: {}\n")
+
+	runCLI(t, "environment", "register",
+		"--store", fixture.StoreDSN,
+		"--id", "env.stream.compose-wait",
+		"--compose-file", "compose.yml",
+		"--health-url", newHealthyTestURL(t),
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	env := append([]string{}, fixture.DockerEnv...)
+	env = append(env,
+		"AGENT_TESTBENCH_FAKE_DOCKER_COMPOSE_UP_SLEEP=0.05",
+		"AGENT_TESTBENCH_COMPOSE_EXECUTE_PROGRESS_INTERVAL_MS=1",
+	)
+	out := runCLIWithEnv(t, env, "environment", "restore", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--execute", "--output-format", "stream-json", "env.stream.compose-wait")
+	events := decodeAgentStreamEvents(t, out)
+	if !agentStreamHasEvent(events, "tool_observation", "docker.compose.execute", "waiting", "docker compose up") {
+		t.Fatalf("stream missing docker compose execute waiting observation: %#v", events)
+	}
+}
+
 func TestEnvironmentRestoreStreamJSONSkipsWorkflowWhenDockerIsNotReady(t *testing.T) {
 	fixture := newEnvironmentRestoreDockerCLIFixture(t)
 	fixture.writeWorkspaceFile(t, "compose.yml", "services: {}\n")

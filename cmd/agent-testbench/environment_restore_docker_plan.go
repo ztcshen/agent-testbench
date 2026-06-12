@@ -6,10 +6,14 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"agent-testbench/internal/store"
 )
+
+var environmentRestoreComposeExecuteProgressInterval = 5 * time.Second
 
 type environmentRestoreDockerReport struct {
 	OK            bool                                  `json:"ok"`
@@ -272,7 +276,7 @@ func environmentRestoreMarkDockerExecuting(report *environmentRestoreDockerRepor
 
 func environmentRestoreRunCommands(ctx context.Context, report *environmentRestoreDockerReport, workspace string) bool {
 	for _, command := range report.Commands {
-		output, errText := runRestoreCommand(ctx, workspace, command)
+		output, errText := runEnvironmentRestoreDockerCommandWithProgress(ctx, workspace, command)
 		if strings.TrimSpace(output) != "" {
 			report.Output = append(report.Output, output)
 		}
@@ -283,6 +287,52 @@ func environmentRestoreRunCommands(ctx context.Context, report *environmentResto
 		}
 	}
 	return true
+}
+
+func runEnvironmentRestoreDockerCommandWithProgress(ctx context.Context, workspace string, command []string) (string, string) {
+	if !agentHasEventStream(ctx) {
+		return runRestoreCommand(ctx, workspace, command)
+	}
+	started := time.Now()
+	resultCh := make(chan struct {
+		output string
+		err    string
+	}, 1)
+	go func() {
+		output, errText := runRestoreCommand(ctx, workspace, command)
+		resultCh <- struct {
+			output string
+			err    string
+		}{output: output, err: errText}
+	}()
+	ticker := time.NewTicker(environmentRestoreComposeExecuteProgressIntervalValue())
+	defer ticker.Stop()
+	for {
+		select {
+		case result := <-resultCh:
+			return result.output, result.err
+		case <-ticker.C:
+			agentEmitEvent(ctx, agentStreamEvent{
+				Type:      "tool_observation",
+				Phase:     "docker.compose.execute",
+				Status:    agentCommandStatusWaiting,
+				Target:    restoreCommandTarget(command),
+				Message:   "Docker Compose command still running",
+				Command:   append([]string(nil), command...),
+				Workdir:   workspace,
+				ElapsedMs: time.Since(started).Milliseconds(),
+			})
+		}
+	}
+}
+
+func environmentRestoreComposeExecuteProgressIntervalValue() time.Duration {
+	if raw := strings.TrimSpace(os.Getenv("AGENT_TESTBENCH_COMPOSE_EXECUTE_PROGRESS_INTERVAL_MS")); raw != "" {
+		if millis, err := strconv.Atoi(raw); err == nil && millis > 0 {
+			return time.Duration(millis) * time.Millisecond
+		}
+	}
+	return environmentRestoreComposeExecuteProgressInterval
 }
 
 func environmentRestoreDockerCleanupPlan(baseArgs []string, options environmentRestoreDockerCleanupOptions, fixedContainerNames []string) environmentRestoreDockerCleanupReport {

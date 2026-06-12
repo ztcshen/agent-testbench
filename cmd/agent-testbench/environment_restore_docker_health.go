@@ -339,7 +339,7 @@ func (p *environmentRestoreHealthProgress) waiting(lastErr string, deadline time
 	environmentRestoreEmitEvent(p.ctx, agentStreamEvent{
 		Type:        "tool_observation",
 		Phase:       "health.wait",
-		Status:      "waiting",
+		Status:      agentCommandStatusWaiting,
 		Target:      p.target,
 		Message:     truncateReportText(lastErr, 200),
 		RemainingMs: remaining.Milliseconds(),

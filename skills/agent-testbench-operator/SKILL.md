@@ -150,7 +150,9 @@ During `environment restore --output-format stream-json`, watch the
 `docker.native-assets`, `docker.compose.execute`, `docker.edge-assets`,
 `docker.health`, and `workflow.acceptance` phases. If Docker restore or health
 does not pass, `--run-workflow` must remain skipped instead of invoking the
-acceptance workflow. While an acceptance run is still running, the stream emits
+acceptance workflow. While Docker Compose startup commands are still running,
+the stream emits `docker.compose.execute` waiting observations for the active
+command. While an acceptance run is still running, the stream emits
 `workflow.acceptance` waiting observations with the acceptance run id.
 During `environment migration apply|baseline --output-format stream-json`, the
 stream emits `environment.migration` waiting observations for the active

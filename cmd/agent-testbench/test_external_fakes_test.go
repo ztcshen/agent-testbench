@@ -65,6 +65,15 @@ if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
   exit 0
 fi
 if [ "$1" = "compose" ]; then
+  saw_up=0
+  for arg in "$@"; do
+    if [ "$arg" = "up" ]; then
+      saw_up=1
+    fi
+  done
+  if [ -n "${AGENT_TESTBENCH_FAKE_DOCKER_COMPOSE_UP_SLEEP:-}" ] && [ "$saw_up" = "1" ]; then
+    sleep "$AGENT_TESTBENCH_FAKE_DOCKER_COMPOSE_UP_SLEEP"
+  fi
   prev=""
   collect_services=0
   for arg in "$@"; do
