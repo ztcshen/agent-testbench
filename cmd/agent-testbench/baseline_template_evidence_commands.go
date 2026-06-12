@@ -410,6 +410,22 @@ func evidenceTasks(ctx context.Context, s store.Store, filter evidenceTaskFilter
 	return report, nil
 }
 
+func postProcessTaskMatches(row store.PostProcessTask, filter evidenceTaskFilter) bool {
+	if filter.StepID != "" && row.StepID != filter.StepID {
+		return false
+	}
+	if filter.CaseID != "" && row.CaseID != filter.CaseID {
+		return false
+	}
+	if filter.Kind != "" && row.Kind != filter.Kind {
+		return false
+	}
+	if filter.Status != "" && row.Status != filter.Status {
+		return false
+	}
+	return true
+}
+
 func printEvidenceTasks(report evidenceTaskReport) {
 	fmt.Printf("Post Process Tasks: %s\n", report.RunID)
 	fmt.Printf("Total: %d Passed: %d Failed: %d Running: %d Skipped: %d Duration: %d ms\n", report.Counts.Total, report.Counts.Passed, report.Counts.Failed, report.Counts.Running, report.Counts.Skipped, report.Counts.DurationMs)

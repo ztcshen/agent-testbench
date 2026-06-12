@@ -509,22 +509,6 @@ func addWorkflowGateStep(report *workflowGateReport, step workflowGateStep) {
 	report.MissingEvidence = append(report.MissingEvidence, step)
 }
 
-func postProcessTaskMatches(row store.PostProcessTask, filter evidenceTaskFilter) bool {
-	if filter.StepID != "" && row.StepID != filter.StepID {
-		return false
-	}
-	if filter.CaseID != "" && row.CaseID != filter.CaseID {
-		return false
-	}
-	if filter.Kind != "" && row.Kind != filter.Kind {
-		return false
-	}
-	if filter.Status != "" && row.Status != filter.Status {
-		return false
-	}
-	return true
-}
-
 func executeCaseSuiteQualityReport(ctx context.Context, bundle profile.Bundle, sourceStore store.Store, sourceStoreURL string, filters caseListFilter, cases []profile.APICase, outputDir string) (caseSuiteQualityReport, error) {
 	started := time.Now()
 	plan, err := casesuite.QualityPlan(ctx, bundle, sourceStore, caseSuiteFilter(filters), cases)
