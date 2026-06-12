@@ -54,22 +54,23 @@ type environmentRestoreDockerCleanupLinkageReport struct {
 }
 
 type environmentRestoreHealthCheckReport struct {
-	ID         string `json:"id,omitempty"`
-	Kind       string `json:"kind"`
-	URL        string `json:"url"`
-	Address    string `json:"address,omitempty"`
-	Command    string `json:"command,omitempty"`
-	Service    string `json:"service,omitempty"`
-	Container  string `json:"container,omitempty"`
-	Expect     string `json:"expect,omitempty"`
-	OneShot    bool   `json:"oneShot,omitempty"`
-	OK         bool   `json:"ok"`
-	StatusCode int    `json:"statusCode,omitempty"`
-	State      string `json:"state,omitempty"`
-	Health     string `json:"health,omitempty"`
-	ExitCode   int    `json:"exitCode,omitempty"`
-	Output     string `json:"output,omitempty"`
-	Error      string `json:"error,omitempty"`
+	ID          string `json:"id,omitempty"`
+	Kind        string `json:"kind"`
+	URL         string `json:"url"`
+	Address     string `json:"address,omitempty"`
+	Command     string `json:"command,omitempty"`
+	Service     string `json:"service,omitempty"`
+	Container   string `json:"container,omitempty"`
+	Expect      string `json:"expect,omitempty"`
+	OneShot     bool   `json:"oneShot,omitempty"`
+	OK          bool   `json:"ok"`
+	StatusCode  int    `json:"statusCode,omitempty"`
+	State       string `json:"state,omitempty"`
+	Health      string `json:"health,omitempty"`
+	ExitCode    int    `json:"exitCode,omitempty"`
+	HasExitCode bool   `json:"-"`
+	Output      string `json:"output,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
 func environmentRestoreDockerPlan(graph store.EnvironmentComponentGraph, compose map[string]any, workspace string, cleanupOptions environmentRestoreDockerCleanupOptions) (environmentRestoreDockerReport, []string) {

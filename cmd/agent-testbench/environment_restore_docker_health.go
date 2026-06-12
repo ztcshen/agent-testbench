@@ -188,6 +188,7 @@ func waitEnvironmentRestoreComposeServiceHealthCheck(ctx context.Context, check 
 		check.Health = health
 		if hasExitCode {
 			check.ExitCode = exitCode
+			check.HasExitCode = true
 		}
 		if environmentRestoreRequiresCompletedExit(check) {
 			return environmentRestoreExitedCompleted(check, state, exitCode, hasExitCode)
@@ -216,6 +217,7 @@ func waitEnvironmentRestoreContainerHealthCheck(ctx context.Context, check envir
 		check.Health = health
 		if hasExitCode {
 			check.ExitCode = exitCode
+			check.HasExitCode = true
 		}
 		if environmentRestoreRequiresCompletedExit(check) {
 			return environmentRestoreExitedCompleted(check, check.State, exitCode, hasExitCode)

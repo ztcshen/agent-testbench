@@ -182,7 +182,7 @@ func environmentStatusApplyComposeServiceExpectation(check environmentRestoreHea
 	}
 	check.Expect = expected.Expect
 	check.OneShot = expected.OneShot
-	check.OK = check.State == "running" && (check.Health == "" || check.Health == "healthy") || environmentRestoreExitedCompleted(&check, check.State, check.ExitCode, check.ExitCode != 0 || check.State == environmentRestoreDockerStateExited)
+	check.OK = check.State == "running" && (check.Health == "" || check.Health == "healthy") || environmentRestoreExitedCompleted(&check, check.State, check.ExitCode, check.HasExitCode)
 	if !check.OK && check.Error == "" {
 		check.Error = "compose service is not ready"
 	}
@@ -243,6 +243,7 @@ func addComposeServiceStatusReport(out map[string]environmentRestoreHealthCheckR
 	}
 	if hasExitCode {
 		check.ExitCode = exitCode
+		check.HasExitCode = true
 	}
 	check.OK = state == "running" && (health == "" || health == "healthy") || environmentRestoreExitedCompleted(&check, state, exitCode, hasExitCode)
 	if !check.OK {
