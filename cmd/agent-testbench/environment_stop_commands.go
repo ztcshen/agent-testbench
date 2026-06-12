@@ -28,11 +28,12 @@ type environmentStopReport struct {
 }
 
 type environmentStopDockerReport struct {
-	OK      bool     `json:"ok"`
-	Action  string   `json:"action"`
-	Command []string `json:"command,omitempty"`
-	Output  string   `json:"output,omitempty"`
-	Error   string   `json:"error,omitempty"`
+	OK      bool                                         `json:"ok"`
+	Action  string                                       `json:"action"`
+	Linkage environmentRestoreDockerCleanupLinkageReport `json:"linkage,omitempty"`
+	Command []string                                     `json:"command,omitempty"`
+	Output  string                                       `json:"output,omitempty"`
+	Error   string                                       `json:"error,omitempty"`
 }
 
 func runEnvironmentStop(ctx context.Context, args []string) error {
@@ -40,13 +41,13 @@ func runEnvironmentStop(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	runtime, env, _, plan, cleanup, err := loadEnvironmentLifecyclePlan(ctx, options.environmentLifecycleOptions)
+	runtime, env, graph, plan, cleanup, err := loadEnvironmentLifecyclePlan(ctx, options.environmentLifecycleOptions)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
 	report := environmentStopReport{OK: true}
-	report.Docker = environmentStopDocker(ctx, plan.Compose, plan.Workspace, options)
+	report.Docker = environmentStopDocker(ctx, plan.Compose, graph, plan.Workspace, options)
 	if !report.Docker.OK {
 		report.OK = false
 		report.Error = report.Docker.Error
@@ -111,18 +112,28 @@ func parseEnvironmentStopOptions(args []string) (environmentStopOptions, error) 
 	}, nil
 }
 
-func environmentStopDocker(ctx context.Context, compose map[string]any, workspace string, options environmentStopOptions) environmentStopDockerReport {
+func environmentStopDocker(ctx context.Context, compose map[string]any, graph store.EnvironmentComponentGraph, workspace string, options environmentStopOptions) environmentStopDockerReport {
 	statusReport := environmentStatusDockerReport{OK: true}
 	if !prepareEnvironmentLifecycleComposeFiles(&statusReport, compose, workspace) {
 		return environmentStopDockerReport{OK: false, Action: statusReport.Action, Error: statusReport.Error}
 	}
-	composeBaseArgs := environmentRestoreComposeBaseArgs(compose, workspace, environmentRestoreResolvedComposeFiles(workspace, environmentRestoreComposeFiles(compose)))
+	composeFiles := environmentRestoreComposeFiles(compose)
+	composeBaseArgs := environmentRestoreComposeBaseArgs(compose, workspace, environmentRestoreResolvedComposeFiles(workspace, composeFiles))
 	if len(composeBaseArgs) == 0 {
 		return environmentStopDockerReport{OK: false, Action: "no-compose-plan", Error: "environment stop requires a recorded composeFile"}
 	}
 	command := append([]string{"docker", "compose"}, composeBaseArgs...)
 	action := environmentStopActionComposeStop
 	if options.Down {
+		linkage := environmentRestoreDockerCleanupLinkage(compose, graph, workspace, composeFiles)
+		if !linkage.OK {
+			return environmentStopDockerReport{
+				OK:      false,
+				Action:  "compose-down-blocked",
+				Linkage: linkage,
+				Error:   firstNonEmpty(linkage.Error, "Docker Compose down requires complete Store-to-Compose environment linkage"),
+			}
+		}
 		action = "compose-down"
 		command = append(command, "down")
 		if options.RemoveOrphans {
@@ -165,6 +176,15 @@ func printEnvironmentStopReport(report environmentStopReport) {
 	fmt.Printf("Docker: %s ok=%t\n", report.Docker.Action, report.Docker.OK)
 	if len(report.Docker.Command) > 0 {
 		fmt.Printf("Command: %s\n", strings.Join(report.Docker.Command, " "))
+	}
+	for _, item := range report.Docker.Linkage.RepairPlan {
+		fmt.Printf("Repair: %s -> %s\n", item.Name, item.Action)
+		if len(item.Missing) > 0 {
+			fmt.Printf("  missing: %s\n", strings.Join(item.Missing, ", "))
+		}
+		if item.CommandHint != "" {
+			fmt.Printf("  hint: %s\n", item.CommandHint)
+		}
 	}
 	if report.Error != "" {
 		fmt.Printf("Error: %s\n", report.Error)

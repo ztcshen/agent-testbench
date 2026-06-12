@@ -209,8 +209,11 @@ If no recorded or discoverable Compose services are available, status fails
 instead of reporting an empty success. `environment stop` defaults to `docker
 compose stop SERVICE...` and preserves containers, volumes, and images; the
 default path also requires recorded or discoverable services so it cannot widen
-into an accidental whole-project stop. Use `--down --remove-orphans` only after
-explicitly deciding to remove Compose-managed containers.
+into an accidental whole-project stop. `--down --remove-orphans` is blocked
+unless the environment has a complete Store-to-Compose cleanup linkage proof,
+so missing project names, component graphs, component service mappings, Compose
+services, or Store-projected Compose files must be repaired before removing
+Compose-managed containers.
 For restore cleanup, `--allow-destructive-docker-cleanup` is only the operator
 approval step. Restore still blocks `docker compose down` when the cleanup
 linkage proof is incomplete: project name, Store component graph, required

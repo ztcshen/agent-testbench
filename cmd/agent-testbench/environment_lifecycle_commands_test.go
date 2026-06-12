@@ -401,9 +401,11 @@ func TestEnvironmentStopDownRemoveOrphansRequiresExplicitFlags(t *testing.T) {
 		"--id", "env.stop.down",
 		"--compose-file", "compose.yml",
 		"--compose-generated-file", "compose.yml="+composeSource,
+		"--compose-project-name", "demo-stop",
 		"--compose-service", "web",
 		"--verification-workflow", "workflow.core-10",
 	)
+	seedCleanupLinkedGraph(t, strings.TrimPrefix(fixture.StoreDSN, "sqlite://"), "env.stop.down", "web")
 
 	out := runCLIFailsWithEnv(t, fixture.DockerEnv, "environment", "stop", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--remove-orphans", "--json", "env.stop.down")
 	if !strings.Contains(out, "--remove-orphans requires --down") {
@@ -421,9 +423,59 @@ func TestEnvironmentStopDownRemoveOrphansRequiresExplicitFlags(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode environment stop down report: %v\n%s", err, out)
 	}
-	want := []string{"docker", "compose", "-f", filepath.Join(fixture.Workspace, "compose.yml"), "down", "--remove-orphans"}
+	want := []string{"docker", "compose", "-f", filepath.Join(fixture.Workspace, "compose.yml"), "-p", "demo-stop", "down", "--remove-orphans"}
 	if !report.OK || report.Docker.Action != "compose-down" || !reflect.DeepEqual(report.Docker.Command, want) {
 		t.Fatalf("environment stop down report = %#v want command %#v", report, want)
+	}
+}
+
+func TestEnvironmentStopDownBlocksWithoutCompleteLinkage(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	composeSource := filepath.Join(t.TempDir(), "compose.yml")
+	writeFile(t, composeSource, "services:\n  web:\n    image: alpine:3.20\n")
+	runCLI(t, "environment", "register",
+		"--store", fixture.StoreDSN,
+		"--id", "env.stop.down.blocked",
+		"--compose-file", "compose.yml",
+		"--compose-generated-file", "compose.yml="+composeSource,
+		"--compose-service", "web",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIFailsWithEnv(t, fixture.DockerEnv, "environment", "stop", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--down", "--remove-orphans", "--json", "env.stop.down.blocked")
+	var report struct {
+		OK     bool `json:"ok"`
+		Docker struct {
+			Action  string `json:"action"`
+			Linkage struct {
+				RepairPlan []struct {
+					Name          string `json:"name"`
+					StoreBacked   bool   `json:"storeBacked"`
+					BlocksCleanup bool   `json:"blocksCleanup"`
+				} `json:"repairPlan"`
+			} `json:"linkage"`
+			Error string `json:"error"`
+		} `json:"docker"`
+	}
+	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
+		t.Fatalf("decode blocked environment stop down report: %v\n%s", err, out)
+	}
+	repairNames := map[string]bool{}
+	for _, item := range report.Docker.Linkage.RepairPlan {
+		repairNames[item.Name] = true
+		if !item.StoreBacked || !item.BlocksCleanup {
+			t.Fatalf("stop down repair item should be Store-backed and blocking: %#v", item)
+		}
+	}
+	if report.OK || report.Docker.Action != "compose-down-blocked" || !strings.Contains(report.Docker.Error, "Store-to-Compose environment linkage") || !repairNames["compose-project-name"] || !repairNames["component-graph"] {
+		t.Fatalf("blocked environment stop down report = %#v", report)
+	}
+	dockerCalls, err := os.ReadFile(fixture.DockerCallsPath)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read fake docker calls: %v", err)
+	}
+	if strings.Contains(string(dockerCalls), " down") {
+		t.Fatalf("blocked stop down must not run docker compose down:\n%s", dockerCalls)
 	}
 }
 
@@ -451,8 +503,8 @@ func TestEnvironmentStopDefaultRequiresInspectableComposeServices(t *testing.T) 
 		t.Fatalf("empty default stop must not run broad docker compose stop:\n%s", dockerCalls)
 	}
 
-	out = runCLIWithEnv(t, fixture.DockerEnv, "environment", "stop", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--down", "--json", "env.stop.empty")
-	if !strings.Contains(out, `"action": "compose-down"`) {
-		t.Fatalf("explicit down should remain available: %q", out)
+	out = runCLIFailsWithEnv(t, fixture.DockerEnv, "environment", "stop", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--down", "--json", "env.stop.empty")
+	if !strings.Contains(out, "compose-down-blocked") || !strings.Contains(out, "Store-to-Compose environment linkage") {
+		t.Fatalf("explicit down without linkage should fail safely: %q", out)
 	}
 }

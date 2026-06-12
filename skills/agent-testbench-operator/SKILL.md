@@ -162,7 +162,9 @@ migration asset while MySQL execution is still running.
 Store-backed compose/env files, then uses `docker compose ps` without
 pull/build/up/down. `environment stop` defaults to `docker compose stop
 SERVICE...`; both commands require recorded or discoverable Compose services
-for their default service-scoped behavior.
+for their default service-scoped behavior. `environment stop --down` is a
+destructive Compose operation and is blocked unless the same Store-to-Compose
+linkage proof used by restore cleanup passes.
 Destructive restore cleanup still requires more than
 `--allow-destructive-docker-cleanup`: the cleanup linkage proof must show a
 recorded Compose project name, Store component graph, required component

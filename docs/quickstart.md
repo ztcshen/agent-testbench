@@ -555,7 +555,10 @@ records `summary.lastStop` on the Environment Catalog entry. The default stop
 path also requires recorded or discoverable services so it does not widen into
 an accidental whole-project stop. Use
 `environment stop --down --remove-orphans` only when you explicitly want Compose
-to remove the environment's containers.
+to remove the environment's containers. The destructive `--down` path uses the
+same Store-to-Compose linkage proof as restore cleanup; when the proof is
+missing, the command blocks and reports `docker.linkage.repairPlan` instead of
+running `docker compose down`.
 
 For sandbox diagnostics, prefer Store-backed read-only checks before inspecting
 containers or temporary files directly:
