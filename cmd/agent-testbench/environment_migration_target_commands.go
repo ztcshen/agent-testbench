@@ -6,8 +6,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 )
+
+var environmentMigrationProgressInterval = 5 * time.Second
 
 type environmentMigrationTargetOptions struct {
 	EnvID          string
@@ -218,7 +222,7 @@ func executeEnvironmentMigrationTarget(ctx context.Context, opts environmentMigr
 		} else {
 			input = environmentMigrationApplySQL(opts.Edge, *item)
 		}
-		attempts, status, errText := runEnvironmentMigrationWithHistory(ctx, opts.Workspace, command, opts.Edge, *item, input, baseline)
+		attempts, status, errText := runEnvironmentMigrationWithProgress(ctx, opts, baseline, command, *item, input)
 		item.Attempts = attempts
 		if errText != "" {
 			item.OK = false
@@ -232,6 +236,49 @@ func executeEnvironmentMigrationTarget(ctx context.Context, opts environmentMigr
 			break
 		}
 	}
+}
+
+func runEnvironmentMigrationWithProgress(ctx context.Context, opts environmentMigrationTargetOptions, baseline bool, command []string, item environmentMigrationItem, input string) (int, string, string) {
+	type migrationResult struct {
+		attempts int
+		status   string
+		errText  string
+	}
+	if !agentHasEventStream(ctx) {
+		return runEnvironmentMigrationWithHistory(ctx, opts.Workspace, command, opts.Edge, item, input, baseline)
+	}
+	resultCh := make(chan migrationResult, 1)
+	started := time.Now()
+	go func() {
+		attempts, status, errText := runEnvironmentMigrationWithHistory(ctx, opts.Workspace, command, opts.Edge, item, input, baseline)
+		resultCh <- migrationResult{attempts: attempts, status: status, errText: errText}
+	}()
+	ticker := time.NewTicker(environmentMigrationProgressIntervalValue())
+	defer ticker.Stop()
+	for {
+		select {
+		case result := <-resultCh:
+			return result.attempts, result.status, result.errText
+		case <-ticker.C:
+			agentEmitEvent(ctx, agentStreamEvent{
+				Type:      "tool_observation",
+				Phase:     "environment.migration",
+				Status:    "waiting",
+				Target:    item.AssetID,
+				Message:   environmentMigrationItemMessage(baseline, "still running", item),
+				ElapsedMs: time.Since(started).Milliseconds(),
+			})
+		}
+	}
+}
+
+func environmentMigrationProgressIntervalValue() time.Duration {
+	if raw := strings.TrimSpace(os.Getenv("AGENT_TESTBENCH_MIGRATION_PROGRESS_INTERVAL_MS")); raw != "" {
+		if millis, err := strconv.Atoi(raw); err == nil && millis > 0 {
+			return time.Duration(millis) * time.Millisecond
+		}
+	}
+	return environmentMigrationProgressInterval
 }
 
 func persistEnvironmentMigrationTargetStatuses(ctx context.Context, opts environmentMigrationTargetOptions, report *environmentMigrationReport) error {

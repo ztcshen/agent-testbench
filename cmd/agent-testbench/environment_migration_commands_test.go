@@ -155,6 +155,8 @@ func TestEnvironmentMigrationApplyStreamJSONEmitsAgentEvents(t *testing.T) {
 	fixture := writeEnvironmentMigrationStoreFixture(t)
 	seedEnvironmentMigrationAsset(t, fixture.storePath)
 	dockerEnv, _, _ := fakeDockerCommandCapturingExecStdin(t)
+	dockerEnv = append(dockerEnv, "AGENT_TESTBENCH_FAKE_DOCKER_EXEC_SLEEP=0.05")
+	dockerEnv = append(dockerEnv, "AGENT_TESTBENCH_MIGRATION_PROGRESS_INTERVAL_MS=1")
 
 	out := runCLIWithEnv(t, dockerEnv, "environment", "migration", "apply", "env.migration",
 		"--store", "sqlite://"+fixture.storePath,
@@ -176,6 +178,9 @@ func TestEnvironmentMigrationApplyStreamJSONEmitsAgentEvents(t *testing.T) {
 	}
 	if !agentStreamHasEvent(events, "tool_call_started", "command", "started", "docker compose exec") {
 		t.Fatalf("stream missing docker compose exec start: %#v", events)
+	}
+	if !agentStreamHasEvent(events, "tool_observation", "environment.migration", "waiting", "app.mysql.migration.0011") {
+		t.Fatalf("stream missing migration waiting observation: %#v", events)
 	}
 	last := events[len(events)-1]
 	report := mapFromReportAny(last["report"])
@@ -494,6 +499,9 @@ if [[ "$1" == "compose" && "$2" == "version" ]]; then
   exit 0
 fi
 if [[ "$*" == *" exec -T mysql "* ]]; then
+  if [[ -n "${AGENT_TESTBENCH_FAKE_DOCKER_EXEC_SLEEP:-}" ]]; then
+    sleep "$AGENT_TESTBENCH_FAKE_DOCKER_EXEC_SLEEP"
+  fi
   cat >> "$MYSQL_STDIN_FILE"
   printf '\n-- agent-testbench-call-boundary --\n' >> "$MYSQL_STDIN_FILE"
 fi

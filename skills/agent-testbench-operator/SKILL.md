@@ -152,6 +152,9 @@ During `environment restore --output-format stream-json`, watch the
 does not pass, `--run-workflow` must remain skipped instead of invoking the
 acceptance workflow. While an acceptance run is still running, the stream emits
 `workflow.acceptance` waiting observations with the acceptance run id.
+During `environment migration apply|baseline --output-format stream-json`, the
+stream emits `environment.migration` waiting observations for the active
+migration asset while MySQL execution is still running.
 
 `environment status` is a read-only Compose inspection path: it can materialize
 Store-backed compose/env files, then uses `docker compose ps` without

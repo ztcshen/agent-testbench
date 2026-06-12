@@ -201,6 +201,9 @@ stream-json`; phase events identify `docker.prepare`,
 acceptance phase must be skipped rather than started. While acceptance is still
 running, watch `workflow.acceptance` waiting observations for the run id and
 remaining timeout.
+For `environment migration apply|baseline --output-format stream-json`, watch
+`environment.migration` waiting observations to identify the active migration
+asset while MySQL execution is still running.
 If no recorded or discoverable Compose services are available, status fails
 instead of reporting an empty success. `environment stop` defaults to `docker
 compose stop SERVICE...` and preserves containers, volumes, and images; the
