@@ -198,7 +198,9 @@ stream-json`; phase events identify `docker.prepare`,
 `docker.compose.validate`, `docker.cleanup`, `docker.native-assets`,
 `docker.compose.execute`, `docker.edge-assets`, `docker.health`, and
 `workflow.acceptance`. If Docker restore or health does not pass, the workflow
-acceptance phase must be skipped rather than started.
+acceptance phase must be skipped rather than started. While acceptance is still
+running, watch `workflow.acceptance` waiting observations for the run id and
+remaining timeout.
 If no recorded or discoverable Compose services are available, status fails
 instead of reporting an empty success. `environment stop` defaults to `docker
 compose stop SERVICE...` and preserves containers, volumes, and images; the

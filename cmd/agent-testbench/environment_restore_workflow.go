@@ -120,6 +120,7 @@ func waitEnvironmentAcceptanceReport(ctx context.Context, serverURL string, envi
 		timeoutSeconds = 120
 	}
 	deadline := time.Now().Add(time.Duration(timeoutSeconds) * time.Second)
+	progress := newEnvironmentRestoreAcceptanceProgress(ctx, runID, deadline)
 	var last map[string]any
 	for {
 		payload, err := fetchWorkflowAcceptanceJSON(ctx, environmentAcceptanceRunURL(serverURL, environmentID, runID))
@@ -134,6 +135,7 @@ func waitEnvironmentAcceptanceReport(ctx context.Context, serverURL string, envi
 		if time.Now().After(deadline) {
 			return last, fmt.Errorf("timed out waiting for async environment acceptance report: %s", runID)
 		}
+		progress.waiting(status)
 		timer := time.NewTimer(500 * time.Millisecond)
 		select {
 		case <-ctx.Done():
@@ -142,6 +144,47 @@ func waitEnvironmentAcceptanceReport(ctx context.Context, serverURL string, envi
 		case <-timer.C:
 		}
 	}
+}
+
+type environmentRestoreAcceptanceProgress struct {
+	ctx      context.Context
+	runID    string
+	deadline time.Time
+	lastEmit time.Time
+	interval time.Duration
+}
+
+func newEnvironmentRestoreAcceptanceProgress(ctx context.Context, runID string, deadline time.Time) environmentRestoreAcceptanceProgress {
+	return environmentRestoreAcceptanceProgress{
+		ctx:      ctx,
+		runID:    strings.TrimSpace(runID),
+		deadline: deadline,
+		lastEmit: time.Now(),
+		interval: 2 * time.Second,
+	}
+}
+
+func (p *environmentRestoreAcceptanceProgress) waiting(status string) {
+	if time.Since(p.lastEmit) < p.interval {
+		return
+	}
+	remaining := time.Until(p.deadline).Round(time.Second)
+	if remaining < 0 {
+		remaining = 0
+	}
+	message := "acceptance workflow still running"
+	if strings.TrimSpace(status) != "" {
+		message += ": " + strings.TrimSpace(status)
+	}
+	environmentRestoreEmitEvent(p.ctx, agentStreamEvent{
+		Type:        "tool_observation",
+		Phase:       "workflow.acceptance",
+		Status:      "waiting",
+		Target:      p.runID,
+		Message:     message,
+		RemainingMs: remaining.Milliseconds(),
+	})
+	p.lastEmit = time.Now()
 }
 
 func environmentRestoreAcceptanceFromPayload(value any) environmentRestoreWorkflowAcceptance {

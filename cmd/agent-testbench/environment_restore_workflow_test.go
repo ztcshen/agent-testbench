@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"agent-testbench/internal/store"
@@ -18,6 +19,51 @@ func TestEnvironmentRestoreRunsVerificationWorkflowAfterDockerHealth(t *testing.
 	assertRestoreWorkflowRunReport(t, report, fixture.outputDir)
 	fixture.assertAcceptancePayload(t)
 	fixture.assertPersistedVerification(t, report.Workflow.RunID)
+}
+
+func TestEnvironmentRestoreStreamJSONEmitsWorkflowAcceptanceWaiting(t *testing.T) {
+	fixture := newEnvironmentRestoreWorkflowRunFixture(t)
+	fixture.acceptanceServer.Close()
+	var reportPolls int32
+	fixture.acceptanceServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/environments/"+fixture.envID+"/acceptance-runs":
+			writeTestJSON(t, w, http.StatusAccepted, restoreWorkflowAcceptedPayload(fixture.envID))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/environments/"+fixture.envID+"/acceptance-runs/batch.env.restore.acceptance.001":
+			if atomic.AddInt32(&reportPolls, 1) <= 5 {
+				writeTestJSON(t, w, http.StatusOK, restoreWorkflowAcceptedPayload(fixture.envID))
+				return
+			}
+			writeTestJSON(t, w, http.StatusOK, restoreWorkflowPassedPayload(fixture.envID))
+		default:
+			t.Fatalf("unexpected acceptance request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(fixture.acceptanceServer.Close)
+	fixture.registerEnvironment(t)
+
+	out := runCLIWithEnv(t, fixture.fakeDockerEnv,
+		"environment", "restore",
+		"--store", "sqlite://"+fixture.storePath,
+		"--workspace", fixture.workspace,
+		"--execute",
+		"--run-workflow",
+		"--server-url", fixture.acceptanceServer.URL,
+		"--workflow-output-dir", fixture.outputDir,
+		"--output-format", "stream-json",
+		"--health-timeout-seconds", "5",
+		fixture.envID,
+	)
+	events := decodeAgentStreamEvents(t, out)
+	if !agentStreamHasEvent(events, "step_started", "workflow.acceptance", "running", "workflow.alpha") {
+		t.Fatalf("stream missing workflow start: %#v", events)
+	}
+	if !agentStreamHasEvent(events, "tool_observation", "workflow.acceptance", "waiting", "batch.env.restore.acceptance.001") {
+		t.Fatalf("stream missing workflow waiting observation: %#v", events)
+	}
+	if !agentStreamHasEvent(events, "step_completed", "workflow.acceptance", "passed", "workflow.alpha") {
+		t.Fatalf("stream missing workflow completion: %#v", events)
+	}
 }
 
 type environmentRestoreWorkflowRunFixture struct {

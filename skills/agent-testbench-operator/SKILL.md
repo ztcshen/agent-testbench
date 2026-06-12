@@ -150,7 +150,8 @@ During `environment restore --output-format stream-json`, watch the
 `docker.native-assets`, `docker.compose.execute`, `docker.edge-assets`,
 `docker.health`, and `workflow.acceptance` phases. If Docker restore or health
 does not pass, `--run-workflow` must remain skipped instead of invoking the
-acceptance workflow.
+acceptance workflow. While an acceptance run is still running, the stream emits
+`workflow.acceptance` waiting observations with the acceptance run id.
 
 `environment status` is a read-only Compose inspection path: it can materialize
 Store-backed compose/env files, then uses `docker compose ps` without

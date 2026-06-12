@@ -451,8 +451,9 @@ stream-json output emits a `workflow.acceptance` skipped event instead of
 calling the acceptance runner. With `--output-format stream-json`, restore also
 emits Docker phase events for preparation, Compose validation, cleanup gates,
 Docker-native Store asset projection, Compose execution, post-start edge
-assets, and health waits so agents can locate long-running or blocked phases
-without inspecting local runtime files.
+assets, health waits, and acceptance-workflow waiting observations so agents
+can locate long-running or blocked phases without inspecting local runtime
+files.
 Restore records Evidence completeness from the workflow result but does not
 mark SkyWalking topology complete or publish the environment as verified; real
 topology collection and `publish-verified` remain separate gates. Use
