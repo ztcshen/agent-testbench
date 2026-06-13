@@ -247,6 +247,7 @@ func walkComposeServiceLines(content string, visit func(service string, trimmed 
 	inServices := false
 	servicesIndent := -1
 	serviceIndent := -1
+	fieldIndent := -1
 	currentService := ""
 	for _, line := range strings.Split(content, "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -269,11 +270,17 @@ func walkComposeServiceLines(content string, visit func(service string, trimmed 
 		}
 		if strings.HasSuffix(trimmed, ":") && (serviceIndent < 0 || indent == serviceIndent) {
 			serviceIndent = indent
+			fieldIndent = -1
 			currentService = strings.TrimSpace(strings.TrimSuffix(trimmed, ":"))
 			continue
 		}
 		if currentService != "" && indent > serviceIndent {
-			visit(currentService, trimmed)
+			if fieldIndent < 0 {
+				fieldIndent = indent
+			}
+			if indent == fieldIndent {
+				visit(currentService, trimmed)
+			}
 		}
 	}
 }

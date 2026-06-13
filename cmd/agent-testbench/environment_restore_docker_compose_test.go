@@ -303,6 +303,24 @@ func TestParseComposeImageReferencesIgnoresNestedImageKeys(t *testing.T) {
 	}
 }
 
+func TestParseComposeImageReferencesFallbackIgnoresNestedImageKeys(t *testing.T) {
+	got := parseComposeImageReferences(strings.Join([]string{
+		"x-invalid: [",
+		"services:",
+		"  app:",
+		"    image: alpine:3.20",
+		"    environment:",
+		"      image: nested/value:latest",
+		"  worker:",
+		"    profiles:",
+		"      - worker",
+		"    image: busybox:1.36",
+	}, "\n") + "\n")
+	if got["app"] != "alpine:3.20" || got["worker"] != "busybox:1.36" {
+		t.Fatalf("fallback compose image refs = %#v", got)
+	}
+}
+
 func TestEnvironmentRestoreAcceptsLocalComposeImageWhenRegistryProbeFails(t *testing.T) {
 	fixture := newEnvironmentRestoreDockerCLIFixture(t)
 	fixture.writeDockerTool(t, `#!/usr/bin/env bash
