@@ -208,7 +208,10 @@ New environment registration stores service repositories and health checks as
 structured `environment_services` and `environment_health_checks`; legacy
 `services_json`, `repos_json`, and `health_checks_json` are compatibility views.
 Restore consumes structured environment files, services, and health checks
-first; legacy JSON fields are fallback inputs for older rows and imports.
+first. During migration or Store copy, structured rows replace matching legacy
+entries by path, service id, health-check id, or equivalent health probe; legacy
+entries that are not represented structurally remain fallback inputs for older
+rows and imports.
 Dynamic Compose file paths, including nested Compose defaults such as
 `${A:-${B:-file.env}}`, are resolved only from Store-backed `compose.env` and
 Store-backed `compose.envFiles`. Absolute or

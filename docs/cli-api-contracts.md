@@ -159,7 +159,9 @@ repository, and health-check metadata in structured `environment_services` and
 `environment_health_checks` rows; `services_json`, `repos_json`, and
 `health_checks_json` remain compatibility views for imported or older
 environments. Restore builds its Docker runtime view from these structured
-rows first and falls back to legacy JSON only when no structured rows exist.
+rows first. In mixed migration rows, structured entries replace matching legacy
+entries by file path, service id, health-check id, or equivalent health probe,
+while unmatched legacy entries remain compatibility inputs.
 Legacy package repositories remain compatibility inputs and are not the SQL
 Store daily restore source.
 An `environment_files` row is considered a materialized file only when it carries
