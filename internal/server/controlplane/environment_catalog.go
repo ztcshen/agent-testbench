@@ -152,9 +152,10 @@ func handleEnvironmentAcceptanceRunStart(w http.ResponseWriter, r *http.Request,
 		requestID = "env-acceptance-" + time.Now().UTC().Format("20060102T150405.000000000Z")
 	}
 	request := apiCaseBatchRunRequest{
-		RequestID:     requestID,
-		EnvironmentID: env.ID,
-		WorkflowID:    env.VerificationWorkflowID,
+		RequestID:             requestID,
+		EnvironmentID:         env.ID,
+		EnvironmentAcceptance: true,
+		WorkflowID:            env.VerificationWorkflowID,
 	}
 	applyAPICaseBatchRunOptionsFromPayload(&request, payload)
 	report, status, err := startAPICaseBatchRun(r.Context(), bundle, runtime, runner, request, collector)

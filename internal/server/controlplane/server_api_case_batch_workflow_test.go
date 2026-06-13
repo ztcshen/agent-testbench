@@ -47,6 +47,26 @@ func TestServerStartsAsyncAPICaseBatchRunForWorkflow(t *testing.T) {
 	requireAPICaseBatchWorkflowStoreRecords(t, ctx, s, report)
 }
 
+func TestServerRejectsGenericBatchRunForEnvironmentVerificationWorkflow(t *testing.T) {
+	ctx, s := openAPICaseBatchSQLiteStore(t)
+	if _, err := s.UpsertEnvironment(ctx, store.Environment{
+		ID:                     "env.workflow",
+		DisplayName:            "Workflow Environment",
+		Status:                 "draft",
+		VerificationWorkflowID: "workflow.ten",
+	}); err != nil {
+		t.Fatalf("upsert environment: %v", err)
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(newAPICaseBatchWorkflowBundle(t), s))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/cases/batch-runs", `{"requestId":"workflow-env-001","workflowId":"workflow.ten"}`, http.StatusConflict)
+	errorText, _ := payload["error"].(string)
+	if !strings.Contains(errorText, "bound to environment env.workflow") || !strings.Contains(errorText, "/api/environments/env.workflow/acceptance-runs") {
+		t.Fatalf("generic workflow gate error = %#v", payload)
+	}
+}
+
 func TestServerRejectsAsyncAPICaseBatchWithoutNodes(t *testing.T) {
 	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample"}, nil))
 	defer server.Close()

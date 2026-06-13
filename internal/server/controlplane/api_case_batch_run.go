@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -52,6 +53,9 @@ func startAPICaseBatchRun(ctx context.Context, bundle profile.Bundle, runtime st
 	request.Suite = normalizeAPICaseBatchSuiteSelector(request.Suite)
 	if len(request.CaseIDs) == 0 && len(request.NodeIDs) == 0 && request.WorkflowID == "" && !request.Suite.configured() {
 		return apiCaseBatchRunReport{}, http.StatusBadRequest, errors.New("caseIds, nodeIds, workflowId, or suite is required")
+	}
+	if status, err := validateAPICaseBatchEnvironmentWorkflowGate(ctx, runtime, request); err != nil {
+		return apiCaseBatchRunReport{}, status, err
 	}
 	plans, err := apiCaseBatchPlans(ctx, bundle, runtime, request)
 	if err != nil {
@@ -121,6 +125,33 @@ func startAPICaseBatchRun(ctx context.Context, bundle profile.Bundle, runtime st
 
 	go runner.run(context.Background(), batchRunID, bundle, request.EnvironmentID, request.WorkflowID, plans, runtime, bundle.FailureCategories, collector)
 	return report, http.StatusAccepted, nil
+}
+
+func validateAPICaseBatchEnvironmentWorkflowGate(ctx context.Context, runtime store.Store, request apiCaseBatchRunRequest) (int, error) {
+	workflowID := strings.TrimSpace(request.WorkflowID)
+	if workflowID == "" || runtime == nil {
+		return 0, nil
+	}
+	environments, err := runtime.ListEnvironments(ctx)
+	if err != nil {
+		return http.StatusInternalServerError, err
+	}
+	ids := []string{}
+	matchedEnvironment := false
+	for _, env := range environments {
+		if strings.TrimSpace(env.VerificationWorkflowID) != workflowID {
+			continue
+		}
+		envID := strings.TrimSpace(env.ID)
+		ids = append(ids, envID)
+		if request.EnvironmentAcceptance && envID == strings.TrimSpace(request.EnvironmentID) {
+			matchedEnvironment = true
+		}
+	}
+	if len(ids) == 0 || matchedEnvironment {
+		return 0, nil
+	}
+	return http.StatusConflict, fmt.Errorf("workflow %s is bound to environment %s; run it through environment acceptance after restore instead of the generic batch API: POST /api/environments/%s/acceptance-runs or agent-testbench environment restore %s --store STORE_NAME_OR_DSN --workspace WORKSPACE --execute --run-workflow --server-url URL", workflowID, strings.Join(ids, ", "), url.PathEscape(ids[0]), ids[0])
 }
 
 func handleAPICaseBatchRunReport(w http.ResponseWriter, r *http.Request, runner *apiCaseBatchRunner) {
