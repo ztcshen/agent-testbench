@@ -56,6 +56,9 @@ func jsonObject(raw string) map[string]any {
 func SourcesFromEnvironmentFiles(files []store.EnvironmentFile) []environmentfiles.ProjectionSource {
 	out := make([]environmentfiles.ProjectionSource, 0, len(files))
 	for _, file := range files {
+		if !store.EnvironmentFileHasInlineContent(file) {
+			continue
+		}
 		out = append(out, environmentfiles.ProjectionSource{
 			Path:   file.Path,
 			Source: "environment_files",

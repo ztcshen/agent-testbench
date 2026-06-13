@@ -78,14 +78,14 @@ func requireEnvironmentFilesContract(t *testing.T, ctx context.Context, s store.
 	if err != nil {
 		t.Fatalf("list environment files: %v", err)
 	}
-	if len(loadedFiles) != 2 || loadedFiles[0].Path != "compose/docker-compose.yml" || loadedFiles[1].Kind != store.EnvironmentFileKindComposeEnvFile {
+	if len(loadedFiles) != 3 || loadedFiles[0].Path != "compose/docker-compose.yml" || loadedFiles[1].Kind != store.EnvironmentFileKindComposeEnvFile || loadedFiles[2].Path != "compose/empty.env" {
 		t.Fatalf("loaded environment files = %#v", loadedFiles)
 	}
 	loadedEnv, err := s.GetEnvironment(ctx, envID)
 	if err != nil {
 		t.Fatalf("get environment after files: %v", err)
 	}
-	if !jsonEqual(loadedEnv.ComposeJSON, `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"envFiles":["compose/runtime.env"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  service-alpha:\n    image: alpine:3.20\n","compose/runtime.env":"APP_MODE=test\n"},"startCommand":"docker compose up -d"}`) {
+	if !jsonEqual(loadedEnv.ComposeJSON, `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"envFiles":["compose/runtime.env","compose/empty.env"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  service-alpha:\n    image: alpine:3.20\n","compose/runtime.env":"APP_MODE=test\n","compose/empty.env":""},"startCommand":"docker compose up -d"}`) {
 		t.Fatalf("structured files were not merged into compose json: %s", loadedEnv.ComposeJSON)
 	}
 }
@@ -107,6 +107,13 @@ func contractEnvironmentFilesFixture() []store.EnvironmentFile {
 			Required:      true,
 			ApplyOrder:    20,
 			SummaryJSON:   `{"source":"contract"}`,
+		},
+		{
+			Path:        "compose/empty.env",
+			Kind:        store.EnvironmentFileKindComposeEnvFile,
+			Required:    true,
+			ApplyOrder:  30,
+			SummaryJSON: `{"contentInline":true,"source":"contract"}`,
 		},
 	}
 }

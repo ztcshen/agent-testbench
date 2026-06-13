@@ -339,7 +339,7 @@ func MergeEnvironmentFilesIntoComposeJSON(env Environment, files []EnvironmentFi
 		case EnvironmentFileKindComposeEnvFile:
 			envFiles = append(envFiles, file.Path)
 		}
-		if file.ContentInline != "" {
+		if EnvironmentFileHasInlineContent(file) {
 			generated[file.Path] = file.ContentInline
 		}
 	}

@@ -31,13 +31,14 @@ func EnvironmentFilesFromComposeJSON(compose map[string]any, source string) []En
 			return
 		}
 		seen[key] = true
+		content, hasContent := generated[path]
 		files = append(files, EnvironmentFile{
 			Path:          path,
 			Kind:          kind,
-			ContentInline: generated[path],
+			ContentInline: content,
 			Required:      true,
 			ApplyOrder:    order,
-			SummaryJSON:   sourceSummaryJSON(source),
+			SummaryJSON:   environmentFileSummaryJSON(source, hasContent),
 		})
 	}
 	for index, path := range stringSliceFromJSONAny(compose["composeFiles"]) {
@@ -92,11 +93,23 @@ func EnvironmentFilesForGeneratedUpdates(compose map[string]any, generated map[s
 			ContentInline: content,
 			Required:      true,
 			ApplyOrder:    applyOrder,
-			SummaryJSON:   sourceSummaryJSON(source),
+			SummaryJSON:   environmentFileSummaryJSON(source, true),
 		})
 		order++
 	}
 	return NormalizeEnvironmentFiles(out)
+}
+
+func EnvironmentFileHasInlineContent(file EnvironmentFile) bool {
+	if file.ContentInline != "" {
+		return true
+	}
+	summary := map[string]any{}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(file.SummaryJSON)), &summary); err != nil {
+		return false
+	}
+	value, ok := summary["contentInline"].(bool)
+	return ok && value
 }
 
 func EnvironmentServicesFromJSON(services []any, repos map[string]any, source string) []EnvironmentService {
@@ -236,11 +249,22 @@ func valueStringFromAny(value any) string {
 }
 
 func sourceSummaryJSON(source string) string {
+	return environmentFileSummaryJSON(source, false)
+}
+
+func environmentFileSummaryJSON(source string, contentInline bool) string {
 	source = strings.TrimSpace(source)
-	if source == "" {
+	if source == "" && !contentInline {
 		return "{}"
 	}
-	raw, err := json.Marshal(map[string]string{"source": source})
+	summary := map[string]any{}
+	if source != "" {
+		summary["source"] = source
+	}
+	if contentInline {
+		summary["contentInline"] = true
+	}
+	raw, err := json.Marshal(summary)
 	if err != nil {
 		return "{}"
 	}
