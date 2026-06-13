@@ -60,7 +60,7 @@ from environments where id = %s;`, sqlString(id)), &rows); err != nil {
 	if len(rows) == 0 {
 		return store.Environment{}, store.ErrNotFound
 	}
-	return rows[0].toStore(), nil
+	return store.HydrateEnvironmentStructuredState(ctx, s, rows[0].toStore())
 }
 
 func (s *Store) ListEnvironments(ctx context.Context) ([]store.Environment, error) {
@@ -74,7 +74,11 @@ from environments order by verified desc, updated_at desc, id;`, &rows); err != 
 	}
 	out := make([]store.Environment, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, row.toStore())
+		env, err := store.HydrateEnvironmentStructuredState(ctx, s, row.toStore())
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, env)
 	}
 	return out, nil
 }

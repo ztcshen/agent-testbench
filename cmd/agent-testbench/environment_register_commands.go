@@ -65,21 +65,39 @@ func runEnvironmentRegister(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	environmentFiles := environmentFilesFromComposeConfig(composeConfig)
+	environmentServices := environmentServiceRows(services, repos, branches, repoRefs, checkouts)
+	environmentHealthChecks := environmentHealthCheckRows(healthURLs, healthTCPs, healthCommands, healthComposeServices)
 	env := store.Environment{
 		ID:                     strings.TrimSpace(*id),
 		DisplayName:            strings.TrimSpace(*displayName),
 		Description:            strings.TrimSpace(*description),
 		Status:                 stringDefault(strings.TrimSpace(*status), "draft"),
-		ServicesJSON:           mustCompactJSON(environmentServices(services, repos, branches, repoRefs, checkouts)),
-		ReposJSON:              mustCompactJSON(environmentRepoMap(repos, branches, repoRefs, checkouts)),
-		ComposeJSON:            mustCompactJSON(composeConfig),
-		HealthChecksJSON:       mustCompactJSON(environmentHealthChecks(healthURLs, healthTCPs, healthCommands, healthComposeServices)),
+		ServicesJSON:           "[]",
+		ReposJSON:              "{}",
+		ComposeJSON:            mustCompactJSON(environmentComposeConfigWithoutGeneratedFiles(composeConfig)),
+		HealthChecksJSON:       "[]",
 		VerificationWorkflowID: strings.TrimSpace(*verificationWorkflowID),
 		SummaryJSON:            mustCompactJSON(map[string]any{"source": "cli"}),
 	}
 	env, err = runtime.UpsertEnvironment(ctx, env)
 	if err != nil {
 		return err
+	}
+	if err := runtime.ReplaceEnvironmentFiles(ctx, env.ID, environmentFiles); err != nil {
+		return err
+	}
+	if err := runtime.ReplaceEnvironmentServices(ctx, env.ID, environmentServices); err != nil {
+		return err
+	}
+	if err := runtime.ReplaceEnvironmentHealthChecks(ctx, env.ID, environmentHealthChecks); err != nil {
+		return err
+	}
+	if len(environmentFiles) > 0 || len(environmentServices) > 0 || len(environmentHealthChecks) > 0 {
+		env, err = runtime.GetEnvironment(ctx, env.ID)
+		if err != nil {
+			return err
+		}
 	}
 	return printEnvironmentCommandResult(env, *jsonOutput)
 }

@@ -57,6 +57,7 @@ type environmentRestoreBuildPlan struct {
 	ComponentGraph       store.EnvironmentComponentGraph
 	PackageSpec          environmentRestorePackageSpec
 	HealthChecks         []any
+	StoreFiles           []store.EnvironmentFile
 	ComponentGraphReport environmentRestoreComponentGraph
 	ComponentStartupPlan controlplane.EnvironmentComponentStartupPlan
 	AttemptedAt          time.Time
@@ -86,8 +87,20 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	files, err := runtime.ListEnvironmentFiles(ctx, env.ID)
+	if err != nil {
+		return err
+	}
+	services, err := runtime.ListEnvironmentServices(ctx, env.ID)
+	if err != nil {
+		return err
+	}
+	healthChecks, err := runtime.ListEnvironmentHealthChecks(ctx, env.ID)
+	if err != nil {
+		return err
+	}
 	options.Workflow.EnvironmentID = env.ID
-	report, err := buildEnvironmentRestoreReport(ctx, env, options.Workspace, options.Execute, options.Pull, options.PrepareReposOnly, options.HealthTimeout, options.Workflow, options.Cleanup, componentGraph)
+	report, err := buildEnvironmentRestoreReportWithStructuredState(ctx, env, options.Workspace, options.Execute, options.Pull, options.PrepareReposOnly, options.HealthTimeout, options.Workflow, options.Cleanup, files, services, healthChecks, componentGraph)
 	if err != nil {
 		return err
 	}
@@ -107,11 +120,19 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 }
 
 func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, workspace string, execute bool, pull bool, prepareReposOnly bool, healthTimeout time.Duration, workflowOptions environmentRestoreWorkflowOptions, cleanupOptions environmentRestoreDockerCleanupOptions, componentGraphs ...store.EnvironmentComponentGraph) (environmentRestoreReport, error) {
+	return buildEnvironmentRestoreReportWithFiles(ctx, env, workspace, execute, pull, prepareReposOnly, healthTimeout, workflowOptions, cleanupOptions, nil, componentGraphs...)
+}
+
+func buildEnvironmentRestoreReportWithFiles(ctx context.Context, env store.Environment, workspace string, execute bool, pull bool, prepareReposOnly bool, healthTimeout time.Duration, workflowOptions environmentRestoreWorkflowOptions, cleanupOptions environmentRestoreDockerCleanupOptions, files []store.EnvironmentFile, componentGraphs ...store.EnvironmentComponentGraph) (environmentRestoreReport, error) {
+	return buildEnvironmentRestoreReportWithStructuredState(ctx, env, workspace, execute, pull, prepareReposOnly, healthTimeout, workflowOptions, cleanupOptions, files, nil, nil, componentGraphs...)
+}
+
+func buildEnvironmentRestoreReportWithStructuredState(ctx context.Context, env store.Environment, workspace string, execute bool, pull bool, prepareReposOnly bool, healthTimeout time.Duration, workflowOptions environmentRestoreWorkflowOptions, cleanupOptions environmentRestoreDockerCleanupOptions, files []store.EnvironmentFile, services []store.EnvironmentService, checks []store.EnvironmentHealthCheck, componentGraphs ...store.EnvironmentComponentGraph) (environmentRestoreReport, error) {
 	workflowID := strings.TrimSpace(env.VerificationWorkflowID)
 	if workflowID == "" {
 		return environmentRestoreReport{}, fmt.Errorf("environment %s has no verification workflow; restore must be anchored to a verified workflow", env.ID)
 	}
-	plan, err := environmentRestoreBuildPlanFromEnvironment(env, workflowID, workspace, workflowOptions.StoreURL, componentGraphs...)
+	plan, err := environmentRestoreBuildPlanFromEnvironmentWithStructuredState(env, workflowID, workspace, workflowOptions.StoreURL, files, services, checks, componentGraphs...)
 	if err != nil {
 		return environmentRestoreReport{}, err
 	}
@@ -138,6 +159,14 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 }
 
 func environmentRestoreBuildPlanFromEnvironment(env store.Environment, workflowID string, workspace string, storeURL string, componentGraphs ...store.EnvironmentComponentGraph) (environmentRestoreBuildPlan, error) {
+	return environmentRestoreBuildPlanFromEnvironmentWithFiles(env, workflowID, workspace, storeURL, nil, componentGraphs...)
+}
+
+func environmentRestoreBuildPlanFromEnvironmentWithFiles(env store.Environment, workflowID string, workspace string, storeURL string, files []store.EnvironmentFile, componentGraphs ...store.EnvironmentComponentGraph) (environmentRestoreBuildPlan, error) {
+	return environmentRestoreBuildPlanFromEnvironmentWithStructuredState(env, workflowID, workspace, storeURL, files, nil, nil, componentGraphs...)
+}
+
+func environmentRestoreBuildPlanFromEnvironmentWithStructuredState(env store.Environment, workflowID string, workspace string, storeURL string, files []store.EnvironmentFile, services []store.EnvironmentService, checks []store.EnvironmentHealthCheck, componentGraphs ...store.EnvironmentComponentGraph) (environmentRestoreBuildPlan, error) {
 	workspace, err := filepath.Abs(strings.TrimSpace(workspace))
 	if err != nil {
 		return environmentRestoreBuildPlan{}, err
@@ -146,7 +175,15 @@ func environmentRestoreBuildPlanFromEnvironment(env store.Environment, workflowI
 	if len(componentGraphs) > 0 {
 		graph = componentGraphs[0]
 	}
-	compose := environmentRestoreComposeWithComponentAssets(env.ID, jsonObjectString(env.ComposeJSON), graph)
+	env, err = environmentRestoreEnvironmentForPlan(env, services, checks)
+	if err != nil {
+		return environmentRestoreBuildPlan{}, err
+	}
+	compose, err := environmentRestoreComposeForPlan(env, files)
+	if err != nil {
+		return environmentRestoreBuildPlan{}, err
+	}
+	compose = environmentRestoreComposeWithComponentAssets(env.ID, compose, graph)
 	specs := environmentsource.RepoSpecs(env.ReposJSON, env.ServicesJSON, workspace)
 	compose = environmentRestoreComposeWithRepoCheckouts(compose, specs)
 	return environmentRestoreBuildPlan{
@@ -157,11 +194,40 @@ func environmentRestoreBuildPlanFromEnvironment(env store.Environment, workflowI
 		ComponentGraph:       graph,
 		PackageSpec:          environmentsource.PackageSpecFromCompose(compose, workspace),
 		HealthChecks:         environmentRestoreEffectiveHealthChecks(jsonArrayString(env.HealthChecksJSON), compose, graph, workspace),
+		StoreFiles:           store.NormalizeEnvironmentFiles(files),
 		ComponentGraphReport: environmentRestoreComponentGraphReport(env.ID, graph),
 		ComponentStartupPlan: controlplane.EnvironmentComponentStartupPlanReport(env.ID, graph),
 		AttemptedAt:          time.Now().UTC(),
 		RemoteOnly:           environmentRestoreRequiresRemoteSources(storeURL),
 	}, nil
+}
+
+func environmentRestoreEnvironmentForPlan(env store.Environment, services []store.EnvironmentService, checks []store.EnvironmentHealthCheck) (store.Environment, error) {
+	if len(services) == 0 && len(checks) == 0 {
+		return env, nil
+	}
+	base := env
+	if len(services) > 0 {
+		base.ServicesJSON = "[]"
+		base.ReposJSON = "{}"
+	}
+	if len(checks) > 0 {
+		base.HealthChecksJSON = "[]"
+	}
+	return store.MergeEnvironmentRuntimeMetadataIntoJSON(base, services, checks)
+}
+
+func environmentRestoreComposeForPlan(env store.Environment, files []store.EnvironmentFile) (map[string]any, error) {
+	if len(files) == 0 {
+		return jsonObjectString(env.ComposeJSON), nil
+	}
+	base := env
+	base.ComposeJSON = mustCompactJSON(environmentComposeConfigWithoutGeneratedFiles(jsonObjectString(env.ComposeJSON)))
+	projected, err := store.MergeEnvironmentFilesIntoComposeJSON(base, files)
+	if err != nil {
+		return nil, err
+	}
+	return jsonObjectString(projected.ComposeJSON), nil
 }
 
 func newEnvironmentRestoreReport(env store.Environment, plan environmentRestoreBuildPlan, execute bool, workflowOptions environmentRestoreWorkflowOptions, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool) environmentRestoreReport {

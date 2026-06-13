@@ -117,6 +117,9 @@ func TestSQLiteSchemaIncludesEnvironmentComponentAssets(t *testing.T) {
 		"service_config_assets",
 		"component_dependencies",
 		"component_config_assets",
+		"environment_files",
+		"environment_services",
+		"environment_health_checks",
 	} {
 		if !tables[table] {
 			t.Fatalf("missing environment component asset table %q in %#v", table, tables)
@@ -162,6 +165,31 @@ func TestSQLiteSchemaIncludesEnvironmentComponentAssets(t *testing.T) {
 	} {
 		if !componentAssetColumns[column] {
 			t.Fatalf("missing component_config_assets.%s in %#v", column, componentAssetColumns)
+		}
+	}
+	fileColumns := sqliteTableColumns(t, dbPath, "environment_files")
+	for _, column := range []string{
+		"file_path",
+		"file_kind",
+		"content_inline",
+		"required",
+		"apply_order",
+		"summary_json",
+	} {
+		if !fileColumns[column] {
+			t.Fatalf("missing environment_files.%s in %#v", column, fileColumns)
+		}
+	}
+	serviceColumns := sqliteTableColumns(t, dbPath, "environment_services")
+	for _, column := range []string{"service_id", "repo_url", "branch", "ref", "checkout", "summary_json"} {
+		if !serviceColumns[column] {
+			t.Fatalf("missing environment_services.%s in %#v", column, serviceColumns)
+		}
+	}
+	healthColumns := sqliteTableColumns(t, dbPath, "environment_health_checks")
+	for _, column := range []string{"check_id", "check_kind", "url", "address", "command", "compose_service", "expect", "apply_order", "summary_json"} {
+		if !healthColumns[column] {
+			t.Fatalf("missing environment_health_checks.%s in %#v", column, healthColumns)
 		}
 	}
 }

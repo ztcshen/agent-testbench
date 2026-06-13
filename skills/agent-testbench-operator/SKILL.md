@@ -197,12 +197,18 @@ carry projection metadata such as `{"dockerNative":{"fileMode":"0600"}}`; do not
 patch generated workspace files by hand as the durable configuration.
 When inspecting or bootstrapping an environment, check the JSON `fileProjection`
 report. A referenced compose file, Compose `env_file`, config file, or secret
-file is not repair-complete until it is backed by `compose.generatedFiles`, a
-component config asset, generated Compose env metadata, or an explicit
-environment package projection; summary-only `startupFiles` entries are repair
-hints, not durable file content. Dynamic Compose file paths, including nested
-Compose defaults such as `${A:-${B:-file.env}}`, are resolved only from
-Store-backed `compose.env` and Store-backed `compose.envFiles`. Absolute or
+file is not repair-complete until it is backed by structured
+`environment_files`, a component config asset, generated Compose env metadata,
+legacy `compose.generatedFiles`, or an explicit environment package projection;
+summary-only `startupFiles` entries are repair hints, not durable file content.
+New environment registration stores service repositories and health checks as
+structured `environment_services` and `environment_health_checks`; legacy
+`services_json`, `repos_json`, and `health_checks_json` are compatibility views.
+Restore consumes structured environment files, services, and health checks
+first; legacy JSON fields are fallback inputs for older rows and imports.
+Dynamic Compose file paths, including nested Compose defaults such as
+`${A:-${B:-file.env}}`, are resolved only from Store-backed `compose.env` and
+Store-backed `compose.envFiles`. Absolute or
 home-directory paths remain blocking projection gaps even when they come from
 Store-backed env values, because they depend on a host-local file instead of
 Store-backed projection. `extends.file` scans only the named `extends.service`

@@ -329,58 +329,6 @@ func requireTraceTopologyContract(t *testing.T, ctx context.Context, s store.Sto
 	}
 }
 
-func requireEnvironmentContract(t *testing.T, ctx context.Context, s store.Store, started time.Time) store.Environment {
-	t.Helper()
-
-	env, err := s.UpsertEnvironment(ctx, store.Environment{
-		ID:                     "env.team.accepted",
-		DisplayName:            "Team Accepted Environment",
-		Description:            "Shared environment accepted by verification workflow",
-		Status:                 "draft",
-		ServicesJSON:           `[{"id":"service.alpha","repo":"../service-alpha"}]`,
-		ReposJSON:              `{"service.alpha":{"url":"../service-alpha","branch":"main"}}`,
-		ComposeJSON:            `{"composeFile":"docker-compose.yml","startCommand":"docker compose up -d"}`,
-		HealthChecksJSON:       `[{"id":"alpha-health","url":"http://127.0.0.1:18080/health"}]`,
-		VerificationWorkflowID: "workflow.smoke",
-		SummaryJSON:            `{"owner":"team"}`,
-	})
-	if err != nil {
-		t.Fatalf("upsert environment: %v", err)
-	}
-	if env.CreatedAt.IsZero() || env.UpdatedAt.IsZero() {
-		t.Fatalf("environment timestamps should be set: %#v", env)
-	}
-	env.LastVerificationRunID = contractRunID
-	env.LastVerificationStatus = store.StatusPassed
-	env.EvidenceComplete = true
-	env.TopologyComplete = true
-	env.Verified = true
-	env.Status = "verified"
-	env.LastVerifiedAt = started.Add(time.Minute)
-	env, err = s.UpsertEnvironment(ctx, env)
-	if err != nil {
-		t.Fatalf("update environment verification: %v", err)
-	}
-	loadedEnv, err := s.GetEnvironment(ctx, "env.team.accepted")
-	if err != nil {
-		t.Fatalf("get environment: %v", err)
-	}
-	if !loadedEnv.Verified || loadedEnv.LastVerificationStatus != store.StatusPassed || !loadedEnv.EvidenceComplete || !loadedEnv.TopologyComplete {
-		t.Fatalf("loaded environment verification = %#v", loadedEnv)
-	}
-	if !jsonEqual(loadedEnv.ReposJSON, env.ReposJSON) || loadedEnv.VerificationWorkflowID != "workflow.smoke" {
-		t.Fatalf("loaded environment catalog fields = %#v", loadedEnv)
-	}
-	environments, err := s.ListEnvironments(ctx)
-	if err != nil {
-		t.Fatalf("list environments: %v", err)
-	}
-	if len(environments) != 1 || environments[0].ID != "env.team.accepted" || !environments[0].Verified {
-		t.Fatalf("environments = %#v", environments)
-	}
-	return env
-}
-
 func requireEnvironmentComponentGraphContract(t *testing.T, ctx context.Context, s store.Store, envID string) {
 	t.Helper()
 

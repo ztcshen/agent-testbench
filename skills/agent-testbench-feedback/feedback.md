@@ -353,21 +353,27 @@ Durable feedback registered by local Codex sessions. Use
 ## 2026-06-12 - Restore stream-json lacks long-running phase events
 - Area: environment
 - Severity: P2
-- Status: new
+- Status: fixed
 - Source: user screenshot report 2026-06-12
 - Evidence: environment restore --output-format stream-json can run for a long time without events, leaving operators unable to tell whether it is blocked in compose, health checks, or migration.
 - Suggestion: Emit step_started/heartbeat/progress events for compose preparation, Docker compose execution, health waiting, migration application, and workflow verification so stream-json always shows the active phase.
+- Resolution: No further code fix is needed. Current restore and migration stream-json output emits phase start/completion events plus waiting observations for Docker compose execution, Docker health, migration execution, and workflow acceptance.
+- Verification: `go test ./cmd/agent-testbench -run 'Test(EnvironmentRestoreStreamJSONEmitsAgentEvents|EnvironmentRestoreStreamJSONEmitsComposeExecuteWaitingObservation|EnvironmentRestoreStreamJSONSkipsWorkflowWhenDockerIsNotReady|EnvironmentRestoreStreamJSONEmitsWorkflowAcceptanceWaiting|EnvironmentMigrationApplyStreamJSONEmitsAgentEvents)' -count=1`
 ## 2026-06-12 - Environment registration file relationships are hard to reason about
 - Area: environment
 - Severity: P2
-- Status: new
+- Status: fixed
 - Source: user screenshot report 2026-06-12
 - Evidence: environment register mixes composeFiles, generatedFiles, and startupFiles references; operators can end up referencing files that are not materialized as durable Store-backed assets.
 - Suggestion: Normalize the registration model so every referenced compose/startup/generated file has an explicit Store-backed asset record, projection kind, ownership, and inspectable restore-readiness status.
+- Resolution: No further code fix is needed for the current restore safety goal. Current inspect/bootstrap/restore output exposes `fileProjection`; missing Store-backed compose/env/config/secret/include/extends projections block restore and return a repair plan instead of relying on host-local files.
+- Verification: `go test ./cmd/agent-testbench ./internal/domain/environmentfiles -run 'Test(EnvironmentInspectAndBootstrapExposeFileProjectionGaps|EnvironmentRestoreSQLStoreRejectsComposeNativeFileProjectionGaps|ProjectionReport)' -count=1`
 ## 2026-06-12 - Compose down cleanup can break partially linked environments
 - Area: environment
 - Severity: P1
-- Status: new
+- Status: fixed
 - Source: user screenshot report 2026-06-12
 - Evidence: An environment was cleaned with docker compose down --remove-orphans, but application containers were not connected through a complete environment link, causing startup chains such as env variable injection to break.
 - Suggestion: Before destructive compose cleanup, require a complete environment linkage/preflight proof for all app containers, env injection paths, and compose project boundaries; otherwise block down/remove-orphans and provide a repair plan.
+- Resolution: No further code fix is needed. Destructive restore cleanup and `environment stop --down --remove-orphans` now require complete Store-to-Compose linkage proof; incomplete linkage blocks Docker down/remove-orphans and returns a Store-backed repair plan.
+- Verification: `go test ./cmd/agent-testbench -run 'Test(EnvironmentRestoreBlocksAllowedDockerCleanupWithoutCompleteLinkage|EnvironmentRestoreBlocksDockerCleanupWhenComposeNativeProjectionMissing|EnvironmentStopDownBlocksWithoutCompleteLinkage|EnvironmentStopDownRemoveOrphansRequiresExplicitFlags)' -count=1`

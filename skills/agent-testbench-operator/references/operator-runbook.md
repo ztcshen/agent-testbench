@@ -231,6 +231,16 @@ Store-projected Compose env/config/secret/include/extends file.
 When inspecting or bootstrapping an environment, use `fileProjection` to verify
 that Compose `env_file`, config file, and secret file references discovered
 inside Store-backed compose files also have Store-backed projection sources.
+New `environment register --compose-generated-file TARGET=SOURCE_FILE` runs
+store Compose and Compose env file content as structured `environment_files`;
+legacy `compose.generatedFiles` remains a compatibility projection for older
+Store rows and imported packages.
+Service repositories and health checks from new registrations are also stored
+as structured `environment_services` and `environment_health_checks`; legacy
+`services_json`, `repos_json`, and `health_checks_json` remain compatibility
+views for older rows and imports. Restore consumes structured environment
+files, services, and health checks first; legacy JSON fields are fallback inputs
+for older rows and imports.
 Variable paths, including nested Compose defaults such as
 `${A:-${B:-file.env}}`, are resolved from Store-backed `compose.env`; if
 required variables are not present there or in Store-backed `compose.envFiles`,

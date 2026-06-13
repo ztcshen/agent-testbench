@@ -6,9 +6,33 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"agent-testbench/internal/store"
 )
 
 func environmentServices(services stringListFlag, repos stringListFlag, branches stringListFlag, repoRefs stringListFlag, checkouts stringListFlag) []map[string]any {
+	rows := environmentServiceRows(services, repos, branches, repoRefs, checkouts)
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		item := map[string]any{"id": row.ServiceID}
+		if row.RepoURL != "" {
+			item["repo"] = row.RepoURL
+		}
+		if row.Branch != "" {
+			item["branch"] = row.Branch
+		}
+		if row.Ref != "" {
+			item["ref"] = row.Ref
+		}
+		if row.Checkout != "" {
+			item["checkout"] = row.Checkout
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func environmentServiceRows(services stringListFlag, repos stringListFlag, branches stringListFlag, repoRefs stringListFlag, checkouts stringListFlag) []store.EnvironmentService {
 	repoByService := environmentKeyValueMap(repos)
 	branchByService := environmentKeyValueMap(branches)
 	refByService := environmentKeyValueMap(repoRefs)
@@ -34,24 +58,73 @@ func environmentServices(services stringListFlag, repos stringListFlag, branches
 		ordered = append(ordered, id)
 	}
 	sort.Strings(ordered)
-	out := make([]map[string]any, 0, len(ordered))
+	out := make([]store.EnvironmentService, 0, len(ordered))
 	for _, id := range ordered {
-		item := map[string]any{"id": id}
-		if repo := repoByService[id]; repo != "" {
-			item["repo"] = repo
-		}
-		if branch := branchByService[id]; branch != "" {
-			item["branch"] = branch
-		}
-		if ref := refByService[id]; ref != "" {
-			item["ref"] = ref
-		}
-		if checkout := checkoutByService[id]; checkout != "" {
-			item["checkout"] = checkout
-		}
-		out = append(out, item)
+		out = append(out, store.EnvironmentService{
+			ServiceID:   id,
+			RepoURL:     repoByService[id],
+			Branch:      branchByService[id],
+			Ref:         refByService[id],
+			Checkout:    checkoutByService[id],
+			SummaryJSON: `{"source":"environment.register"}`,
+		})
 	}
 	return out
+}
+
+func environmentServiceRowsFromJSON(services []any, repos map[string]any) []store.EnvironmentService {
+	byID := map[string]store.EnvironmentService{}
+	for _, raw := range services {
+		item := jsonObjectFromAny(raw)
+		id, _ := item["id"].(string)
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		service := byID[id]
+		service.ServiceID = id
+		if value, _ := item["repo"].(string); value != "" {
+			service.RepoURL = value
+		}
+		if value, _ := item["branch"].(string); value != "" {
+			service.Branch = value
+		}
+		if value, _ := item["ref"].(string); value != "" {
+			service.Ref = value
+		}
+		if value, _ := item["checkout"].(string); value != "" {
+			service.Checkout = value
+		}
+		byID[id] = service
+	}
+	for id, raw := range repos {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		repo := jsonObjectFromAny(raw)
+		service := byID[id]
+		service.ServiceID = id
+		if value, _ := repo["url"].(string); value != "" {
+			service.RepoURL = value
+		}
+		if value, _ := repo["branch"].(string); value != "" {
+			service.Branch = value
+		}
+		if value, _ := repo["ref"].(string); value != "" {
+			service.Ref = value
+		}
+		if value, _ := repo["checkout"].(string); value != "" {
+			service.Checkout = value
+		}
+		byID[id] = service
+	}
+	out := make([]store.EnvironmentService, 0, len(byID))
+	for _, service := range byID {
+		service.SummaryJSON = `{"source":"environment.legacy-json"}`
+		out = append(out, service)
+	}
+	return store.NormalizeEnvironmentServices(out)
 }
 
 func environmentRepoMap(repos stringListFlag, branches stringListFlag, repoRefs stringListFlag, checkouts stringListFlag) map[string]any {
@@ -150,6 +223,92 @@ func environmentComposeConfig(composeFiles stringListFlag, generatedFiles string
 	return out, nil
 }
 
+func environmentComposeConfigWithoutGeneratedFiles(compose map[string]any) map[string]any {
+	out := map[string]any{}
+	for key, value := range compose {
+		if key == "generatedFiles" {
+			continue
+		}
+		out[key] = value
+	}
+	return out
+}
+
+func environmentFilesFromComposeConfig(compose map[string]any) []store.EnvironmentFile {
+	generated := stringMapFromAny(compose["generatedFiles"])
+	seen := map[string]bool{}
+	files := make([]store.EnvironmentFile, 0, len(generated))
+	add := func(kind string, path string, order int) {
+		path = filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
+		if path == "" || path == "." {
+			return
+		}
+		key := kind + "\x00" + path
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		files = append(files, store.EnvironmentFile{
+			Path:          path,
+			Kind:          kind,
+			ContentInline: generated[path],
+			Required:      true,
+			ApplyOrder:    order,
+			SummaryJSON:   `{"source":"environment.register"}`,
+		})
+	}
+	for index, path := range stringSliceFromAny(compose["composeFiles"]) {
+		add(store.EnvironmentFileKindComposeFile, path, 10+index)
+	}
+	for index, path := range stringSliceFromAny(compose["envFiles"]) {
+		add(store.EnvironmentFileKindComposeEnvFile, path, 100+index)
+	}
+	order := 200
+	for path := range generated {
+		if seen[store.EnvironmentFileKindComposeFile+"\x00"+path] || seen[store.EnvironmentFileKindComposeEnvFile+"\x00"+path] {
+			continue
+		}
+		add(store.EnvironmentFileKindStartupFile, path, order)
+		order++
+	}
+	return files
+}
+
+func environmentFilesForGeneratedUpdates(compose map[string]any, generated map[string]string) []store.EnvironmentFile {
+	composeFiles := map[string]bool{}
+	for _, path := range stringSliceFromAny(compose["composeFiles"]) {
+		composeFiles[filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))] = true
+	}
+	envFiles := map[string]bool{}
+	for _, path := range stringSliceFromAny(compose["envFiles"]) {
+		envFiles[filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))] = true
+	}
+	out := make([]store.EnvironmentFile, 0, len(generated))
+	order := 200
+	for path, content := range generated {
+		cleanPath := filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
+		kind := store.EnvironmentFileKindStartupFile
+		applyOrder := order
+		if composeFiles[cleanPath] {
+			kind = store.EnvironmentFileKindComposeFile
+			applyOrder = 10
+		} else if envFiles[cleanPath] {
+			kind = store.EnvironmentFileKindComposeEnvFile
+			applyOrder = 100
+		}
+		out = append(out, store.EnvironmentFile{
+			Path:          cleanPath,
+			Kind:          kind,
+			ContentInline: content,
+			Required:      true,
+			ApplyOrder:    applyOrder,
+			SummaryJSON:   `{"source":"environment.startup-file.put"}`,
+		})
+		order++
+	}
+	return store.NormalizeEnvironmentFiles(out)
+}
+
 func generatedFileContentMapFromFlags(values stringListFlag) (map[string]string, error) {
 	out := map[string]string{}
 	for _, raw := range values.Values() {
@@ -204,6 +363,71 @@ func environmentHealthChecks(urls stringListFlag, tcpAddresses stringListFlag, c
 		index++
 	}
 	return out
+}
+
+func environmentHealthCheckRows(urls stringListFlag, tcpAddresses stringListFlag, commands stringListFlag, composeServices stringListFlag) []store.EnvironmentHealthCheck {
+	out := make([]store.EnvironmentHealthCheck, 0, len(urls.Values())+len(tcpAddresses.Values())+len(commands.Values())+len(composeServices.Values()))
+	index := 1
+	add := func(check store.EnvironmentHealthCheck) {
+		check.CheckID = fmt.Sprintf("health-%02d", index)
+		check.ApplyOrder = index
+		check.SummaryJSON = `{"source":"environment.register"}`
+		out = append(out, check)
+		index++
+	}
+	for _, url := range urls.Values() {
+		add(store.EnvironmentHealthCheck{Kind: "url", URL: url})
+	}
+	for _, address := range tcpAddresses.Values() {
+		add(store.EnvironmentHealthCheck{Kind: "tcp", Address: address})
+	}
+	for _, command := range commands.Values() {
+		add(store.EnvironmentHealthCheck{Kind: "command", Command: command})
+	}
+	for _, service := range composeServices.Values() {
+		add(store.EnvironmentHealthCheck{Kind: "compose-service", ComposeService: service})
+	}
+	return out
+}
+
+func environmentHealthCheckRowsFromJSON(checks []any) []store.EnvironmentHealthCheck {
+	out := make([]store.EnvironmentHealthCheck, 0, len(checks))
+	for index, raw := range checks {
+		item := jsonObjectFromAny(raw)
+		id, _ := item["id"].(string)
+		if strings.TrimSpace(id) == "" {
+			id = fmt.Sprintf("health-%02d", index+1)
+		}
+		kind, _ := item["kind"].(string)
+		check := store.EnvironmentHealthCheck{
+			CheckID:     id,
+			Kind:        kind,
+			ApplyOrder:  index + 1,
+			SummaryJSON: `{"source":"environment.legacy-json"}`,
+		}
+		check.URL, _ = item["url"].(string)
+		check.Address, _ = item["address"].(string)
+		check.Command, _ = item["command"].(string)
+		check.ComposeService, _ = item["service"].(string)
+		check.Expect, _ = item["expect"].(string)
+		out = append(out, check)
+	}
+	return store.NormalizeEnvironmentHealthChecks(out)
+}
+
+func mergeEnvironmentFiles(existing []store.EnvironmentFile, updates []store.EnvironmentFile) []store.EnvironmentFile {
+	byKey := map[string]store.EnvironmentFile{}
+	for _, file := range existing {
+		byKey[file.Kind+"\x00"+file.Path] = file
+	}
+	for _, file := range updates {
+		byKey[file.Kind+"\x00"+file.Path] = file
+	}
+	out := make([]store.EnvironmentFile, 0, len(byKey))
+	for _, file := range byKey {
+		out = append(out, file)
+	}
+	return store.NormalizeEnvironmentFiles(out)
 }
 
 func environmentRepoUpdateMap(repos stringListFlag, branches stringListFlag, repoRefs stringListFlag, checkouts stringListFlag) map[string]map[string]string {

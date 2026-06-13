@@ -44,15 +44,29 @@ select id, display_name, description, status, verified, services_json, repos_jso
   health_checks_json, verification_workflow_id, last_verification_run_id, last_verification_status,
   evidence_complete, topology_complete, last_verified_at, summary_json, created_at, updated_at
 from environments where id = %s;`, s.dialect.BindVar(1))
-	return scanEnvironment(s.db.QueryRowContext(ctx, query, id))
+	env, err := scanEnvironment(s.db.QueryRowContext(ctx, query, id))
+	if err != nil {
+		return store.Environment{}, err
+	}
+	return store.HydrateEnvironmentStructuredState(ctx, s, env)
 }
 
 func (s *Store) ListEnvironments(ctx context.Context) ([]store.Environment, error) {
-	return queryStoreRows(ctx, s.db, `
+	items, err := queryStoreRows(ctx, s.db, `
 select id, display_name, description, status, verified, services_json, repos_json, compose_json,
   health_checks_json, verification_workflow_id, last_verification_run_id, last_verification_status,
   evidence_complete, topology_complete, last_verified_at, summary_json, created_at, updated_at
 from environments order by verified desc, updated_at desc, id;`, scanEnvironment)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		items[i], err = store.HydrateEnvironmentStructuredState(ctx, s, items[i])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
 }
 
 func (s *Store) ReplaceEnvironmentComponentGraph(ctx context.Context, envID string, graph store.EnvironmentComponentGraph) (err error) {

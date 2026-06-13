@@ -100,6 +100,12 @@ func (s *fakeSQLState) lastQuery(t *testing.T) fakeSQLCall {
 	return s.queries[len(s.queries)-1]
 }
 
+func (s *fakeSQLState) queriesSnapshot() []fakeSQLCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]fakeSQLCall(nil), s.queries...)
+}
+
 var fakeSQLStateRegistry = &fakeRegistry{states: map[string]*fakeSQLState{}}
 
 type fakeRegistry struct {

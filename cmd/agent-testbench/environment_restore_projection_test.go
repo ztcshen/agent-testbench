@@ -73,6 +73,49 @@ func TestEnvironmentRestoreProjectsDockerNativeStoreAssetsBeforeComposeUp(t *tes
 	}
 }
 
+func TestEnvironmentRestoreUsesStructuredEnvironmentFilesForDockerPlan(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	report, err := buildEnvironmentRestoreReportWithStructuredState(context.Background(), store.Environment{
+		ID:                     "env.structured.restore",
+		ComposeJSON:            `{"composeFile":"compose/docker-compose.yml","services":["app"],"startCommand":"docker compose up -d"}`,
+		HealthChecksJSON:       `[]`,
+		VerificationWorkflowID: "workflow.structured-restore",
+	}, workspace, false, false, true, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{}, []store.EnvironmentFile{
+		{
+			Path:          "compose/docker-compose.yml",
+			Kind:          store.EnvironmentFileKindComposeFile,
+			ContentInline: "services:\n  app:\n    image: alpine:3.20\n",
+			Required:      true,
+			ApplyOrder:    10,
+		},
+		{
+			Path:          "compose/runtime.env",
+			Kind:          store.EnvironmentFileKindComposeEnvFile,
+			ContentInline: "APP_MODE=test\n",
+			Required:      true,
+			ApplyOrder:    20,
+		},
+	}, nil, []store.EnvironmentHealthCheck{
+		{CheckID: "app-health", Kind: "compose-service", ComposeService: "app"},
+	})
+	if err != nil {
+		t.Fatalf("build restore report: %v", err)
+	}
+	if !report.OK || !report.Docker.OK {
+		t.Fatalf("structured restore report docker=%#v readiness=%#v preflight=%#v", report.Docker, report.Readiness, report.Preflight)
+	}
+	if !strings.Contains(mustCompactJSON(report.Compose), "generatedFiles") {
+		t.Fatalf("structured files should be projected into compose runtime view: %#v", report.Compose)
+	}
+	generated := map[string]bool{}
+	for _, item := range report.Docker.Generated {
+		generated[filepath.ToSlash(item.Path)] = item.OK && item.Action == "plan-write"
+	}
+	if !generated[filepath.ToSlash(filepath.Join(workspace, "compose/docker-compose.yml"))] || !generated[filepath.ToSlash(filepath.Join(workspace, "compose/runtime.env"))] {
+		t.Fatalf("structured files were not planned as generated files: %#v", report.Docker.Generated)
+	}
+}
+
 func installProjectionFakeDocker(t *testing.T, fakeBin string) {
 	t.Helper()
 	writeFile(t, filepath.Join(fakeBin, "docker"), `#!/usr/bin/env bash

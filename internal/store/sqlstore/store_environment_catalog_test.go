@@ -90,11 +90,39 @@ func assertMySQLAcceptedEnvironmentLookup(
 	if !loadedEnv.Verified || loadedEnv.LastVerificationStatus != store.StatusPassed || !loadedEnv.EvidenceComplete || !loadedEnv.TopologyComplete {
 		t.Fatalf("loaded environment verification = %#v", loadedEnv)
 	}
-	query := state.lastQuery(t)
-	assertSQLContains(t, query.query, "environment get query", "from environments where id = ?")
-	if query.args[0] != env.ID {
-		t.Fatalf("environment get query = %#v", query)
+	queries := state.queriesSnapshot()
+	if len(queries) < 4 {
+		t.Fatalf("environment lookup queries = %#v", queries)
 	}
+	environmentQuery := findFakeSQLQuery(t, queries, "from environments where id = ?")
+	assertSQLContains(t, environmentQuery.query, "environment get query", "from environments where id = ?")
+	if environmentQuery.args[0] != env.ID {
+		t.Fatalf("environment get query = %#v", environmentQuery)
+	}
+	filesQuery := findFakeSQLQuery(t, queries, "from environment_files")
+	assertSQLContains(t, filesQuery.query, "environment files query", "from environment_files", "where env_id = ?")
+	if filesQuery.args[0] != env.ID {
+		t.Fatalf("environment files query = %#v", filesQuery)
+	}
+	servicesQuery := findFakeSQLQuery(t, queries, "from environment_services")
+	if servicesQuery.args[0] != env.ID {
+		t.Fatalf("environment services query = %#v", servicesQuery)
+	}
+	healthQuery := findFakeSQLQuery(t, queries, "from environment_health_checks")
+	if healthQuery.args[0] != env.ID {
+		t.Fatalf("environment health query = %#v", healthQuery)
+	}
+}
+
+func findFakeSQLQuery(t *testing.T, queries []fakeSQLCall, fragment string) fakeSQLCall {
+	t.Helper()
+	for _, query := range queries {
+		if strings.Contains(query.query, fragment) {
+			return query
+		}
+	}
+	t.Fatalf("missing query containing %q in %#v", fragment, queries)
+	return fakeSQLCall{}
 }
 
 func queueMySQLAcceptedEnvironmentRow(state *fakeSQLState, env store.Environment, verifiedAt time.Time) {

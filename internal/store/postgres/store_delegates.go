@@ -133,6 +133,30 @@ func (s *Store) ListEnvironments(ctx context.Context) ([]store.Environment, erro
 	return s.core.ListEnvironments(ctx)
 }
 
+func (s *Store) ReplaceEnvironmentFiles(ctx context.Context, envID string, files []store.EnvironmentFile) error {
+	return s.core.ReplaceEnvironmentFiles(ctx, envID, files)
+}
+
+func (s *Store) ListEnvironmentFiles(ctx context.Context, envID string) ([]store.EnvironmentFile, error) {
+	return s.core.ListEnvironmentFiles(ctx, envID)
+}
+
+func (s *Store) ReplaceEnvironmentServices(ctx context.Context, envID string, services []store.EnvironmentService) error {
+	return s.core.ReplaceEnvironmentServices(ctx, envID, services)
+}
+
+func (s *Store) ListEnvironmentServices(ctx context.Context, envID string) ([]store.EnvironmentService, error) {
+	return s.core.ListEnvironmentServices(ctx, envID)
+}
+
+func (s *Store) ReplaceEnvironmentHealthChecks(ctx context.Context, envID string, checks []store.EnvironmentHealthCheck) error {
+	return s.core.ReplaceEnvironmentHealthChecks(ctx, envID, checks)
+}
+
+func (s *Store) ListEnvironmentHealthChecks(ctx context.Context, envID string) ([]store.EnvironmentHealthCheck, error) {
+	return s.core.ListEnvironmentHealthChecks(ctx, envID)
+}
+
 func (s *Store) ReplaceEnvironmentComponentGraph(ctx context.Context, envID string, graph store.EnvironmentComponentGraph) error {
 	return s.core.ReplaceEnvironmentComponentGraph(ctx, envID, graph)
 }

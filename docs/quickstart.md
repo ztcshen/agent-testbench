@@ -466,11 +466,21 @@ restore fails before invoking Docker if it is missing.
 `environment inspect`, `environment bootstrap`, and `environment restore`
 include `fileProjection` in JSON output. The report lists each referenced
 `composeFiles` and Compose `envFiles` entry, generated `.agent-testbench`
-Compose env file, Store `generatedFiles` item, and component config asset with
-its source and projection rule. A referenced file is ready only when it can be
-traced to `compose.generatedFiles`, a component config asset, generated Compose
-env metadata, or an explicit environment package source; summary-only
-`startupFiles` entries without stored file content are reported as repair gaps.
+Compose env file, structured `environment_files` row, legacy Store
+`generatedFiles` item, and component config asset with its source and projection
+rule. New `environment register --compose-generated-file TARGET=SOURCE_FILE`
+runs write the file content into `environment_files`; `compose.generatedFiles`
+is kept as a compatibility view for older/imported environments. A referenced
+file is ready only when it can be traced to `environment_files`, a component
+config asset, generated Compose env metadata, legacy `compose.generatedFiles`,
+or an explicit environment package source; summary-only `startupFiles` entries
+without stored file content are reported as repair gaps.
+New environment registration also stores service repositories and health checks
+as structured `environment_services` and `environment_health_checks` rows.
+The legacy `services_json`, `repos_json`, and `health_checks_json` fields are
+kept as compatibility views for older Store rows and imported packages. Restore
+uses the structured rows first and falls back to those legacy JSON fields only
+when the structured rows are absent.
 When `fileProjection.ok=false`, `fileProjection.repairPlan` groups the
 Store-backed repairs needed for summary-only startup files, unresolved Compose
 variables, and unprojected Compose env/config/secret/include/extends file

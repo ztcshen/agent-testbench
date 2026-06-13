@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"agent-testbench/internal/store"
 )
 
 func runEnvironmentRepo(ctx context.Context, args []string) error {
@@ -24,6 +26,43 @@ func runEnvironmentRepo(ctx context.Context, args []string) error {
 }
 
 func runEnvironmentRepoSet(ctx context.Context, args []string) error {
+	opts, err := parseEnvironmentRepoSetOptions(args)
+	if err != nil {
+		return err
+	}
+	runtime, cleanup, err := openRequiredCLIStore(ctx, opts.storeRef, opts.storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	env, err := updateEnvironmentRepositories(ctx, runtime, opts.id, opts.updates)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":           true,
+		"environment":  environmentPayload(env),
+		"updatedRepos": opts.updates,
+	}
+	if opts.jsonOutput {
+		return writeIndentedJSON(payload)
+	}
+	fmt.Printf("Updated Environment Repositories: %s\n", env.ID)
+	for _, serviceID := range sortedMapKeys(opts.updates) {
+		fmt.Printf("- %s\n", serviceID)
+	}
+	return nil
+}
+
+type environmentRepoSetOptions struct {
+	storeRef   string
+	storeURL   string
+	jsonOutput bool
+	id         string
+	updates    map[string]map[string]string
+}
+
+func parseEnvironmentRepoSetOptions(args []string) (environmentRepoSetOptions, error) {
 	flags := flag.NewFlagSet("environment repo set", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
@@ -35,57 +74,85 @@ func runEnvironmentRepoSet(ctx context.Context, args []string) error {
 	flags.Var(&repoRefs, "repo-ref", "Service Git ref as SERVICE=REF; repeat for multiple services")
 	flags.Var(&checkouts, "checkout", "Service checkout path as SERVICE=PATH; repeat for multiple services")
 	if err := parseInterspersedFlags(flags, args); err != nil {
-		return err
+		return environmentRepoSetOptions{}, err
 	}
 	id := strings.TrimSpace(flags.Arg(0))
 	if id == "" {
-		return errors.New("environment id is required")
+		return environmentRepoSetOptions{}, errors.New("environment id is required")
 	}
 	updates := environmentRepoUpdateMap(repos, branches, repoRefs, checkouts)
 	if len(updates) == 0 {
-		return errors.New("at least one --repo, --branch, --repo-ref, or --checkout update is required")
+		return environmentRepoSetOptions{}, errors.New("at least one --repo, --branch, --repo-ref, or --checkout update is required")
 	}
-	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
+	return environmentRepoSetOptions{
+		storeRef:   *storeRef,
+		storeURL:   *storeURL,
+		jsonOutput: *jsonOutput,
+		id:         id,
+		updates:    updates,
+	}, nil
+}
+
+func updateEnvironmentRepositories(ctx context.Context, runtime store.EnvironmentStore, id string, updates map[string]map[string]string) (store.Environment, error) {
 	env, err := runtime.GetEnvironment(ctx, id)
 	if err != nil {
-		return err
+		return store.Environment{}, err
 	}
-	repoMap := jsonObjectString(env.ReposJSON)
-	for serviceID, update := range updates {
-		current := jsonObjectFromAny(repoMap[serviceID])
-		for key, value := range update {
-			if strings.TrimSpace(value) == "" {
-				delete(current, key)
-				continue
-			}
-			current[key] = value
-		}
-		repoMap[serviceID] = current
+	services, err := runtime.ListEnvironmentServices(ctx, env.ID)
+	if err != nil {
+		return store.Environment{}, err
 	}
-	env.ReposJSON = mustCompactJSON(repoMap)
-	env.ServicesJSON = mustCompactJSON(environmentServicesWithRepoUpdates(jsonArrayString(env.ServicesJSON), updates))
+	if len(services) == 0 {
+		services = environmentServiceRowsFromJSON(jsonArrayString(env.ServicesJSON), jsonObjectString(env.ReposJSON))
+	}
+	services = storeEnvironmentServicesWithRepoUpdates(services, updates)
+	services = store.NormalizeEnvironmentServices(services)
+	env.ReposJSON = "{}"
+	env.ServicesJSON = "[]"
 	env.UpdatedAt = time.Now().UTC()
 	env, err = runtime.UpsertEnvironment(ctx, env)
 	if err != nil {
-		return err
+		return store.Environment{}, err
 	}
-	payload := map[string]any{
-		"ok":           true,
-		"environment":  environmentPayload(env),
-		"updatedRepos": updates,
+	if err := runtime.ReplaceEnvironmentServices(ctx, env.ID, services); err != nil {
+		return store.Environment{}, err
 	}
-	if *jsonOutput {
-		return writeIndentedJSON(payload)
+	return runtime.GetEnvironment(ctx, env.ID)
+}
+
+func storeEnvironmentServicesWithRepoUpdates(services []store.EnvironmentService, updates map[string]map[string]string) []store.EnvironmentService {
+	byID := map[string]store.EnvironmentService{}
+	for _, service := range services {
+		byID[service.ServiceID] = service
 	}
-	fmt.Printf("Updated Environment Repositories: %s\n", env.ID)
-	for _, serviceID := range sortedMapKeys(updates) {
-		fmt.Printf("- %s\n", serviceID)
+	for serviceID, update := range updates {
+		current := byID[serviceID]
+		current.ServiceID = serviceID
+		applyStoreEnvironmentServiceRepoUpdate(&current, update)
+		current.SummaryJSON = `{"source":"environment.repo.set"}`
+		byID[serviceID] = current
 	}
-	return nil
+	out := make([]store.EnvironmentService, 0, len(byID))
+	for _, service := range byID {
+		out = append(out, service)
+	}
+	return out
+}
+
+func applyStoreEnvironmentServiceRepoUpdate(service *store.EnvironmentService, update map[string]string) {
+	for key, value := range update {
+		value = strings.TrimSpace(value)
+		switch key {
+		case "url":
+			service.RepoURL = value
+		case "branch":
+			service.Branch = value
+		case "ref":
+			service.Ref = value
+		case "checkout":
+			service.Checkout = value
+		}
+	}
 }
 
 func runEnvironmentStartupFile(ctx context.Context, args []string) error {
@@ -132,14 +199,29 @@ func runEnvironmentStartupFilePut(ctx context.Context, args []string) error {
 		return err
 	}
 	compose := jsonObjectString(env.ComposeJSON)
-	current := stringMapFromAny(compose["generatedFiles"])
+	existingFiles, err := runtime.ListEnvironmentFiles(ctx, env.ID)
+	if err != nil {
+		return err
+	}
+	if len(existingFiles) == 0 {
+		existingFiles = environmentFilesFromComposeConfig(compose)
+	}
+	current := map[string]string{}
 	for path, content := range generated {
 		current[path] = content
 	}
 	compose["generatedFiles"] = current
-	env.ComposeJSON = mustCompactJSON(compose)
+	updatedFiles := environmentFilesForGeneratedUpdates(compose, generated)
+	env.ComposeJSON = mustCompactJSON(environmentComposeConfigWithoutGeneratedFiles(compose))
 	env.SummaryJSON = environmentStartupFileSummaryJSON(env.SummaryJSON, generated)
 	env, err = runtime.UpsertEnvironment(ctx, env)
+	if err != nil {
+		return err
+	}
+	if err := runtime.ReplaceEnvironmentFiles(ctx, env.ID, mergeEnvironmentFiles(existingFiles, updatedFiles)); err != nil {
+		return err
+	}
+	env, err = runtime.GetEnvironment(ctx, env.ID)
 	if err != nil {
 		return err
 	}

@@ -6,9 +6,9 @@ type Change struct {
 	SQL     string
 }
 
-const CurrentVersion = 19
+const CurrentVersion = 21
 
-var changes = orderedChanges(coreChanges, environmentCatalogChanges, agentTaskChanges)
+var changes = orderedChanges(coreChanges, environmentCatalogChanges, agentTaskChanges, environmentDockerChanges)
 
 func orderedChanges(groups ...[]Change) []Change {
 	var total int

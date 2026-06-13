@@ -149,10 +149,19 @@ CLI registration exposes the same shapes through `--health-url`,
 SQL Store-backed one-click restore requires component source repositories to be
 remote Git URLs when code must be cloned. Compose startup files and
 component-owned assets can be generated from compact Store metadata through
-`compose.generatedFiles`, `component_config_assets`, or `environment register
+`environment_files`, `component_config_assets`, or `environment register
 --compose-generated-file TARGET=SOURCE_FILE`; the generated files are written
-under the restore workspace before Docker starts. Legacy package repositories
-remain compatibility inputs and are not the SQL Store daily restore source.
+under the restore workspace before Docker starts. New `environment register`
+runs store Compose files and Compose env files as structured `environment_files`
+rows; `compose.generatedFiles` remains a compatibility view for imported or
+older environments. New register and repo-update flows also store service,
+repository, and health-check metadata in structured `environment_services` and
+`environment_health_checks` rows; `services_json`, `repos_json`, and
+`health_checks_json` remain compatibility views for imported or older
+environments. Restore builds its Docker runtime view from these structured
+rows first and falls back to legacy JSON only when no structured rows exist.
+Legacy package repositories remain compatibility inputs and are not the SQL
+Store daily restore source.
 Docker-native projection keeps the Store as the source of truth while letting
 Compose carry runtime mechanics: `component_config_assets.asset_kind` values
 such as `compose-config`, `compose-secret`, `env-file`, and plain MySQL
@@ -165,7 +174,8 @@ must not hand-edit local copies as the canonical configuration. Asset
 file permissions at execution time.
 Environment inspect, bootstrap, and restore JSON expose a derived
 `fileProjection` report. It explains how `composeFiles`, Compose `envFiles`,
-generated restore env files, `compose.generatedFiles`, native Compose
+generated restore env files, structured `environment_files`, legacy
+`compose.generatedFiles`, native Compose
 `env_file`/`configs`/`secrets` file references, `summary.startupFiles`, and
 component config assets relate, and marks any referenced file that lacks a
 Store-backed content source or explicit environment package projection.
@@ -181,8 +191,10 @@ Compose env/config/secret/include or extends file references. Recursive
 `extends.file` inspection is limited to the named `extends.service` so unrelated
 services in a shared compose file do not block restore readiness.
 For already-registered environments, `environment startup-file put ENV_ID
---file TARGET=SOURCE_FILE` updates only `compose.generatedFiles` and preserves
-the existing workflow, services, repositories, and health checks.
+--file TARGET=SOURCE_FILE` writes the supplied content into structured
+`environment_files` rows and preserves the existing workflow, services,
+repositories, and health checks. Runtime inspection still projects those files
+as `compose.generatedFiles` for older consumers.
 Component graph assets are deterministic startup/config material, not source
 archives, Docker images, runtime databases, logs, or Evidence payloads. Inline
 assets have no per-kind size limit: DDL, seed SQL, Apollo-style configuration,
