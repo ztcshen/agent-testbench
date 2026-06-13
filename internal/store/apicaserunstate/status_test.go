@@ -46,6 +46,28 @@ func TestStatusByCaseKeepsLatestAndAnyPassed(t *testing.T) {
 	}
 }
 
+func TestStatusByCaseKeepsLatestWithinRun(t *testing.T) {
+	passed, latest, err := StatusByCase(context.Background(), fakeStore{
+		runs: []store.Run{{ID: "run-with-retry", ProfileID: "current"}},
+		caseRuns: map[string][]store.APICaseRun{
+			"run-with-retry": {
+				{CaseID: "case.alpha", Status: store.StatusSkipped},
+				{CaseID: "case.alpha", Status: store.StatusFailed},
+			},
+		},
+	}, "current")
+
+	if err != nil {
+		t.Fatalf("status by case: %v", err)
+	}
+	if passed["case.alpha"] {
+		t.Fatalf("passed map = %#v", passed)
+	}
+	if latest["case.alpha"] != store.StatusFailed {
+		t.Fatalf("latest map should use the newest case run in the workflow run: %#v", latest)
+	}
+}
+
 func TestStatusByCaseFiltersRunsByProfile(t *testing.T) {
 	passed, latest, err := StatusByCase(context.Background(), fakeStore{
 		runs: []store.Run{

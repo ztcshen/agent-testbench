@@ -29,7 +29,8 @@ func StatusByCase(ctx context.Context, runtime Store, profileID string) (map[str
 		if err != nil {
 			return nil, nil, err
 		}
-		for _, item := range caseRuns {
+		for j := len(caseRuns) - 1; j >= 0; j-- {
+			item := caseRuns[j]
 			if latest[item.CaseID] == "" {
 				latest[item.CaseID] = item.Status
 			}
