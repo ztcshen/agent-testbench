@@ -3,6 +3,8 @@ package main
 import (
 	"path/filepath"
 	"strings"
+
+	"agent-testbench/internal/domain/composefile"
 )
 
 func environmentRestoreComposeWithRepoCheckouts(compose map[string]any, specs []environmentRestoreRepoSpec) map[string]any {
@@ -47,25 +49,9 @@ func environmentRestoreRepoCheckoutReplacements(specs []environmentRestoreRepoSp
 }
 
 func environmentRestoreRewriteComposeHostBindSources(content string, replacements map[string]string) (string, bool) {
-	lines := strings.Split(content, "\n")
-	state := composeBindMountParseState{}
-	changed := false
-	for index, line := range lines {
-		_, source := state.bindSource(line)
-		replacement := environmentRestoreRepoCheckoutForBindSource(source, replacements)
-		if replacement == "" || replacement == source {
-			continue
-		}
-		next := strings.Replace(line, source, replacement, 1)
-		if next != line {
-			lines[index] = next
-			changed = true
-		}
-	}
-	if !changed {
-		return content, false
-	}
-	return strings.Join(lines, "\n"), true
+	return composefile.RewriteBindMountSources(content, func(source string) string {
+		return environmentRestoreRepoCheckoutForBindSource(source, replacements)
+	})
 }
 
 func environmentRestoreRepoCheckoutForBindSource(source string, replacements map[string]string) string {

@@ -5,14 +5,6 @@ import (
 	"strings"
 )
 
-func composeHostSourceLooksLikePath(source string) bool {
-	return strings.HasPrefix(source, ".") ||
-		strings.HasPrefix(source, "/") ||
-		strings.HasPrefix(source, "~") ||
-		strings.HasPrefix(source, "$") ||
-		strings.HasPrefix(source, "${")
-}
-
 func extractSandboxComposePaths(value string) []string {
 	out := []string{}
 	for _, field := range strings.FieldsFunc(value, func(r rune) bool {

@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"agent-testbench/internal/domain/composefile"
 )
 
 func environmentRestoreContainerNames(compose map[string]any, workspace string) []string {
@@ -22,7 +22,7 @@ func environmentRestoreContainerNames(compose map[string]any, workspace string) 
 func environmentRestoreContainerNameByService(compose map[string]any, workspace string) map[string]string {
 	out := map[string]string{}
 	addContent := func(content string) {
-		for service, container := range parseComposeContainerNames(content) {
+		for service, container := range composefile.ParseContainerNames(content) {
 			out[service] = container
 		}
 	}
@@ -39,44 +39,10 @@ func environmentRestoreContainerNameByService(compose map[string]any, workspace 
 	return out
 }
 
-func parseComposeContainerNames(content string) map[string]string {
-	out := map[string]string{}
-	inServices := false
-	currentService := ""
-	for _, line := range strings.Split(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		indent := len(line) - len(strings.TrimLeft(line, " "))
-		if indent == 0 {
-			inServices = trimmed == composeServicesHeader
-			currentService = ""
-			continue
-		}
-		if !inServices {
-			continue
-		}
-		if indent == 2 && strings.HasSuffix(trimmed, ":") {
-			currentService = strings.TrimSuffix(trimmed, ":")
-			continue
-		}
-		if currentService == "" || !strings.HasPrefix(trimmed, "container_name:") {
-			continue
-		}
-		name := strings.TrimSpace(strings.TrimPrefix(trimmed, "container_name:"))
-		name = strings.Trim(name, `"'`)
-		if name != "" {
-			out[currentService] = name
-		}
-	}
-	return out
-}
-
 func environmentRestoreComposeBindMountSources(compose map[string]any, workspace string) map[string][]string {
 	out := map[string][]string{}
 	for _, content := range environmentRestoreComposeFileContents(compose, workspace) {
-		for service, sources := range parseComposeBindMountSources(content) {
+		for service, sources := range composefile.ParseBindMountSources(content) {
 			out[service] = append(out[service], sources...)
 		}
 	}
@@ -86,7 +52,7 @@ func environmentRestoreComposeBindMountSources(compose map[string]any, workspace
 func environmentRestoreComposeImageReferences(compose map[string]any, workspace string) map[string]string {
 	out := map[string]string{}
 	for _, content := range environmentRestoreComposeFileContents(compose, workspace) {
-		for service, image := range parseComposeImageReferences(content) {
+		for service, image := range composefile.ParseImageReferences(content) {
 			out[service] = image
 		}
 	}
@@ -115,185 +81,9 @@ func environmentRestoreComposeFileContents(compose map[string]any, workspace str
 }
 
 func parseComposeImageReferences(content string) map[string]string {
-	out := map[string]string{}
-	var doc struct {
-		Services map[string]struct {
-			Image string `yaml:"image"`
-		} `yaml:"services"`
-	}
-	if err := yaml.Unmarshal([]byte(content), &doc); err == nil {
-		for service, config := range doc.Services {
-			image := cleanComposeScalar(config.Image)
-			if service != "" && image != "" {
-				out[service] = image
-			}
-		}
-		return out
-	}
-	walkComposeServiceLines(content, func(service string, trimmed string) {
-		if strings.HasPrefix(trimmed, "image:") {
-			image := cleanComposeScalar(strings.TrimSpace(strings.TrimPrefix(trimmed, "image:")))
-			if image != "" {
-				out[service] = image
-			}
-		}
-	})
-	return out
-}
-
-func parseComposeBindMountSources(content string) map[string][]string {
-	out := map[string][]string{}
-	state := composeBindMountParseState{}
-	for _, line := range strings.Split(content, "\n") {
-		service, source := state.bindSource(line)
-		if source != "" {
-			out[service] = append(out[service], source)
-		}
-	}
-	return out
-}
-
-type composeBindMountParseState struct {
-	inServices     bool
-	servicesIndent int
-	serviceIndent  int
-	currentService string
-	inVolumes      bool
-	volumesIndent  int
-}
-
-func (state *composeBindMountParseState) bindSource(line string) (string, string) {
-	trimmed := strings.TrimSpace(line)
-	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-		return "", ""
-	}
-	indent := leadingSpaceCount(line)
-	if !state.inServices {
-		state.enterServices(trimmed, indent)
-		return "", ""
-	}
-	if indent <= state.servicesIndent {
-		state.reset()
-		return "", ""
-	}
-	if state.enterService(trimmed, indent) {
-		return "", ""
-	}
-	if state.currentService == "" || indent <= state.serviceIndent {
-		state.inVolumes = false
-		return "", ""
-	}
-	if state.enterVolumes(trimmed, indent) {
-		return "", ""
-	}
-	if state.inVolumes && indent <= state.volumesIndent {
-		state.inVolumes = false
-	}
-	if !state.inVolumes {
-		return "", ""
-	}
-	return state.currentService, composeVolumeSource(trimmed)
-}
-
-func (state *composeBindMountParseState) enterServices(trimmed string, indent int) {
-	if trimmed != composeServicesHeader {
-		return
-	}
-	state.inServices = true
-	state.servicesIndent = indent
-	state.serviceIndent = -1
-}
-
-func (state *composeBindMountParseState) reset() {
-	state.inServices = false
-	state.currentService = ""
-	state.inVolumes = false
-	state.serviceIndent = -1
-}
-
-func (state *composeBindMountParseState) enterService(trimmed string, indent int) bool {
-	if strings.HasPrefix(trimmed, "-") || !strings.HasSuffix(trimmed, ":") {
-		return false
-	}
-	if state.serviceIndent >= 0 && indent != state.serviceIndent {
-		return false
-	}
-	state.serviceIndent = indent
-	state.currentService = strings.TrimSpace(strings.TrimSuffix(trimmed, ":"))
-	state.inVolumes = false
-	return true
-}
-
-func (state *composeBindMountParseState) enterVolumes(trimmed string, indent int) bool {
-	if strings.TrimSuffix(trimmed, ":") != "volumes" {
-		return false
-	}
-	state.inVolumes = true
-	state.volumesIndent = indent
-	return true
-}
-
-func composeVolumeSource(trimmed string) string {
-	if strings.HasPrefix(trimmed, "- ") {
-		source, _, ok := parseComposeShortVolume(strings.TrimSpace(strings.TrimPrefix(trimmed, "- ")))
-		if ok {
-			return source
-		}
-		return ""
-	}
-	if strings.HasPrefix(trimmed, "source:") {
-		return cleanComposeScalar(strings.TrimSpace(strings.TrimPrefix(trimmed, "source:")))
-	}
-	return ""
-}
-
-func walkComposeServiceLines(content string, visit func(service string, trimmed string)) {
-	inServices := false
-	servicesIndent := -1
-	serviceIndent := -1
-	fieldIndent := -1
-	currentService := ""
-	for _, line := range strings.Split(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		indent := leadingSpaceCount(line)
-		if !inServices {
-			if trimmed == composeServicesHeader {
-				inServices = true
-				servicesIndent = indent
-			}
-			continue
-		}
-		if indent <= servicesIndent {
-			break
-		}
-		if strings.HasPrefix(trimmed, "-") {
-			continue
-		}
-		if strings.HasSuffix(trimmed, ":") && (serviceIndent < 0 || indent == serviceIndent) {
-			serviceIndent = indent
-			fieldIndent = -1
-			currentService = strings.TrimSpace(strings.TrimSuffix(trimmed, ":"))
-			continue
-		}
-		if currentService != "" && indent > serviceIndent {
-			if fieldIndent < 0 {
-				fieldIndent = indent
-			}
-			if indent == fieldIndent {
-				visit(currentService, trimmed)
-			}
-		}
-	}
+	return composefile.ParseImageReferences(content)
 }
 
 func cleanComposeScalar(value string) string {
-	value = strings.TrimSpace(value)
-	value = strings.Trim(value, `"'`)
-	if cut, _, ok := strings.Cut(value, " #"); ok {
-		value = strings.TrimSpace(cut)
-	}
-	return strings.Trim(value, `"'`)
+	return composefile.CleanScalar(value)
 }

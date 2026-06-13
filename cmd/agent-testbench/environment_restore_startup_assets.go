@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"agent-testbench/internal/domain/composefile"
 	"agent-testbench/internal/domain/environmentfiles"
 	"agent-testbench/internal/domain/environmentsource"
 )
@@ -133,28 +134,7 @@ func environmentRestoreStartupAssetCandidates(content string, composeFile string
 }
 
 func parseComposeShortVolume(value string) (string, string, bool) {
-	value = strings.TrimSpace(value)
-	value = strings.Trim(value, `"'`)
-	if strings.HasPrefix(value, "[") ||
-		strings.HasPrefix(value, "{") ||
-		strings.HasPrefix(value, "type:") ||
-		strings.HasPrefix(value, "source:") ||
-		strings.HasPrefix(value, "target:") {
-		return "", "", false
-	}
-	source, target, ok := splitComposeShortVolume(value)
-	if !ok {
-		return "", "", false
-	}
-	source = strings.Trim(source, `"' `)
-	target = strings.Trim(target, `"' `)
-	if source == "" || target == "" {
-		return "", "", false
-	}
-	if !composeHostSourceLooksLikePath(source) {
-		return "", "", false
-	}
-	return source, target, true
+	return composefile.ParseShortVolume(value)
 }
 
 func environmentRestoreStartupAssetPath(source string, composeDir string, compose map[string]any, workspace string) (string, bool) {
@@ -198,30 +178,6 @@ func environmentRestoreComposeEnvValues(compose map[string]any, workspace string
 	}
 	values["AGENT_TESTBENCH_WORKSPACE"] = workspace
 	return values
-}
-
-func splitComposeShortVolume(value string) (string, string, bool) {
-	depth := 0
-	firstColon := -1
-	for i := 0; i < len(value); i++ {
-		switch {
-		case value[i] == '$' && i+1 < len(value) && value[i+1] == '{':
-			depth++
-			i++
-		case value[i] == '}' && depth > 0:
-			depth--
-		case value[i] == ':' && depth == 0:
-			if firstColon < 0 {
-				firstColon = i
-				continue
-			}
-			return value[:firstColon], value[firstColon+1 : i], true
-		}
-	}
-	if firstColon < 0 {
-		return "", "", false
-	}
-	return value[:firstColon], value[firstColon+1:], true
 }
 
 func environmentRestoreStartupWorkspacePath(path string, workspace string) string {
