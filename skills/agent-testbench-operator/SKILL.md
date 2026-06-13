@@ -201,6 +201,9 @@ file is not repair-complete until it is backed by structured
 `environment_files`, a component config asset, generated Compose env metadata,
 legacy `compose.generatedFiles`, or an explicit environment package projection;
 summary-only `startupFiles` entries are repair hints, not durable file content.
+An `environment_files` row is repair-complete only when it carries materialized
+inline content. Explicitly stored empty files are valid, but reference-only rows
+without materialized content must still be treated as projection gaps.
 New environment registration stores service repositories and health checks as
 structured `environment_services` and `environment_health_checks`; legacy
 `services_json`, `repos_json`, and `health_checks_json` are compatibility views.

@@ -162,6 +162,10 @@ environments. Restore builds its Docker runtime view from these structured
 rows first and falls back to legacy JSON only when no structured rows exist.
 Legacy package repositories remain compatibility inputs and are not the SQL
 Store daily restore source.
+An `environment_files` row is considered a materialized file only when it carries
+inline content, including an explicitly stored empty string. Referenced file
+rows without materialized content remain projection gaps; restore must not treat
+them as empty files.
 Docker-native projection keeps the Store as the source of truth while letting
 Compose carry runtime mechanics: `component_config_assets.asset_kind` values
 such as `compose-config`, `compose-secret`, `env-file`, and plain MySQL
@@ -194,7 +198,8 @@ For already-registered environments, `environment startup-file put ENV_ID
 --file TARGET=SOURCE_FILE` writes the supplied content into structured
 `environment_files` rows and preserves the existing workflow, services,
 repositories, and health checks. Runtime inspection still projects those files
-as `compose.generatedFiles` for older consumers.
+as `compose.generatedFiles` for older consumers, including explicitly stored
+empty files.
 Component graph assets are deterministic startup/config material, not source
 archives, Docker images, runtime databases, logs, or Evidence payloads. Inline
 assets have no per-kind size limit: DDL, seed SQL, Apollo-style configuration,

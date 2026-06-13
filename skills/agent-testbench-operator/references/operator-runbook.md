@@ -235,6 +235,9 @@ New `environment register --compose-generated-file TARGET=SOURCE_FILE` runs
 store Compose and Compose env file content as structured `environment_files`;
 legacy `compose.generatedFiles` remains a compatibility projection for older
 Store rows and imported packages.
+Treat an `environment_files` row as repair-complete only when it has
+materialized inline content. Explicit empty files are valid Store content, but
+reference-only rows without materialized content are still projection gaps.
 Service repositories and health checks from new registrations are also stored
 as structured `environment_services` and `environment_health_checks`; legacy
 `services_json`, `repos_json`, and `health_checks_json` remain compatibility

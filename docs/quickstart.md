@@ -475,6 +475,9 @@ file is ready only when it can be traced to `environment_files`, a component
 config asset, generated Compose env metadata, legacy `compose.generatedFiles`,
 or an explicit environment package source; summary-only `startupFiles` entries
 without stored file content are reported as repair gaps.
+An `environment_files` row must carry materialized inline content to count as
+Store-backed file content. Explicitly stored empty files are valid, but a
+reference row with no materialized content still blocks restore readiness.
 New environment registration also stores service repositories and health checks
 as structured `environment_services` and `environment_health_checks` rows.
 The legacy `services_json`, `repos_json`, and `health_checks_json` fields are
