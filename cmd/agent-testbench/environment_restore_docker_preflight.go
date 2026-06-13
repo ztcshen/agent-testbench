@@ -62,7 +62,7 @@ func environmentRestoreContainerNameConflicts(compose map[string]any, workspace 
 	return conflicts
 }
 
-func environmentRestorePreflightReport(packageSpec environmentRestorePackageSpec, specs []environmentRestoreRepoSpec, compose map[string]any, workspace string, execute bool, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool) environmentRestorePreflight {
+func environmentRestorePreflightReport(packageSpec environmentRestorePackageSpec, specs []environmentRestoreRepoSpec, compose map[string]any, workspace string, execute bool, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool, packageIgnored bool) environmentRestorePreflight {
 	report := environmentRestorePreflight{
 		OK:                true,
 		AssumeCleanDocker: cleanupOptions.AssumeCleanDocker,
@@ -71,7 +71,7 @@ func environmentRestorePreflightReport(packageSpec environmentRestorePackageSpec
 			"Heavy Docker image and container validation should be reviewed before deleting or rebuilding existing local Docker state.",
 		},
 	}
-	if environmentRestorePreflightRequiresGit(packageSpec, specs) {
+	if environmentRestorePreflightRequiresGit(packageSpec, specs, packageIgnored) {
 		report.Tools = append(report.Tools, environmentRestoreTool("git", true))
 	}
 	composeFile := strings.TrimSpace(valueString(compose["composeFile"]))
@@ -89,8 +89,8 @@ func environmentRestorePreflightReport(packageSpec environmentRestorePackageSpec
 	return report
 }
 
-func environmentRestorePreflightRequiresGit(packageSpec environmentRestorePackageSpec, specs []environmentRestoreRepoSpec) bool {
-	if strings.TrimSpace(packageSpec.URL) != "" || strings.TrimSpace(packageSpec.Ref) != "" {
+func environmentRestorePreflightRequiresGit(packageSpec environmentRestorePackageSpec, specs []environmentRestoreRepoSpec, packageIgnored bool) bool {
+	if !packageIgnored && (strings.TrimSpace(packageSpec.URL) != "" || strings.TrimSpace(packageSpec.Ref) != "") {
 		return true
 	}
 	for _, spec := range specs {

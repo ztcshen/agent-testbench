@@ -171,7 +171,7 @@ func newEnvironmentRestoreReport(env store.Environment, plan environmentRestoreB
 		HealthChecks:         plan.HealthChecks,
 		ComponentGraph:       plan.ComponentGraphReport,
 		ComponentStartupPlan: plan.ComponentStartupPlan,
-		Preflight:            environmentRestorePreflightReport(plan.PackageSpec, plan.Specs, plan.Compose, plan.Workspace, execute, cleanupOptions, prepareReposOnly),
+		Preflight:            environmentRestorePreflightReport(plan.PackageSpec, plan.Specs, plan.Compose, plan.Workspace, execute, cleanupOptions, prepareReposOnly, plan.RemoteOnly),
 		FileProjection:       environmentRestoreFileProjection(env, plan),
 		SourcePolicy:         environmentsource.SourcePolicyReport(plan.Specs, plan.RemoteOnly),
 		Workflow: environmentRestoreWorkflowRun{
