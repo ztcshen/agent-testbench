@@ -1,6 +1,7 @@
 package main
 
 import (
+	"agent-testbench/internal/store"
 	"context"
 	"encoding/json"
 	"os"
@@ -167,14 +168,7 @@ exit 0
 		t.Fatalf("open store: %v", err)
 	}
 	defer runtime.Close()
-	env, err := runtime.GetEnvironment(context.Background(), "env.status.oneshot")
-	if err != nil {
-		t.Fatalf("get environment: %v", err)
-	}
-	env.HealthChecksJSON = `[{"kind":"compose-service","service":"seed","expect":"service_completed_successfully"}]`
-	if _, err := runtime.UpsertEnvironment(context.Background(), env); err != nil {
-		t.Fatalf("upsert one-shot health check: %v", err)
-	}
+	replaceStatusOneShotHealthCheck(t, runtime, "env.status.oneshot")
 
 	out := runCLIWithEnv(t, fixture.DockerEnv, "environment", "status", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--json", "env.status.oneshot")
 	var report struct {
@@ -197,6 +191,21 @@ exit 0
 	}
 	if !report.OK || report.Docker.Summary.Ready != 1 || report.Docker.Summary.Failed != 0 || len(report.Docker.Services) != 1 || !report.Docker.Services[0].OK || report.Docker.Services[0].State != "exited" || report.Docker.Services[0].ExitCode != 0 {
 		t.Fatalf("one-shot status report = %#v", report)
+	}
+}
+
+func replaceStatusOneShotHealthCheck(t *testing.T, runtime store.Store, envID string) {
+	t.Helper()
+	err := runtime.ReplaceEnvironmentHealthChecks(context.Background(), envID, []store.EnvironmentHealthCheck{{
+		CheckID:        "seed-completed",
+		Kind:           "compose-service",
+		ComposeService: "seed",
+		Expect:         "service_completed_successfully",
+		ApplyOrder:     1,
+		SummaryJSON:    `{"source":"test.structured-health"}`,
+	}})
+	if err != nil {
+		t.Fatalf("replace structured one-shot health check: %v", err)
 	}
 }
 
@@ -229,14 +238,7 @@ exit 0
 		t.Fatalf("open store: %v", err)
 	}
 	defer runtime.Close()
-	env, err := runtime.GetEnvironment(context.Background(), "env.status.oneshot.no-exit")
-	if err != nil {
-		t.Fatalf("get environment: %v", err)
-	}
-	env.HealthChecksJSON = `[{"kind":"compose-service","service":"seed","expect":"service_completed_successfully"}]`
-	if _, err := runtime.UpsertEnvironment(context.Background(), env); err != nil {
-		t.Fatalf("upsert one-shot health check: %v", err)
-	}
+	replaceStatusOneShotHealthCheck(t, runtime, "env.status.oneshot.no-exit")
 
 	out := runCLIFailsWithEnv(t, fixture.DockerEnv, "environment", "status", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--json", "env.status.oneshot.no-exit")
 	var report struct {
@@ -391,14 +393,7 @@ exit 0
 		t.Fatalf("open store: %v", err)
 	}
 	defer runtime.Close()
-	env, err := runtime.GetEnvironment(context.Background(), "env.status.oneshot.running")
-	if err != nil {
-		t.Fatalf("get environment: %v", err)
-	}
-	env.HealthChecksJSON = `[{"kind":"compose-service","service":"seed","expect":"service_completed_successfully"}]`
-	if _, err := runtime.UpsertEnvironment(context.Background(), env); err != nil {
-		t.Fatalf("upsert running one-shot health check: %v", err)
-	}
+	replaceStatusOneShotHealthCheck(t, runtime, "env.status.oneshot.running")
 
 	out := runCLIFailsWithEnv(t, fixture.DockerEnv, "environment", "status", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--json", "env.status.oneshot.running")
 	var report struct {

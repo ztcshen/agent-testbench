@@ -63,8 +63,7 @@ func runEnvironmentStatus(ctx context.Context, args []string) error {
 		VerificationWorkflow: plan.WorkflowID,
 		ComponentGraph:       environmentRestoreComponentGraphReport(env.ID, graph),
 	}
-	healthChecks := environmentRestoreEffectiveHealthChecks(jsonArrayString(env.HealthChecksJSON), plan.Compose, graph, plan.Workspace)
-	report.Docker = environmentStatusDocker(ctx, plan.Compose, plan.Workspace, healthChecks)
+	report.Docker = environmentStatusDocker(ctx, plan.Compose, plan.Workspace, plan.HealthChecks)
 	if !report.Docker.OK {
 		report.OK = false
 		report.Error = report.Docker.Error
