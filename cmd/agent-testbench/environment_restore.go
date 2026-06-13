@@ -115,6 +115,7 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 	report := newEnvironmentRestoreReport(env, plan, execute, workflowOptions, cleanupOptions, prepareReposOnly)
 	environmentRestoreEmitRunStarted(ctx, report)
 	environmentRestoreAddSourceReports(ctx, &report, plan, execute, pull)
+	environmentRestoreApplyPreDockerReadinessGates(&report, cleanupOptions)
 	report.Docker = environmentRestoreDockerForReport(ctx, report, plan, execute, prepareReposOnly, healthTimeout, cleanupOptions)
 	if !report.Docker.OK {
 		report.OK = false
@@ -196,6 +197,26 @@ func newEnvironmentRestoreReport(env store.Environment, plan environmentRestoreB
 	return report
 }
 
+func environmentRestoreApplyPreDockerReadinessGates(report *environmentRestoreReport, cleanupOptions environmentRestoreDockerCleanupOptions) {
+	if environmentRestoreFileProjectionReadyForDocker(*report, cleanupOptions) {
+		return
+	}
+	report.OK = false
+	if strings.TrimSpace(report.Error) == "" {
+		report.Error = "file projection readiness did not pass before Docker startup"
+	}
+}
+
+func environmentRestoreFileProjectionReadyForDocker(report environmentRestoreReport, cleanupOptions environmentRestoreDockerCleanupOptions) bool {
+	if !environmentRestoreFileProjectionRequired(report, cleanupOptions) {
+		return true
+	}
+	if len(report.FileProjection.Files) == 0 && strings.TrimSpace(valueString(report.Compose["startCommand"])) != "" {
+		return true
+	}
+	return len(report.FileProjection.Files) > 0 && report.FileProjection.OK
+}
+
 func environmentRestoreFileProjection(env store.Environment, plan environmentRestoreBuildPlan) environmentfiles.ProjectionReport {
 	compose := plan.Compose
 	if plan.RemoteOnly {
@@ -256,7 +277,7 @@ func environmentRestoreDockerForReport(ctx context.Context, report environmentRe
 		environmentRestoreEmitStep(ctx, "step_completed", "docker.restore", statusText(docker.OK), report.EnvironmentID, docker.Action, docker.Error)
 		return docker
 	}
-	docker = environmentRestoreSkippedDockerReport(report, plan.Workspace)
+	docker = environmentRestoreSkippedDockerReport(report, plan.Workspace, cleanupOptions)
 	environmentRestoreEmitStep(ctx, "step_completed", "docker.restore", statusText(docker.OK), report.EnvironmentID, docker.Action, docker.Error)
 	return docker
 }
@@ -292,13 +313,21 @@ func environmentRestorePrepareReposOnlyDockerReport(plan environmentRestoreBuild
 	return docker
 }
 
-func environmentRestoreSkippedDockerReport(report environmentRestoreReport, workspace string) environmentRestoreDockerReport {
+func environmentRestoreSkippedDockerReport(report environmentRestoreReport, workspace string, cleanupOptions environmentRestoreDockerCleanupOptions) environmentRestoreDockerReport {
 	if !report.SourcePolicy.OK {
 		return environmentRestoreDockerReport{
 			OK:      false,
 			Action:  "skipped-due-to-source-policy",
 			Workdir: workspace,
 			Error:   "remote Git source policy did not pass",
+		}
+	}
+	if !environmentRestoreFileProjectionReadyForDocker(report, cleanupOptions) {
+		return environmentRestoreDockerReport{
+			OK:      false,
+			Action:  "skipped-due-to-file-projection",
+			Workdir: workspace,
+			Error:   "file projection readiness did not pass before Docker startup",
 		}
 	}
 	if !report.Preflight.OK {
