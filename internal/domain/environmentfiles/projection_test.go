@@ -242,6 +242,88 @@ func TestProjectionReportResolvesComposeNativeInterpolatedReferencesFromStoreEnv
 	}
 }
 
+func TestProjectionReportResolvesNestedComposeNativeInterpolationFromStoreEnv(t *testing.T) {
+	env := store.Environment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
+		"composeFile": "compose/docker-compose.yml",
+		"env": map[string]string{
+			"DEFAULT_PROFILE": "prod",
+		},
+		"generatedFiles": map[string]string{
+			"compose/docker-compose.yml": strings.Join([]string{
+				"services:",
+				"  app:",
+				"    image: alpine:3.20",
+				"configs:",
+				"  app_config:",
+				"    file: ./config/${PROFILE:-${DEFAULT_PROFILE:-dev}}.yml",
+			}, "\n") + "\n",
+			"compose/config/prod.yml": "mode: prod\n",
+		},
+	})}
+
+	report := FromEnvironment(env, store.EnvironmentComponentGraph{})
+	if !report.OK || report.Counts.Missing != 0 {
+		t.Fatalf("nested interpolated projection report = %#v", report)
+	}
+	if !projectionContains(report, KindComposeConfigFile, "compose/config/prod.yml", "compose.generatedFiles", true) {
+		t.Fatalf("nested config interpolation should resolve through compose.env: %#v", report.Files)
+	}
+}
+
+func TestProjectionReportRejectsAbsoluteComposeNativeReferences(t *testing.T) {
+	env := store.Environment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
+		"composeFile": "compose/docker-compose.yml",
+		"generatedFiles": map[string]string{
+			"compose/docker-compose.yml": strings.Join([]string{
+				"services:",
+				"  app:",
+				"    image: alpine:3.20",
+				"    env_file: /etc/app.env",
+			}, "\n") + "\n",
+			"/etc/app.env": "APP_MODE=host-local\n",
+		},
+	})}
+
+	report := FromEnvironment(env, store.EnvironmentComponentGraph{})
+	if report.OK || report.Counts.Missing != 1 {
+		t.Fatalf("absolute env_file should fail projection readiness: %#v", report)
+	}
+	if !projectionContains(report, KindEnvFile, "/etc/app.env", "compose.path", false) {
+		t.Fatalf("absolute env_file should be reported as a compose path gap: %#v", report.Files)
+	}
+	if !projectionRepairContains(report, "compose-file-projection", "fileProjection.missing", "env-file:/etc/app.env") {
+		t.Fatalf("absolute env_file repair plan should require Store projection: %#v", report.RepairPlan)
+	}
+}
+
+func TestProjectionReportRejectsInterpolatedAbsoluteComposeNativeReferences(t *testing.T) {
+	env := store.Environment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
+		"composeFile": "compose/docker-compose.yml",
+		"env": map[string]string{
+			"APP_ENV_FILE": "/etc/app.env",
+		},
+		"package": map[string]string{
+			"url": "git@example.com:team/env.git",
+		},
+		"generatedFiles": map[string]string{
+			"compose/docker-compose.yml": strings.Join([]string{
+				"services:",
+				"  app:",
+				"    image: alpine:3.20",
+				"    env_file: ${APP_ENV_FILE}",
+			}, "\n") + "\n",
+		},
+	})}
+
+	report := FromEnvironment(env, store.EnvironmentComponentGraph{})
+	if report.OK || report.Counts.Missing != 1 {
+		t.Fatalf("interpolated absolute env_file should fail projection readiness: %#v", report)
+	}
+	if !projectionContains(report, KindEnvFile, "/etc/app.env", "compose.path", false) {
+		t.Fatalf("interpolated absolute env_file should not be accepted by package projection: %#v", report.Files)
+	}
+}
+
 func TestProjectionReportRejectsEmptyRemoteAssetRef(t *testing.T) {
 	env := store.Environment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
 		"composeFile": "compose/docker-compose.yml",

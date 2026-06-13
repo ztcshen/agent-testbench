@@ -231,9 +231,12 @@ Store-projected Compose env/config/secret/include/extends file.
 When inspecting or bootstrapping an environment, use `fileProjection` to verify
 that Compose `env_file`, config file, and secret file references discovered
 inside Store-backed compose files also have Store-backed projection sources.
-Variable paths are resolved from Store-backed `compose.env`; if required
-variables are not present there, the projection gap should be repaired in Store
-instead of relying on a local shell. For `extends.file`, only the named
+Variable paths, including nested Compose defaults such as
+`${A:-${B:-file.env}}`, are resolved from Store-backed `compose.env`; if
+required variables are not present there, the projection gap should be repaired
+in Store instead of relying on a local shell. Absolute or home-directory paths
+remain blocking gaps even after interpolation because they depend on host-local
+files instead of Store-backed projection. For `extends.file`, only the named
 `extends.service` in the referenced file is inspected, so unrelated services in
 shared compose fragments should not block readiness. When
 `fileProjection.ok=false`, use `fileProjection.repairPlan` to see the blocking

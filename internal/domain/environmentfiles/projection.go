@@ -158,7 +158,7 @@ func (b *projectionBuilder) addComposeContentReferences(paths []string) {
 		}
 		for _, ref := range composeContentFileReferences(content, cleanCompose, target.service, b.env) {
 			if ref.err != "" {
-				b.add(b.unresolvedReferenceFile(ref.path, ref.kind, ref.err))
+				b.add(b.unresolvedReferenceFile(ref.path, ref.kind, ref.source, ref.err))
 				continue
 			}
 			b.add(b.referencedFile(ref.path, ref.kind))
@@ -205,11 +205,14 @@ func (b *projectionBuilder) referencedFile(path string, kind string) ProjectionF
 	return file
 }
 
-func (b *projectionBuilder) unresolvedReferenceFile(path string, kind string, errorText string) ProjectionFile {
+func (b *projectionBuilder) unresolvedReferenceFile(path string, kind string, source string, errorText string) ProjectionFile {
+	if source == "" {
+		source = "compose.interpolation"
+	}
 	return ProjectionFile{
 		Path:        path,
 		Kind:        kind,
-		Source:      "compose.interpolation",
+		Source:      source,
 		Required:    true,
 		StoreBacked: false,
 		OK:          false,
@@ -226,6 +229,7 @@ type composeContentFileReference struct {
 	kind    string
 	path    string
 	service string
+	source  string
 	err     string
 }
 
@@ -359,12 +363,12 @@ func (c *composeReferenceCollector) addReferencesWithService(kind string, value 
 }
 
 func (c *composeReferenceCollector) addReference(kind string, path string, service string) {
-	resolvedPath, errText := cleanComposeReferencedPath(path, c.composeDir, c.env)
+	resolvedPath, source, errText := cleanComposeReferencedPath(path, c.composeDir, c.env)
 	path = resolvedPath
 	if path == "" {
 		return
 	}
-	c.refs = append(c.refs, composeContentFileReference{kind: kind, path: path, service: strings.TrimSpace(service), err: errText})
+	c.refs = append(c.refs, composeContentFileReference{kind: kind, path: path, service: strings.TrimSpace(service), source: source, err: errText})
 }
 
 func composeMap(value any) map[string]any {
@@ -417,19 +421,25 @@ func composeBool(value any, defaultValue bool) bool {
 	}
 }
 
-func cleanComposeReferencedPath(path string, composeDir string, env map[string]string) (string, string) {
+func cleanComposeReferencedPath(path string, composeDir string, env map[string]string) (string, string, string) {
 	path = strings.TrimSpace(path)
-	if path == "" || strings.HasPrefix(path, "~") || filepath.IsAbs(path) {
-		return "", ""
+	if path == "" {
+		return "", "", ""
+	}
+	if strings.HasPrefix(path, "~") || filepath.IsAbs(path) {
+		return cleanPath(path), "compose.path", "compose file reference must be relative and Store-projected, not a host-local absolute or home path"
 	}
 	if strings.Contains(path, "$") {
 		resolved, ok := InterpolateComposeText(path, env)
 		if !ok {
-			return cleanComposePathWithDir(path, composeDir), "compose file reference contains variables that are not resolved by Store-backed compose.env"
+			return cleanComposePathWithDir(path, composeDir), "compose.interpolation", "compose file reference contains variables that are not resolved by Store-backed compose.env"
 		}
 		path = resolved
+		if strings.HasPrefix(path, "~") || filepath.IsAbs(path) {
+			return cleanPath(path), "compose.path", "resolved compose file reference must stay relative to the restore workspace"
+		}
 	}
-	return cleanComposePathWithDir(path, composeDir), ""
+	return cleanComposePathWithDir(path, composeDir), "", ""
 }
 
 func cleanComposePathWithDir(path string, composeDir string) string {
@@ -441,6 +451,13 @@ func cleanComposePathWithDir(path string, composeDir string) string {
 
 // InterpolateComposeText resolves Compose-style variable expressions from env.
 func InterpolateComposeText(value string, env map[string]string) (string, bool) {
+	return interpolateComposeText(value, env, 0)
+}
+
+func interpolateComposeText(value string, env map[string]string, depth int) (string, bool) {
+	if depth > 8 {
+		return value, false
+	}
 	var out strings.Builder
 	for i := 0; i < len(value); {
 		if value[i] != '$' {
@@ -458,37 +475,71 @@ func InterpolateComposeText(value string, env map[string]string) (string, bool) 
 			i += 2
 			continue
 		}
-		if value[i+1] == '{' {
-			end := strings.IndexByte(value[i+2:], '}')
-			if end < 0 {
-				return value, false
-			}
-			expr := value[i+2 : i+2+end]
-			replacement, ok := resolveComposeVariableExpression(expr, env)
-			if !ok {
-				return value, false
-			}
-			out.WriteString(replacement)
-			i += end + 3
-			continue
+		replacement, next, ok := composeInterpolationReplacement(value, i, env, depth)
+		if !ok {
+			return value, false
 		}
-		nameEnd := i + 1
-		for nameEnd < len(value) && composeVariableNameByte(value[nameEnd]) {
-			nameEnd++
-		}
-		if nameEnd == i+1 {
+		if next == i {
 			out.WriteByte(value[i])
 			i++
 			continue
 		}
-		replacement, ok := env[value[i+1:nameEnd]]
-		if !ok {
-			return value, false
-		}
 		out.WriteString(replacement)
-		i = nameEnd
+		i = next
 	}
 	return out.String(), true
+}
+
+func composeInterpolationReplacement(value string, start int, env map[string]string, depth int) (string, int, bool) {
+	if value[start+1] == '{' {
+		return composeBracedInterpolationReplacement(value, start, env, depth)
+	}
+	nameEnd := start + 1
+	for nameEnd < len(value) && composeVariableNameByte(value[nameEnd]) {
+		nameEnd++
+	}
+	if nameEnd == start+1 {
+		return "", start, true
+	}
+	replacement, ok := env[value[start+1:nameEnd]]
+	return replacement, nameEnd, ok
+}
+
+func composeBracedInterpolationReplacement(value string, start int, env map[string]string, depth int) (string, int, bool) {
+	end := composeExpressionEnd(value, start+2)
+	if end < 0 {
+		return "", start, false
+	}
+	replacement, ok := resolveComposeVariableExpression(value[start+2:end], env)
+	if !ok {
+		return "", start, false
+	}
+	if strings.Contains(replacement, "$") {
+		replacement, ok = interpolateComposeText(replacement, env, depth+1)
+		if !ok {
+			return "", start, false
+		}
+	}
+	return replacement, end + 1, true
+}
+
+func composeExpressionEnd(value string, start int) int {
+	depth := 0
+	for i := start; i < len(value); i++ {
+		if value[i] == '$' && i+1 < len(value) && value[i+1] == '{' {
+			depth++
+			i++
+			continue
+		}
+		if value[i] != '}' {
+			continue
+		}
+		if depth == 0 {
+			return i
+		}
+		depth--
+	}
+	return -1
 }
 
 func resolveComposeVariableExpression(expr string, env map[string]string) (string, bool) {
