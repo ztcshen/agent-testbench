@@ -16,7 +16,10 @@ import (
 	"agent-testbench/internal/store"
 )
 
-const environmentRestoreAttemptLimit = 20
+const (
+	environmentRestoreAttemptLimit                      = 20
+	environmentRestoreDockerActionSkippedFileProjection = "skipped-due-to-file-projection"
+)
 
 type environmentRestoreReport struct {
 	OK                   bool                                         `json:"ok"`
@@ -325,7 +328,7 @@ func environmentRestoreSkippedDockerReport(report environmentRestoreReport, work
 	if !environmentRestoreFileProjectionReadyForDocker(report, cleanupOptions) {
 		return environmentRestoreDockerReport{
 			OK:      false,
-			Action:  "skipped-due-to-file-projection",
+			Action:  environmentRestoreDockerActionSkippedFileProjection,
 			Workdir: workspace,
 			Error:   "file projection readiness did not pass before Docker startup",
 		}

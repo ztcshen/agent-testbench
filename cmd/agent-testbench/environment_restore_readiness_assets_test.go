@@ -158,7 +158,7 @@ func TestEnvironmentRestoreSQLStoreRejectsComposeNativeFileProjectionGaps(t *tes
 			if report.FileProjection.OK || len(report.FileProjection.Missing) != 1 {
 				t.Fatalf("%s fileProjection should show one native file gap: %#v", backend.name, report.FileProjection)
 			}
-			if report.OK || report.Docker.Action != "skipped-due-to-file-projection" || report.Docker.OK {
+			if report.OK || report.Docker.Action != environmentRestoreDockerActionSkippedFileProjection || report.Docker.OK {
 				t.Fatalf("%s Docker startup should be blocked before Compose execution: %#v", backend.name, report.Docker)
 			}
 		})

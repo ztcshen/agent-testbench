@@ -228,7 +228,7 @@ func TestEnvironmentRestoreBlocksDockerCleanupWhenComposeNativeProjectionMissing
 	seedCleanupLinkedGraph(t, storePath, "env.cleanup.native-file-gap", "web")
 
 	out := runCLIFailsWithEnv(t, fakeDockerEnv, "environment", "restore", "--store", "sqlite://"+storePath, "--workspace", workspace, "--execute", "--clean-docker-state", "--allow-destructive-docker-cleanup", "--json", "env.cleanup.native-file-gap")
-	if !strings.Contains(out, "skipped-due-to-file-projection") || !strings.Contains(out, "env-file:app.env") {
+	if !strings.Contains(out, environmentRestoreDockerActionSkippedFileProjection) || !strings.Contains(out, "env-file:app.env") {
 		t.Fatalf("cleanup should block missing Compose-native projection: %q", out)
 	}
 	var report struct {
@@ -246,7 +246,7 @@ func TestEnvironmentRestoreBlocksDockerCleanupWhenComposeNativeProjectionMissing
 	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
 		t.Fatalf("decode native projection cleanup json: %v\n%s", err, out)
 	}
-	if report.Docker.Action != "skipped-due-to-file-projection" {
+	if report.Docker.Action != environmentRestoreDockerActionSkippedFileProjection {
 		t.Fatalf("native projection should block before Docker cleanup: %#v", report.Docker)
 	}
 	if len(report.FileProjection.RepairPlan) != 1 || report.FileProjection.RepairPlan[0].Name != "compose-file-projection" || report.FileProjection.RepairPlan[0].Target != "fileProjection.missing" || !stringSliceContains(report.FileProjection.RepairPlan[0].Missing, "env-file:app.env") {

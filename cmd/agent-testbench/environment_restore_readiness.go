@@ -321,7 +321,7 @@ func environmentRestoreReadinessDockerDetail(report environmentRestoreReport) st
 		return "repository preparation completed; Docker startup intentionally skipped"
 	case "skipped-due-to-source-policy":
 		return "Docker startup is blocked until package and component sources use remote Git URLs"
-	case "skipped-due-to-file-projection":
+	case environmentRestoreDockerActionSkippedFileProjection:
 		return "Docker startup is blocked until every referenced Compose file is Store-backed"
 	case "missing-docker-plan":
 		return "composeFile or startCommand is required"
