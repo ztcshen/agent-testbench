@@ -258,7 +258,19 @@ func copyStoreEnvironmentState(ctx context.Context, source store.Store, target s
 
 func storeCopyEnvironmentForTarget(env store.Environment, files []store.EnvironmentFile, services []store.EnvironmentService, healthChecks []store.EnvironmentHealthCheck) store.Environment {
 	if len(files) > 0 {
-		env.ComposeJSON = mustCompactJSON(environmentComposeConfigWithoutGeneratedFiles(jsonObjectString(env.ComposeJSON)))
+		compose := jsonObjectString(env.ComposeJSON)
+		generated := stringMapFromAny(compose["generatedFiles"])
+		for _, file := range files {
+			if store.EnvironmentFileHasInlineContent(file) {
+				delete(generated, file.Path)
+			}
+		}
+		if len(generated) > 0 {
+			compose["generatedFiles"] = generated
+		} else {
+			delete(compose, "generatedFiles")
+		}
+		env.ComposeJSON = mustCompactJSON(compose)
 	}
 	if len(services) > 0 {
 		env.ServicesJSON = "[]"

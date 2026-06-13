@@ -91,7 +91,7 @@ func seedStoreCopyEnvironmentState(t *testing.T, ctx context.Context, source *sq
 		Verified:               true,
 		ServicesJSON:           `[]`,
 		ReposJSON:              `{}`,
-		ComposeJSON:            `{"composeFiles":["compose.yml"]}`,
+		ComposeJSON:            `{"composeFiles":["compose.yml"],"envFiles":["legacy.env"],"generatedFiles":{"compose.yml":"legacy compose should not survive structured copy\n","legacy.env":"LEGACY_MODE=true\n"}}`,
 		HealthChecksJSON:       `[]`,
 		VerificationWorkflowID: "workflow.alpha",
 		LastVerificationStatus: "passed",
@@ -103,14 +103,23 @@ func seedStoreCopyEnvironmentState(t *testing.T, ctx context.Context, source *sq
 	}); err != nil {
 		t.Fatalf("seed environment: %v", err)
 	}
-	if err := source.ReplaceEnvironmentFiles(ctx, "env.alpha", []store.EnvironmentFile{{
-		Path:          "compose.yml",
-		Kind:          store.EnvironmentFileKindComposeFile,
-		ContentInline: "services:\n  service-alpha:\n    image: alpine:3.20\n",
-		Required:      true,
-		ApplyOrder:    10,
-		SummaryJSON:   `{"source":"test.structured"}`,
-	}}); err != nil {
+	if err := source.ReplaceEnvironmentFiles(ctx, "env.alpha", []store.EnvironmentFile{
+		{
+			Path:          "compose.yml",
+			Kind:          store.EnvironmentFileKindComposeFile,
+			ContentInline: "services:\n  service-alpha:\n    image: alpine:3.20\n",
+			Required:      true,
+			ApplyOrder:    10,
+			SummaryJSON:   `{"source":"test.structured"}`,
+		},
+		{
+			Path:        "legacy.env",
+			Kind:        store.EnvironmentFileKindComposeEnvFile,
+			Required:    true,
+			ApplyOrder:  20,
+			SummaryJSON: `{"source":"test.reference-only"}`,
+		},
+	}); err != nil {
 		t.Fatalf("seed environment files: %v", err)
 	}
 	if err := source.ReplaceEnvironmentServices(ctx, "env.alpha", []store.EnvironmentService{{
@@ -232,8 +241,12 @@ func requireStoreCopyTargetState(t *testing.T, ctx context.Context, target *sqli
 	if !strings.Contains(env.ComposeJSON, "service-alpha") || !strings.Contains(env.ServicesJSON, "https://example.invalid/service-alpha.git") || !strings.Contains(env.HealthChecksJSON, "127.0.0.1") {
 		t.Fatalf("target environment should hydrate structured Docker metadata: compose=%s services=%s health=%s", env.ComposeJSON, env.ServicesJSON, env.HealthChecksJSON)
 	}
-	if rawComposeJSON := sqliteScalar(t, targetPath, `select compose_json from environments where id = 'env.alpha';`); strings.Contains(rawComposeJSON, "generatedFiles") || strings.Contains(rawComposeJSON, "service-alpha") {
+	rawComposeJSON := sqliteScalar(t, targetPath, `select compose_json from environments where id = 'env.alpha';`)
+	if strings.Contains(rawComposeJSON, "service-alpha") || strings.Contains(rawComposeJSON, "legacy compose should not survive") {
 		t.Fatalf("raw target compose_json should not carry hydrated structured file content: %s", rawComposeJSON)
+	}
+	if !strings.Contains(rawComposeJSON, "LEGACY_MODE=true") {
+		t.Fatalf("raw target compose_json should preserve legacy generated content not backed by materialized environment_files: %s", rawComposeJSON)
 	}
 	if rawServicesJSON := sqliteScalar(t, targetPath, `select services_json from environments where id = 'env.alpha';`); rawServicesJSON != "[]" {
 		t.Fatalf("raw target services_json should not carry structured services: %s", rawServicesJSON)
@@ -245,7 +258,7 @@ func requireStoreCopyTargetState(t *testing.T, ctx context.Context, target *sqli
 	if err != nil {
 		t.Fatalf("target environment files: %v", err)
 	}
-	if len(files) != 1 || files[0].Path != "compose.yml" || !strings.Contains(files[0].ContentInline, "service-alpha") {
+	if len(files) != 2 || files[0].Path != "compose.yml" || !strings.Contains(files[0].ContentInline, "service-alpha") || files[1].Path != "legacy.env" || files[1].ContentInline != "" {
 		t.Fatalf("target environment files = %#v", files)
 	}
 	services, err := target.ListEnvironmentServices(ctx, "env.alpha")
