@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"agent-testbench/internal/domain/environmentsource"
-	"agent-testbench/internal/store"
 
 	"gopkg.in/yaml.v3"
 )
@@ -69,12 +68,22 @@ type ProjectionFile struct {
 	Error             string `json:"error,omitempty"`
 }
 
-func FromEnvironment(env store.Environment, graph store.EnvironmentComponentGraph) ProjectionReport {
-	return FromCompose(jsonObject(env.ComposeJSON), jsonObject(env.SummaryJSON), graph)
+type ProjectionAsset struct {
+	OwnerComponentID  string
+	AssetID           string
+	AssetKind         string
+	TargetComponentID string
+	TargetPath        string
+	ContentInline     string
+	RemoteRefJSON     string
 }
 
-func FromCompose(compose map[string]any, summary map[string]any, graph store.EnvironmentComponentGraph) ProjectionReport {
-	assetFiles := projectionFilesFromAssets(graph.Assets)
+func FromJSON(composeJSON string, summaryJSON string, assets []ProjectionAsset) ProjectionReport {
+	return FromCompose(jsonObject(composeJSON), jsonObject(summaryJSON), assets)
+}
+
+func FromCompose(compose map[string]any, summary map[string]any, assets []ProjectionAsset) ProjectionReport {
+	assetFiles := projectionFilesFromAssets(assets)
 	builder := projectionBuilder{
 		compose:       compose,
 		generated:     stringMap(compose["generatedFiles"]),
@@ -82,7 +91,7 @@ func FromCompose(compose map[string]any, summary map[string]any, graph store.Env
 		startupFiles:  startupFileSet(summary),
 		packageSource: strings.TrimSpace(valueString(jsonObjectFromAny(compose["package"])["url"])) != "",
 		assetByPath:   projectionFilesByPath(assetFiles),
-		assetContent:  projectionAssetContentByPath(graph.Assets),
+		assetContent:  projectionAssetContentByPath(assets),
 	}
 	builder.env = projectionComposeEnv(compose, builder.generated, builder.assetContent)
 	builder.addReferencedFiles(KindComposeFile, composeFiles(compose))
@@ -802,7 +811,7 @@ func dedupeProjectionTargets(values []string) []string {
 	return out
 }
 
-func projectionFilesFromAssets(assets []store.ComponentConfigAsset) []ProjectionFile {
+func projectionFilesFromAssets(assets []ProjectionAsset) []ProjectionFile {
 	files := []ProjectionFile{}
 	for _, asset := range assets {
 		if file := projectionFileFromAsset(asset); strings.TrimSpace(file.Path) != "" {
@@ -826,7 +835,7 @@ func projectionFilesByPath(files []ProjectionFile) map[string]ProjectionFile {
 	return out
 }
 
-func projectionAssetContentByPath(assets []store.ComponentConfigAsset) map[string]string {
+func projectionAssetContentByPath(assets []ProjectionAsset) map[string]string {
 	out := map[string]string{}
 	for _, asset := range assets {
 		path := cleanPath(asset.TargetPath)
@@ -842,7 +851,7 @@ func projectionAssetContentByPath(assets []store.ComponentConfigAsset) map[strin
 	return out
 }
 
-func projectionFileFromAsset(asset store.ComponentConfigAsset) ProjectionFile {
+func projectionFileFromAsset(asset ProjectionAsset) ProjectionFile {
 	path := cleanPath(asset.TargetPath)
 	file := ProjectionFile{
 		Path:              path,

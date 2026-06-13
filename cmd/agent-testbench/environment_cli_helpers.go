@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"agent-testbench/internal/domain/environmentfiles"
+	"agent-testbench/internal/environmentprojection"
 	"agent-testbench/internal/store"
 )
 
@@ -88,7 +88,7 @@ func printEnvironmentCommandResult(env store.Environment, jsonOutput bool, compo
 	payload := map[string]any{"ok": true, "environment": environmentPayload(env)}
 	if len(componentGraphs) > 0 {
 		payload["componentGraph"] = environmentRestoreComponentGraphReport(env.ID, componentGraphs[0])
-		payload["fileProjection"] = environmentfiles.FromEnvironment(env, componentGraphs[0])
+		payload["fileProjection"] = environmentprojection.FromEnvironment(env, componentGraphs[0])
 	}
 	if jsonOutput {
 		return writeIndentedJSON(payload)
@@ -113,7 +113,7 @@ func printEnvironmentCommandResult(env store.Environment, jsonOutput bool, compo
 		if strings.TrimSpace(readiness.Error) != "" {
 			fmt.Printf("Component Readiness Error: %s\n", readiness.Error)
 		}
-		projection := environmentfiles.FromEnvironment(env, componentGraphs[0])
+		projection := environmentprojection.FromEnvironment(env, componentGraphs[0])
 		fmt.Printf("File Projection Ready: %t\n", projection.OK)
 		if len(projection.Missing) > 0 {
 			fmt.Printf("File Projection Missing: %d\n", len(projection.Missing))

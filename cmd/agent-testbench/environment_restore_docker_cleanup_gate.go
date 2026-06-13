@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"agent-testbench/internal/domain/environmentfiles"
+	"agent-testbench/internal/environmentprojection"
 	"agent-testbench/internal/store"
 )
 
@@ -97,7 +97,7 @@ func environmentRestoreCleanupMissingProjectedFiles(compose map[string]any, grap
 	if len(composeFiles) > 0 {
 		projectionCompose["composeFiles"] = composeFiles
 	}
-	projection := environmentfiles.FromCompose(projectionCompose, nil, graph)
+	projection := environmentprojection.FromCompose(projectionCompose, nil, graph)
 	missing := make([]string, 0, len(projection.Missing))
 	for _, file := range projection.Missing {
 		missing = append(missing, file.Kind+":"+filepath.ToSlash(file.Path))

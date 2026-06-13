@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"agent-testbench/internal/domain/environmentfiles"
 	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/environmentprojection"
 	"agent-testbench/internal/store"
 )
 
@@ -90,7 +90,7 @@ func handleEnvironmentItem(w http.ResponseWriter, r *http.Request, runtime store
 		if !graphOK {
 			return
 		}
-		writeJSON(w, map[string]any{"ok": true, "environment": environmentAPIPayload(env), "componentGraph": EnvironmentComponentGraphReadinessReport(env.ID, componentGraph), "fileProjection": environmentfiles.FromEnvironment(env, componentGraph)})
+		writeJSON(w, map[string]any{"ok": true, "environment": environmentAPIPayload(env), "componentGraph": EnvironmentComponentGraphReadinessReport(env.ID, componentGraph), "fileProjection": environmentprojection.FromEnvironment(env, componentGraph)})
 	case action == "bootstrap" && r.Method == http.MethodGet:
 		env, ok := loadEnvironmentAPI(w, r, runtime, id)
 		if !ok {
@@ -103,7 +103,7 @@ func handleEnvironmentItem(w http.ResponseWriter, r *http.Request, runtime store
 		plan := EnvironmentBootstrapPlan(env)
 		componentReadiness := EnvironmentComponentGraphReadinessReport(env.ID, componentGraph)
 		componentStartupPlan := EnvironmentComponentStartupPlanReport(env.ID, componentGraph)
-		fileProjection := environmentfiles.FromEnvironment(env, componentGraph)
+		fileProjection := environmentprojection.FromEnvironment(env, componentGraph)
 		plan["componentGraph"] = componentReadiness
 		plan["componentStartupPlan"] = componentStartupPlan
 		plan["fileProjection"] = fileProjection

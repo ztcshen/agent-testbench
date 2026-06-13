@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"agent-testbench/internal/domain/environmentfiles"
+	"agent-testbench/internal/environmentprojection"
 	"agent-testbench/internal/server/controlplane"
 	"agent-testbench/internal/store"
 )
@@ -144,7 +144,7 @@ func runEnvironmentBootstrap(ctx context.Context, args []string) error {
 	bootstrapPlan := controlplane.EnvironmentBootstrapPlan(env)
 	componentReadiness := environmentRestoreComponentGraphReport(env.ID, componentGraph)
 	componentStartupPlan := controlplane.EnvironmentComponentStartupPlanReport(env.ID, componentGraph)
-	fileProjection := environmentfiles.FromEnvironment(env, componentGraph)
+	fileProjection := environmentprojection.FromEnvironment(env, componentGraph)
 	bootstrapPlan["componentGraph"] = componentReadiness
 	bootstrapPlan["componentStartupPlan"] = componentStartupPlan
 	bootstrapPlan["fileProjection"] = fileProjection

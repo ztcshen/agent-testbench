@@ -11,6 +11,7 @@ import (
 
 	"agent-testbench/internal/domain/environmentfiles"
 	"agent-testbench/internal/domain/environmentsource"
+	"agent-testbench/internal/environmentprojection"
 	"agent-testbench/internal/server/controlplane"
 	"agent-testbench/internal/store"
 )
@@ -205,7 +206,7 @@ func environmentRestoreFileProjection(env store.Environment, plan environmentRes
 			}
 		}
 	}
-	return environmentfiles.FromCompose(compose, jsonObjectString(env.SummaryJSON), plan.ComponentGraph)
+	return environmentprojection.FromCompose(compose, jsonObjectString(env.SummaryJSON), plan.ComponentGraph)
 }
 
 func environmentRestoreAddSourceReports(ctx context.Context, report *environmentRestoreReport, plan environmentRestoreBuildPlan, execute bool, pull bool) {

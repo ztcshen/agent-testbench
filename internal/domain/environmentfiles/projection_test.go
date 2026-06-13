@@ -4,12 +4,23 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-
-	"agent-testbench/internal/store"
 )
 
+type projectionTestEnvironment struct {
+	ComposeJSON string
+	SummaryJSON string
+}
+
+type projectionTestGraph struct {
+	Assets []ProjectionAsset
+}
+
+func projectionReport(env projectionTestEnvironment, graph projectionTestGraph) ProjectionReport {
+	return FromJSON(env.ComposeJSON, env.SummaryJSON, graph.Assets)
+}
+
 func TestProjectionReportExplainsStoreBackedFilesAndGaps(t *testing.T) {
-	env := store.Environment{
+	env := projectionTestEnvironment{
 		ComposeJSON: `{
 			"composeFile":"compose.yml",
 			"composeFiles":["compose.yml"],
@@ -19,8 +30,8 @@ func TestProjectionReportExplainsStoreBackedFilesAndGaps(t *testing.T) {
 		}`,
 		SummaryJSON: `{"startupFiles":{"files":[{"path":"runtime.env"}]}}`,
 	}
-	graph := store.EnvironmentComponentGraph{
-		Assets: []store.ComponentConfigAsset{{
+	graph := projectionTestGraph{
+		Assets: []ProjectionAsset{{
 			OwnerComponentID: "app",
 			AssetID:          "app.secret",
 			AssetKind:        assetKindComposeSecret,
@@ -29,7 +40,7 @@ func TestProjectionReportExplainsStoreBackedFilesAndGaps(t *testing.T) {
 		}},
 	}
 
-	report := FromEnvironment(env, graph)
+	report := projectionReport(env, graph)
 	if report.OK || report.Counts.Referenced != 3 || report.Counts.Missing != 1 || report.Counts.RepairItems != 1 {
 		t.Fatalf("projection report = %#v", report)
 	}
@@ -51,7 +62,7 @@ func TestProjectionReportExplainsStoreBackedFilesAndGaps(t *testing.T) {
 }
 
 func TestProjectionReportAcceptsEnvironmentPackageFiles(t *testing.T) {
-	env := store.Environment{
+	env := projectionTestEnvironment{
 		ComposeJSON: `{
 			"composeFile":"compose/docker-compose.yml",
 			"envFiles":["compose/runtime.env"],
@@ -59,7 +70,7 @@ func TestProjectionReportAcceptsEnvironmentPackageFiles(t *testing.T) {
 		}`,
 	}
 
-	report := FromEnvironment(env, store.EnvironmentComponentGraph{})
+	report := projectionReport(env, projectionTestGraph{})
 	if !report.OK || report.Counts.Referenced != 2 || report.Counts.Missing != 0 {
 		t.Fatalf("package projection report = %#v", report)
 	}
@@ -69,15 +80,15 @@ func TestProjectionReportAcceptsEnvironmentPackageFiles(t *testing.T) {
 }
 
 func TestProjectionReportAcceptsComponentAssetForReferencedFile(t *testing.T) {
-	env := store.Environment{
+	env := projectionTestEnvironment{
 		ComposeJSON: `{
 			"composeFile":"compose/docker-compose.yml",
 			"generatedFiles":{"compose/docker-compose.yml":"services: {}"},
 			"envFiles":["compose/app.env"]
 		}`,
 	}
-	graph := store.EnvironmentComponentGraph{
-		Assets: []store.ComponentConfigAsset{{
+	graph := projectionTestGraph{
+		Assets: []ProjectionAsset{{
 			OwnerComponentID: "app",
 			AssetID:          "app.env",
 			AssetKind:        "env-file",
@@ -86,7 +97,7 @@ func TestProjectionReportAcceptsComponentAssetForReferencedFile(t *testing.T) {
 		}},
 	}
 
-	report := FromEnvironment(env, graph)
+	report := projectionReport(env, graph)
 	if !report.OK || report.Counts.Missing != 0 {
 		t.Fatalf("component asset projection report = %#v", report)
 	}
@@ -96,7 +107,7 @@ func TestProjectionReportAcceptsComponentAssetForReferencedFile(t *testing.T) {
 }
 
 func TestProjectionReportDiscoversComposeNativeFileReferences(t *testing.T) {
-	env := store.Environment{
+	env := projectionTestEnvironment{
 		ComposeJSON: `{
 			"composeFile":"compose/docker-compose.yml",
 			"generatedFiles":{
@@ -105,8 +116,8 @@ func TestProjectionReportDiscoversComposeNativeFileReferences(t *testing.T) {
 			}
 		}`,
 	}
-	graph := store.EnvironmentComponentGraph{
-		Assets: []store.ComponentConfigAsset{{
+	graph := projectionTestGraph{
+		Assets: []ProjectionAsset{{
 			OwnerComponentID: "db",
 			AssetID:          "db.password",
 			AssetKind:        assetKindComposeSecret,
@@ -115,7 +126,7 @@ func TestProjectionReportDiscoversComposeNativeFileReferences(t *testing.T) {
 		}},
 	}
 
-	report := FromEnvironment(env, graph)
+	report := projectionReport(env, graph)
 	if report.OK || report.Counts.Referenced != 5 || report.Counts.Missing != 2 {
 		t.Fatalf("compose-native projection report = %#v", report)
 	}
@@ -159,7 +170,7 @@ func TestProjectionReportDiscoversComposeNativeReferenceVariants(t *testing.T) {
 		"    db_password:",
 		"        file: ./secrets/db.txt # db secret",
 	}, "\n") + "\n"
-	env := store.Environment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
+	env := projectionTestEnvironment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
 		"composeFile": "compose/docker-compose.yml",
 		"generatedFiles": map[string]string{
 			"compose/docker-compose.yml":  composeContent,
@@ -171,7 +182,7 @@ func TestProjectionReportDiscoversComposeNativeReferenceVariants(t *testing.T) {
 		},
 	})}
 
-	report := FromEnvironment(env, store.EnvironmentComponentGraph{})
+	report := projectionReport(env, projectionTestGraph{})
 	if report.OK || report.Counts.Referenced != 11 || report.Counts.Missing != 5 {
 		t.Fatalf("compose variant projection report = %#v", report)
 	}
@@ -209,7 +220,7 @@ func TestProjectionReportDiscoversComposeNativeReferenceVariants(t *testing.T) {
 }
 
 func TestProjectionReportResolvesComposeNativeInterpolatedReferencesFromStoreEnv(t *testing.T) {
-	env := store.Environment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
+	env := projectionTestEnvironment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
 		"composeFile": "compose/docker-compose.yml",
 		"env": map[string]string{
 			"PROFILE": "prod",
@@ -230,7 +241,7 @@ func TestProjectionReportResolvesComposeNativeInterpolatedReferencesFromStoreEnv
 		},
 	})}
 
-	report := FromEnvironment(env, store.EnvironmentComponentGraph{})
+	report := projectionReport(env, projectionTestGraph{})
 	if !report.OK || report.Counts.Missing != 0 {
 		t.Fatalf("interpolated projection report = %#v", report)
 	}
@@ -243,7 +254,7 @@ func TestProjectionReportResolvesComposeNativeInterpolatedReferencesFromStoreEnv
 }
 
 func TestProjectionReportResolvesNestedComposeNativeInterpolationFromStoreEnv(t *testing.T) {
-	env := store.Environment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
+	env := projectionTestEnvironment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
 		"composeFile": "compose/docker-compose.yml",
 		"env": map[string]string{
 			"DEFAULT_PROFILE": "prod",
@@ -261,7 +272,7 @@ func TestProjectionReportResolvesNestedComposeNativeInterpolationFromStoreEnv(t 
 		},
 	})}
 
-	report := FromEnvironment(env, store.EnvironmentComponentGraph{})
+	report := projectionReport(env, projectionTestGraph{})
 	if !report.OK || report.Counts.Missing != 0 {
 		t.Fatalf("nested interpolated projection report = %#v", report)
 	}
@@ -271,7 +282,7 @@ func TestProjectionReportResolvesNestedComposeNativeInterpolationFromStoreEnv(t 
 }
 
 func TestProjectionReportResolvesComposeNativeInterpolationFromStoreEnvFiles(t *testing.T) {
-	env := store.Environment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
+	env := projectionTestEnvironment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
 		"composeFile": "compose/docker-compose.yml",
 		"envFiles": []string{
 			"compose/runtime.env",
@@ -292,7 +303,7 @@ func TestProjectionReportResolvesComposeNativeInterpolationFromStoreEnvFiles(t *
 		},
 	})}
 
-	report := FromEnvironment(env, store.EnvironmentComponentGraph{})
+	report := projectionReport(env, projectionTestGraph{})
 	if !report.OK || report.Counts.Missing != 0 {
 		t.Fatalf("env-file interpolated projection report = %#v", report)
 	}
@@ -302,7 +313,7 @@ func TestProjectionReportResolvesComposeNativeInterpolationFromStoreEnvFiles(t *
 }
 
 func TestProjectionReportResolvesComposeNativeInterpolationFromEnvFileAsset(t *testing.T) {
-	env := store.Environment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
+	env := projectionTestEnvironment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
 		"composeFile": "compose/docker-compose.yml",
 		"envFiles": []string{
 			"compose/runtime.env",
@@ -317,8 +328,8 @@ func TestProjectionReportResolvesComposeNativeInterpolationFromEnvFileAsset(t *t
 			"compose/env/blue.env": "APP_MODE=test\n",
 		},
 	})}
-	graph := store.EnvironmentComponentGraph{
-		Assets: []store.ComponentConfigAsset{{
+	graph := projectionTestGraph{
+		Assets: []ProjectionAsset{{
 			OwnerComponentID: "app",
 			AssetID:          "app.runtime-env",
 			AssetKind:        "env-file",
@@ -327,7 +338,7 @@ func TestProjectionReportResolvesComposeNativeInterpolationFromEnvFileAsset(t *t
 		}},
 	}
 
-	report := FromEnvironment(env, graph)
+	report := projectionReport(env, graph)
 	if !report.OK || report.Counts.Missing != 0 {
 		t.Fatalf("env-file asset interpolated projection report = %#v", report)
 	}
@@ -337,7 +348,7 @@ func TestProjectionReportResolvesComposeNativeInterpolationFromEnvFileAsset(t *t
 }
 
 func TestProjectionReportRejectsAbsoluteComposeNativeReferences(t *testing.T) {
-	env := store.Environment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
+	env := projectionTestEnvironment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
 		"composeFile": "compose/docker-compose.yml",
 		"generatedFiles": map[string]string{
 			"compose/docker-compose.yml": strings.Join([]string{
@@ -350,7 +361,7 @@ func TestProjectionReportRejectsAbsoluteComposeNativeReferences(t *testing.T) {
 		},
 	})}
 
-	report := FromEnvironment(env, store.EnvironmentComponentGraph{})
+	report := projectionReport(env, projectionTestGraph{})
 	if report.OK || report.Counts.Missing != 1 {
 		t.Fatalf("absolute env_file should fail projection readiness: %#v", report)
 	}
@@ -363,7 +374,7 @@ func TestProjectionReportRejectsAbsoluteComposeNativeReferences(t *testing.T) {
 }
 
 func TestProjectionReportRejectsInterpolatedAbsoluteComposeNativeReferences(t *testing.T) {
-	env := store.Environment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
+	env := projectionTestEnvironment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
 		"composeFile": "compose/docker-compose.yml",
 		"env": map[string]string{
 			"APP_ENV_FILE": "/etc/app.env",
@@ -381,7 +392,7 @@ func TestProjectionReportRejectsInterpolatedAbsoluteComposeNativeReferences(t *t
 		},
 	})}
 
-	report := FromEnvironment(env, store.EnvironmentComponentGraph{})
+	report := projectionReport(env, projectionTestGraph{})
 	if report.OK || report.Counts.Missing != 1 {
 		t.Fatalf("interpolated absolute env_file should fail projection readiness: %#v", report)
 	}
@@ -391,7 +402,7 @@ func TestProjectionReportRejectsInterpolatedAbsoluteComposeNativeReferences(t *t
 }
 
 func TestProjectionReportRejectsEmptyRemoteAssetRef(t *testing.T) {
-	env := store.Environment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
+	env := projectionTestEnvironment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
 		"composeFile": "compose/docker-compose.yml",
 		"generatedFiles": map[string]string{
 			"compose/docker-compose.yml": strings.Join([]string{
@@ -406,8 +417,8 @@ func TestProjectionReportRejectsEmptyRemoteAssetRef(t *testing.T) {
 			}, "\n") + "\n",
 		},
 	})}
-	graph := store.EnvironmentComponentGraph{
-		Assets: []store.ComponentConfigAsset{{
+	graph := projectionTestGraph{
+		Assets: []ProjectionAsset{{
 			OwnerComponentID: "db",
 			AssetID:          "db.password",
 			AssetKind:        assetKindComposeSecret,
@@ -416,7 +427,7 @@ func TestProjectionReportRejectsEmptyRemoteAssetRef(t *testing.T) {
 		}},
 	}
 
-	report := FromEnvironment(env, graph)
+	report := projectionReport(env, graph)
 	if report.OK || report.Counts.Missing != 2 {
 		t.Fatalf("empty remote ref should fail projection readiness: %#v", report)
 	}
@@ -426,11 +437,11 @@ func TestProjectionReportRejectsEmptyRemoteAssetRef(t *testing.T) {
 }
 
 func TestProjectionReportScansComponentBackedComposeFileReferences(t *testing.T) {
-	env := store.Environment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
+	env := projectionTestEnvironment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
 		"composeFile": "compose/docker-compose.yml",
 	})}
-	graph := store.EnvironmentComponentGraph{
-		Assets: []store.ComponentConfigAsset{
+	graph := projectionTestGraph{
+		Assets: []ProjectionAsset{
 			{
 				OwnerComponentID: "compose",
 				AssetID:          "compose.main",
@@ -456,7 +467,7 @@ func TestProjectionReportScansComponentBackedComposeFileReferences(t *testing.T)
 		},
 	}
 
-	report := FromEnvironment(env, graph)
+	report := projectionReport(env, graph)
 	if report.OK || report.Counts.Missing != 1 {
 		t.Fatalf("component-backed compose projection report = %#v", report)
 	}
@@ -472,7 +483,7 @@ func TestProjectionReportScansComponentBackedComposeFileReferences(t *testing.T)
 }
 
 func TestProjectionReportLimitsExtendsScanToReferencedService(t *testing.T) {
-	env := store.Environment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
+	env := projectionTestEnvironment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
 		"composeFile": "compose/docker-compose.yml",
 		"generatedFiles": map[string]string{
 			"compose/docker-compose.yml": strings.Join([]string{
@@ -507,7 +518,7 @@ func TestProjectionReportLimitsExtendsScanToReferencedService(t *testing.T) {
 		},
 	})}
 
-	report := FromEnvironment(env, store.EnvironmentComponentGraph{})
+	report := projectionReport(env, projectionTestGraph{})
 	if report.OK || report.Counts.Missing != 1 {
 		t.Fatalf("extends projection report = %#v", report)
 	}
