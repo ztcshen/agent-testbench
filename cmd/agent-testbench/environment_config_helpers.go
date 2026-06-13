@@ -176,6 +176,31 @@ func environmentComposeConfigWithoutGeneratedFiles(compose map[string]any) map[s
 	return store.EnvironmentComposeJSONWithoutGeneratedFiles(compose)
 }
 
+func environmentComposeConfigWithoutMaterializedEnvironmentFiles(compose map[string]any, files []store.EnvironmentFile) map[string]any {
+	out := map[string]any{}
+	for key, value := range compose {
+		out[key] = value
+	}
+	generated := stringMapFromAny(compose["generatedFiles"])
+	for _, file := range files {
+		if !store.EnvironmentFileHasInlineContent(file) {
+			continue
+		}
+		path := filepath.Clean(strings.TrimSpace(file.Path))
+		if path == "." || path == "" {
+			continue
+		}
+		delete(generated, path)
+		delete(generated, file.Path)
+	}
+	if len(generated) > 0 {
+		out["generatedFiles"] = generated
+	} else {
+		delete(out, "generatedFiles")
+	}
+	return out
+}
+
 func environmentFilesFromComposeConfig(compose map[string]any) []store.EnvironmentFile {
 	return store.EnvironmentFilesFromComposeJSON(compose, "environment.register")
 }

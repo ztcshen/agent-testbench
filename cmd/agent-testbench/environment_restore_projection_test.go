@@ -124,6 +124,55 @@ func TestEnvironmentRestoreUsesStructuredEnvironmentFilesForDockerPlan(t *testin
 	}
 }
 
+func TestEnvironmentRestorePreservesLegacyGeneratedFilesNotMaterializedInStore(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	report, err := buildEnvironmentRestoreReportWithStructuredState(context.Background(), store.Environment{
+		ID: "env.mixed.restore",
+		ComposeJSON: `{
+			"composeFiles":["compose/docker-compose.yml"],
+			"envFiles":["compose/legacy.env"],
+			"generatedFiles":{
+				"compose/docker-compose.yml":"legacy compose should be replaced\n",
+				"compose/legacy.env":"LEGACY_MODE=true\n"
+			},
+			"services":["app"]
+		}`,
+		HealthChecksJSON:       `[]`,
+		VerificationWorkflowID: "workflow.mixed-restore",
+	}, workspace, false, false, true, time.Second, environmentRestoreWorkflowOptions{}, environmentRestoreDockerCleanupOptions{}, []store.EnvironmentFile{
+		{
+			Path:          "compose/docker-compose.yml",
+			Kind:          store.EnvironmentFileKindComposeFile,
+			ContentInline: "services:\n  app:\n    image: alpine:3.20\n",
+			Required:      true,
+			ApplyOrder:    10,
+		},
+		{
+			Path:       "compose/legacy.env",
+			Kind:       store.EnvironmentFileKindComposeEnvFile,
+			Required:   true,
+			ApplyOrder: 20,
+		},
+	}, nil, nil)
+	if err != nil {
+		t.Fatalf("build restore report: %v", err)
+	}
+	generated := stringMapFromAny(report.Compose["generatedFiles"])
+	if strings.Contains(generated["compose/docker-compose.yml"], "legacy compose should be replaced") || !strings.Contains(generated["compose/docker-compose.yml"], "image: alpine:3.20") {
+		t.Fatalf("structured compose file should replace legacy generated content: %#v", generated)
+	}
+	if !strings.Contains(generated["compose/legacy.env"], "LEGACY_MODE=true") {
+		t.Fatalf("legacy generated env file without materialized content should survive restore planning: %#v", generated)
+	}
+	planned := map[string]bool{}
+	for _, item := range report.Docker.Generated {
+		planned[filepath.ToSlash(item.Path)] = item.OK && item.Action == "plan-write"
+	}
+	if !planned[filepath.ToSlash(filepath.Join(workspace, "compose/docker-compose.yml"))] || !planned[filepath.ToSlash(filepath.Join(workspace, "compose/legacy.env"))] {
+		t.Fatalf("mixed generated files were not both planned: %#v", report.Docker.Generated)
+	}
+}
+
 func installProjectionFakeDocker(t *testing.T, fakeBin string) {
 	t.Helper()
 	writeFile(t, filepath.Join(fakeBin, "docker"), `#!/usr/bin/env bash

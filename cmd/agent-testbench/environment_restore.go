@@ -222,7 +222,7 @@ func environmentRestoreComposeForPlan(env store.Environment, files []store.Envir
 		return jsonObjectString(env.ComposeJSON), nil
 	}
 	base := env
-	base.ComposeJSON = mustCompactJSON(environmentComposeConfigWithoutGeneratedFiles(jsonObjectString(env.ComposeJSON)))
+	base.ComposeJSON = mustCompactJSON(environmentComposeConfigWithoutMaterializedEnvironmentFiles(jsonObjectString(env.ComposeJSON), files))
 	projected, err := store.MergeEnvironmentFilesIntoComposeJSON(base, files)
 	if err != nil {
 		return nil, err
