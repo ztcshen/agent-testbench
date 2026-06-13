@@ -62,6 +62,14 @@ func PrepareEnvironmentForUpsert(e Environment, now time.Time) (Environment, err
 	return e, nil
 }
 
+func PrepareEnvironmentForStructuredUpsert(ctx context.Context, lister EnvironmentStructuredStateLister, e Environment, now time.Time) (Environment, error) {
+	e, err := EnvironmentWithoutStructuredState(ctx, lister, e)
+	if err != nil {
+		return Environment{}, err
+	}
+	return PrepareEnvironmentForUpsert(e, now)
+}
+
 func ValidateEnvironmentDefinitionSize(e Environment) error {
 	definitionFields := []namedSize{
 		{name: "id", size: len(e.ID)},
@@ -359,6 +367,55 @@ func MergeEnvironmentFilesIntoComposeJSON(env Environment, files []EnvironmentFi
 	}
 	env.ComposeJSON = string(raw)
 	return env, nil
+}
+
+func EnvironmentWithoutStructuredState(ctx context.Context, lister EnvironmentStructuredStateLister, env Environment) (Environment, error) {
+	files, err := lister.ListEnvironmentFiles(ctx, env.ID)
+	if err != nil {
+		return Environment{}, err
+	}
+	services, err := lister.ListEnvironmentServices(ctx, env.ID)
+	if err != nil {
+		return Environment{}, err
+	}
+	checks, err := lister.ListEnvironmentHealthChecks(ctx, env.ID)
+	if err != nil {
+		return Environment{}, err
+	}
+	env = EnvironmentWithoutStructuredFiles(env, files)
+	return EnvironmentWithoutStructuredRuntimeMetadata(env, services, checks), nil
+}
+
+func EnvironmentWithoutStructuredFiles(env Environment, files []EnvironmentFile) Environment {
+	files = NormalizeEnvironmentFiles(files)
+	if len(files) == 0 {
+		return env
+	}
+	compose := map[string]any{}
+	if strings.TrimSpace(env.ComposeJSON) != "" {
+		if err := json.Unmarshal([]byte(env.ComposeJSON), &compose); err != nil {
+			return env
+		}
+	}
+	generated := stringMapFromJSONAny(compose["generatedFiles"])
+	for _, file := range files {
+		if !EnvironmentFileHasInlineContent(file) {
+			continue
+		}
+		path := cleanEnvironmentFilePath(file.Path)
+		if path == "" {
+			continue
+		}
+		delete(generated, path)
+		delete(generated, file.Path)
+	}
+	if len(generated) > 0 {
+		compose["generatedFiles"] = generated
+	} else {
+		delete(compose, "generatedFiles")
+	}
+	env.ComposeJSON = mustJSON(compose, "{}")
+	return env
 }
 
 func ValidateEnvironmentServices(envID string, services []EnvironmentService) error {

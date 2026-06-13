@@ -2,6 +2,7 @@ package storecontract
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ func requireEnvironmentContract(t *testing.T, ctx context.Context, s store.Store
 	env := requireEnvironmentCatalogContract(t, ctx, s, started)
 	requireEnvironmentFilesContract(t, ctx, s, env.ID)
 	requireEnvironmentRuntimeMetadataContract(t, ctx, s, env.ID)
+	requireEnvironmentUpsertKeepsStructuredStateOutOfRawJSON(t, ctx, s, env.ID)
 	requireEnvironmentListContract(t, ctx, s)
 	return env
 }
@@ -156,6 +158,39 @@ func requireEnvironmentRuntimeMetadataContract(t *testing.T, ctx context.Context
 		!jsonEqual(loadedEnv.ReposJSON, `{"service.alpha":{"branch":"main","checkout":"service-alpha","ref":"v1.0.0","url":"https://example.com/service-alpha.git"}}`) ||
 		!jsonEqual(loadedEnv.HealthChecksJSON, `[{"id":"health-alpha","kind":"url","url":"http://127.0.0.1:18080/health"},{"expect":"service_completed_successfully","id":"health-seed","kind":"compose-service","service":"seed"}]`) {
 		t.Fatalf("structured runtime metadata was not merged: services=%s repos=%s health=%s", loadedEnv.ServicesJSON, loadedEnv.ReposJSON, loadedEnv.HealthChecksJSON)
+	}
+}
+
+func requireEnvironmentUpsertKeepsStructuredStateOutOfRawJSON(t *testing.T, ctx context.Context, s store.Store, envID string) {
+	t.Helper()
+
+	env, err := s.GetEnvironment(ctx, envID)
+	if err != nil {
+		t.Fatalf("get hydrated environment before status update: %v", err)
+	}
+	env.Status = "verification-recorded"
+	env.LastVerificationStatus = store.StatusPassed
+	if _, err := s.UpsertEnvironment(ctx, env); err != nil {
+		t.Fatalf("upsert hydrated environment status update: %v", err)
+	}
+	if err := s.ReplaceEnvironmentFiles(ctx, envID, nil); err != nil {
+		t.Fatalf("clear structured environment files: %v", err)
+	}
+	if err := s.ReplaceEnvironmentServices(ctx, envID, nil); err != nil {
+		t.Fatalf("clear structured environment services: %v", err)
+	}
+	if err := s.ReplaceEnvironmentHealthChecks(ctx, envID, nil); err != nil {
+		t.Fatalf("clear structured environment health checks: %v", err)
+	}
+	loadedEnv, err := s.GetEnvironment(ctx, envID)
+	if err != nil {
+		t.Fatalf("get environment after clearing structured rows: %v", err)
+	}
+	if strings.Contains(loadedEnv.ComposeJSON, "generatedFiles") {
+		t.Fatalf("upsert should not persist hydrated generated files in raw compose_json: %s", loadedEnv.ComposeJSON)
+	}
+	if !jsonEqual(loadedEnv.ServicesJSON, `[]`) || !jsonEqual(loadedEnv.ReposJSON, `{}`) || !jsonEqual(loadedEnv.HealthChecksJSON, `[]`) {
+		t.Fatalf("upsert should not persist hydrated runtime metadata: services=%s repos=%s health=%s", loadedEnv.ServicesJSON, loadedEnv.ReposJSON, loadedEnv.HealthChecksJSON)
 	}
 }
 

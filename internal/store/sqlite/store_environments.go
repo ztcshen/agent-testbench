@@ -10,7 +10,7 @@ import (
 
 func (s *Store) UpsertEnvironment(ctx context.Context, e store.Environment) (store.Environment, error) {
 	var err error
-	e, err = store.PrepareEnvironmentForUpsert(e, utcNow())
+	e, err = store.PrepareEnvironmentForStructuredUpsert(ctx, s, e, utcNow())
 	if err != nil {
 		return store.Environment{}, err
 	}
