@@ -103,6 +103,101 @@ func TestEnvironmentRegisterStoresDockerFilesAsStructuredRows(t *testing.T) {
 	requireStructuredEnvironmentInspectProjection(t, storePath)
 }
 
+func TestEnvironmentRepoSetPreservesMixedLegacyServices(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	storeRef := "sqlite://" + storePath
+	runCLI(t, "environment", "register",
+		"--store", storeRef,
+		"--id", "env.mixed.repo-set",
+		"--service", "app",
+		"--repo", "app=https://example.invalid/app.git",
+		"--checkout", "app=app",
+		"--verification-workflow", "workflow.core-10",
+		"--json",
+	)
+	seedLegacyEnvironmentRepositoryMetadata(t, storePath)
+
+	repoSetOut := runCLI(t, "environment", "repo", "set",
+		"--store", storeRef,
+		"--repo-ref", "app=v2.0.0",
+		"--checkout", "app=app-v2",
+		"--json",
+		"env.mixed.repo-set",
+	)
+	var repoSet struct {
+		Environment struct {
+			Services []map[string]any `json:"services"`
+			Repos    map[string]any   `json:"repos"`
+		} `json:"environment"`
+	}
+	if err := json.Unmarshal([]byte(repoSetOut), &repoSet); err != nil {
+		t.Fatalf("decode environment repo set json: %v\n%s", err, repoSetOut)
+	}
+	requireMixedRepoSetProjection(t, repoSet.Environment.Services, repoSet.Environment.Repos)
+	requireMixedRepoSetStructuredRows(t, storePath)
+	if rawServicesJSON := sqliteScalar(t, storePath, `select services_json from environments where id = 'env.mixed.repo-set';`); rawServicesJSON != "[]" {
+		t.Fatalf("raw services_json should be migrated into structured services after repo set: %s", rawServicesJSON)
+	}
+	if rawReposJSON := sqliteScalar(t, storePath, `select repos_json from environments where id = 'env.mixed.repo-set';`); rawReposJSON != "{}" {
+		t.Fatalf("raw repos_json should be migrated into structured services after repo set: %s", rawReposJSON)
+	}
+}
+
+func seedLegacyEnvironmentRepositoryMetadata(t *testing.T, storePath string) {
+	t.Helper()
+	ctx := context.Background()
+	runtime, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer runtime.Close()
+	env, err := runtime.GetEnvironment(ctx, "env.mixed.repo-set")
+	if err != nil {
+		t.Fatalf("get environment: %v", err)
+	}
+	env.ServicesJSON = `[{"id":"legacy-service","repo":"https://example.invalid/legacy.git","checkout":"legacy-service"}]`
+	env.ReposJSON = `{"legacy-service":{"url":"https://example.invalid/legacy.git","checkout":"legacy-service"}}`
+	if _, err := runtime.UpsertEnvironment(ctx, env); err != nil {
+		t.Fatalf("seed legacy environment metadata: %v", err)
+	}
+}
+
+func requireMixedRepoSetProjection(t *testing.T, services []map[string]any, repos map[string]any) {
+	t.Helper()
+	serviceIDs := map[string]bool{}
+	for _, service := range services {
+		serviceIDs[fmt.Sprint(service["id"])] = true
+	}
+	appRepo, _ := repos["app"].(map[string]any)
+	legacyRepo, _ := repos["legacy-service"].(map[string]any)
+	if len(services) != 2 || !serviceIDs["app"] || !serviceIDs["legacy-service"] {
+		t.Fatalf("repo set should preserve structured and legacy services: %#v", services)
+	}
+	if appRepo["ref"] != "v2.0.0" || appRepo["checkout"] != "app-v2" {
+		t.Fatalf("repo set should update structured app repo: %#v", appRepo)
+	}
+	if legacyRepo["url"] != "https://example.invalid/legacy.git" || legacyRepo["checkout"] != "legacy-service" {
+		t.Fatalf("repo set should preserve legacy repo metadata: %#v", legacyRepo)
+	}
+}
+
+func requireMixedRepoSetStructuredRows(t *testing.T, storePath string) {
+	t.Helper()
+	ctx := context.Background()
+	runtime, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer runtime.Close()
+	services, err := runtime.ListEnvironmentServices(ctx, "env.mixed.repo-set")
+	if err != nil {
+		t.Fatalf("list environment services: %v", err)
+	}
+	if len(services) != 2 {
+		t.Fatalf("repo set should migrate mixed services into structured rows: %#v", services)
+	}
+}
+
 func requireStructuredRegisterOutput(t *testing.T, compose map[string]any, services []map[string]any, repos map[string]any, healthChecks []map[string]any) {
 	t.Helper()
 	if _, ok := compose["generatedFiles"]; !ok {

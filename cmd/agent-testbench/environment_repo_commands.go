@@ -102,9 +102,7 @@ func updateEnvironmentRepositories(ctx context.Context, runtime store.Environmen
 	if err != nil {
 		return store.Environment{}, err
 	}
-	if len(services) == 0 {
-		services = environmentServiceRowsFromJSON(jsonArrayString(env.ServicesJSON), jsonObjectString(env.ReposJSON))
-	}
+	services = environmentServicesWithLegacyJSON(services, env.ServicesJSON, env.ReposJSON)
 	services = storeEnvironmentServicesWithRepoUpdates(services, updates)
 	services = store.NormalizeEnvironmentServices(services)
 	env.ReposJSON = "{}"
@@ -118,6 +116,25 @@ func updateEnvironmentRepositories(ctx context.Context, runtime store.Environmen
 		return store.Environment{}, err
 	}
 	return runtime.GetEnvironment(ctx, env.ID)
+}
+
+func environmentServicesWithLegacyJSON(services []store.EnvironmentService, servicesJSON string, reposJSON string) []store.EnvironmentService {
+	byID := map[string]store.EnvironmentService{}
+	for _, service := range environmentServiceRowsFromJSON(jsonArrayString(servicesJSON), jsonObjectString(reposJSON)) {
+		if strings.TrimSpace(service.ServiceID) != "" {
+			byID[service.ServiceID] = service
+		}
+	}
+	for _, service := range services {
+		if strings.TrimSpace(service.ServiceID) != "" {
+			byID[service.ServiceID] = service
+		}
+	}
+	out := make([]store.EnvironmentService, 0, len(byID))
+	for _, service := range byID {
+		out = append(out, service)
+	}
+	return store.NormalizeEnvironmentServices(out)
 }
 
 func storeEnvironmentServicesWithRepoUpdates(services []store.EnvironmentService, updates map[string]map[string]string) []store.EnvironmentService {
