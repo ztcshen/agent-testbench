@@ -260,12 +260,8 @@ func storeCopyEnvironmentForTarget(env store.Environment, files []store.Environm
 	if len(files) > 0 {
 		env.ComposeJSON = mustCompactJSON(environmentComposeConfigWithoutMaterializedEnvironmentFiles(jsonObjectString(env.ComposeJSON), files))
 	}
-	if len(services) > 0 {
-		env.ServicesJSON = "[]"
-		env.ReposJSON = "{}"
-	}
-	if len(healthChecks) > 0 {
-		env.HealthChecksJSON = "[]"
+	if len(services) > 0 || len(healthChecks) > 0 {
+		env = store.EnvironmentWithoutStructuredRuntimeMetadata(env, services, healthChecks)
 	}
 	return env
 }

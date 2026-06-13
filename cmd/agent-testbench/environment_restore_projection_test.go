@@ -173,6 +173,56 @@ func TestEnvironmentRestorePreservesLegacyGeneratedFilesNotMaterializedInStore(t
 	}
 }
 
+func TestEnvironmentRestorePreservesLegacyRuntimeMetadataNotStructured(t *testing.T) {
+	plan, err := environmentRestoreBuildPlanFromEnvironmentWithStructuredState(store.Environment{
+		ID: "env.mixed.runtime",
+		ServicesJSON: `[
+			{"id":"app","repo":"https://example.invalid/old-app.git","checkout":"old-app"},
+			{"id":"legacy","repo":"https://example.invalid/legacy.git","checkout":"legacy"}
+		]`,
+		ReposJSON: `{
+			"app":{"url":"https://example.invalid/old-app.git","checkout":"old-app"},
+			"legacy":{"url":"https://example.invalid/legacy.git","checkout":"legacy"}
+		}`,
+		ComposeJSON: `{"startCommand":"true"}`,
+		HealthChecksJSON: `[
+			{"id":"app-health","kind":"url","url":"http://127.0.0.1:18080/old"},
+			{"id":"legacy-health","kind":"url","url":"http://127.0.0.1:18081/health"}
+		]`,
+	}, "workflow.mixed-runtime", t.TempDir(), "sqlite://store.sqlite", nil, []store.EnvironmentService{
+		{
+			ServiceID:   "app",
+			RepoURL:     "https://example.invalid/app.git",
+			Checkout:    "app",
+			SummaryJSON: `{"source":"structured"}`,
+		},
+	}, []store.EnvironmentHealthCheck{
+		{
+			CheckID:     "app-health",
+			Kind:        "url",
+			URL:         "http://127.0.0.1:18080/health",
+			SummaryJSON: `{"source":"structured"}`,
+		},
+	})
+	if err != nil {
+		t.Fatalf("build mixed runtime plan: %v", err)
+	}
+	specs := map[string]environmentRestoreRepoSpec{}
+	for _, spec := range plan.Specs {
+		specs[spec.ServiceID] = spec
+	}
+	if specs["app"].URL != "https://example.invalid/app.git" || !strings.HasSuffix(filepath.ToSlash(specs["app"].Checkout), "/app") {
+		t.Fatalf("structured app repo should replace legacy app repo: %#v", specs["app"])
+	}
+	if specs["legacy"].URL != "https://example.invalid/legacy.git" || !strings.HasSuffix(filepath.ToSlash(specs["legacy"].Checkout), "/legacy") {
+		t.Fatalf("legacy repo not represented by structured rows should survive: %#v", specs)
+	}
+	health := mustCompactJSON(plan.HealthChecks)
+	if !strings.Contains(health, "18080/health") || strings.Contains(health, "18080/old") || !strings.Contains(health, "18081/health") {
+		t.Fatalf("mixed health checks should replace matching structured ids and preserve other legacy checks: %s", health)
+	}
+}
+
 func installProjectionFakeDocker(t *testing.T, fakeBin string) {
 	t.Helper()
 	writeFile(t, filepath.Join(fakeBin, "docker"), `#!/usr/bin/env bash

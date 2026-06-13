@@ -206,15 +206,7 @@ func environmentRestoreEnvironmentForPlan(env store.Environment, services []stor
 	if len(services) == 0 && len(checks) == 0 {
 		return env, nil
 	}
-	base := env
-	if len(services) > 0 {
-		base.ServicesJSON = "[]"
-		base.ReposJSON = "{}"
-	}
-	if len(checks) > 0 {
-		base.HealthChecksJSON = "[]"
-	}
-	return store.MergeEnvironmentRuntimeMetadataIntoJSON(base, services, checks)
+	return store.MergeEnvironmentRuntimeMetadataIntoJSON(env, services, checks)
 }
 
 func environmentRestoreComposeForPlan(env store.Environment, files []store.EnvironmentFile) (map[string]any, error) {
