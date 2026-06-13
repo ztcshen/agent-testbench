@@ -14,7 +14,7 @@ import (
 
 func TestCopyStoreCurrentStateCopiesCatalogAndEnvironmentGraph(t *testing.T) {
 	ctx := context.Background()
-	source, target := openStoreCopySQLitePair(t, ctx)
+	source, target, targetPath := openStoreCopySQLitePair(t, ctx)
 	now := time.Now().UTC()
 
 	seedStoreCopyProfileState(t, ctx, source, now)
@@ -27,10 +27,10 @@ func TestCopyStoreCurrentStateCopiesCatalogAndEnvironmentGraph(t *testing.T) {
 	}
 	requireStoreCopyCurrentStateReport(t, report)
 	requireStoreCopyRequirementValidation(t, report)
-	requireStoreCopyTargetState(t, ctx, target)
+	requireStoreCopyTargetState(t, ctx, target, targetPath)
 }
 
-func openStoreCopySQLitePair(t *testing.T, ctx context.Context) (*sqlite.Store, *sqlite.Store) {
+func openStoreCopySQLitePair(t *testing.T, ctx context.Context) (*sqlite.Store, *sqlite.Store, string) {
 	t.Helper()
 
 	source, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "source.sqlite")})
@@ -38,12 +38,13 @@ func openStoreCopySQLitePair(t *testing.T, ctx context.Context) (*sqlite.Store, 
 		t.Fatalf("open source: %v", err)
 	}
 	t.Cleanup(func() { _ = source.Close() })
-	target, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "target.sqlite")})
+	targetPath := filepath.Join(t.TempDir(), "target.sqlite")
+	target, err := sqlite.Open(ctx, sqlite.Config{Path: targetPath})
 	if err != nil {
 		t.Fatalf("open target: %v", err)
 	}
 	t.Cleanup(func() { _ = target.Close() })
-	return source, target
+	return source, target, targetPath
 }
 
 func seedStoreCopyProfileState(t *testing.T, ctx context.Context, source *sqlite.Store, now time.Time) {
@@ -88,10 +89,10 @@ func seedStoreCopyEnvironmentState(t *testing.T, ctx context.Context, source *sq
 		DisplayName:            "Environment Alpha",
 		Status:                 "verified",
 		Verified:               true,
-		ServicesJSON:           `[{"id":"service.alpha"}]`,
-		ReposJSON:              `{"service.alpha":{"url":"https://example.invalid/service-alpha.git"}}`,
+		ServicesJSON:           `[]`,
+		ReposJSON:              `{}`,
 		ComposeJSON:            `{"composeFiles":["compose.yml"]}`,
-		HealthChecksJSON:       `[{"id":"alpha","url":"http://127.0.0.1:18080/health"}]`,
+		HealthChecksJSON:       `[]`,
 		VerificationWorkflowID: "workflow.alpha",
 		LastVerificationStatus: "passed",
 		EvidenceComplete:       true,
@@ -101,6 +102,33 @@ func seedStoreCopyEnvironmentState(t *testing.T, ctx context.Context, source *sq
 		UpdatedAt:              now,
 	}); err != nil {
 		t.Fatalf("seed environment: %v", err)
+	}
+	if err := source.ReplaceEnvironmentFiles(ctx, "env.alpha", []store.EnvironmentFile{{
+		Path:          "compose.yml",
+		Kind:          store.EnvironmentFileKindComposeFile,
+		ContentInline: "services:\n  service-alpha:\n    image: alpine:3.20\n",
+		Required:      true,
+		ApplyOrder:    10,
+		SummaryJSON:   `{"source":"test.structured"}`,
+	}}); err != nil {
+		t.Fatalf("seed environment files: %v", err)
+	}
+	if err := source.ReplaceEnvironmentServices(ctx, "env.alpha", []store.EnvironmentService{{
+		ServiceID:   "service.alpha",
+		RepoURL:     "https://example.invalid/service-alpha.git",
+		Checkout:    "service-alpha",
+		SummaryJSON: `{"source":"test.structured"}`,
+	}}); err != nil {
+		t.Fatalf("seed environment services: %v", err)
+	}
+	if err := source.ReplaceEnvironmentHealthChecks(ctx, "env.alpha", []store.EnvironmentHealthCheck{{
+		CheckID:     "alpha",
+		Kind:        "url",
+		URL:         "http://127.0.0.1:18080/health",
+		ApplyOrder:  1,
+		SummaryJSON: `{"source":"test.structured"}`,
+	}}); err != nil {
+		t.Fatalf("seed environment health checks: %v", err)
 	}
 }
 
@@ -174,7 +202,7 @@ func requireStoreCopyRequirementValidation(t *testing.T, report storeCopyStateRe
 	}
 }
 
-func requireStoreCopyTargetState(t *testing.T, ctx context.Context, target *sqlite.Store) {
+func requireStoreCopyTargetState(t *testing.T, ctx context.Context, target *sqlite.Store, targetPath string) {
 	t.Helper()
 
 	catalog, err := target.GetProfileCatalog(ctx)
@@ -200,6 +228,39 @@ func requireStoreCopyTargetState(t *testing.T, ctx context.Context, target *sqli
 	}
 	if env.VerificationWorkflowID != "workflow.alpha" || !env.Verified {
 		t.Fatalf("target environment = %#v", env)
+	}
+	if !strings.Contains(env.ComposeJSON, "service-alpha") || !strings.Contains(env.ServicesJSON, "https://example.invalid/service-alpha.git") || !strings.Contains(env.HealthChecksJSON, "127.0.0.1") {
+		t.Fatalf("target environment should hydrate structured Docker metadata: compose=%s services=%s health=%s", env.ComposeJSON, env.ServicesJSON, env.HealthChecksJSON)
+	}
+	if rawComposeJSON := sqliteScalar(t, targetPath, `select compose_json from environments where id = 'env.alpha';`); strings.Contains(rawComposeJSON, "generatedFiles") || strings.Contains(rawComposeJSON, "service-alpha") {
+		t.Fatalf("raw target compose_json should not carry hydrated structured file content: %s", rawComposeJSON)
+	}
+	if rawServicesJSON := sqliteScalar(t, targetPath, `select services_json from environments where id = 'env.alpha';`); rawServicesJSON != "[]" {
+		t.Fatalf("raw target services_json should not carry structured services: %s", rawServicesJSON)
+	}
+	if rawHealthJSON := sqliteScalar(t, targetPath, `select health_checks_json from environments where id = 'env.alpha';`); rawHealthJSON != "[]" {
+		t.Fatalf("raw target health_checks_json should not carry structured health checks: %s", rawHealthJSON)
+	}
+	files, err := target.ListEnvironmentFiles(ctx, "env.alpha")
+	if err != nil {
+		t.Fatalf("target environment files: %v", err)
+	}
+	if len(files) != 1 || files[0].Path != "compose.yml" || !strings.Contains(files[0].ContentInline, "service-alpha") {
+		t.Fatalf("target environment files = %#v", files)
+	}
+	services, err := target.ListEnvironmentServices(ctx, "env.alpha")
+	if err != nil {
+		t.Fatalf("target environment services: %v", err)
+	}
+	if len(services) != 1 || services[0].ServiceID != "service.alpha" || services[0].Checkout != "service-alpha" {
+		t.Fatalf("target environment services = %#v", services)
+	}
+	healthChecks, err := target.ListEnvironmentHealthChecks(ctx, "env.alpha")
+	if err != nil {
+		t.Fatalf("target environment health checks: %v", err)
+	}
+	if len(healthChecks) != 1 || healthChecks[0].Kind != "url" || healthChecks[0].URL != "http://127.0.0.1:18080/health" {
+		t.Fatalf("target environment health checks = %#v", healthChecks)
 	}
 	graph, err := target.GetEnvironmentComponentGraph(ctx, "env.alpha")
 	if err != nil {
