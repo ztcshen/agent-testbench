@@ -220,9 +220,7 @@ func runEnvironmentStartupFilePut(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(existingFiles) == 0 {
-		existingFiles = environmentFilesFromComposeConfig(compose)
-	}
+	existingFiles = environmentFilesWithLegacyCompose(existingFiles, compose)
 	current := map[string]string{}
 	for path, content := range generated {
 		current[path] = content
@@ -254,6 +252,10 @@ func runEnvironmentStartupFilePut(ctx context.Context, args []string) error {
 		fmt.Printf("- %s (%d bytes)\n", item["path"], item["bytes"])
 	}
 	return nil
+}
+
+func environmentFilesWithLegacyCompose(files []store.EnvironmentFile, compose map[string]any) []store.EnvironmentFile {
+	return mergeEnvironmentFiles(environmentFilesFromComposeConfig(compose), files)
 }
 
 func environmentStartupFilePayload(files map[string]string) []map[string]any {
