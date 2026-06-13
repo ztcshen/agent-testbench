@@ -128,7 +128,7 @@ create table if not exists environment_services (
   primary key (env_id, service_id),
   foreign key (env_id) references environments(id) on delete cascade
 );`, types.keyText, types.keyText, types.text, types.keyText, types.text, types.text, types.jsonType, types.timeType, types.timeType),
-		d.CreateIndexSQL("idx_environment_services_repo", "environment_services", []string{"env_id", "repo_url", "service_id"}),
+		environmentServicesRepoIndexSQL(d),
 		fmt.Sprintf(`
 create table if not exists environment_health_checks (
   env_id %s not null,
@@ -148,4 +148,16 @@ create table if not exists environment_health_checks (
 );`, types.keyText, types.keyText, types.keyText, types.text, types.text, types.text, types.keyText, types.keyText, types.intType, types.jsonType, types.timeType, types.timeType),
 		d.CreateIndexSQL("idx_environment_health_checks_kind_order", "environment_health_checks", []string{"env_id", "check_kind", "apply_order", "check_id"}),
 	}
+}
+
+func environmentServicesRepoIndexSQL(d Dialect) string {
+	if d.Name() == "mysql" {
+		return fmt.Sprintf("create index %s\n  on %s(%s, %s(191), %s);",
+			d.QuoteIdent("idx_environment_services_repo"),
+			d.QuoteIdent("environment_services"),
+			d.QuoteIdent("env_id"),
+			d.QuoteIdent("repo_url"),
+			d.QuoteIdent("service_id"))
+	}
+	return d.CreateIndexSQL("idx_environment_services_repo", "environment_services", []string{"env_id", "repo_url", "service_id"})
 }

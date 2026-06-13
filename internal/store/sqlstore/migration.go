@@ -52,6 +52,9 @@ func UpgradeSchema(ctx context.Context, db *sql.DB, d Dialect) (SchemaStatusResu
 	}
 	for _, statement := range incrementalSchemaSQL(d, current) {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
+			if isIdempotentSchemaReplayError(d, statement, err) {
+				continue
+			}
 			return SchemaStatusResult{}, fmt.Errorf("apply shared sql store migration: %w", err)
 		}
 	}
