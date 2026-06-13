@@ -135,7 +135,11 @@ func environmentRestoreStartupAssetCandidates(content string, composeFile string
 func parseComposeShortVolume(value string) (string, string, bool) {
 	value = strings.TrimSpace(value)
 	value = strings.Trim(value, `"'`)
-	if strings.HasPrefix(value, "[") || strings.Contains(value, "source:") || strings.Contains(value, "target:") {
+	if strings.HasPrefix(value, "[") ||
+		strings.HasPrefix(value, "{") ||
+		strings.HasPrefix(value, "type:") ||
+		strings.HasPrefix(value, "source:") ||
+		strings.HasPrefix(value, "target:") {
 		return "", "", false
 	}
 	source, target, ok := splitComposeShortVolume(value)
@@ -198,6 +202,7 @@ func environmentRestoreComposeEnvValues(compose map[string]any, workspace string
 
 func splitComposeShortVolume(value string) (string, string, bool) {
 	depth := 0
+	firstColon := -1
 	for i := 0; i < len(value); i++ {
 		switch {
 		case value[i] == '$' && i+1 < len(value) && value[i+1] == '{':
@@ -206,10 +211,17 @@ func splitComposeShortVolume(value string) (string, string, bool) {
 		case value[i] == '}' && depth > 0:
 			depth--
 		case value[i] == ':' && depth == 0:
-			return value[:i], value[i+1:], true
+			if firstColon < 0 {
+				firstColon = i
+				continue
+			}
+			return value[:firstColon], value[firstColon+1 : i], true
 		}
 	}
-	return "", "", false
+	if firstColon < 0 {
+		return "", "", false
+	}
+	return value[:firstColon], value[firstColon+1:], true
 }
 
 func environmentRestoreStartupWorkspacePath(path string, workspace string) string {

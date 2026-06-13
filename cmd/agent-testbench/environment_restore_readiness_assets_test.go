@@ -221,6 +221,20 @@ func TestEnvironmentRestoreStartupAssetsParsesShortVolumeDefaultInterpolation(t 
 	}
 }
 
+func TestParseComposeShortVolumeHandlesInterpolationAndAccessMode(t *testing.T) {
+	source, target, ok := parseComposeShortVolume("${CONFIG_DIR:-./config}:/etc/config:ro")
+	if !ok || source != "${CONFIG_DIR:-./config}" || target != "/etc/config" {
+		t.Fatalf("short volume with interpolation and mode = source %q target %q ok %t", source, target, ok)
+	}
+}
+
+func TestParseComposeShortVolumeAllowsSourceWordInPath(t *testing.T) {
+	source, target, ok := parseComposeShortVolume("/tmp/missing-source:/workspace/app")
+	if !ok || source != "/tmp/missing-source" || target != "/workspace/app" {
+		t.Fatalf("short volume with source word in path = source %q target %q ok %t", source, target, ok)
+	}
+}
+
 func TestEnvironmentRestoreMaterializesComponentAssetsAsStartupFiles(t *testing.T) {
 	for _, backend := range environmentRestoreReadinessProductStoreBackends() {
 		t.Run(backend.name, func(t *testing.T) {

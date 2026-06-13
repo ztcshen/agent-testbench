@@ -235,7 +235,11 @@ func (state *composeBindMountParseState) enterVolumes(trimmed string, indent int
 
 func composeVolumeSource(trimmed string) string {
 	if strings.HasPrefix(trimmed, "- ") {
-		return environmentRestoreShortVolumeSource(strings.TrimSpace(strings.TrimPrefix(trimmed, "- ")))
+		source, _, ok := parseComposeShortVolume(strings.TrimSpace(strings.TrimPrefix(trimmed, "- ")))
+		if ok {
+			return source
+		}
+		return ""
 	}
 	if strings.HasPrefix(trimmed, "source:") {
 		return cleanComposeScalar(strings.TrimSpace(strings.TrimPrefix(trimmed, "source:")))
@@ -283,21 +287,6 @@ func walkComposeServiceLines(content string, visit func(service string, trimmed 
 			}
 		}
 	}
-}
-
-func environmentRestoreShortVolumeSource(entry string) string {
-	entry = cleanComposeScalar(entry)
-	if entry == "" || strings.HasPrefix(entry, "type:") {
-		return ""
-	}
-	if !strings.HasPrefix(entry, "/") && !strings.HasPrefix(entry, "$") {
-		return ""
-	}
-	source, _, ok := strings.Cut(entry, ":")
-	if !ok {
-		return ""
-	}
-	return cleanComposeScalar(source)
 }
 
 func cleanComposeScalar(value string) string {
