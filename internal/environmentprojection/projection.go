@@ -1,3 +1,5 @@
+// Package environmentprojection adapts Store environment records into
+// domain-level file projection inputs.
 package environmentprojection
 
 import (
