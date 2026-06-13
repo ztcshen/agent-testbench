@@ -112,8 +112,8 @@ type apiCaseRunRecordTimes struct {
 func apiCaseRunRecordTimesFromResult(result apicase.RunResult, now time.Time) apiCaseRunRecordTimes {
 	startedAt := apiCaseResultTime(result.StartedAt, now)
 	finishedAt := apiCaseResultTime(result.FinishedAt, now)
-	if finishedAt.Before(startedAt) {
-		finishedAt = startedAt
+	if !finishedAt.After(startedAt) {
+		finishedAt = startedAt.Add(10 * time.Millisecond)
 	}
 	return apiCaseRunRecordTimes{StartedAt: startedAt, FinishedAt: finishedAt}
 }

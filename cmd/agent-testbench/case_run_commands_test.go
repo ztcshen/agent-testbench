@@ -11,7 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"agent-testbench/internal/runner/apicase"
 	"agent-testbench/internal/store/sqlite"
 )
 
@@ -263,4 +265,19 @@ func TestCaseRunCommandExecutesStoreCatalogCaseID(t *testing.T) {
 	out := runCLI(t, "case", "run", "--case-id", "case.catalog", "--base-url", server.URL, "--run-id", "catalog-run-001", "--evidence-dir", evidenceDir, "--store", "sqlite://"+storePath, "--profile", "sample", "--override", "id=item-override", "--json")
 	assertCatalogCaseRunPayload(t, out)
 	assertCatalogCaseRunStore(t, storePath, evidenceDir)
+}
+
+func TestCaseRunIndexTimesSeparatesEqualStartAndFinish(t *testing.T) {
+	started := time.Date(2026, time.June, 13, 14, 51, 50, 169247000, time.UTC)
+	times := caseRunIndexTimes(apicase.RunResult{
+		StartedAt:  started.Format(time.RFC3339Nano),
+		FinishedAt: started.Format(time.RFC3339Nano),
+	})
+
+	if !times.finishedAt.After(times.startedAt) {
+		t.Fatalf("finishedAt should be after startedAt: started=%s finished=%s", times.startedAt.Format(time.RFC3339Nano), times.finishedAt.Format(time.RFC3339Nano))
+	}
+	if got := times.finishedAt.Sub(times.startedAt); got < 10*time.Millisecond {
+		t.Fatalf("finishedAt delta = %s, want at least 10ms", got)
+	}
 }

@@ -257,13 +257,9 @@ func TestServerProfileImportSwitchesActiveProfile(t *testing.T) {
 		t.Fatalf("dashboard read model payload = %s", dashboardModel.PayloadJSON)
 	}
 	for table, want := range map[string]int{
-		"template":                1,
-		"template_config":         1,
-		"node_config":             1,
-		"workflow":                1,
-		"interface_node":          1,
-		"interface_node_case":     1,
-		"workflow_interface_node": 1,
+		"profile_catalogs":  1,
+		"config_versions":   1,
+		"config_read_model": 6,
 	} {
 		if got := sqliteCountRows(t, dbPath, table); got != want {
 			t.Fatalf("%s count = %d, want %d", table, got, want)

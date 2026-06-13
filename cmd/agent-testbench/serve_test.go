@@ -292,7 +292,7 @@ func TestServeHandlerPublishesProfilePathIntoStoreBeforeServing(t *testing.T) {
 	if payload.Source.ID != "sample" || len(payload.Items) != 1 || payload.Items[0].ID != "node.alpha" {
 		t.Fatalf("interface nodes payload = %#v", payload)
 	}
-	if got := sqliteScalar(t, storePath, "select value from kv where key = 'active_profile_id';"); got != "sample" {
+	if got := sqliteScalar(t, storePath, "select profile_id from config_versions where active = 1;"); got != "sample" {
 		t.Fatalf("active profile id = %q", got)
 	}
 	if got := sqliteScalar(t, storePath, "select count(*) from config_read_model where profile_id = 'sample';"); got == "0" {
@@ -322,7 +322,7 @@ func TestServeHandlerPublishesInstalledProfileIDBeforeServing(t *testing.T) {
 	if profiles.Code != http.StatusOK || !strings.Contains(profiles.Body.String(), profileHome) {
 		t.Fatalf("installed profiles response = %d %s", profiles.Code, profiles.Body.String())
 	}
-	if got := sqliteScalar(t, storePath, "select value from kv where key = 'active_profile_id';"); got != "sample" {
+	if got := sqliteScalar(t, storePath, "select profile_id from config_versions where active = 1;"); got != "sample" {
 		t.Fatalf("active profile id = %q", got)
 	}
 }

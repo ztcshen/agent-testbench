@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -9,7 +10,9 @@ import (
 	"regexp"
 	"strings"
 
-	"agent-testbench/internal/store/schema"
+	"agent-testbench/internal/store/sqlstore"
+
+	_ "modernc.org/sqlite"
 )
 
 type Config struct {
@@ -68,6 +71,8 @@ func backendScheme(storeURL string) string {
 }
 
 type Store struct {
+	*sqlstore.Store
+	db   *sql.DB
 	path string
 }
 
@@ -93,7 +98,7 @@ type SchemaStatusResult struct {
 }
 
 func (r SchemaStatusResult) HasPending() bool {
-	return r.CurrentVersion < r.TargetVersion
+	return r.CurrentVersion != r.TargetVersion
 }
 
 func SchemaStatus(ctx context.Context, cfg Config) (SchemaStatusResult, error) {
@@ -134,95 +139,70 @@ func openRaw(ctx context.Context, cfg Config) (*Store, error) {
 		return nil, fmt.Errorf("create sqlite store directory: %w", err)
 	}
 
-	s := &Store{path: cfg.Path}
-	if err := s.configure(ctx); err != nil {
+	db, err := openDB(ctx, cfg)
+	if err != nil {
 		return nil, err
 	}
-	return s, nil
+	return &Store{Store: sqlstore.New(db, sqlstore.SQLiteDialect{}), db: db, path: cfg.Path}, nil
 }
 
 func (s *Store) Close() error {
+	if s == nil || s.Store == nil {
+		return nil
+	}
+	return s.Store.Close()
+}
+
+func openDB(ctx context.Context, cfg Config) (*sql.DB, error) {
+	cfg = cfg.Resolve()
+	db, err := sql.Open(sqlstore.SQLiteDialect{}.DriverName(), cfg.Path)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite store: %w", err)
+	}
+	if err := configureDB(ctx, db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("ping sqlite store: %w", err)
+	}
+	return db, nil
+}
+
+func configureDB(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, `
+PRAGMA foreign_keys = ON;
+PRAGMA busy_timeout = 5000;
+PRAGMA journal_mode = WAL;`); err != nil {
+		return fmt.Errorf("configure sqlite store: %w", err)
+	}
 	return nil
 }
 
-func (s *Store) configure(ctx context.Context) error {
-	return s.exec(ctx, `
-PRAGMA foreign_keys = ON;
-PRAGMA busy_timeout = 5000;
-PRAGMA journal_mode = WAL;`)
-}
-
 func (s *Store) upgradeSchema(ctx context.Context) (SchemaStatusResult, error) {
-	if err := s.ensureSchemaVersionTable(ctx); err != nil {
-		return SchemaStatusResult{}, err
-	}
-	current, err := s.currentSchemaVersion(ctx)
+	normalized, err := normalizeLegacySchema(ctx, s.db)
 	if err != nil {
 		return SchemaStatusResult{}, err
 	}
-
-	applied := 0
-	for _, change := range schema.All() {
-		if change.Version <= current {
-			continue
-		}
-		statement := fmt.Sprintf(`
-begin;
-%s
-insert into schema_versions (version, name, applied_at)
-values (%d, %s, %s);
-commit;`, change.SQL, change.Version, sqlString(change.Name), sqlString(encodeTime(utcNow())))
-		if err := s.exec(ctx, statement); err != nil {
-			return SchemaStatusResult{}, fmt.Errorf("apply schema change %d %q: %w", change.Version, change.Name, err)
-		}
-		applied++
+	status, err := sqlstore.UpgradeSchema(ctx, s.db, sqlstore.SQLiteDialect{})
+	if normalized && err == nil {
+		status.AppliedCount++
 	}
-	return s.schemaStatus(ctx, applied)
+	return sqliteSchemaStatus(s.path, status), err
 }
 
 func (s *Store) schemaStatus(ctx context.Context, applied int) (SchemaStatusResult, error) {
-	current, err := s.currentSchemaVersion(ctx)
-	if err != nil {
-		return SchemaStatusResult{}, err
-	}
+	status, err := sqlstore.SchemaStatus(ctx, s.db, sqlstore.SQLiteDialect{})
+	status.AppliedCount = applied
+	return sqliteSchemaStatus(s.path, status), err
+}
+
+func sqliteSchemaStatus(path string, status sqlstore.SchemaStatusResult) SchemaStatusResult {
 	return SchemaStatusResult{
-		Path:           s.path,
-		CurrentVersion: current,
-		TargetVersion:  schema.CurrentVersion,
-		AppliedCount:   applied,
-	}, nil
-}
-
-func (s *Store) ensureSchemaVersionTable(ctx context.Context) error {
-	return s.exec(ctx, `
-create table if not exists schema_versions (
-  version integer primary key,
-  name text not null,
-  applied_at text not null
-);`)
-}
-
-func (s *Store) currentSchemaVersion(ctx context.Context) (int, error) {
-	var tableRows []struct {
-		Count int `json:"count"`
+		Path:           path,
+		CurrentVersion: status.CurrentVersion,
+		TargetVersion:  status.TargetVersion,
+		AppliedCount:   status.AppliedCount,
 	}
-	if err := s.query(ctx, `
-select count(*) as count from sqlite_master
-where type = 'table' and name = 'schema_versions';`, &tableRows); err != nil {
-		return 0, err
-	}
-	if len(tableRows) == 0 || tableRows[0].Count == 0 {
-		return 0, nil
-	}
-
-	var versionRows []struct {
-		Version int `json:"version"`
-	}
-	if err := s.query(ctx, `select coalesce(max(version), 0) as version from schema_versions;`, &versionRows); err != nil {
-		return 0, err
-	}
-	if len(versionRows) == 0 {
-		return 0, nil
-	}
-	return versionRows[0].Version, nil
 }

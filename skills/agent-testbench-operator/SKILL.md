@@ -28,6 +28,11 @@ Treat AgentTestBench as a CLI/service first. Do not read `cmd/`, `internal/`,
 or other source files unless the CLI/service behavior is broken, the user asks
 for implementation work, or a command's help/report is insufficient.
 
+SQLite, PostgreSQL, and MySQL are Store engines for the same logical SQL Store
+model. SQLite is the local single-file engine; do not treat it as a separate
+legacy table model when inspecting status, running workflows, or collecting
+Store evidence.
+
 ### Failure Boundary
 
 For integration-test and sandbox-operation tasks, stay on the AgentTestBench
