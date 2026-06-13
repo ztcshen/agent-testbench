@@ -400,7 +400,7 @@ func environmentRestoreStoreStartupFilesReady(report environmentRestoreReport) (
 		missing = append(missing, file)
 	}
 	if len(missing) > 0 {
-		return false, "SQL Store restore must write compose startup files from compact Store metadata; missing generatedFiles for: " + strings.Join(missing, ", ")
+		return false, "SQL Store restore must write compose startup files from Store-backed file content; missing environment_files for: " + strings.Join(missing, ", ")
 	}
 	return true, fmt.Sprintf("%d compose startup file(s) will be generated from Store metadata", len(composeFiles))
 }

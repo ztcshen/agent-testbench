@@ -109,7 +109,7 @@ func TestEnvironmentRestoreStoreStartupFilesRejectLeftoverWorkspaceCompose(t *te
 		},
 	}
 	ok, detail := environmentRestoreStoreStartupFilesReady(report)
-	if ok || !strings.Contains(detail, "missing generatedFiles") {
+	if ok || !strings.Contains(detail, "missing environment_files") {
 		t.Fatalf("leftover workspace compose should not satisfy Store startup readiness: ok=%t detail=%q", ok, detail)
 	}
 }
@@ -121,7 +121,7 @@ func TestEnvironmentRestoreSQLStoreRejectsLocalStartupFilesWithoutStoreGenerated
 			if !report.SourcePolicy.OK || report.Package.Action != "ignored-for-sql-store-restore" {
 				t.Fatalf("%s local startup pre-readiness report = %#v", backend.name, report)
 			}
-			if !restoreTypedReadinessHasItem(report.Readiness.Items, "store-startup-files", false, "missing generatedFiles") {
+			if !restoreTypedReadinessHasItem(report.Readiness.Items, "store-startup-files", false, "missing environment_files") {
 				t.Fatalf("%s readiness should reject local startup files without Store content: %#v", backend.name, report.Readiness.Items)
 			}
 			if !restoreTypedReadinessHasItem(report.Readiness.Items, "file-projection", false, "compose-file:compose/docker-compose.yml") {

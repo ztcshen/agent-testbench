@@ -47,7 +47,7 @@ func TestProjectionReportExplainsStoreBackedFilesAndGaps(t *testing.T) {
 	if len(report.Missing) != 1 || report.Missing[0].Path != "runtime.env" || report.Missing[0].Source != "summary.startupFiles" {
 		t.Fatalf("missing projection = %#v", report.Missing)
 	}
-	if len(report.RepairPlan) != 1 || report.RepairPlan[0].Name != "startup-file-content" || report.RepairPlan[0].Target != "compose.generatedFiles" || !report.RepairPlan[0].BlocksRestore {
+	if len(report.RepairPlan) != 1 || report.RepairPlan[0].Name != "startup-file-content" || report.RepairPlan[0].Target != "environment_files" || !report.RepairPlan[0].BlocksRestore {
 		t.Fatalf("startup repair plan = %#v", report.RepairPlan)
 	}
 	if !projectionContains(report, KindComposeFile, "compose.yml", "compose.generatedFiles", true) {

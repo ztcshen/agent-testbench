@@ -15,6 +15,10 @@ func FromCompose(compose map[string]any, summary map[string]any, graph store.Env
 	return environmentfiles.FromCompose(compose, summary, AssetsFromGraph(graph))
 }
 
+func FromComposeWithEnvironmentFiles(compose map[string]any, summary map[string]any, graph store.EnvironmentComponentGraph, files []store.EnvironmentFile) environmentfiles.ProjectionReport {
+	return environmentfiles.FromComposeWithSources(compose, summary, AssetsFromGraph(graph), SourcesFromEnvironmentFiles(files))
+}
+
 func AssetsFromGraph(graph store.EnvironmentComponentGraph) []environmentfiles.ProjectionAsset {
 	out := make([]environmentfiles.ProjectionAsset, 0, len(graph.Assets))
 	for _, asset := range graph.Assets {
@@ -26,6 +30,17 @@ func AssetsFromGraph(graph store.EnvironmentComponentGraph) []environmentfiles.P
 			TargetPath:        asset.TargetPath,
 			ContentInline:     asset.ContentInline,
 			RemoteRefJSON:     asset.RemoteRefJSON,
+		})
+	}
+	return out
+}
+
+func SourcesFromEnvironmentFiles(files []store.EnvironmentFile) []environmentfiles.ProjectionSource {
+	out := make([]environmentfiles.ProjectionSource, 0, len(files))
+	for _, file := range files {
+		out = append(out, environmentfiles.ProjectionSource{
+			Path:   file.Path,
+			Source: "environment_files",
 		})
 	}
 	return out

@@ -81,7 +81,7 @@ func environmentRestoreStartupAssets(compose map[string]any, specs []environment
 		}
 		if !environmentRestoreStartupAssetAvailable(clean, workspace, generatedPaths) {
 			asset.OK = false
-			asset.Error = "startup asset must exist in the restore workspace or be provided through Store generatedFiles"
+			asset.Error = "startup asset must exist in the restore workspace or be provided through Store-backed environment_files"
 		}
 		out = append(out, asset)
 	}

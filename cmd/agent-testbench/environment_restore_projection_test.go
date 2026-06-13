@@ -107,6 +107,14 @@ func TestEnvironmentRestoreUsesStructuredEnvironmentFilesForDockerPlan(t *testin
 	if !strings.Contains(mustCompactJSON(report.Compose), "generatedFiles") {
 		t.Fatalf("structured files should be projected into compose runtime view: %#v", report.Compose)
 	}
+	projectionSources := map[string]string{}
+	for _, file := range report.FileProjection.Files {
+		projectionSources[file.Kind+":"+file.Path] = file.Source
+	}
+	if projectionSources["compose-file:compose/docker-compose.yml"] != "environment_files" ||
+		projectionSources["env-file:compose/runtime.env"] != "environment_files" {
+		t.Fatalf("structured file projection sources = %#v files=%#v", projectionSources, report.FileProjection.Files)
+	}
 	generated := map[string]bool{}
 	for _, item := range report.Docker.Generated {
 		generated[filepath.ToSlash(item.Path)] = item.OK && item.Action == "plan-write"

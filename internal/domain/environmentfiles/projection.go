@@ -74,16 +74,26 @@ type ProjectionAsset struct {
 	RemoteRefJSON     string
 }
 
+type ProjectionSource struct {
+	Path   string
+	Source string
+}
+
 func FromJSON(composeJSON string, summaryJSON string, assets []ProjectionAsset) ProjectionReport {
 	return FromCompose(jsonObject(composeJSON), jsonObject(summaryJSON), assets)
 }
 
 func FromCompose(compose map[string]any, summary map[string]any, assets []ProjectionAsset) ProjectionReport {
+	return FromComposeWithSources(compose, summary, assets, nil)
+}
+
+func FromComposeWithSources(compose map[string]any, summary map[string]any, assets []ProjectionAsset, sources []ProjectionSource) ProjectionReport {
 	assetFiles := projectionFilesFromAssets(assets)
 	builder := projectionBuilder{
 		compose:       compose,
 		generated:     stringMap(compose["generatedFiles"]),
 		generatedMode: stringMap(compose["generatedFileModes"]),
+		sourceByPath:  projectionSourceByPath(sources),
 		startupFiles:  startupFileSet(summary),
 		packageSource: strings.TrimSpace(valueString(jsonObjectFromAny(compose["package"])["url"])) != "",
 		assetByPath:   projectionFilesByPath(assetFiles),
@@ -120,6 +130,7 @@ type projectionBuilder struct {
 	compose       map[string]any
 	generated     map[string]string
 	generatedMode map[string]string
+	sourceByPath  map[string]string
 	env           map[string]string
 	startupFiles  map[string]bool
 	packageSource bool
@@ -201,11 +212,11 @@ func (b *projectionBuilder) referencedFile(path string, kind string) ProjectionF
 		Required:    true,
 		StoreBacked: false,
 		OK:          false,
-		Error:       "referenced file is not backed by compose.generatedFiles, component asset, or environment package metadata",
+		Error:       "referenced file is not backed by environment_files, component asset, legacy generatedFiles, or environment package metadata",
 	}
 	if b.startupFiles[path] {
 		file.Source = "summary.startupFiles"
-		file.Error = "startup file summary exists but compose.generatedFiles content is missing"
+		file.Error = "startup file summary exists but Store-backed file content is missing"
 	}
 	return file
 }
@@ -226,10 +237,14 @@ func (b *projectionBuilder) unresolvedReferenceFile(path string, kind string, so
 }
 
 func (b *projectionBuilder) generatedFile(path string, kind string, required bool) ProjectionFile {
+	source := strings.TrimSpace(b.sourceByPath[cleanPath(path)])
+	if source == "" {
+		source = "compose.generatedFiles"
+	}
 	file := ProjectionFile{
 		Path:           path,
 		Kind:           kind,
-		Source:         "compose.generatedFiles",
+		Source:         source,
 		ProjectionRule: "store-inline-file",
 		Required:       required,
 		StoreBacked:    true,
@@ -309,9 +324,9 @@ func projectionRepairPlan(missing []ProjectionFile) []ProjectionRepairItem {
 	if len(summaryStartup) > 0 {
 		items = append(items, ProjectionRepairItem{
 			Name:          "startup-file-content",
-			Target:        "compose.generatedFiles",
+			Target:        "environment_files",
 			Missing:       dedupeSortedProjectionTargets(summaryStartup),
-			Action:        "store the referenced startup file content in compose.generatedFiles; summary.startupFiles is only a repair hint",
+			Action:        "store the referenced startup file content in environment_files; summary.startupFiles is only a repair hint",
 			CommandHint:   "environment startup-file put ENV_ID --file PATH=LOCAL_FILE",
 			StoreBacked:   true,
 			BlocksRestore: true,
@@ -333,7 +348,7 @@ func projectionRepairPlan(missing []ProjectionFile) []ProjectionRepairItem {
 			Name:          "compose-file-projection",
 			Target:        "fileProjection.missing",
 			Missing:       dedupeSortedProjectionTargets(unprojectedFiles),
-			Action:        "store every referenced Compose env/config/secret/include/extends file as a generated file, component asset, or environment package projection",
+			Action:        "store every referenced Compose env/config/secret/include/extends file in environment_files, component assets, or environment package projection",
 			CommandHint:   "environment startup-file put ENV_ID --file PATH=LOCAL_FILE",
 			StoreBacked:   true,
 			BlocksRestore: true,
@@ -366,6 +381,19 @@ func dedupeProjectionTargets(values []string) []string {
 		}
 		seen[value] = true
 		out = append(out, value)
+	}
+	return out
+}
+
+func projectionSourceByPath(sources []ProjectionSource) map[string]string {
+	out := map[string]string{}
+	for _, item := range sources {
+		path := cleanPath(item.Path)
+		source := strings.TrimSpace(item.Source)
+		if path == "" || source == "" {
+			continue
+		}
+		out[path] = source
 	}
 	return out
 }

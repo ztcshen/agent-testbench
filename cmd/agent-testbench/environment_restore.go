@@ -296,7 +296,7 @@ func environmentRestoreFileProjection(env store.Environment, plan environmentRes
 			}
 		}
 	}
-	return environmentprojection.FromCompose(compose, jsonObjectString(env.SummaryJSON), plan.ComponentGraph)
+	return environmentprojection.FromComposeWithEnvironmentFiles(compose, jsonObjectString(env.SummaryJSON), plan.ComponentGraph, plan.StoreFiles)
 }
 
 func environmentRestoreAddSourceReports(ctx context.Context, report *environmentRestoreReport, plan environmentRestoreBuildPlan, execute bool, pull bool) {
