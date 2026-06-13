@@ -189,6 +189,9 @@ func requireEnvironmentUpsertKeepsStructuredStateOutOfRawJSON(t *testing.T, ctx 
 	if strings.Contains(loadedEnv.ComposeJSON, "generatedFiles") {
 		t.Fatalf("upsert should not persist hydrated generated files in raw compose_json: %s", loadedEnv.ComposeJSON)
 	}
+	if strings.Contains(loadedEnv.ComposeJSON, "composeFiles") || strings.Contains(loadedEnv.ComposeJSON, "envFiles") || strings.Contains(loadedEnv.ComposeJSON, "compose/docker-compose.yml") {
+		t.Fatalf("upsert should not persist hydrated file references in raw compose_json: %s", loadedEnv.ComposeJSON)
+	}
 	if !jsonEqual(loadedEnv.ServicesJSON, `[]`) || !jsonEqual(loadedEnv.ReposJSON, `{}`) || !jsonEqual(loadedEnv.HealthChecksJSON, `[]`) {
 		t.Fatalf("upsert should not persist hydrated runtime metadata: services=%s repos=%s health=%s", loadedEnv.ServicesJSON, loadedEnv.ReposJSON, loadedEnv.HealthChecksJSON)
 	}

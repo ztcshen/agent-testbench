@@ -398,16 +398,44 @@ func EnvironmentWithoutStructuredFiles(env Environment, files []EnvironmentFile)
 		}
 	}
 	generated := stringMapFromJSONAny(compose["generatedFiles"])
+	structuredComposeFiles := map[string]bool{}
+	structuredEnvFiles := map[string]bool{}
 	for _, file := range files {
-		if !EnvironmentFileHasInlineContent(file) {
-			continue
-		}
 		path := cleanEnvironmentFilePath(file.Path)
 		if path == "" {
 			continue
 		}
+		switch file.Kind {
+		case EnvironmentFileKindComposeFile:
+			structuredComposeFiles[path] = true
+		case EnvironmentFileKindComposeEnvFile:
+			structuredEnvFiles[path] = true
+		}
+		if !EnvironmentFileHasInlineContent(file) {
+			continue
+		}
 		delete(generated, path)
 		delete(generated, file.Path)
+	}
+	composeFiles := stringSliceWithoutPaths(stringSliceFromJSONAny(compose["composeFiles"]), structuredComposeFiles)
+	envFiles := stringSliceWithoutPaths(stringSliceFromJSONAny(compose["envFiles"]), structuredEnvFiles)
+	if len(composeFiles) > 0 {
+		compose["composeFiles"] = composeFiles
+	} else {
+		delete(compose, "composeFiles")
+	}
+	composeFile := cleanEnvironmentFilePath(valueStringFromAny(compose["composeFile"]))
+	if composeFile != "" && structuredComposeFiles[composeFile] {
+		if len(composeFiles) > 0 {
+			compose["composeFile"] = composeFiles[0]
+		} else {
+			delete(compose, "composeFile")
+		}
+	}
+	if len(envFiles) > 0 {
+		compose["envFiles"] = envFiles
+	} else {
+		delete(compose, "envFiles")
 	}
 	if len(generated) > 0 {
 		compose["generatedFiles"] = generated
@@ -416,6 +444,18 @@ func EnvironmentWithoutStructuredFiles(env Environment, files []EnvironmentFile)
 	}
 	env.ComposeJSON = mustJSON(compose, "{}")
 	return env
+}
+
+func stringSliceWithoutPaths(values []string, paths map[string]bool) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		clean := cleanEnvironmentFilePath(value)
+		if clean == "" || paths[clean] {
+			continue
+		}
+		out = append(out, clean)
+	}
+	return out
 }
 
 func ValidateEnvironmentServices(envID string, services []EnvironmentService) error {
