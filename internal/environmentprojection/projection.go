@@ -3,12 +3,19 @@
 package environmentprojection
 
 import (
+	"encoding/json"
+	"strings"
+
 	"agent-testbench/internal/domain/environmentfiles"
 	"agent-testbench/internal/store"
 )
 
 func FromEnvironment(env store.Environment, graph store.EnvironmentComponentGraph) environmentfiles.ProjectionReport {
 	return environmentfiles.FromJSON(env.ComposeJSON, env.SummaryJSON, AssetsFromGraph(graph))
+}
+
+func FromEnvironmentWithEnvironmentFiles(env store.Environment, graph store.EnvironmentComponentGraph, files []store.EnvironmentFile) environmentfiles.ProjectionReport {
+	return environmentfiles.FromComposeWithSources(jsonObject(env.ComposeJSON), jsonObject(env.SummaryJSON), AssetsFromGraph(graph), SourcesFromEnvironmentFiles(files))
 }
 
 func FromCompose(compose map[string]any, summary map[string]any, graph store.EnvironmentComponentGraph) environmentfiles.ProjectionReport {
@@ -31,6 +38,17 @@ func AssetsFromGraph(graph store.EnvironmentComponentGraph) []environmentfiles.P
 			ContentInline:     asset.ContentInline,
 			RemoteRefJSON:     asset.RemoteRefJSON,
 		})
+	}
+	return out
+}
+
+func jsonObject(raw string) map[string]any {
+	if strings.TrimSpace(raw) == "" {
+		return map[string]any{}
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(raw), &out); err != nil || out == nil {
+		return map[string]any{}
 	}
 	return out
 }

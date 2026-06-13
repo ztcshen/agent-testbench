@@ -90,7 +90,12 @@ func handleEnvironmentItem(w http.ResponseWriter, r *http.Request, runtime store
 		if !graphOK {
 			return
 		}
-		writeJSON(w, map[string]any{"ok": true, "environment": environmentAPIPayload(env), "componentGraph": EnvironmentComponentGraphReadinessReport(env.ID, componentGraph), "fileProjection": environmentprojection.FromEnvironment(env, componentGraph)})
+		files, filesOK := loadEnvironmentFilesAPI(w, r, runtime, id)
+		if !filesOK {
+			return
+		}
+		fileProjection := environmentprojection.FromEnvironmentWithEnvironmentFiles(env, componentGraph, files)
+		writeJSON(w, map[string]any{"ok": true, "environment": environmentAPIPayload(env), "componentGraph": EnvironmentComponentGraphReadinessReport(env.ID, componentGraph), "fileProjection": fileProjection})
 	case action == "bootstrap" && r.Method == http.MethodGet:
 		env, ok := loadEnvironmentAPI(w, r, runtime, id)
 		if !ok {
@@ -100,10 +105,14 @@ func handleEnvironmentItem(w http.ResponseWriter, r *http.Request, runtime store
 		if !graphOK {
 			return
 		}
+		files, filesOK := loadEnvironmentFilesAPI(w, r, runtime, id)
+		if !filesOK {
+			return
+		}
 		plan := EnvironmentBootstrapPlan(env)
 		componentReadiness := EnvironmentComponentGraphReadinessReport(env.ID, componentGraph)
 		componentStartupPlan := EnvironmentComponentStartupPlanReport(env.ID, componentGraph)
-		fileProjection := environmentprojection.FromEnvironment(env, componentGraph)
+		fileProjection := environmentprojection.FromEnvironmentWithEnvironmentFiles(env, componentGraph, files)
 		plan["componentGraph"] = componentReadiness
 		plan["componentStartupPlan"] = componentStartupPlan
 		plan["fileProjection"] = fileProjection
@@ -120,6 +129,15 @@ func handleEnvironmentItem(w http.ResponseWriter, r *http.Request, runtime store
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+func loadEnvironmentFilesAPI(w http.ResponseWriter, r *http.Request, runtime store.Store, id string) ([]store.EnvironmentFile, bool) {
+	files, err := runtime.ListEnvironmentFiles(r.Context(), id)
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return nil, false
+	}
+	return files, true
 }
 
 func handleEnvironmentAcceptanceRuns(w http.ResponseWriter, r *http.Request, runtime store.Store, bundle profile.Bundle, runner *apiCaseBatchRunner, collector traceCollector, id string, parts []string) {

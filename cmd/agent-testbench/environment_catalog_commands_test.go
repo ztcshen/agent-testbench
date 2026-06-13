@@ -96,13 +96,25 @@ func TestEnvironmentRegisterStoresDockerFilesAsStructuredRows(t *testing.T) {
 	if err := json.Unmarshal([]byte(registerOut), &registered); err != nil {
 		t.Fatalf("decode register output: %v\n%s", err, registerOut)
 	}
-	if _, ok := registered.Environment.Compose["generatedFiles"]; !ok {
-		t.Fatalf("runtime register output should merge structured generated files: %#v", registered.Environment.Compose)
-	}
-	if len(registered.Environment.Services) != 1 || registered.Environment.Services[0]["repo"] != "https://example.com/team/app.git" || registered.Environment.Repos["app"] == nil || len(registered.Environment.HealthChecks) != 1 {
-		t.Fatalf("runtime register output should merge structured metadata: %#v", registered.Environment)
-	}
+	requireStructuredRegisterOutput(t, registered.Environment.Compose, registered.Environment.Services, registered.Environment.Repos, registered.Environment.HealthChecks)
+	requireStructuredEnvironmentRows(t, storePath)
+	requireRawEnvironmentCompatibilityColumns(t, storePath)
+	requireStructuredEnvironmentRuntimeProjection(t, storePath)
+	requireStructuredEnvironmentInspectProjection(t, storePath)
+}
 
+func requireStructuredRegisterOutput(t *testing.T, compose map[string]any, services []map[string]any, repos map[string]any, healthChecks []map[string]any) {
+	t.Helper()
+	if _, ok := compose["generatedFiles"]; !ok {
+		t.Fatalf("runtime register output should merge structured generated files: %#v", compose)
+	}
+	if len(services) != 1 || services[0]["repo"] != "https://example.com/team/app.git" || repos["app"] == nil || len(healthChecks) != 1 {
+		t.Fatalf("runtime register output should merge structured metadata: services=%#v repos=%#v health=%#v", services, repos, healthChecks)
+	}
+}
+
+func requireStructuredEnvironmentRows(t *testing.T, storePath string) {
+	t.Helper()
 	ctx := context.Background()
 	runtime, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
 	if err != nil {
@@ -130,6 +142,10 @@ func TestEnvironmentRegisterStoresDockerFilesAsStructuredRows(t *testing.T) {
 	if len(checks) != 1 || checks[0].Kind != "url" || checks[0].URL != "http://127.0.0.1:18080/health" {
 		t.Fatalf("structured environment health checks = %#v", checks)
 	}
+}
+
+func requireRawEnvironmentCompatibilityColumns(t *testing.T, storePath string) {
+	t.Helper()
 	rawComposeJSON := sqliteScalar(t, storePath, `select compose_json from environments where id = 'env.structured.files';`)
 	if strings.Contains(rawComposeJSON, "generatedFiles") {
 		t.Fatalf("raw compose_json should not carry generated file content: %s", rawComposeJSON)
@@ -143,12 +159,51 @@ func TestEnvironmentRegisterStoresDockerFilesAsStructuredRows(t *testing.T) {
 	if rawHealthJSON := sqliteScalar(t, storePath, `select health_checks_json from environments where id = 'env.structured.files';`); rawHealthJSON != "[]" {
 		t.Fatalf("raw health_checks_json should not carry structured health checks: %s", rawHealthJSON)
 	}
+}
+
+func requireStructuredEnvironmentRuntimeProjection(t *testing.T, storePath string) {
+	t.Helper()
+	ctx := context.Background()
+	runtime, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer runtime.Close()
 	loaded, err := runtime.GetEnvironment(ctx, "env.structured.files")
 	if err != nil {
 		t.Fatalf("get environment: %v", err)
 	}
 	if !strings.Contains(loaded.ComposeJSON, "generatedFiles") || !strings.Contains(loaded.ComposeJSON, "APP_MODE=test") {
 		t.Fatalf("structured files should merge into runtime compose json: %s", loaded.ComposeJSON)
+	}
+}
+
+func requireStructuredEnvironmentInspectProjection(t *testing.T, storePath string) {
+	t.Helper()
+	inspectOut := runCLI(t, "environment", "inspect",
+		"--store", "sqlite://"+storePath,
+		"env.structured.files",
+		"--json",
+	)
+	var inspected struct {
+		FileProjection struct {
+			Files []struct {
+				Path   string `json:"path"`
+				Kind   string `json:"kind"`
+				Source string `json:"source"`
+			} `json:"files"`
+		} `json:"fileProjection"`
+	}
+	if err := json.Unmarshal([]byte(inspectOut), &inspected); err != nil {
+		t.Fatalf("decode inspect output: %v\n%s", err, inspectOut)
+	}
+	projectionSources := map[string]string{}
+	for _, file := range inspected.FileProjection.Files {
+		projectionSources[file.Kind+":"+file.Path] = file.Source
+	}
+	if projectionSources["compose-file:compose/docker-compose.yml"] != "environment_files" ||
+		projectionSources["env-file:compose/runtime.env"] != "environment_files" {
+		t.Fatalf("inspect fileProjection should expose structured sources: %#v", projectionSources)
 	}
 }
 

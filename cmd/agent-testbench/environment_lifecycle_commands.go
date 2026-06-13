@@ -66,12 +66,27 @@ func loadEnvironmentLifecyclePlan(ctx context.Context, options environmentLifecy
 		cleanup()
 		return nil, store.Environment{}, store.EnvironmentComponentGraph{}, environmentRestoreBuildPlan{}, func() {}, err
 	}
+	files, err := runtime.ListEnvironmentFiles(ctx, env.ID)
+	if err != nil {
+		cleanup()
+		return nil, store.Environment{}, store.EnvironmentComponentGraph{}, environmentRestoreBuildPlan{}, func() {}, err
+	}
+	services, err := runtime.ListEnvironmentServices(ctx, env.ID)
+	if err != nil {
+		cleanup()
+		return nil, store.Environment{}, store.EnvironmentComponentGraph{}, environmentRestoreBuildPlan{}, func() {}, err
+	}
+	healthChecks, err := runtime.ListEnvironmentHealthChecks(ctx, env.ID)
+	if err != nil {
+		cleanup()
+		return nil, store.Environment{}, store.EnvironmentComponentGraph{}, environmentRestoreBuildPlan{}, func() {}, err
+	}
 	workflowID := strings.TrimSpace(env.VerificationWorkflowID)
 	if workflowID == "" {
 		cleanup()
 		return nil, store.Environment{}, store.EnvironmentComponentGraph{}, environmentRestoreBuildPlan{}, func() {}, fmt.Errorf("environment %s has no verification workflow; lifecycle commands must be anchored to a verified workflow", env.ID)
 	}
-	plan, err := environmentRestoreBuildPlanFromEnvironment(env, workflowID, options.Workspace, options.StoreURL, graph)
+	plan, err := environmentRestoreBuildPlanFromEnvironmentWithStructuredState(env, workflowID, options.Workspace, options.StoreURL, files, services, healthChecks, graph)
 	if err != nil {
 		cleanup()
 		return nil, store.Environment{}, store.EnvironmentComponentGraph{}, environmentRestoreBuildPlan{}, func() {}, err

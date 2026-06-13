@@ -407,6 +407,44 @@ func requireComposeOptionsBootstrapPlan(t *testing.T, serverURL string) {
 	}
 }
 
+func TestServerEnvironmentAPIReportsStructuredFileProjectionSources(t *testing.T) {
+	ctx := context.Background()
+	s := openEnvironmentRouteStore(t, ctx)
+	if _, err := s.UpsertEnvironment(ctx, store.Environment{
+		ID:                     "env.api.structured.files",
+		DisplayName:            "API Structured Files",
+		Status:                 "draft",
+		ServicesJSON:           `[]`,
+		ReposJSON:              `{}`,
+		ComposeJSON:            `{"composeFile":"compose/docker-compose.yml"}`,
+		HealthChecksJSON:       `[]`,
+		VerificationWorkflowID: "workflow.core-10",
+		SummaryJSON:            `{}`,
+	}); err != nil {
+		t.Fatalf("upsert environment: %v", err)
+	}
+	if err := s.ReplaceEnvironmentFiles(ctx, "env.api.structured.files", []store.EnvironmentFile{
+		{
+			Path:          "compose/docker-compose.yml",
+			Kind:          store.EnvironmentFileKindComposeFile,
+			ContentInline: "services:\n  app:\n    image: alpine:3.20\n",
+			Required:      true,
+		},
+	}); err != nil {
+		t.Fatalf("replace environment files: %v", err)
+	}
+	response := decodeJSONResponse(t, startEnvironmentRouteServer(t, s)+"/api/environments/env.api.structured.files", http.StatusOK)
+	projection := response["fileProjection"].(map[string]any)
+	files := projection["files"].([]any)
+	if len(files) == 0 {
+		t.Fatalf("fileProjection missing files: %#v", projection)
+	}
+	first := files[0].(map[string]any)
+	if first["path"] != "compose/docker-compose.yml" || first["source"] != "environment_files" {
+		t.Fatalf("structured file projection source = %#v", files)
+	}
+}
+
 func TestServerEnvironmentAPIReportsComponentGraphReadiness(t *testing.T) {
 	ctx := context.Background()
 	s := openEnvironmentRouteStore(t, ctx)

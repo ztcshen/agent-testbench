@@ -143,11 +143,11 @@ func runEnvironmentInspect(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	env, componentGraph, err := loadEnvironmentAndComponentGraphForCLI(ctx, options.StoreRef, options.StoreURL, options.ID)
+	env, componentGraph, files, err := loadEnvironmentAndComponentGraphForCLI(ctx, options.StoreRef, options.StoreURL, options.ID)
 	if err != nil {
 		return err
 	}
-	return printEnvironmentCommandResult(env, options.JSONOutput, componentGraph)
+	return printEnvironmentCommandResultWithFiles(env, options.JSONOutput, componentGraph, files)
 }
 
 func runEnvironmentBootstrap(ctx context.Context, args []string) error {
@@ -155,14 +155,14 @@ func runEnvironmentBootstrap(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	env, componentGraph, err := loadEnvironmentAndComponentGraphForCLI(ctx, options.StoreRef, options.StoreURL, options.ID)
+	env, componentGraph, files, err := loadEnvironmentAndComponentGraphForCLI(ctx, options.StoreRef, options.StoreURL, options.ID)
 	if err != nil {
 		return err
 	}
 	bootstrapPlan := controlplane.EnvironmentBootstrapPlan(env)
 	componentReadiness := environmentRestoreComponentGraphReport(env.ID, componentGraph)
 	componentStartupPlan := controlplane.EnvironmentComponentStartupPlanReport(env.ID, componentGraph)
-	fileProjection := environmentprojection.FromEnvironment(env, componentGraph)
+	fileProjection := environmentprojection.FromEnvironmentWithEnvironmentFiles(env, componentGraph, files)
 	bootstrapPlan["componentGraph"] = componentReadiness
 	bootstrapPlan["componentStartupPlan"] = componentStartupPlan
 	bootstrapPlan["fileProjection"] = fileProjection
