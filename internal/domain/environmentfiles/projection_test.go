@@ -270,6 +270,72 @@ func TestProjectionReportResolvesNestedComposeNativeInterpolationFromStoreEnv(t 
 	}
 }
 
+func TestProjectionReportResolvesComposeNativeInterpolationFromStoreEnvFiles(t *testing.T) {
+	env := store.Environment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
+		"composeFile": "compose/docker-compose.yml",
+		"envFiles": []string{
+			"compose/runtime.env",
+			"compose/override.env",
+		},
+		"generatedFiles": map[string]string{
+			"compose/docker-compose.yml": strings.Join([]string{
+				"services:",
+				"  app:",
+				"    image: alpine:3.20",
+				"configs:",
+				"  app_config:",
+				"    file: ./config/${PROFILE}.yml",
+			}, "\n") + "\n",
+			"compose/runtime.env":     "PROFILE=dev\n",
+			"compose/override.env":    "export PROFILE=prod # selected profile\n",
+			"compose/config/prod.yml": "mode: prod\n",
+		},
+	})}
+
+	report := FromEnvironment(env, store.EnvironmentComponentGraph{})
+	if !report.OK || report.Counts.Missing != 0 {
+		t.Fatalf("env-file interpolated projection report = %#v", report)
+	}
+	if !projectionContains(report, KindComposeConfigFile, "compose/config/prod.yml", "compose.generatedFiles", true) {
+		t.Fatalf("config interpolation should resolve through Store-backed compose env files: %#v", report.Files)
+	}
+}
+
+func TestProjectionReportResolvesComposeNativeInterpolationFromEnvFileAsset(t *testing.T) {
+	env := store.Environment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
+		"composeFile": "compose/docker-compose.yml",
+		"envFiles": []string{
+			"compose/runtime.env",
+		},
+		"generatedFiles": map[string]string{
+			"compose/docker-compose.yml": strings.Join([]string{
+				"services:",
+				"  app:",
+				"    image: alpine:3.20",
+				"    env_file: ./env/${TARGET}.env",
+			}, "\n") + "\n",
+			"compose/env/blue.env": "APP_MODE=test\n",
+		},
+	})}
+	graph := store.EnvironmentComponentGraph{
+		Assets: []store.ComponentConfigAsset{{
+			OwnerComponentID: "app",
+			AssetID:          "app.runtime-env",
+			AssetKind:        "env-file",
+			TargetPath:       "compose/runtime.env",
+			ContentInline:    "TARGET=blue\n",
+		}},
+	}
+
+	report := FromEnvironment(env, graph)
+	if !report.OK || report.Counts.Missing != 0 {
+		t.Fatalf("env-file asset interpolated projection report = %#v", report)
+	}
+	if !projectionContains(report, KindEnvFile, "compose/env/blue.env", "compose.generatedFiles", true) {
+		t.Fatalf("env interpolation should resolve through Store-backed env-file asset: %#v", report.Files)
+	}
+}
+
 func TestProjectionReportRejectsAbsoluteComposeNativeReferences(t *testing.T) {
 	env := store.Environment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
 		"composeFile": "compose/docker-compose.yml",

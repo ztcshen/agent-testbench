@@ -79,12 +79,12 @@ func FromCompose(compose map[string]any, summary map[string]any, graph store.Env
 		compose:       compose,
 		generated:     stringMap(compose["generatedFiles"]),
 		generatedMode: stringMap(compose["generatedFileModes"]),
-		env:           stringMap(compose["env"]),
 		startupFiles:  startupFileSet(summary),
 		packageSource: strings.TrimSpace(valueString(jsonObjectFromAny(compose["package"])["url"])) != "",
 		assetByPath:   projectionFilesByPath(assetFiles),
 		assetContent:  projectionAssetContentByPath(graph.Assets),
 	}
+	builder.env = projectionComposeEnv(compose, builder.generated, builder.assetContent)
 	builder.addReferencedFiles(KindComposeFile, composeFiles(compose))
 	builder.addReferencedFiles(KindEnvFile, stringSlice(compose["envFiles"]))
 	builder.addComposeContentReferences(composeFiles(compose))
@@ -589,6 +589,74 @@ func composeVariableNameByte(value byte) bool {
 	return value == '_' || value >= '0' && value <= '9' || value >= 'A' && value <= 'Z' || value >= 'a' && value <= 'z'
 }
 
+func projectionComposeEnv(compose map[string]any, generated map[string]string, assetContent map[string]string) map[string]string {
+	env := stringMap(compose["env"])
+	for _, envFile := range stringSlice(compose["envFiles"]) {
+		content := generated[cleanPath(envFile)]
+		if content == "" {
+			content = assetContent[cleanPath(envFile)]
+		}
+		if content == "" {
+			continue
+		}
+		for key, value := range parseComposeEnvFile(content) {
+			env[key] = value
+		}
+	}
+	return env
+}
+
+func parseComposeEnvFile(content string) map[string]string {
+	out := map[string]string{}
+	for _, line := range strings.Split(content, "\n") {
+		key, value, ok := parseComposeEnvLine(line)
+		if ok {
+			out[key] = value
+		}
+	}
+	return out
+}
+
+func parseComposeEnvLine(line string) (string, string, bool) {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return "", "", false
+	}
+	line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+	sep := strings.IndexByte(line, '=')
+	if sep <= 0 {
+		return "", "", false
+	}
+	key := strings.TrimSpace(line[:sep])
+	if !composeEnvKey(key) {
+		return "", "", false
+	}
+	return key, cleanComposeEnvValue(line[sep+1:]), true
+}
+
+func composeEnvKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	for i := 0; i < len(key); i++ {
+		if !composeVariableNameByte(key[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func cleanComposeEnvValue(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'')) {
+		return strings.Trim(value[1:len(value)-1], "\r")
+	}
+	if hash := strings.Index(value, " #"); hash >= 0 {
+		value = strings.TrimSpace(value[:hash])
+	}
+	return strings.Trim(value, "\r")
+}
+
 func (b *projectionBuilder) generatedFile(path string, kind string, required bool) ProjectionFile {
 	file := ProjectionFile{
 		Path:           path,
@@ -686,7 +754,7 @@ func projectionRepairPlan(missing []ProjectionFile) []ProjectionRepairItem {
 			Name:          "compose-env-variable",
 			Target:        "compose.env",
 			Missing:       dedupeSortedProjectionTargets(unresolvedVariables),
-			Action:        "record required Compose path variables in Store-backed compose.env so file references resolve reproducibly",
+			Action:        "record required Compose path variables in Store-backed compose.env or compose.envFiles so file references resolve reproducibly",
 			CommandHint:   "environment register --id ENV_ID --compose-env KEY=VALUE --verification-workflow WORKFLOW_ID",
 			StoreBacked:   true,
 			BlocksRestore: true,

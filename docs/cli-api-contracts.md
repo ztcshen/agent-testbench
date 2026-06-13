@@ -170,10 +170,11 @@ generated restore env files, `compose.generatedFiles`, native Compose
 component config assets relate, and marks any referenced file that lacks a
 Store-backed content source or explicit environment package projection.
 Compose-native references that use variables, including nested Compose defaults,
-are resolved only from Store-backed `compose.env`; unresolved required variables
-remain blocking projection gaps. Absolute or home-directory references remain
-blocking gaps even after interpolation because they depend on host-local files
-instead of Store-backed projection. When `fileProjection.ok=false`,
+are resolved only from Store-backed `compose.env` and Store-backed
+`compose.envFiles`; unresolved required variables remain blocking projection
+gaps. Absolute or home-directory references remain blocking gaps even after
+interpolation because they depend on host-local files instead of Store-backed
+projection. When `fileProjection.ok=false`,
 `fileProjection.repairPlan` groups the required Store-backed repair actions for
 summary-only startup files, unresolved Compose variables, and unprojected
 Compose env/config/secret/include or extends file references. Recursive
