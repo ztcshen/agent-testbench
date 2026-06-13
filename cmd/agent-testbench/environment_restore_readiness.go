@@ -387,7 +387,7 @@ func environmentRestoreStoreStartupFilesReady(report environmentRestoreReport) (
 		}
 		return false, "composeFile or startCommand is required"
 	}
-	generated := stringMapFromAny(report.Compose["generatedFiles"])
+	generated := generatedFileContentMapFromAny(report.Compose["generatedFiles"])
 	missing := []string{}
 	for _, file := range composeFiles {
 		clean := filepath.Clean(strings.TrimSpace(file))

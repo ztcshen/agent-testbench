@@ -63,6 +63,33 @@ func stringMapFromAny(value any) map[string]string {
 	return out
 }
 
+func generatedFileContentMapFromAny(value any) map[string]string {
+	out := map[string]string{}
+	switch typed := value.(type) {
+	case map[string]string:
+		for key, value := range typed {
+			if clean := cleanGeneratedFileContentPath(key); clean != "" {
+				out[clean] = value
+			}
+		}
+	case map[string]any:
+		for key, value := range typed {
+			if clean := cleanGeneratedFileContentPath(key); clean != "" {
+				out[clean] = valueString(value)
+			}
+		}
+	}
+	return out
+}
+
+func cleanGeneratedFileContentPath(path string) string {
+	clean := filepath.Clean(strings.TrimSpace(path))
+	if clean == "." || clean == "" {
+		return ""
+	}
+	return clean
+}
+
 func stringSliceFromAny(value any) []string {
 	values, ok := value.([]any)
 	if !ok {

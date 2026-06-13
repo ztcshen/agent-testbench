@@ -181,7 +181,7 @@ func environmentComposeConfigWithoutMaterializedEnvironmentFiles(compose map[str
 	for key, value := range compose {
 		out[key] = value
 	}
-	generated := stringMapFromAny(compose["generatedFiles"])
+	generated := generatedFileContentMapFromAny(compose["generatedFiles"])
 	for _, file := range files {
 		if !store.EnvironmentFileHasInlineContent(file) {
 			continue

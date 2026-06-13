@@ -257,7 +257,7 @@ func TestEnvironmentRestoreMaterializesComponentAssetsAsStartupFiles(t *testing.
 			if !restoreTypedReadinessHasItem(report.Readiness.Items, "startup-assets", true, "2 Compose startup asset") {
 				t.Fatalf("%s readiness should accept component asset startup files: %#v", backend.name, report.Readiness.Items)
 			}
-			if _, ok := stringMapFromAny(report.Compose["generatedFiles"])["compose/mysql/init/schema.sql"]; !ok {
+			if _, ok := generatedFileContentMapFromAny(report.Compose["generatedFiles"])["compose/mysql/init/schema.sql"]; !ok {
 				t.Fatalf("%s component schema asset was not projected into generatedFiles: %#v", backend.name, report.Compose["generatedFiles"])
 			}
 		})

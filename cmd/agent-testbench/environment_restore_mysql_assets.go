@@ -90,7 +90,7 @@ func environmentRestoreMySQLInitDBMountsTarget(compose map[string]any, workspace
 	}
 	for _, composeFile := range environmentRestoreComposeFiles(compose) {
 		cleanCompose := filepath.Clean(composeFile)
-		content := stringMapFromAny(compose["generatedFiles"])[cleanCompose]
+		content := generatedFileContentMapFromAny(compose["generatedFiles"])[cleanCompose]
 		if content == "" {
 			raw, err := os.ReadFile(restoreWorkspacePath(workspace, cleanCompose))
 			if err == nil {
@@ -302,7 +302,7 @@ func environmentRestoreProjectDockerNativeAssets(report *environmentRestoreDocke
 	if !execute {
 		return true
 	}
-	failures := environmentRestoreProjectMySQLInitDBAssets(graph, compose, stringMapFromAny(compose["generatedFiles"]), workspace)
+	failures := environmentRestoreProjectMySQLInitDBAssets(graph, compose, generatedFileContentMapFromAny(compose["generatedFiles"]), workspace)
 	for _, item := range failures {
 		report.AppliedAssets = append(report.AppliedAssets, item)
 		if !item.OK {

@@ -70,7 +70,7 @@ func environmentRestoreComposeWithComponentAssets(envID string, compose map[stri
 	for key, value := range compose {
 		out[key] = value
 	}
-	generated := stringMapFromAny(out["generatedFiles"])
+	generated := generatedFileContentMapFromAny(out["generatedFiles"])
 	generatedModes := stringMapFromAny(out["generatedFileModes"])
 	generatedOrder := stringSliceFromAny(out["generatedFileOrder"])
 	if len(generatedOrder) == 0 && len(generated) > 0 {

@@ -18,7 +18,7 @@ type environmentRestoreGeneratedFile struct {
 }
 
 func prepareEnvironmentRestoreGeneratedFiles(compose map[string]any, workspace string, execute bool) []environmentRestoreGeneratedFile {
-	files := stringMapFromAny(compose["generatedFiles"])
+	files := generatedFileContentMapFromAny(compose["generatedFiles"])
 	if len(files) == 0 {
 		return nil
 	}

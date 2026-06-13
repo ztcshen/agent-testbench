@@ -459,7 +459,7 @@ func environmentRestoreComposeServiceDefinitions(compose map[string]any, workspa
 	known := map[string]bool{}
 	builds := map[string]bool{}
 	inspected := false
-	generated := stringMapFromAny(compose["generatedFiles"])
+	generated := generatedFileContentMapFromAny(compose["generatedFiles"])
 	for _, file := range composeFiles {
 		content := generated[filepath.Clean(file)]
 		if content == "" {

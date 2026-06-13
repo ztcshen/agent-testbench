@@ -425,7 +425,7 @@ func environmentRestoreSkippedDockerReport(report environmentRestoreReport, work
 }
 
 func environmentRestoreMissingComposeFile(compose map[string]any, workspace string) string {
-	generated := stringMapFromAny(compose["generatedFiles"])
+	generated := generatedFileContentMapFromAny(compose["generatedFiles"])
 	for _, composeFile := range environmentRestoreComposeFiles(compose) {
 		clean := filepath.Clean(strings.TrimSpace(composeFile))
 		if clean == "" || clean == "." {

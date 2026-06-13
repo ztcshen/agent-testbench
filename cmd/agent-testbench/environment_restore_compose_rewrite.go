@@ -12,7 +12,7 @@ func environmentRestoreComposeWithRepoCheckouts(compose map[string]any, specs []
 	if len(replacements) == 0 {
 		return compose
 	}
-	generated := stringMapFromAny(compose["generatedFiles"])
+	generated := generatedFileContentMapFromAny(compose["generatedFiles"])
 	if len(generated) == 0 {
 		return compose
 	}

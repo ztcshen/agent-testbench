@@ -28,7 +28,7 @@ type environmentRestoreStartupAssetCandidate struct {
 }
 
 func environmentRestoreStartupAssets(compose map[string]any, specs []environmentRestoreRepoSpec, workspace string) []environmentRestoreStartupAsset {
-	generated := stringMapFromAny(compose["generatedFiles"])
+	generated := generatedFileContentMapFromAny(compose["generatedFiles"])
 	generatedPaths := map[string]bool{}
 	for path := range generated {
 		generatedPaths[filepath.Clean(path)] = true

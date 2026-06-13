@@ -157,7 +157,7 @@ func TestEnvironmentRestorePreservesLegacyGeneratedFilesNotMaterializedInStore(t
 	if err != nil {
 		t.Fatalf("build restore report: %v", err)
 	}
-	generated := stringMapFromAny(report.Compose["generatedFiles"])
+	generated := generatedFileContentMapFromAny(report.Compose["generatedFiles"])
 	if strings.Contains(generated["compose/docker-compose.yml"], "legacy compose should be replaced") || !strings.Contains(generated["compose/docker-compose.yml"], "image: alpine:3.20") {
 		t.Fatalf("structured compose file should replace legacy generated content: %#v", generated)
 	}

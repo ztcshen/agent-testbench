@@ -26,7 +26,7 @@ func environmentRestoreContainerNameByService(compose map[string]any, workspace 
 			out[service] = container
 		}
 	}
-	for _, content := range stringMapFromAny(compose["generatedFiles"]) {
+	for _, content := range generatedFileContentMapFromAny(compose["generatedFiles"]) {
 		addContent(content)
 	}
 	for _, file := range environmentRestoreComposeFiles(compose) {
@@ -61,7 +61,7 @@ func environmentRestoreComposeImageReferences(compose map[string]any, workspace 
 
 func environmentRestoreComposeFileContents(compose map[string]any, workspace string) []string {
 	contents := []string{}
-	generated := stringMapFromAny(compose["generatedFiles"])
+	generated := generatedFileContentMapFromAny(compose["generatedFiles"])
 	for _, file := range environmentRestoreComposeFiles(compose) {
 		content := generated[filepath.Clean(file)]
 		if content == "" {

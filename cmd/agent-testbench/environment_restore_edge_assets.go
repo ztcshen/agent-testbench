@@ -61,7 +61,7 @@ func environmentRestoreApplyEdgeAssetsWithOptions(ctx context.Context, graph sto
 		return nil
 	}
 	componentByID := environmentRestoreComponentMap(graph.Components)
-	generated := stringMapFromAny(compose["generatedFiles"])
+	generated := generatedFileContentMapFromAny(compose["generatedFiles"])
 	out := []environmentRestoreAppliedAsset{}
 	for _, ref := range environmentRestoreDependencyAssetRefs(graph) {
 		if !ref.Found {
