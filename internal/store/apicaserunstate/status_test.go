@@ -22,7 +22,7 @@ func (s fakeStore) ListAPICaseRuns(_ context.Context, runID string) ([]store.API
 
 func TestStatusByCaseKeepsLatestAndAnyPassed(t *testing.T) {
 	passed, latest, err := StatusByCase(context.Background(), fakeStore{
-		runs: []store.Run{{ID: "old"}, {ID: "new"}},
+		runs: []store.Run{{ID: "old", ProfileID: "current"}, {ID: "new", ProfileID: "current"}},
 		caseRuns: map[string][]store.APICaseRun{
 			"old": {
 				{CaseID: "case.alpha", Status: store.StatusPassed},
@@ -33,7 +33,7 @@ func TestStatusByCaseKeepsLatestAndAnyPassed(t *testing.T) {
 				{CaseID: "case.beta", Status: "PASSED"},
 			},
 		},
-	})
+	}, "current")
 
 	if err != nil {
 		t.Fatalf("status by case: %v", err)
@@ -43,5 +43,36 @@ func TestStatusByCaseKeepsLatestAndAnyPassed(t *testing.T) {
 	}
 	if latest["case.alpha"] != store.StatusFailed || latest["case.beta"] != "PASSED" {
 		t.Fatalf("latest map = %#v", latest)
+	}
+}
+
+func TestStatusByCaseFiltersRunsByProfile(t *testing.T) {
+	passed, latest, err := StatusByCase(context.Background(), fakeStore{
+		runs: []store.Run{
+			{ID: "other-old", ProfileID: "other"},
+			{ID: "current-new", ProfileID: "current"},
+			{ID: "other-new", ProfileID: "other"},
+		},
+		caseRuns: map[string][]store.APICaseRun{
+			"other-old": {
+				{CaseID: "case.shared", Status: store.StatusPassed},
+			},
+			"current-new": {
+				{CaseID: "case.shared", Status: store.StatusFailed},
+			},
+			"other-new": {
+				{CaseID: "case.current-only", Status: store.StatusPassed},
+			},
+		},
+	}, "current")
+
+	if err != nil {
+		t.Fatalf("status by case: %v", err)
+	}
+	if passed["case.shared"] || passed["case.current-only"] {
+		t.Fatalf("passed map should ignore other profile runs: %#v", passed)
+	}
+	if latest["case.shared"] != store.StatusFailed || latest["case.current-only"] != "" {
+		t.Fatalf("latest map should ignore other profile runs: %#v", latest)
 	}
 }

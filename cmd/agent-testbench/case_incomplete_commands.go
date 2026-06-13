@@ -80,7 +80,7 @@ type incompleteCaseItem struct {
 }
 
 func incompleteCaseReportForStore(ctx context.Context, bundle profile.Bundle, s store.Store) (incompleteCaseReport, error) {
-	passed, latest, err := apicaserunstate.StatusByCase(ctx, s)
+	passed, latest, err := apicaserunstate.StatusByCase(ctx, s, bundle.ID)
 	if err != nil {
 		return incompleteCaseReport{}, err
 	}

@@ -20,7 +20,7 @@ func handleCaseIncompleteBatches(w http.ResponseWriter, r *http.Request, bundle 
 		})
 		return
 	}
-	passed, latest, err := apicaserunstate.StatusByCase(r.Context(), runtime)
+	passed, latest, err := apicaserunstate.StatusByCase(r.Context(), runtime, bundle.ID)
 	if err != nil {
 		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 		return
