@@ -73,58 +73,7 @@ func environmentServiceRows(services stringListFlag, repos stringListFlag, branc
 }
 
 func environmentServiceRowsFromJSON(services []any, repos map[string]any) []store.EnvironmentService {
-	byID := map[string]store.EnvironmentService{}
-	for _, raw := range services {
-		item := jsonObjectFromAny(raw)
-		id, _ := item["id"].(string)
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
-		service := byID[id]
-		service.ServiceID = id
-		if value, _ := item["repo"].(string); value != "" {
-			service.RepoURL = value
-		}
-		if value, _ := item["branch"].(string); value != "" {
-			service.Branch = value
-		}
-		if value, _ := item["ref"].(string); value != "" {
-			service.Ref = value
-		}
-		if value, _ := item["checkout"].(string); value != "" {
-			service.Checkout = value
-		}
-		byID[id] = service
-	}
-	for id, raw := range repos {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
-		repo := jsonObjectFromAny(raw)
-		service := byID[id]
-		service.ServiceID = id
-		if value, _ := repo["url"].(string); value != "" {
-			service.RepoURL = value
-		}
-		if value, _ := repo["branch"].(string); value != "" {
-			service.Branch = value
-		}
-		if value, _ := repo["ref"].(string); value != "" {
-			service.Ref = value
-		}
-		if value, _ := repo["checkout"].(string); value != "" {
-			service.Checkout = value
-		}
-		byID[id] = service
-	}
-	out := make([]store.EnvironmentService, 0, len(byID))
-	for _, service := range byID {
-		service.SummaryJSON = `{"source":"environment.legacy-json"}`
-		out = append(out, service)
-	}
-	return store.NormalizeEnvironmentServices(out)
+	return store.EnvironmentServicesFromJSON(services, repos, "environment.legacy-json")
 }
 
 func environmentRepoMap(repos stringListFlag, branches stringListFlag, repoRefs stringListFlag, checkouts stringListFlag) map[string]any {
@@ -224,89 +173,15 @@ func environmentComposeConfig(composeFiles stringListFlag, generatedFiles string
 }
 
 func environmentComposeConfigWithoutGeneratedFiles(compose map[string]any) map[string]any {
-	out := map[string]any{}
-	for key, value := range compose {
-		if key == "generatedFiles" {
-			continue
-		}
-		out[key] = value
-	}
-	return out
+	return store.EnvironmentComposeJSONWithoutGeneratedFiles(compose)
 }
 
 func environmentFilesFromComposeConfig(compose map[string]any) []store.EnvironmentFile {
-	generated := stringMapFromAny(compose["generatedFiles"])
-	seen := map[string]bool{}
-	files := make([]store.EnvironmentFile, 0, len(generated))
-	add := func(kind string, path string, order int) {
-		path = filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
-		if path == "" || path == "." {
-			return
-		}
-		key := kind + "\x00" + path
-		if seen[key] {
-			return
-		}
-		seen[key] = true
-		files = append(files, store.EnvironmentFile{
-			Path:          path,
-			Kind:          kind,
-			ContentInline: generated[path],
-			Required:      true,
-			ApplyOrder:    order,
-			SummaryJSON:   `{"source":"environment.register"}`,
-		})
-	}
-	for index, path := range stringSliceFromAny(compose["composeFiles"]) {
-		add(store.EnvironmentFileKindComposeFile, path, 10+index)
-	}
-	for index, path := range stringSliceFromAny(compose["envFiles"]) {
-		add(store.EnvironmentFileKindComposeEnvFile, path, 100+index)
-	}
-	order := 200
-	for path := range generated {
-		if seen[store.EnvironmentFileKindComposeFile+"\x00"+path] || seen[store.EnvironmentFileKindComposeEnvFile+"\x00"+path] {
-			continue
-		}
-		add(store.EnvironmentFileKindStartupFile, path, order)
-		order++
-	}
-	return files
+	return store.EnvironmentFilesFromComposeJSON(compose, "environment.register")
 }
 
 func environmentFilesForGeneratedUpdates(compose map[string]any, generated map[string]string) []store.EnvironmentFile {
-	composeFiles := map[string]bool{}
-	for _, path := range stringSliceFromAny(compose["composeFiles"]) {
-		composeFiles[filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))] = true
-	}
-	envFiles := map[string]bool{}
-	for _, path := range stringSliceFromAny(compose["envFiles"]) {
-		envFiles[filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))] = true
-	}
-	out := make([]store.EnvironmentFile, 0, len(generated))
-	order := 200
-	for path, content := range generated {
-		cleanPath := filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
-		kind := store.EnvironmentFileKindStartupFile
-		applyOrder := order
-		if composeFiles[cleanPath] {
-			kind = store.EnvironmentFileKindComposeFile
-			applyOrder = 10
-		} else if envFiles[cleanPath] {
-			kind = store.EnvironmentFileKindComposeEnvFile
-			applyOrder = 100
-		}
-		out = append(out, store.EnvironmentFile{
-			Path:          cleanPath,
-			Kind:          kind,
-			ContentInline: content,
-			Required:      true,
-			ApplyOrder:    applyOrder,
-			SummaryJSON:   `{"source":"environment.startup-file.put"}`,
-		})
-		order++
-	}
-	return store.NormalizeEnvironmentFiles(out)
+	return store.EnvironmentFilesForGeneratedUpdates(compose, generated, "environment.startup-file.put")
 }
 
 func generatedFileContentMapFromFlags(values stringListFlag) (map[string]string, error) {
@@ -391,28 +266,7 @@ func environmentHealthCheckRows(urls stringListFlag, tcpAddresses stringListFlag
 }
 
 func environmentHealthCheckRowsFromJSON(checks []any) []store.EnvironmentHealthCheck {
-	out := make([]store.EnvironmentHealthCheck, 0, len(checks))
-	for index, raw := range checks {
-		item := jsonObjectFromAny(raw)
-		id, _ := item["id"].(string)
-		if strings.TrimSpace(id) == "" {
-			id = fmt.Sprintf("health-%02d", index+1)
-		}
-		kind, _ := item["kind"].(string)
-		check := store.EnvironmentHealthCheck{
-			CheckID:     id,
-			Kind:        kind,
-			ApplyOrder:  index + 1,
-			SummaryJSON: `{"source":"environment.legacy-json"}`,
-		}
-		check.URL, _ = item["url"].(string)
-		check.Address, _ = item["address"].(string)
-		check.Command, _ = item["command"].(string)
-		check.ComposeService, _ = item["service"].(string)
-		check.Expect, _ = item["expect"].(string)
-		out = append(out, check)
-	}
-	return store.NormalizeEnvironmentHealthChecks(out)
+	return store.EnvironmentHealthChecksFromJSON(checks, "environment.legacy-json")
 }
 
 func mergeEnvironmentFiles(existing []store.EnvironmentFile, updates []store.EnvironmentFile) []store.EnvironmentFile {

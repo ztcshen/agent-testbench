@@ -575,6 +575,12 @@ func cleanEnvironmentFilePath(path string) string {
 
 func stringMapFromJSONAny(value any) map[string]string {
 	out := map[string]string{}
+	if raw, ok := value.(map[string]string); ok {
+		for key, item := range raw {
+			out[key] = item
+		}
+		return out
+	}
 	if raw, ok := value.(map[string]any); ok {
 		for key, item := range raw {
 			if text, ok := item.(string); ok {

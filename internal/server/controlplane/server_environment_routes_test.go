@@ -445,6 +445,55 @@ func TestServerEnvironmentAPIReportsStructuredFileProjectionSources(t *testing.T
 	}
 }
 
+func TestServerEnvironmentAPIRegistersStructuredDockerMetadata(t *testing.T) {
+	ctx := context.Background()
+	s := openEnvironmentRouteStore(t, ctx)
+	serverURL := startEnvironmentRouteServer(t, s)
+
+	registered := postJSONResponse(t, serverURL+"/api/environments", `{
+  "id": "env.api.structured.register",
+  "services": [{"id":"app","repo":"https://example.com/team/app.git","branch":"main"}],
+  "repos": {"app":{"url":"https://example.com/team/app.git","checkout":"app"}},
+  "compose": {
+    "composeFile":"compose/docker-compose.yml",
+    "composeFiles":["compose/docker-compose.yml"],
+    "envFiles":["compose/runtime.env"],
+    "generatedFiles":{
+      "compose/docker-compose.yml":"services:\n  app:\n    image: alpine:3.20\n",
+      "compose/runtime.env":"APP_MODE=test\n"
+    }
+  },
+  "healthChecks": [{"id":"app-health","kind":"compose-service","service":"app"}],
+  "verificationWorkflowId": "workflow.core-10"
+}`, http.StatusOK)
+	env := registered["environment"].(map[string]any)
+	compose := env["compose"].(map[string]any)
+	if compose["generatedFiles"] == nil {
+		t.Fatalf("registered environment should return hydrated generated files: %#v", env)
+	}
+	files, err := s.ListEnvironmentFiles(ctx, "env.api.structured.register")
+	if err != nil {
+		t.Fatalf("list environment files: %v", err)
+	}
+	if len(files) != 2 || files[0].Kind != store.EnvironmentFileKindComposeFile || files[1].Kind != store.EnvironmentFileKindComposeEnvFile {
+		t.Fatalf("registered environment files = %#v", files)
+	}
+	services, err := s.ListEnvironmentServices(ctx, "env.api.structured.register")
+	if err != nil {
+		t.Fatalf("list environment services: %v", err)
+	}
+	if len(services) != 1 || services[0].RepoURL != "https://example.com/team/app.git" || services[0].Checkout != "app" {
+		t.Fatalf("registered environment services = %#v", services)
+	}
+	checks, err := s.ListEnvironmentHealthChecks(ctx, "env.api.structured.register")
+	if err != nil {
+		t.Fatalf("list environment health checks: %v", err)
+	}
+	if len(checks) != 1 || checks[0].Kind != "compose-service" || checks[0].ComposeService != "app" {
+		t.Fatalf("registered environment health checks = %#v", checks)
+	}
+}
+
 func TestServerEnvironmentAPIReportsComponentGraphReadiness(t *testing.T) {
 	ctx := context.Background()
 	s := openEnvironmentRouteStore(t, ctx)
