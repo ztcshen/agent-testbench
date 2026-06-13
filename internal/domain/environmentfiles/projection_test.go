@@ -347,6 +347,16 @@ func TestProjectionReportResolvesComposeNativeInterpolationFromEnvFileAsset(t *t
 	}
 }
 
+func TestProjectionGeneratedFileContentPreservesWhitespace(t *testing.T) {
+	content := "\nservices:\n  app:\n    image: alpine:3.20\n"
+	generated := generatedFileContentMap(map[string]any{
+		"compose/docker-compose.yml": content,
+	})
+	if generated["compose/docker-compose.yml"] != content {
+		t.Fatalf("generated file content = %q, want %q", generated["compose/docker-compose.yml"], content)
+	}
+}
+
 func TestProjectionReportRejectsAbsoluteComposeNativeReferences(t *testing.T) {
 	env := projectionTestEnvironment{ComposeJSON: projectionTestComposeJSON(t, map[string]any{
 		"composeFile": "compose/docker-compose.yml",

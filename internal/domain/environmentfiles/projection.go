@@ -91,7 +91,7 @@ func FromComposeWithSources(compose map[string]any, summary map[string]any, asse
 	assetFiles := projectionFilesFromAssets(assets)
 	builder := projectionBuilder{
 		compose:       compose,
-		generated:     stringMap(compose["generatedFiles"]),
+		generated:     generatedFileContentMap(compose["generatedFiles"]),
 		generatedMode: stringMap(compose["generatedFileModes"]),
 		sourceByPath:  projectionSourceByPath(sources),
 		startupFiles:  startupFileSet(summary),
@@ -473,6 +473,16 @@ func stringMap(value any) map[string]string {
 	for key, raw := range jsonObjectFromAny(value) {
 		if key = strings.TrimSpace(key); key != "" {
 			out[cleanPath(key)] = strings.TrimSpace(valueString(raw))
+		}
+	}
+	return out
+}
+
+func generatedFileContentMap(value any) map[string]string {
+	out := map[string]string{}
+	for key, raw := range jsonObjectFromAny(value) {
+		if key = cleanPath(key); key != "" {
+			out[key] = valueString(raw)
 		}
 	}
 	return out
