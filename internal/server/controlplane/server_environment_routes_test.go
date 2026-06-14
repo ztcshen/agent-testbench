@@ -2,6 +2,7 @@ package controlplane_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -163,6 +164,60 @@ func TestServerRegistersInterfaceIntoSandboxStoreWithoutProfileImport(t *testing
 	detail := decodeJSONResponse(t, serverURL+"/api/interface-node?id=interface.create", http.StatusOK)
 	if detail["ok"] != true || detail["requested"] != "interface.create" {
 		t.Fatalf("interface detail payload = %#v", detail)
+	}
+}
+
+func TestServerRegistersInterfaceDefaultCaseExecutionFromMethodPath(t *testing.T) {
+	ctx := context.Background()
+	s := openEnvironmentRouteStore(t, ctx)
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "current",
+		Services: []store.CatalogService{
+			{ID: "service.gateway", DisplayName: "Gateway", Kind: "http", ServicePort: 18181, Status: "active"},
+		},
+	}); err != nil {
+		t.Fatalf("seed catalog: %v", err)
+	}
+	serverURL := startEnvironmentRouteServer(t, s)
+
+	payload := postJSONResponse(t, serverURL+"/api/sandbox/interfaces", `{
+		"id":"interface.lookup",
+		"displayName":"Lookup API",
+		"serviceId":"service.gateway",
+		"method":"post",
+		"path":"/v1/lookup"
+	}`, http.StatusOK)
+	if payload["ok"] != true {
+		t.Fatalf("interface registration payload = %#v", payload)
+	}
+
+	catalog, err := s.GetProfileCatalog(ctx)
+	if err != nil {
+		t.Fatalf("get catalog: %v", err)
+	}
+	if len(catalog.TemplateConfigs) != 1 {
+		t.Fatalf("registered template configs = %#v", catalog.TemplateConfigs)
+	}
+	var config struct {
+		CaseID        string `json:"caseId"`
+		CaseExecution struct {
+			Method            string `json:"method"`
+			NodeID            string `json:"nodeId"`
+			Path              string `json:"path"`
+			ExpectedHTTPCodes []int  `json:"expectedHttpCodes"`
+		} `json:"caseExecution"`
+	}
+	if err := json.Unmarshal([]byte(catalog.TemplateConfigs[0].ConfigJSON), &config); err != nil {
+		t.Fatalf("parse template config json: %v", err)
+	}
+	if config.CaseID != "interface.lookup.default" {
+		t.Fatalf("template config caseId = %q", config.CaseID)
+	}
+	if config.CaseExecution.Method != "POST" || config.CaseExecution.NodeID != "interface.lookup" || config.CaseExecution.Path != "/v1/lookup" {
+		t.Fatalf("default caseExecution = %#v from config %s", config.CaseExecution, catalog.TemplateConfigs[0].ConfigJSON)
+	}
+	if len(config.CaseExecution.ExpectedHTTPCodes) != 1 || config.CaseExecution.ExpectedHTTPCodes[0] != http.StatusOK {
+		t.Fatalf("default expected HTTP codes = %#v", config.CaseExecution.ExpectedHTTPCodes)
 	}
 }
 
