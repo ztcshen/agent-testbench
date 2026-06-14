@@ -41,7 +41,7 @@ func handleCaseIncompleteBatches(w http.ResponseWriter, r *http.Request, bundle 
 			"reason":           reason,
 			"source":           "profile:" + bundle.ID,
 			"message":          "no passed Store run found for this API Case",
-			"suggestedCommand": apicasecommand.SuggestedRunCommand(item),
+			"suggestedCommand": apicasecommand.SuggestedRunCommandForProfile(item, bundle.ID),
 		})
 	}
 	writeJSON(w, map[string]any{

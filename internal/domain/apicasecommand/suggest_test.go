@@ -19,6 +19,28 @@ func TestSuggestedRunCommandIncludesOptionalFlags(t *testing.T) {
 	}
 }
 
+func TestSuggestedRunCommandForProfileIncludesNonDefaultProfile(t *testing.T) {
+	command := SuggestedRunCommandForProfile(profile.APICase{
+		CasePath: "cases/create item.json",
+	}, "sample")
+
+	want := `agent-testbench case run --case "cases/create item.json" --profile "sample"`
+	if command != want {
+		t.Fatalf("suggested command = %q, want %q", command, want)
+	}
+}
+
+func TestSuggestedRunCommandForProfileOmitsDefaultProfile(t *testing.T) {
+	command := SuggestedRunCommandForProfile(profile.APICase{
+		CasePath: "cases/create item.json",
+	}, "default")
+
+	want := `agent-testbench case run --case "cases/create item.json"`
+	if command != want {
+		t.Fatalf("suggested command = %q, want %q", command, want)
+	}
+}
+
 func TestSuggestedRunCommandRequiresCasePath(t *testing.T) {
 	if command := SuggestedRunCommand(profile.APICase{BaseURL: "http://127.0.0.1:8080"}); command != "" {
 		t.Fatalf("suggested command without case path = %q", command)

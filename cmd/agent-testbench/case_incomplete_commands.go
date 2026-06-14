@@ -99,7 +99,7 @@ func incompleteCaseReportForStore(ctx context.Context, bundle profile.Bundle, s 
 			Reason:           reason,
 			Source:           "profile:" + bundle.ID,
 			Message:          "no passed Store run found for this API Case",
-			SuggestedCommand: apicasecommand.SuggestedRunCommand(item),
+			SuggestedCommand: apicasecommand.SuggestedRunCommandForProfile(item, bundle.ID),
 		})
 	}
 	return incompleteCaseReport{
