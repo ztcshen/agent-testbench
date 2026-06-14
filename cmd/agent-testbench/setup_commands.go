@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"agent-testbench/internal/domain/commandline"
 )
 
 type setupCommandReport struct {
@@ -67,7 +69,7 @@ func runtimeFreshnessRepairCommand(repo string) string {
 		repo = "."
 	}
 	wrapper := filepath.Join(repo, "bin", "agent-testbench.sh")
-	return quoteCommandValue(wrapper) + " setup --repo " + quoteCommandValue(repo) + " --build-runtime --runtime-only"
+	return commandline.ShellQuote(wrapper) + " setup --repo " + commandline.ShellQuote(repo) + " --build-runtime --runtime-only"
 }
 
 func doctorRuntimeFreshnessCheck(runtime statusRuntimeReport) doctorCheckReport {

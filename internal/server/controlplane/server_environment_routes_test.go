@@ -2,6 +2,7 @@ package controlplane_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -163,6 +164,60 @@ func TestServerRegistersInterfaceIntoSandboxStoreWithoutProfileImport(t *testing
 	detail := decodeJSONResponse(t, serverURL+"/api/interface-node?id=interface.create", http.StatusOK)
 	if detail["ok"] != true || detail["requested"] != "interface.create" {
 		t.Fatalf("interface detail payload = %#v", detail)
+	}
+}
+
+func TestServerRegistersInterfaceDefaultCaseExecutionFromMethodPath(t *testing.T) {
+	ctx := context.Background()
+	s := openEnvironmentRouteStore(t, ctx)
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "current",
+		Services: []store.CatalogService{
+			{ID: "service.gateway", DisplayName: "Gateway", Kind: "http", ServicePort: 18181, Status: "active"},
+		},
+	}); err != nil {
+		t.Fatalf("seed catalog: %v", err)
+	}
+	serverURL := startEnvironmentRouteServer(t, s)
+
+	payload := postJSONResponse(t, serverURL+"/api/sandbox/interfaces", `{
+		"id":"interface.lookup",
+		"displayName":"Lookup API",
+		"serviceId":"service.gateway",
+		"method":"post",
+		"path":"/v1/lookup"
+	}`, http.StatusOK)
+	if payload["ok"] != true {
+		t.Fatalf("interface registration payload = %#v", payload)
+	}
+
+	catalog, err := s.GetProfileCatalog(ctx)
+	if err != nil {
+		t.Fatalf("get catalog: %v", err)
+	}
+	if len(catalog.TemplateConfigs) != 1 {
+		t.Fatalf("registered template configs = %#v", catalog.TemplateConfigs)
+	}
+	var config struct {
+		CaseID        string `json:"caseId"`
+		CaseExecution struct {
+			Method            string `json:"method"`
+			NodeID            string `json:"nodeId"`
+			Path              string `json:"path"`
+			ExpectedHTTPCodes []int  `json:"expectedHttpCodes"`
+		} `json:"caseExecution"`
+	}
+	if err := json.Unmarshal([]byte(catalog.TemplateConfigs[0].ConfigJSON), &config); err != nil {
+		t.Fatalf("parse template config json: %v", err)
+	}
+	if config.CaseID != "interface.lookup.default" {
+		t.Fatalf("template config caseId = %q", config.CaseID)
+	}
+	if config.CaseExecution.Method != "POST" || config.CaseExecution.NodeID != "interface.lookup" || config.CaseExecution.Path != "/v1/lookup" {
+		t.Fatalf("default caseExecution = %#v from config %s", config.CaseExecution, catalog.TemplateConfigs[0].ConfigJSON)
+	}
+	if len(config.CaseExecution.ExpectedHTTPCodes) != 1 || config.CaseExecution.ExpectedHTTPCodes[0] != http.StatusOK {
+		t.Fatalf("default expected HTTP codes = %#v", config.CaseExecution.ExpectedHTTPCodes)
 	}
 }
 
@@ -392,9 +447,105 @@ func registerComposeOptionsEnvironment(t *testing.T, serverURL string) {
 func requireComposeOptionsBootstrapPlan(t *testing.T, serverURL string) {
 	t.Helper()
 	optionsBootstrap := decodeJSONResponse(t, serverURL+"/api/environments/env.compose.options.api/bootstrap", http.StatusOK)
-	optionsDocker := optionsBootstrap["plan"].(map[string]any)["restore"].(map[string]any)["docker"].(map[string]any)
+	plan := optionsBootstrap["plan"].(map[string]any)
+	optionsDocker := plan["restore"].(map[string]any)["docker"].(map[string]any)
 	if optionsDocker["projectName"] != "demo" || optionsDocker["skipPull"] != true || optionsDocker["skipBuild"] != true || len(optionsDocker["commands"].([]any)) != 1 {
 		t.Fatalf("compose options bootstrap docker plan = %#v", optionsDocker)
+	}
+	projection := plan["fileProjection"].(map[string]any)
+	if projection["ok"] != false || len(projection["missing"].([]any)) != 2 {
+		t.Fatalf("compose options bootstrap should expose local file projection gaps: %#v", projection)
+	}
+	restoreProjection := plan["restore"].(map[string]any)["fileProjection"].(map[string]any)
+	if restoreProjection["ok"] != false {
+		t.Fatalf("restore bootstrap should carry file projection gaps: %#v", restoreProjection)
+	}
+}
+
+func TestServerEnvironmentAPIReportsStructuredFileProjectionSources(t *testing.T) {
+	ctx := context.Background()
+	s := openEnvironmentRouteStore(t, ctx)
+	if _, err := s.UpsertEnvironment(ctx, store.Environment{
+		ID:                     "env.api.structured.files",
+		DisplayName:            "API Structured Files",
+		Status:                 "draft",
+		ServicesJSON:           `[]`,
+		ReposJSON:              `{}`,
+		ComposeJSON:            `{"composeFile":"compose/docker-compose.yml"}`,
+		HealthChecksJSON:       `[]`,
+		VerificationWorkflowID: "workflow.core-10",
+		SummaryJSON:            `{}`,
+	}); err != nil {
+		t.Fatalf("upsert environment: %v", err)
+	}
+	if err := s.ReplaceEnvironmentFiles(ctx, "env.api.structured.files", []store.EnvironmentFile{
+		{
+			Path:          "compose/docker-compose.yml",
+			Kind:          store.EnvironmentFileKindComposeFile,
+			ContentInline: "services:\n  app:\n    image: alpine:3.20\n",
+			Required:      true,
+		},
+	}); err != nil {
+		t.Fatalf("replace environment files: %v", err)
+	}
+	response := decodeJSONResponse(t, startEnvironmentRouteServer(t, s)+"/api/environments/env.api.structured.files", http.StatusOK)
+	projection := response["fileProjection"].(map[string]any)
+	files := projection["files"].([]any)
+	if len(files) == 0 {
+		t.Fatalf("fileProjection missing files: %#v", projection)
+	}
+	first := files[0].(map[string]any)
+	if first["path"] != "compose/docker-compose.yml" || first["source"] != "environment_files" {
+		t.Fatalf("structured file projection source = %#v", files)
+	}
+}
+
+func TestServerEnvironmentAPIRegistersStructuredDockerMetadata(t *testing.T) {
+	ctx := context.Background()
+	s := openEnvironmentRouteStore(t, ctx)
+	serverURL := startEnvironmentRouteServer(t, s)
+
+	registered := postJSONResponse(t, serverURL+"/api/environments", `{
+  "id": "env.api.structured.register",
+  "services": [{"id":"app","repo":"https://example.com/team/app.git","branch":"main"}],
+  "repos": {"app":{"url":"https://example.com/team/app.git","checkout":"app"}},
+  "compose": {
+    "composeFile":"compose/docker-compose.yml",
+    "composeFiles":["compose/docker-compose.yml"],
+    "envFiles":["compose/runtime.env"],
+    "generatedFiles":{
+      "compose/docker-compose.yml":"services:\n  app:\n    image: alpine:3.20\n",
+      "compose/runtime.env":"APP_MODE=test\n"
+    }
+  },
+  "healthChecks": [{"id":"app-health","kind":"compose-service","service":"app"}],
+  "verificationWorkflowId": "workflow.core-10"
+}`, http.StatusOK)
+	env := registered["environment"].(map[string]any)
+	compose := env["compose"].(map[string]any)
+	if compose["generatedFiles"] == nil {
+		t.Fatalf("registered environment should return hydrated generated files: %#v", env)
+	}
+	files, err := s.ListEnvironmentFiles(ctx, "env.api.structured.register")
+	if err != nil {
+		t.Fatalf("list environment files: %v", err)
+	}
+	if len(files) != 2 || files[0].Kind != store.EnvironmentFileKindComposeFile || files[1].Kind != store.EnvironmentFileKindComposeEnvFile {
+		t.Fatalf("registered environment files = %#v", files)
+	}
+	services, err := s.ListEnvironmentServices(ctx, "env.api.structured.register")
+	if err != nil {
+		t.Fatalf("list environment services: %v", err)
+	}
+	if len(services) != 1 || services[0].RepoURL != "https://example.com/team/app.git" || services[0].Checkout != "app" {
+		t.Fatalf("registered environment services = %#v", services)
+	}
+	checks, err := s.ListEnvironmentHealthChecks(ctx, "env.api.structured.register")
+	if err != nil {
+		t.Fatalf("list environment health checks: %v", err)
+	}
+	if len(checks) != 1 || checks[0].Kind != "compose-service" || checks[0].ComposeService != "app" {
+		t.Fatalf("registered environment health checks = %#v", checks)
 	}
 }
 

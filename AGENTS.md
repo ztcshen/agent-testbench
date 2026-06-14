@@ -30,8 +30,9 @@ agent-native, API-operated, Store-first, and local-first.
   with minimal one-time registration when a runtime or service must be known.
 - SQL Store is the active source of truth for current sandbox configuration,
   runtime facts, workflow catalog, execution state, Evidence indexes, and
-  verification results. PostgreSQL and MySQL are supported product Store
-  engines; SQLite is compatibility-only.
+  verification results. SQLite, PostgreSQL, and MySQL are supported product
+  Store engines that share the same logical SQL Store schema; differences must
+  stay in dialect and driver handling.
 - The sandbox's own SQL Store/control-plane database must be provisioned
   outside any Docker environment restored for a tested target, and must remain
   separate from target application databases. Environment restore may start
@@ -49,10 +50,10 @@ agent-native, API-operated, Store-first, and local-first.
   flows for normal testing.
 - Prefer Store-first APIs and UI paths for new behavior. Add file-package
   adapters only as compatibility or import/export bridges.
-- PostgreSQL and MySQL are both product Store engines for personal and team
-  workflows; teams should pick the engine that matches their operational
-  environment.
-- SQLite is retained only for legacy migration, compatibility, and tests.
+- SQLite, PostgreSQL, and MySQL are product Store engines. SQLite is the local
+  single-file engine; PostgreSQL and MySQL are stronger fits for shared,
+  remote, and multi-user workflows. Legacy SQLite data migration is a
+  compatibility path, not a separate daily Store schema.
 - Runtime Evidence, logs, and local databases must not be committed.
 - Prefer small, verifiable slices with tests and a commit per slice.
 - Keep first-party source files below the project line budget. When a

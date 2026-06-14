@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"agent-testbench/internal/domain/commandline"
 	"agent-testbench/internal/store"
 	"agent-testbench/internal/store/sqlite"
 )
@@ -266,7 +267,7 @@ func requireWorkflowGateFailureReport(t *testing.T, fixture workflowGateFailureF
 		t.Fatalf("workflow gate failed steps = %#v", report.FailedSteps)
 	}
 	next := strings.Join(report.NextActions, "\n")
-	if !strings.Contains(next, "agent-testbench workflow step --run "+quoteCommandValue(fixture.runID)+" --step 'step.submit'") || !strings.Contains(next, "agent-testbench case diagnose --case-run 'run.workflow-gate.submit'") {
+	if !strings.Contains(next, "agent-testbench workflow step --run "+commandline.ShellQuote(fixture.runID)+" --step 'step.submit'") || !strings.Contains(next, "agent-testbench case diagnose --case-run 'run.workflow-gate.submit'") {
 		t.Fatalf("workflow gate next actions = %#v", report.NextActions)
 	}
 }

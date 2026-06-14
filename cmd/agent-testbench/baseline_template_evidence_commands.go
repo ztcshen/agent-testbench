@@ -10,192 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"agent-testbench/internal/domain/profile"
 	"agent-testbench/internal/runner/evidence"
-	"agent-testbench/internal/runner/requesttemplate"
 	"agent-testbench/internal/server/controlplane"
 	"agent-testbench/internal/store"
 )
-
-func runBaseline(ctx context.Context, args []string) error {
-	if len(args) == 0 {
-		return errors.New("missing baseline command")
-	}
-	switch args[0] {
-	case "get":
-		return runBaselineGet(ctx, args[1:])
-	case "set":
-		return runBaselineSet(ctx, args[1:])
-	default:
-		return fmt.Errorf("unknown baseline command: %s", args[0])
-	}
-}
-
-func runBaselineGet(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("baseline get", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	profileID := flags.String("profile", "", "Profile id")
-	subjectID := flags.String("subject", "", "Subject id")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
-	if err != nil {
-		return err
-	}
-	s, err := openStore(ctx, resolvedStoreURL)
-	if err != nil {
-		return err
-	}
-	defer closeCLIStore(s)
-
-	gate, err := s.GetBaselineGate(ctx, *profileID, *subjectID)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return fmt.Errorf("baseline gate not found: %s %s", *profileID, *subjectID)
-		}
-		return err
-	}
-	printBaselineGate(gate)
-	return nil
-}
-
-func runBaselineSet(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("baseline set", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	profileID := flags.String("profile", "", "Profile id")
-	subjectID := flags.String("subject", "", "Subject id")
-	status := flags.String("status", "", "Gate status")
-	required := flags.Bool("required", false, "Mark the gate as required")
-	summaryJSON := flags.String("summary-json", "{}", "Gate summary JSON")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
-	if err != nil {
-		return err
-	}
-	s, err := openStore(ctx, resolvedStoreURL)
-	if err != nil {
-		return err
-	}
-	defer closeCLIStore(s)
-
-	now := time.Now().UTC()
-	gate, err := s.UpsertBaselineGate(ctx, store.BaselineGate{
-		ProfileID:   *profileID,
-		SubjectID:   *subjectID,
-		Status:      *status,
-		Required:    *required,
-		SummaryJSON: *summaryJSON,
-		CheckedAt:   now,
-		UpdatedAt:   now,
-	})
-	if err != nil {
-		return err
-	}
-	printBaselineGate(gate)
-	return nil
-}
-
-func printBaselineGate(gate store.BaselineGate) {
-	fmt.Printf("Baseline Gate: %s %s\n", gate.ProfileID, gate.SubjectID)
-	fmt.Printf("Status: %s\n", gate.Status)
-	fmt.Printf("Required: %t\n", gate.Required)
-}
-
-func runTemplate(args []string) error {
-	if len(args) == 0 {
-		return errors.New("missing template command")
-	}
-	switch args[0] {
-	case "render":
-		return runTemplateRender(args[1:])
-	default:
-		return fmt.Errorf("unknown template command: %s", args[0])
-	}
-}
-
-func runTemplateRender(args []string) error {
-	flags := flag.NewFlagSet("template render", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
-	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
-	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	templateID := flags.String("template", "", "Request template id")
-	fixtureID := flags.String("fixture", "", "Fixture id")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	bundle, cleanup, err := loadTemplateRenderBundle(context.Background(), *profilePath, *profileHome, *storeRef, *storeURL, *templateID)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
-	rendered, err := requesttemplate.Render(bundle, requesttemplate.Options{
-		TemplateID: *templateID,
-		FixtureID:  *fixtureID,
-	})
-	if err != nil {
-		return err
-	}
-	encoder := json.NewEncoder(os.Stdout)
-	encoder.SetIndent("", "  ")
-	return encoder.Encode(rendered)
-}
-
-func loadTemplateRenderBundle(ctx context.Context, profileRef string, profileHomeRef string, storeRef string, legacyStoreURL string, templateID string) (profile.Bundle, func(), error) {
-	resolvedStoreURL, err := resolveRequiredDailyStoreReference(storeRef, legacyStoreURL)
-	if err != nil {
-		return profile.Bundle{}, func() {}, err
-	}
-	if strings.TrimSpace(profileRef) != "" {
-		resolvedProfile, err := resolveProfileReference(profileRef, profileHomeRef)
-		if err != nil {
-			return profile.Bundle{}, func() {}, err
-		}
-		bundle, err := profile.Load(resolvedProfile)
-		return bundle, func() {}, err
-	}
-	runtime, err := openStore(ctx, resolvedStoreURL)
-	if err != nil {
-		return profile.Bundle{}, func() {}, err
-	}
-	bundle, err := serveBundle(ctx, runtime)
-	if err != nil {
-		closeCLIStore(runtime)
-		return profile.Bundle{}, func() {}, err
-	}
-	if templateNeedsPublishedProfile(bundle, templateID) {
-		if catalogIndex, err := runtime.GetProfileCatalogIndex(ctx); err == nil && strings.TrimSpace(catalogIndex.ProfileID) != "" {
-			if profileIndex, err := runtime.GetProfileIndex(ctx, catalogIndex.ProfileID); err == nil && strings.TrimSpace(profileIndex.BundlePath) != "" {
-				if pathBundle, err := profile.Load(profileIndex.BundlePath); err == nil {
-					bundle = pathBundle
-				}
-			}
-		}
-	}
-	return bundle, cleanupCLIStore(runtime), nil
-}
-
-func templateNeedsPublishedProfile(bundle profile.Bundle, templateID string) bool {
-	templateID = strings.TrimSpace(templateID)
-	if templateID == "" {
-		return false
-	}
-	for _, item := range bundle.RequestTemplates {
-		if item.ID != templateID {
-			continue
-		}
-		return strings.TrimSpace(item.Method) == "" || strings.TrimSpace(item.Path) == ""
-	}
-	return false
-}
 
 func runEvidence(ctx context.Context, args []string) error {
 	if len(args) == 0 {
@@ -408,6 +226,22 @@ func evidenceTasks(ctx context.Context, s store.Store, filter evidenceTaskFilter
 		}
 	}
 	return report, nil
+}
+
+func postProcessTaskMatches(row store.PostProcessTask, filter evidenceTaskFilter) bool {
+	if filter.StepID != "" && row.StepID != filter.StepID {
+		return false
+	}
+	if filter.CaseID != "" && row.CaseID != filter.CaseID {
+		return false
+	}
+	if filter.Kind != "" && row.Kind != filter.Kind {
+		return false
+	}
+	if filter.Status != "" && row.Status != filter.Status {
+		return false
+	}
+	return true
 }
 
 func printEvidenceTasks(report evidenceTaskReport) {

@@ -11,7 +11,6 @@ import (
 
 	"agent-testbench/internal/store/mysql"
 	"agent-testbench/internal/store/postgres"
-	"agent-testbench/internal/store/schema"
 	"agent-testbench/internal/store/sqlstore"
 )
 
@@ -19,17 +18,17 @@ func TestStoreUpgradeAndStatusCommands(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
 
 	initial := runCLI(t, "store", "status", "--store", "sqlite://"+dbPath)
-	if !strings.Contains(initial, "Version: 0") || !strings.Contains(initial, fmt.Sprintf("Pending: %d", schema.CurrentVersion)) {
+	if !strings.Contains(initial, "Version: 0") || !strings.Contains(initial, fmt.Sprintf("Pending: %d", sqlstore.CurrentSchemaVersion)) {
 		t.Fatalf("initial status output = %q", initial)
 	}
 
 	upgraded := runCLI(t, "store", "upgrade", "--store", "sqlite://"+dbPath)
-	if !strings.Contains(upgraded, fmt.Sprintf("Upgraded store schema to version %d", schema.CurrentVersion)) {
+	if !strings.Contains(upgraded, fmt.Sprintf("Upgraded store schema to version %d", sqlstore.CurrentSchemaVersion)) {
 		t.Fatalf("upgrade output = %q", upgraded)
 	}
 
 	current := runCLI(t, "store", "status", "--store", "sqlite://"+dbPath)
-	if !strings.Contains(current, fmt.Sprintf("Version: %d", schema.CurrentVersion)) || !strings.Contains(current, "Pending: 0") {
+	if !strings.Contains(current, fmt.Sprintf("Version: %d", sqlstore.CurrentSchemaVersion)) || !strings.Contains(current, "Pending: 0") {
 		t.Fatalf("current status output = %q", current)
 	}
 }

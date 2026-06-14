@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -75,6 +74,12 @@ type EnvironmentStore interface {
 	UpsertEnvironment(context.Context, Environment) (Environment, error)
 	GetEnvironment(context.Context, string) (Environment, error)
 	ListEnvironments(context.Context) ([]Environment, error)
+	ReplaceEnvironmentFiles(context.Context, string, []EnvironmentFile) error
+	ListEnvironmentFiles(context.Context, string) ([]EnvironmentFile, error)
+	ReplaceEnvironmentServices(context.Context, string, []EnvironmentService) error
+	ListEnvironmentServices(context.Context, string) ([]EnvironmentService, error)
+	ReplaceEnvironmentHealthChecks(context.Context, string, []EnvironmentHealthCheck) error
+	ListEnvironmentHealthChecks(context.Context, string) ([]EnvironmentHealthCheck, error)
 	ReplaceEnvironmentComponentGraph(context.Context, string, EnvironmentComponentGraph) error
 	GetEnvironmentComponentGraph(context.Context, string) (EnvironmentComponentGraph, error)
 }
@@ -85,6 +90,12 @@ type AgentTaskStore interface {
 	ListAgentTasks(context.Context) ([]AgentTask, error)
 	RecordAgentTaskRun(context.Context, AgentTaskRun) (AgentTaskRun, error)
 	ListAgentTaskRuns(context.Context, string, int) ([]AgentTaskRun, error)
+}
+
+type EnvironmentStructuredStateLister interface {
+	ListEnvironmentFiles(context.Context, string) ([]EnvironmentFile, error)
+	ListEnvironmentServices(context.Context, string) ([]EnvironmentService, error)
+	ListEnvironmentHealthChecks(context.Context, string) ([]EnvironmentHealthCheck, error)
 }
 
 type Run = execution.Run
@@ -230,204 +241,6 @@ type BaselineGate struct {
 type ProfileIndex = catalog.ProfileIndex
 type ConfigVersion = catalog.ConfigVersion
 type ReadModel = catalog.ReadModel
-
-type Environment struct {
-	ID                     string
-	DisplayName            string
-	Description            string
-	Status                 string
-	Verified               bool
-	ServicesJSON           string
-	ReposJSON              string
-	ComposeJSON            string
-	HealthChecksJSON       string
-	VerificationWorkflowID string
-	LastVerificationRunID  string
-	LastVerificationStatus string
-	EvidenceComplete       bool
-	TopologyComplete       bool
-	LastVerifiedAt         time.Time
-	SummaryJSON            string
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
-}
-
-const (
-	StoreMetadataMaxBytes         = 1024 * 1024
-	EnvironmentDefinitionMaxBytes = StoreMetadataMaxBytes
-	EnvironmentSummaryMaxBytes    = StoreMetadataMaxBytes
-	ComponentAssetInlineMaxBytes  = StoreMetadataMaxBytes
-	ComponentGraphMaxBytes        = StoreMetadataMaxBytes
-)
-
-func PrepareEnvironmentForUpsert(e Environment, now time.Time) (Environment, error) {
-	if err := ValidateEnvironmentDefinitionSize(e); err != nil {
-		return Environment{}, err
-	}
-	if e.CreatedAt.IsZero() {
-		e.CreatedAt = now
-	}
-	if e.UpdatedAt.IsZero() {
-		e.UpdatedAt = now
-	}
-	return e, nil
-}
-
-func ValidateEnvironmentDefinitionSize(e Environment) error {
-	definitionFields := []namedSize{
-		{name: "id", size: len(e.ID)},
-		{name: "display_name", size: len(e.DisplayName)},
-		{name: "description", size: len(e.Description)},
-		{name: "status", size: len(e.Status)},
-		{name: "services_json", size: len(e.ServicesJSON)},
-		{name: "repos_json", size: len(e.ReposJSON)},
-		{name: "compose_json", size: len(e.ComposeJSON)},
-		{name: "health_checks_json", size: len(e.HealthChecksJSON)},
-		{name: "verification_workflow_id", size: len(e.VerificationWorkflowID)},
-	}
-	total := 0
-	for _, field := range definitionFields {
-		total += field.size
-	}
-	if total > EnvironmentDefinitionMaxBytes {
-		largest := largestNamedSize(definitionFields)
-		return fmt.Errorf("environment definition metadata is %d bytes; 1 MB safety boundary is %d bytes; write blocked. Reason: largest contributor %s contributes %d bytes in environment %q; below this boundary the Store accepts deterministic restore metadata, startup configuration, DDL, seed SQL, certificates, keys, and launch scripts without per-kind limits", total, EnvironmentDefinitionMaxBytes, largest.name, largest.size, e.ID)
-	}
-	if len(e.SummaryJSON) > EnvironmentSummaryMaxBytes {
-		return fmt.Errorf("environment summary metadata is %d bytes; 1 MB safety boundary is %d bytes; write blocked. Reason: largest contributor summary_json contributes %d bytes in environment %q; below this boundary the Store accepts acceptance summaries, restore status, and indexes without per-kind limits", len(e.SummaryJSON), EnvironmentSummaryMaxBytes, len(e.SummaryJSON), e.ID)
-	}
-	return nil
-}
-
-type namedSize struct {
-	name string
-	size int
-}
-
-func largestNamedSize(items []namedSize) namedSize {
-	largest := namedSize{}
-	for _, item := range items {
-		if item.size > largest.size {
-			largest = item
-		}
-	}
-	return largest
-}
-
-type EnvironmentComponentGraph struct {
-	Components   []EnvironmentComponent `json:"components"`
-	Dependencies []ComponentDependency  `json:"dependencies"`
-	Assets       []ComponentConfigAsset `json:"assets"`
-}
-
-type EnvironmentComponent struct {
-	EnvID           string    `json:"envId,omitempty"`
-	ComponentID     string    `json:"componentId"`
-	DisplayName     string    `json:"displayName,omitempty"`
-	Kind            string    `json:"kind,omitempty"`
-	Role            string    `json:"role,omitempty"`
-	ComposeService  string    `json:"composeService,omitempty"`
-	Image           string    `json:"image,omitempty"`
-	Required        bool      `json:"required"`
-	RuntimeJSON     string    `json:"runtimeJson,omitempty"`
-	HealthCheckJSON string    `json:"healthCheckJson,omitempty"`
-	SummaryJSON     string    `json:"summaryJson,omitempty"`
-	CreatedAt       time.Time `json:"createdAt,omitempty"`
-	UpdatedAt       time.Time `json:"updatedAt,omitempty"`
-}
-
-type ComponentDependency struct {
-	EnvID               string    `json:"envId,omitempty"`
-	ConsumerComponentID string    `json:"consumerComponentId"`
-	ProviderComponentID string    `json:"providerComponentId"`
-	Phase               string    `json:"phase,omitempty"`
-	Capability          string    `json:"capability,omitempty"`
-	Required            bool      `json:"required"`
-	ProfileJSON         string    `json:"profileJson,omitempty"`
-	CreatedAt           time.Time `json:"createdAt,omitempty"`
-	UpdatedAt           time.Time `json:"updatedAt,omitempty"`
-}
-
-type ComponentConfigAsset struct {
-	EnvID             string    `json:"envId,omitempty"`
-	OwnerComponentID  string    `json:"ownerComponentId"`
-	AssetID           string    `json:"assetId"`
-	AssetKind         string    `json:"assetKind,omitempty"`
-	TargetComponentID string    `json:"targetComponentId,omitempty"`
-	TargetPath        string    `json:"targetPath,omitempty"`
-	ContentInline     string    `json:"contentInline,omitempty"`
-	RemoteRefJSON     string    `json:"remoteRefJson,omitempty"`
-	SHA256            string    `json:"sha256,omitempty"`
-	SizeBytes         int64     `json:"sizeBytes,omitempty"`
-	ApplyOrder        int       `json:"applyOrder,omitempty"`
-	Sensitive         bool      `json:"sensitive"`
-	SummaryJSON       string    `json:"summaryJson,omitempty"`
-	CreatedAt         time.Time `json:"createdAt,omitempty"`
-	UpdatedAt         time.Time `json:"updatedAt,omitempty"`
-}
-
-func ValidateEnvironmentComponentGraph(envID string, g EnvironmentComponentGraph) error {
-	envID = strings.TrimSpace(envID)
-	if envID == "" {
-		return fmt.Errorf("environment id is required for component graph")
-	}
-	total := 0
-	componentIDs := map[string]bool{}
-	contributors := make([]namedSize, 0, len(g.Components)+len(g.Dependencies)+len(g.Assets))
-	for _, component := range g.Components {
-		id := strings.TrimSpace(component.ComponentID)
-		if id == "" {
-			return fmt.Errorf("component id is required")
-		}
-		componentIDs[id] = true
-		size := len(id) + len(component.DisplayName) + len(component.Kind) + len(component.Role) +
-			len(component.ComposeService) + len(component.Image) + len(component.RuntimeJSON) +
-			len(component.HealthCheckJSON) + len(component.SummaryJSON)
-		total += size
-		contributors = append(contributors, namedSize{name: fmt.Sprintf("component %q", id), size: size})
-	}
-	for _, dep := range g.Dependencies {
-		consumer := strings.TrimSpace(dep.ConsumerComponentID)
-		provider := strings.TrimSpace(dep.ProviderComponentID)
-		if consumer == "" || provider == "" {
-			return fmt.Errorf("component dependency requires consumer and provider component ids")
-		}
-		if !componentIDs[consumer] {
-			return fmt.Errorf("component dependency consumer %q is not registered in environment %s", consumer, envID)
-		}
-		if !componentIDs[provider] {
-			return fmt.Errorf("component dependency provider %q is not registered in environment %s", provider, envID)
-		}
-		size := len(consumer) + len(provider) + len(dep.Phase) + len(dep.Capability) + len(dep.ProfileJSON)
-		total += size
-		contributors = append(contributors, namedSize{name: fmt.Sprintf("dependency %q->%q", consumer, provider), size: size})
-	}
-	for _, asset := range g.Assets {
-		owner := strings.TrimSpace(asset.OwnerComponentID)
-		if owner == "" || strings.TrimSpace(asset.AssetID) == "" {
-			return fmt.Errorf("component config asset requires owner component id and asset id")
-		}
-		if !componentIDs[owner] {
-			return fmt.Errorf("component config asset owner %q is not registered in environment %s", owner, envID)
-		}
-		target := strings.TrimSpace(asset.TargetComponentID)
-		if target != "" && !componentIDs[target] {
-			return fmt.Errorf("component config asset target %q is not registered in environment %s", target, envID)
-		}
-		if len(asset.ContentInline) > ComponentAssetInlineMaxBytes {
-			return fmt.Errorf("component config asset %q inline content is %d bytes; 1 MB safety boundary is %d bytes; write blocked. Reason: owner=%q kind=%q target=%q path=%q is the single inline content contributor over the boundary; below this boundary the Store accepts deterministic text configuration, DDL, seed SQL, certificates, keys, and launch scripts without per-kind limits", asset.AssetID, len(asset.ContentInline), ComponentAssetInlineMaxBytes, owner, asset.AssetKind, target, asset.TargetPath)
-		}
-		size := len(owner) + len(asset.AssetID) + len(asset.AssetKind) + len(target) + len(asset.TargetPath) +
-			len(asset.ContentInline) + len(asset.RemoteRefJSON) + len(asset.SHA256) + len(asset.SummaryJSON)
-		total += size
-		contributors = append(contributors, namedSize{name: fmt.Sprintf("asset %q owner=%q kind=%q target=%q path=%q", asset.AssetID, owner, asset.AssetKind, target, asset.TargetPath), size: size})
-	}
-	if total > ComponentGraphMaxBytes {
-		largest := largestNamedSize(contributors)
-		return fmt.Errorf("environment component graph metadata is %d bytes; 1 MB safety boundary is %d bytes; write blocked. Reason: largest contributor %s contributes %d bytes in environment %q, and the combined component graph is over the boundary; below this boundary the Store accepts deterministic restore metadata and startup text without per-kind limits", total, ComponentGraphMaxBytes, largest.name, largest.size, envID)
-	}
-	return nil
-}
 
 type ProfileCatalog = catalog.ProfileCatalog
 type ProfileCatalogIndex = catalog.ProfileCatalogIndex

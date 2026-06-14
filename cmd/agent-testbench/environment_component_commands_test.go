@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"agent-testbench/internal/store"
+	"agent-testbench/internal/store/sqlite"
 )
 
 type environmentComponentReadinessFixture struct {
@@ -284,5 +286,184 @@ func TestEnvironmentStartupFilePutMergesGeneratedFilesWithoutReRegistering(t *te
 	}
 	if len(payload.Environment.Summary.StartupFiles.Files) != 1 || payload.Environment.Summary.StartupFiles.Files[0].Path != "compose/docker-compose.yml" {
 		t.Fatalf("startup-file summary = %#v", payload.Environment.Summary.StartupFiles)
+	}
+}
+
+func TestEnvironmentStartupFilePutPreservesMixedLegacyGeneratedFiles(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	storeRef := "sqlite://" + storePath
+	sourceCompose := filepath.Join(t.TempDir(), "source-compose.yml")
+	sourceEnv := filepath.Join(t.TempDir(), "runtime.env")
+	writeFile(t, sourceCompose, "services:\n  app:\n    image: alpine:3.20\n")
+	writeFile(t, sourceEnv, "APP_MODE=test\n")
+	runCLI(t, "environment", "register",
+		"--store", storeRef,
+		"--id", "env.mixed.startup-files",
+		"--compose-file", "compose/docker-compose.yml",
+		"--compose-generated-file", "compose/docker-compose.yml="+sourceCompose,
+		"--verification-workflow", "workflow.core-10",
+	)
+	seedLegacyEnvironmentGeneratedFiles(t, storePath)
+
+	out := runCLI(t, "environment", "startup-file", "put",
+		"--store", storeRef,
+		"--file", "compose/runtime.env="+sourceEnv,
+		"--json",
+		"env.mixed.startup-files",
+	)
+	var payload struct {
+		Environment struct {
+			Compose struct {
+				GeneratedFiles map[string]string `json:"generatedFiles"`
+			} `json:"compose"`
+		} `json:"environment"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("decode startup-file put json: %v\n%s", err, out)
+	}
+	requireMixedStartupFileProjection(t, payload.Environment.Compose.GeneratedFiles)
+	requireMixedStartupFileRows(t, storePath)
+	if rawComposeJSON := sqliteScalar(t, storePath, `select compose_json from environments where id = 'env.mixed.startup-files';`); strings.Contains(rawComposeJSON, "generatedFiles") {
+		t.Fatalf("raw compose_json should migrate mixed generated files into structured rows: %s", rawComposeJSON)
+	}
+}
+
+func seedLegacyEnvironmentGeneratedFiles(t *testing.T, storePath string) {
+	t.Helper()
+	ctx := context.Background()
+	runtime, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer runtime.Close()
+	env, err := runtime.GetEnvironment(ctx, "env.mixed.startup-files")
+	if err != nil {
+		t.Fatalf("get environment: %v", err)
+	}
+	env.ComposeJSON = `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"generatedFiles":{"compose/legacy.env":"LEGACY_MODE=true\n"}}`
+	if _, err := runtime.UpsertEnvironment(ctx, env); err != nil {
+		t.Fatalf("seed legacy generated files: %v", err)
+	}
+}
+
+func requireMixedStartupFileProjection(t *testing.T, generated map[string]string) {
+	t.Helper()
+	if !strings.Contains(generated["compose/docker-compose.yml"], "app:") {
+		t.Fatalf("structured compose file should be preserved: %#v", generated)
+	}
+	if generated["compose/legacy.env"] != "LEGACY_MODE=true\n" {
+		t.Fatalf("legacy generated file should be preserved: %#v", generated)
+	}
+	if generated["compose/runtime.env"] != "APP_MODE=test\n" {
+		t.Fatalf("new generated file should be stored: %#v", generated)
+	}
+}
+
+func requireMixedStartupFileRows(t *testing.T, storePath string) {
+	t.Helper()
+	ctx := context.Background()
+	runtime, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer runtime.Close()
+	files, err := runtime.ListEnvironmentFiles(ctx, "env.mixed.startup-files")
+	if err != nil {
+		t.Fatalf("list environment files: %v", err)
+	}
+	if len(files) != 3 {
+		t.Fatalf("startup-file put should migrate mixed generated files into structured rows: %#v", files)
+	}
+}
+
+func TestEnvironmentInspectAndBootstrapExposeFileProjectionGaps(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	sourceCompose := filepath.Join(t.TempDir(), "source-compose.yml")
+	sourceEnv := filepath.Join(t.TempDir(), "runtime.env")
+	writeFile(t, sourceCompose, "services:\n  web:\n    image: alpine:3.20\n")
+	writeFile(t, sourceEnv, "APP_MODE=test\n")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.file.projection",
+		"--compose-file", "compose/docker-compose.yml",
+		"--compose-generated-file", "compose/docker-compose.yml="+sourceCompose,
+		"--compose-env-file", "compose/runtime.env",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	inspectOut := runCLI(t, "environment", "inspect", "--store", "sqlite://"+storePath, "--json", "env.file.projection")
+	var inspectPayload struct {
+		FileProjection struct {
+			OK      bool `json:"ok"`
+			Missing []struct {
+				Path   string `json:"path"`
+				Kind   string `json:"kind"`
+				Source string `json:"source"`
+			} `json:"missing"`
+			RepairPlan []struct {
+				Name          string   `json:"name"`
+				Target        string   `json:"target"`
+				Missing       []string `json:"missing"`
+				BlocksRestore bool     `json:"blocksRestore"`
+			} `json:"repairPlan"`
+		} `json:"fileProjection"`
+	}
+	if err := json.Unmarshal([]byte(inspectOut), &inspectPayload); err != nil {
+		t.Fatalf("decode inspect file projection: %v\n%s", err, inspectOut)
+	}
+	if inspectPayload.FileProjection.OK || len(inspectPayload.FileProjection.Missing) != 1 || inspectPayload.FileProjection.Missing[0].Path != "compose/runtime.env" || inspectPayload.FileProjection.Missing[0].Kind != "env-file" {
+		t.Fatalf("inspect file projection should expose missing env file: %#v", inspectPayload.FileProjection)
+	}
+	if len(inspectPayload.FileProjection.RepairPlan) != 1 ||
+		inspectPayload.FileProjection.RepairPlan[0].Name != "compose-file-projection" ||
+		inspectPayload.FileProjection.RepairPlan[0].Target != "fileProjection.missing" ||
+		!stringSliceContains(inspectPayload.FileProjection.RepairPlan[0].Missing, "env-file:compose/runtime.env") ||
+		!inspectPayload.FileProjection.RepairPlan[0].BlocksRestore {
+		t.Fatalf("inspect file projection repair plan = %#v", inspectPayload.FileProjection.RepairPlan)
+	}
+
+	bootstrapOut := runCLI(t, "environment", "bootstrap", "--store", "sqlite://"+storePath, "--json", "env.file.projection")
+	var bootstrapPayload struct {
+		Plan struct {
+			FileProjection struct {
+				OK         bool  `json:"ok"`
+				RepairPlan []any `json:"repairPlan"`
+			} `json:"fileProjection"`
+			Restore struct {
+				FileProjection struct {
+					OK         bool  `json:"ok"`
+					RepairPlan []any `json:"repairPlan"`
+				} `json:"fileProjection"`
+			} `json:"restore"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal([]byte(bootstrapOut), &bootstrapPayload); err != nil {
+		t.Fatalf("decode bootstrap file projection: %v\n%s", err, bootstrapOut)
+	}
+	if bootstrapPayload.Plan.FileProjection.OK || bootstrapPayload.Plan.Restore.FileProjection.OK {
+		t.Fatalf("bootstrap should carry missing file projection: %#v", bootstrapPayload.Plan)
+	}
+	if len(bootstrapPayload.Plan.FileProjection.RepairPlan) != 1 || len(bootstrapPayload.Plan.Restore.FileProjection.RepairPlan) != 1 {
+		t.Fatalf("bootstrap should carry file projection repair plans: %#v", bootstrapPayload.Plan)
+	}
+
+	runCLI(t, "environment", "startup-file", "put",
+		"--store", "sqlite://"+storePath,
+		"--file", "compose/runtime.env="+sourceEnv,
+		"--json",
+		"env.file.projection",
+	)
+	repairedOut := runCLI(t, "environment", "inspect", "--store", "sqlite://"+storePath, "--json", "env.file.projection")
+	var repairedPayload struct {
+		FileProjection struct {
+			OK      bool  `json:"ok"`
+			Missing []any `json:"missing"`
+		} `json:"fileProjection"`
+	}
+	if err := json.Unmarshal([]byte(repairedOut), &repairedPayload); err != nil {
+		t.Fatalf("decode repaired inspect file projection: %v\n%s", err, repairedOut)
+	}
+	if !repairedPayload.FileProjection.OK || len(repairedPayload.FileProjection.Missing) != 0 {
+		t.Fatalf("repaired file projection should pass: %#v", repairedPayload.FileProjection)
 	}
 }

@@ -397,9 +397,13 @@ func catalogInterfacePartsFromRegistration(request sandboxInterfaceRegistrationR
 	if caseStatus == "" {
 		caseStatus = "active"
 	}
+	caseExecution := request.CaseExecution
+	if len(caseExecution) == 0 {
+		caseExecution = defaultSandboxCaseExecution(id, method, path)
+	}
 	configJSON := compactJSON(map[string]any{
 		"caseId":        caseID,
-		"caseExecution": request.CaseExecution,
+		"caseExecution": caseExecution,
 	})
 	node := store.CatalogInterfaceNode{
 		ID:          id,
@@ -458,6 +462,15 @@ func catalogInterfacePartsFromRegistration(request sandboxInterfaceRegistrationR
 		ConfigJSON: configJSON,
 	}
 	return node, template, apiCase, config, nil
+}
+
+func defaultSandboxCaseExecution(nodeID string, method string, path string) map[string]any {
+	return map[string]any{
+		"method":            strings.ToUpper(strings.TrimSpace(method)),
+		"nodeId":            strings.TrimSpace(nodeID),
+		"path":              strings.TrimSpace(path),
+		"expectedHttpCodes": []int{http.StatusOK},
+	}
 }
 
 func upsertCatalogService(services []store.CatalogService, service store.CatalogService) []store.CatalogService {

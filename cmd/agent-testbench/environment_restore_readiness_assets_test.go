@@ -59,11 +59,14 @@ func TestEnvironmentRestoreSQLStoreUsesStoreGeneratedStartupFiles(t *testing.T) 
 			if !report.SourcePolicy.OK || !report.SourcePolicy.RemoteOnly || report.Package.Action != "ignored-for-sql-store-restore" || report.Docker.Action != "plan-docker-compose" {
 				t.Fatalf("%s generated startup report = %#v", backend.name, report)
 			}
-			if len(report.Docker.Generated) != 1 || report.Docker.Generated[0].Action != "plan-write" || !report.Docker.Generated[0].OK {
+			if len(report.Docker.Generated) != 1 || report.Docker.Generated[0].Action != environmentRestoreGeneratedFileActionPlanWrite || !report.Docker.Generated[0].OK {
 				t.Fatalf("%s generated startup file report = %#v", backend.name, report.Docker.Generated)
 			}
 			if !restoreTypedReadinessHasItem(report.Readiness.Items, "store-startup-files", true, "generated from Store metadata") {
 				t.Fatalf("%s readiness should accept Store generated startup files: %#v", backend.name, report.Readiness.Items)
+			}
+			if !restoreTypedReadinessHasItem(report.Readiness.Items, "file-projection", true, "Store-backed projection") {
+				t.Fatalf("%s readiness should expose Store-backed file projection: %#v", backend.name, report.Readiness.Items)
 			}
 		})
 	}
@@ -84,7 +87,7 @@ func TestEnvironmentRestoreStoreStartupFilesAcceptWrittenWorkspaceCompose(t *tes
 		Docker: environmentRestoreDockerReport{
 			Generated: []environmentRestoreGeneratedFile{{
 				Path:   composePath,
-				Action: "write",
+				Action: environmentRestoreGeneratedFileActionWrite,
 				OK:     true,
 			}},
 		},
@@ -106,7 +109,7 @@ func TestEnvironmentRestoreStoreStartupFilesRejectLeftoverWorkspaceCompose(t *te
 		},
 	}
 	ok, detail := environmentRestoreStoreStartupFilesReady(report)
-	if ok || !strings.Contains(detail, "missing generatedFiles") {
+	if ok || !strings.Contains(detail, "missing environment_files") {
 		t.Fatalf("leftover workspace compose should not satisfy Store startup readiness: ok=%t detail=%q", ok, detail)
 	}
 }
@@ -118,8 +121,11 @@ func TestEnvironmentRestoreSQLStoreRejectsLocalStartupFilesWithoutStoreGenerated
 			if !report.SourcePolicy.OK || report.Package.Action != "ignored-for-sql-store-restore" {
 				t.Fatalf("%s local startup pre-readiness report = %#v", backend.name, report)
 			}
-			if !restoreTypedReadinessHasItem(report.Readiness.Items, "store-startup-files", false, "missing generatedFiles") {
+			if !restoreTypedReadinessHasItem(report.Readiness.Items, "store-startup-files", false, "missing environment_files") {
 				t.Fatalf("%s readiness should reject local startup files without Store content: %#v", backend.name, report.Readiness.Items)
+			}
+			if !restoreTypedReadinessHasItem(report.Readiness.Items, "file-projection", false, "compose-file:compose/docker-compose.yml") {
+				t.Fatalf("%s readiness should expose missing file projection: %#v", backend.name, report.Readiness.Items)
 			}
 		})
 	}
@@ -139,6 +145,26 @@ func TestEnvironmentRestoreSQLStoreRejectsMissingComposeStartupAssets(t *testing
 	}
 }
 
+func TestEnvironmentRestoreSQLStoreRejectsComposeNativeFileProjectionGaps(t *testing.T) {
+	for _, backend := range environmentRestoreReadinessProductStoreBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			report := buildEnvironmentRestoreSQLReadinessReport(t, backend, environmentRestoreSQLStoreStartupEnv("native.file.gaps", "app", environmentRestoreReadinessGeneratedComposeWithNativeFileGap(), environmentRestoreReadinessSQLHealth))
+			if report.Readiness.OK {
+				t.Fatalf("%s readiness should block missing native Compose file projections: %#v", backend.name, report.Readiness)
+			}
+			if !restoreTypedReadinessHasItem(report.Readiness.Items, "file-projection", false, "env-file:compose/app.env") {
+				t.Fatalf("%s readiness should expose missing env_file projection: %#v", backend.name, report.Readiness.Items)
+			}
+			if report.FileProjection.OK || len(report.FileProjection.Missing) != 1 {
+				t.Fatalf("%s fileProjection should show one native file gap: %#v", backend.name, report.FileProjection)
+			}
+			if report.OK || report.Docker.Action != environmentRestoreDockerActionSkippedFileProjection || report.Docker.OK {
+				t.Fatalf("%s Docker startup should be blocked before Compose execution: %#v", backend.name, report.Docker)
+			}
+		})
+	}
+}
+
 func TestEnvironmentRestoreSQLStoreAcceptsStoreGeneratedComposeStartupAssets(t *testing.T) {
 	for _, backend := range environmentRestoreReadinessProductStoreBackends() {
 		t.Run(backend.name, func(t *testing.T) {
@@ -150,6 +176,65 @@ func TestEnvironmentRestoreSQLStoreAcceptsStoreGeneratedComposeStartupAssets(t *
 				t.Fatalf("%s readiness should accept Store generated startup assets: %#v", backend.name, report.Readiness.Items)
 			}
 		})
+	}
+}
+
+func TestEnvironmentRestoreStartupAssetsTreatRepoCheckoutAsCovered(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	compose := map[string]any{
+		"composeFiles": []any{"compose/docker-compose.yml"},
+		"generatedFiles": map[string]any{
+			"compose/docker-compose.yml": strings.Join([]string{
+				"services:",
+				"  app:",
+				"    image: alpine:3.20",
+				"    volumes:",
+				"      - ${DOCKER_APP_REPO}:/workspace/app",
+			}, "\n") + "\n",
+		},
+		"env": map[string]any{
+			"DOCKER_APP_REPO": "$AGENT_TESTBENCH_WORKSPACE/app",
+		},
+	}
+	assets := environmentRestoreStartupAssets(compose, []environmentRestoreRepoSpec{{
+		Checkout: filepath.Join(workspace, "app"),
+	}}, workspace)
+	if len(assets) != 0 {
+		t.Fatalf("repo checkout bind mount should be covered, got %#v", assets)
+	}
+}
+
+func TestEnvironmentRestoreStartupAssetsParsesShortVolumeDefaultInterpolation(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	compose := map[string]any{
+		"composeFiles": []any{"compose/docker-compose.yml"},
+		"generatedFiles": map[string]any{
+			"compose/docker-compose.yml": strings.Join([]string{
+				"services:",
+				"  app:",
+				"    image: alpine:3.20",
+				"    volumes:",
+				"      - ${CONFIG_DIR:-./config}:/etc/config",
+			}, "\n") + "\n",
+		},
+	}
+	assets := environmentRestoreStartupAssets(compose, nil, workspace)
+	if len(assets) != 1 || assets[0].Path != filepath.Clean("compose/config") || assets[0].OK {
+		t.Fatalf("default interpolation bind mount should be a missing startup asset, got %#v", assets)
+	}
+}
+
+func TestParseComposeShortVolumeHandlesInterpolationAndAccessMode(t *testing.T) {
+	source, target, ok := parseComposeShortVolume("${CONFIG_DIR:-./config}:/etc/config:ro")
+	if !ok || source != "${CONFIG_DIR:-./config}" || target != "/etc/config" {
+		t.Fatalf("short volume with interpolation and mode = source %q target %q ok %t", source, target, ok)
+	}
+}
+
+func TestParseComposeShortVolumeAllowsSourceWordInPath(t *testing.T) {
+	source, target, ok := parseComposeShortVolume("/tmp/missing-source:/workspace/app")
+	if !ok || source != "/tmp/missing-source" || target != "/workspace/app" {
+		t.Fatalf("short volume with source word in path = source %q target %q ok %t", source, target, ok)
 	}
 }
 
@@ -172,7 +257,7 @@ func TestEnvironmentRestoreMaterializesComponentAssetsAsStartupFiles(t *testing.
 			if !restoreTypedReadinessHasItem(report.Readiness.Items, "startup-assets", true, "2 Compose startup asset") {
 				t.Fatalf("%s readiness should accept component asset startup files: %#v", backend.name, report.Readiness.Items)
 			}
-			if _, ok := stringMapFromAny(report.Compose["generatedFiles"])["compose/mysql/init/schema.sql"]; !ok {
+			if _, ok := generatedFileContentMapFromAny(report.Compose["generatedFiles"])["compose/mysql/init/schema.sql"]; !ok {
 				t.Fatalf("%s component schema asset was not projected into generatedFiles: %#v", backend.name, report.Compose["generatedFiles"])
 			}
 		})
@@ -252,4 +337,8 @@ func environmentRestoreReadinessGeneratedComposeMissingAssets() string {
 
 func environmentRestoreReadinessGeneratedComposeWithAssets() string {
 	return `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  mysql:\n    image: mysql:8\n    volumes:\n      - ./mysql/init:/docker-entrypoint-initdb.d\n  app:\n    image: alpine:3.20\n    command: [\"/bin/sh\", \"/sandbox/compose/scripts/run-app.sh\"]\n    volumes:\n      - ${DOCKER_APP_REPO:-/tmp/app}:/workspace/app\n      - ${SANDBOX_ROOT:-/tmp/sandbox}:/sandbox\n","compose/mysql/init/schema.sql":"create database app;\n","compose/scripts/run-app.sh":"#!/bin/sh\nexit 0\n"},"env":{"DOCKER_APP_REPO":"$AGENT_TESTBENCH_WORKSPACE/app","SANDBOX_ROOT":"$AGENT_TESTBENCH_WORKSPACE"}}`
+}
+
+func environmentRestoreReadinessGeneratedComposeWithNativeFileGap() string {
+	return `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  app:\n    image: alpine:3.20\n    env_file:\n      - ./app.env\n    configs:\n      - source: app_config\n        target: /etc/app/config.yml\nconfigs:\n  app_config:\n    file: ./config/app.yml\n","compose/config/app.yml":"mode: test\n"}}`
 }

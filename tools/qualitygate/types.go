@@ -20,27 +20,39 @@ type Options struct {
 }
 
 type Config struct {
-	FileEffectiveLinesWarn   int
-	FileEffectiveLinesBlock  int
-	FunctionLinesWarn        int
-	FunctionLinesBlock       int
-	FunctionStatementsWarn   int
-	FunctionDuplicateLines   int
-	StructFieldsWarn         int
-	StructFieldsBlock        int
-	InterfaceMethodsWarn     int
-	InterfaceMethodsBlock    int
-	PackageLinesWarn         int
-	PackageLinesBlock        int
-	PackageFileCountWarn     int
-	PackageFileCountBlock    int
-	FileFunctionCountWarn    int
-	FileFunctionCountBlock   int
-	DuplicatePercentWarn     float64
-	DuplicatePercentBlock    float64
-	DuplicateBlockLines      int
-	PackageDuplicateBlocks   int
-	NoSemanticPackageNames   map[string]bool
+	sizeThresholdConfig
+	duplicateThresholdConfig
+	pathFilterConfig
+}
+
+type sizeThresholdConfig struct {
+	FileEffectiveLinesWarn  int
+	FileEffectiveLinesBlock int
+	FunctionLinesWarn       int
+	FunctionLinesBlock      int
+	FunctionStatementsWarn  int
+	FunctionDuplicateLines  int
+	StructFieldsWarn        int
+	StructFieldsBlock       int
+	InterfaceMethodsWarn    int
+	InterfaceMethodsBlock   int
+	PackageLinesWarn        int
+	PackageLinesBlock       int
+	PackageFileCountWarn    int
+	PackageFileCountBlock   int
+	FileFunctionCountWarn   int
+	FileFunctionCountBlock  int
+}
+
+type duplicateThresholdConfig struct {
+	DuplicatePercentWarn   float64
+	DuplicatePercentBlock  float64
+	DuplicateBlockLines    int
+	PackageDuplicateBlocks int
+	NoSemanticPackageNames map[string]bool
+}
+
+type pathFilterConfig struct {
 	ExcludedDirs             map[string]bool
 	ExcludedFileSuffixes     []string
 	GeneratedFileSuffixes    []string
@@ -155,74 +167,80 @@ type Issue struct {
 
 func DefaultConfig() Config {
 	return Config{
-		FileEffectiveLinesWarn:  400,
-		FileEffectiveLinesBlock: 600,
-		FunctionLinesWarn:       60,
-		FunctionLinesBlock:      100,
-		FunctionStatementsWarn:  60,
-		FunctionDuplicateLines:  80,
-		StructFieldsWarn:        25,
-		StructFieldsBlock:       40,
-		InterfaceMethodsWarn:    10,
-		InterfaceMethodsBlock:   20,
-		PackageLinesWarn:        1500,
-		PackageLinesBlock:       2500,
-		PackageFileCountWarn:    20,
-		PackageFileCountBlock:   35,
-		FileFunctionCountWarn:   40,
-		FileFunctionCountBlock:  45,
-		DuplicatePercentWarn:    5,
-		DuplicatePercentBlock:   8,
-		DuplicateBlockLines:     40,
-		PackageDuplicateBlocks:  3,
-		NoSemanticPackageNames: map[string]bool{
-			"common":  true,
-			"commons": true,
-			"helper":  true,
-			"helpers": true,
-			"util":    true,
-			"utils":   true,
+		sizeThresholdConfig: sizeThresholdConfig{
+			FileEffectiveLinesWarn:  400,
+			FileEffectiveLinesBlock: 600,
+			FunctionLinesWarn:       60,
+			FunctionLinesBlock:      100,
+			FunctionStatementsWarn:  60,
+			FunctionDuplicateLines:  80,
+			StructFieldsWarn:        25,
+			StructFieldsBlock:       40,
+			InterfaceMethodsWarn:    10,
+			InterfaceMethodsBlock:   20,
+			PackageLinesWarn:        1500,
+			PackageLinesBlock:       2500,
+			PackageFileCountWarn:    20,
+			PackageFileCountBlock:   35,
+			FileFunctionCountWarn:   40,
+			FileFunctionCountBlock:  45,
 		},
-		ExcludedDirs: map[string]bool{
-			".git":         true,
-			".idea":        true,
-			".runtime":     true,
-			".scratch":     true,
-			"node_modules": true,
-			"vendor":       true,
-			"third_party":  true,
-			"generated":    true,
-			"gen":          true,
-			"mocks":        true,
-			"mock":         true,
-			"testdata":     true,
-			"docs":         true,
-			"migrations":   true,
-			"scripts":      true,
+		duplicateThresholdConfig: duplicateThresholdConfig{
+			DuplicatePercentWarn:   5,
+			DuplicatePercentBlock:  8,
+			DuplicateBlockLines:    40,
+			PackageDuplicateBlocks: 3,
+			NoSemanticPackageNames: map[string]bool{
+				"common":  true,
+				"commons": true,
+				"helper":  true,
+				"helpers": true,
+				"util":    true,
+				"utils":   true,
+			},
 		},
-		ExcludedFileSuffixes: []string{
-			".pb.go",
-			".pb.gw.go",
-			".gen.go",
-			"_mock.go",
-			"wire_gen.go",
-		},
-		GeneratedFileSuffixes: []string{
-			".pb.go",
-			".pb.gw.go",
-			".gen.go",
-			"_mock.go",
-			"wire_gen.go",
-		},
-		GeneratedPathFragments: []string{
-			"/swagger/",
-			"/openapi/",
-			"/control-plane/static/assets/react/",
-		},
-		GeneratedCommentPrefixes: []string{
-			"// Code generated",
-			"// This file was generated",
-			"// DO NOT EDIT",
+		pathFilterConfig: pathFilterConfig{
+			ExcludedDirs: map[string]bool{
+				".git":         true,
+				".idea":        true,
+				".runtime":     true,
+				".scratch":     true,
+				"node_modules": true,
+				"vendor":       true,
+				"third_party":  true,
+				"generated":    true,
+				"gen":          true,
+				"mocks":        true,
+				"mock":         true,
+				"testdata":     true,
+				"docs":         true,
+				"migrations":   true,
+				"scripts":      true,
+			},
+			ExcludedFileSuffixes: []string{
+				".pb.go",
+				".pb.gw.go",
+				".gen.go",
+				"_mock.go",
+				"wire_gen.go",
+			},
+			GeneratedFileSuffixes: []string{
+				".pb.go",
+				".pb.gw.go",
+				".gen.go",
+				"_mock.go",
+				"wire_gen.go",
+			},
+			GeneratedPathFragments: []string{
+				"/swagger/",
+				"/openapi/",
+				"/control-plane/static/assets/react/",
+			},
+			GeneratedCommentPrefixes: []string{
+				"// Code generated",
+				"// This file was generated",
+				"// DO NOT EDIT",
+			},
 		},
 	}
 }

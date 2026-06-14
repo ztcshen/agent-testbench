@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"agent-testbench/internal/store"
+	"agent-testbench/internal/store/sqlite"
 )
 
 func TestEnvironmentCommandsAcceptActiveSQLiteStore(t *testing.T) {
@@ -58,6 +60,275 @@ func TestEnvironmentRegisterRejectsOversizedDefinitionMetadata(t *testing.T) {
 	got := err.Error()
 	if !strings.Contains(got, "write blocked") || !strings.Contains(got, fmt.Sprintf("1 MB safety boundary is %d bytes", store.EnvironmentDefinitionMaxBytes)) || !strings.Contains(got, "Reason:") || !strings.Contains(got, "largest contributor") {
 		t.Fatalf("oversized environment metadata error = %q", got)
+	}
+}
+
+func TestEnvironmentRegisterStoresDockerFilesAsStructuredRows(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	composeSource := filepath.Join(t.TempDir(), "compose.yml")
+	envSource := filepath.Join(t.TempDir(), "runtime.env")
+	writeFile(t, composeSource, "services:\n  app:\n    image: alpine:3.20\n")
+	writeFile(t, envSource, "APP_MODE=test\n")
+
+	registerOut := runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.structured.files",
+		"--compose-file", "compose/docker-compose.yml",
+		"--compose-env-file", "compose/runtime.env",
+		"--compose-generated-file", "compose/docker-compose.yml="+composeSource,
+		"--compose-generated-file", "compose/runtime.env="+envSource,
+		"--service", "app",
+		"--repo", "app=https://example.com/team/app.git",
+		"--branch", "app=main",
+		"--repo-ref", "app=v1.0.0",
+		"--checkout", "app=app",
+		"--health-url", "http://127.0.0.1:18080/health",
+		"--verification-workflow", "workflow.core-10",
+		"--json",
+	)
+	var registered struct {
+		Environment struct {
+			Compose      map[string]any   `json:"compose"`
+			Services     []map[string]any `json:"services"`
+			Repos        map[string]any   `json:"repos"`
+			HealthChecks []map[string]any `json:"healthChecks"`
+		} `json:"environment"`
+	}
+	if err := json.Unmarshal([]byte(registerOut), &registered); err != nil {
+		t.Fatalf("decode register output: %v\n%s", err, registerOut)
+	}
+	requireStructuredRegisterOutput(t, registered.Environment.Compose, registered.Environment.Services, registered.Environment.Repos, registered.Environment.HealthChecks)
+	requireStructuredEnvironmentRows(t, storePath)
+	requireRawEnvironmentCompatibilityColumns(t, storePath)
+	requireStructuredEnvironmentRuntimeProjection(t, storePath)
+	requireStructuredEnvironmentInspectProjection(t, storePath)
+}
+
+func TestEnvironmentRegisterDoesNotPersistPartialRowsWhenStructuredFilesFail(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	composeSource := filepath.Join(t.TempDir(), "compose.yml")
+	writeFile(t, composeSource, strings.Repeat("x", store.EnvironmentFileInlineMaxBytes+1))
+
+	out := runCLIFails(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.partial.blocked",
+		"--compose-file", "compose/docker-compose.yml",
+		"--compose-generated-file", "compose/docker-compose.yml="+composeSource,
+		"--verification-workflow", "workflow.core-10",
+	)
+	if !strings.Contains(out, "write blocked") {
+		t.Fatalf("oversized structured file error = %q", out)
+	}
+
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = s.Close()
+	})
+	if _, err := s.GetEnvironment(ctx, "env.partial.blocked"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("failed environment registration should not leave a partial environment row, got err=%v", err)
+	}
+}
+
+func TestEnvironmentRepoSetPreservesMixedLegacyServices(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	storeRef := "sqlite://" + storePath
+	runCLI(t, "environment", "register",
+		"--store", storeRef,
+		"--id", "env.mixed.repo-set",
+		"--service", "app",
+		"--repo", "app=https://example.invalid/app.git",
+		"--checkout", "app=app",
+		"--verification-workflow", "workflow.core-10",
+		"--json",
+	)
+	seedLegacyEnvironmentRepositoryMetadata(t, storePath)
+
+	repoSetOut := runCLI(t, "environment", "repo", "set",
+		"--store", storeRef,
+		"--repo-ref", "app=v2.0.0",
+		"--checkout", "app=app-v2",
+		"--json",
+		"env.mixed.repo-set",
+	)
+	var repoSet struct {
+		Environment struct {
+			Services []map[string]any `json:"services"`
+			Repos    map[string]any   `json:"repos"`
+		} `json:"environment"`
+	}
+	if err := json.Unmarshal([]byte(repoSetOut), &repoSet); err != nil {
+		t.Fatalf("decode environment repo set json: %v\n%s", err, repoSetOut)
+	}
+	requireMixedRepoSetProjection(t, repoSet.Environment.Services, repoSet.Environment.Repos)
+	requireMixedRepoSetStructuredRows(t, storePath)
+	if rawServicesJSON := sqliteScalar(t, storePath, `select services_json from environments where id = 'env.mixed.repo-set';`); rawServicesJSON != "[]" {
+		t.Fatalf("raw services_json should be migrated into structured services after repo set: %s", rawServicesJSON)
+	}
+	if rawReposJSON := sqliteScalar(t, storePath, `select repos_json from environments where id = 'env.mixed.repo-set';`); rawReposJSON != "{}" {
+		t.Fatalf("raw repos_json should be migrated into structured services after repo set: %s", rawReposJSON)
+	}
+}
+
+func seedLegacyEnvironmentRepositoryMetadata(t *testing.T, storePath string) {
+	t.Helper()
+	ctx := context.Background()
+	runtime, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer runtime.Close()
+	env, err := runtime.GetEnvironment(ctx, "env.mixed.repo-set")
+	if err != nil {
+		t.Fatalf("get environment: %v", err)
+	}
+	env.ServicesJSON = `[{"id":"legacy-service","repo":"https://example.invalid/legacy.git","checkout":"legacy-service"}]`
+	env.ReposJSON = `{"legacy-service":{"url":"https://example.invalid/legacy.git","checkout":"legacy-service"}}`
+	if _, err := runtime.UpsertEnvironment(ctx, env); err != nil {
+		t.Fatalf("seed legacy environment metadata: %v", err)
+	}
+}
+
+func requireMixedRepoSetProjection(t *testing.T, services []map[string]any, repos map[string]any) {
+	t.Helper()
+	serviceIDs := map[string]bool{}
+	for _, service := range services {
+		serviceIDs[fmt.Sprint(service["id"])] = true
+	}
+	appRepo, _ := repos["app"].(map[string]any)
+	legacyRepo, _ := repos["legacy-service"].(map[string]any)
+	if len(services) != 2 || !serviceIDs["app"] || !serviceIDs["legacy-service"] {
+		t.Fatalf("repo set should preserve structured and legacy services: %#v", services)
+	}
+	if appRepo["ref"] != "v2.0.0" || appRepo["checkout"] != "app-v2" {
+		t.Fatalf("repo set should update structured app repo: %#v", appRepo)
+	}
+	if legacyRepo["url"] != "https://example.invalid/legacy.git" || legacyRepo["checkout"] != "legacy-service" {
+		t.Fatalf("repo set should preserve legacy repo metadata: %#v", legacyRepo)
+	}
+}
+
+func requireMixedRepoSetStructuredRows(t *testing.T, storePath string) {
+	t.Helper()
+	ctx := context.Background()
+	runtime, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer runtime.Close()
+	services, err := runtime.ListEnvironmentServices(ctx, "env.mixed.repo-set")
+	if err != nil {
+		t.Fatalf("list environment services: %v", err)
+	}
+	if len(services) != 2 {
+		t.Fatalf("repo set should migrate mixed services into structured rows: %#v", services)
+	}
+}
+
+func requireStructuredRegisterOutput(t *testing.T, compose map[string]any, services []map[string]any, repos map[string]any, healthChecks []map[string]any) {
+	t.Helper()
+	if _, ok := compose["generatedFiles"]; !ok {
+		t.Fatalf("runtime register output should merge structured generated files: %#v", compose)
+	}
+	if len(services) != 1 || services[0]["repo"] != "https://example.com/team/app.git" || repos["app"] == nil || len(healthChecks) != 1 {
+		t.Fatalf("runtime register output should merge structured metadata: services=%#v repos=%#v health=%#v", services, repos, healthChecks)
+	}
+}
+
+func requireStructuredEnvironmentRows(t *testing.T, storePath string) {
+	t.Helper()
+	ctx := context.Background()
+	runtime, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer runtime.Close()
+	files, err := runtime.ListEnvironmentFiles(ctx, "env.structured.files")
+	if err != nil {
+		t.Fatalf("list environment files: %v", err)
+	}
+	if len(files) != 2 || files[0].Kind != store.EnvironmentFileKindComposeFile || files[1].Kind != store.EnvironmentFileKindComposeEnvFile {
+		t.Fatalf("structured environment files = %#v", files)
+	}
+	services, err := runtime.ListEnvironmentServices(ctx, "env.structured.files")
+	if err != nil {
+		t.Fatalf("list environment services: %v", err)
+	}
+	if len(services) != 1 || services[0].ServiceID != "app" || services[0].RepoURL != "https://example.com/team/app.git" || services[0].Ref != "v1.0.0" {
+		t.Fatalf("structured environment services = %#v", services)
+	}
+	checks, err := runtime.ListEnvironmentHealthChecks(ctx, "env.structured.files")
+	if err != nil {
+		t.Fatalf("list environment health checks: %v", err)
+	}
+	if len(checks) != 1 || checks[0].Kind != "url" || checks[0].URL != "http://127.0.0.1:18080/health" {
+		t.Fatalf("structured environment health checks = %#v", checks)
+	}
+}
+
+func requireRawEnvironmentCompatibilityColumns(t *testing.T, storePath string) {
+	t.Helper()
+	rawComposeJSON := sqliteScalar(t, storePath, `select compose_json from environments where id = 'env.structured.files';`)
+	if strings.Contains(rawComposeJSON, "generatedFiles") {
+		t.Fatalf("raw compose_json should not carry generated file content: %s", rawComposeJSON)
+	}
+	if rawServicesJSON := sqliteScalar(t, storePath, `select services_json from environments where id = 'env.structured.files';`); rawServicesJSON != "[]" {
+		t.Fatalf("raw services_json should not carry structured services: %s", rawServicesJSON)
+	}
+	if rawReposJSON := sqliteScalar(t, storePath, `select repos_json from environments where id = 'env.structured.files';`); rawReposJSON != "{}" {
+		t.Fatalf("raw repos_json should not carry structured repos: %s", rawReposJSON)
+	}
+	if rawHealthJSON := sqliteScalar(t, storePath, `select health_checks_json from environments where id = 'env.structured.files';`); rawHealthJSON != "[]" {
+		t.Fatalf("raw health_checks_json should not carry structured health checks: %s", rawHealthJSON)
+	}
+}
+
+func requireStructuredEnvironmentRuntimeProjection(t *testing.T, storePath string) {
+	t.Helper()
+	ctx := context.Background()
+	runtime, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer runtime.Close()
+	loaded, err := runtime.GetEnvironment(ctx, "env.structured.files")
+	if err != nil {
+		t.Fatalf("get environment: %v", err)
+	}
+	if !strings.Contains(loaded.ComposeJSON, "generatedFiles") || !strings.Contains(loaded.ComposeJSON, "APP_MODE=test") {
+		t.Fatalf("structured files should merge into runtime compose json: %s", loaded.ComposeJSON)
+	}
+}
+
+func requireStructuredEnvironmentInspectProjection(t *testing.T, storePath string) {
+	t.Helper()
+	inspectOut := runCLI(t, "environment", "inspect",
+		"--store", "sqlite://"+storePath,
+		"env.structured.files",
+		"--json",
+	)
+	var inspected struct {
+		FileProjection struct {
+			Files []struct {
+				Path   string `json:"path"`
+				Kind   string `json:"kind"`
+				Source string `json:"source"`
+			} `json:"files"`
+		} `json:"fileProjection"`
+	}
+	if err := json.Unmarshal([]byte(inspectOut), &inspected); err != nil {
+		t.Fatalf("decode inspect output: %v\n%s", err, inspectOut)
+	}
+	projectionSources := map[string]string{}
+	for _, file := range inspected.FileProjection.Files {
+		projectionSources[file.Kind+":"+file.Path] = file.Source
+	}
+	if projectionSources["compose-file:compose/docker-compose.yml"] != "environment_files" ||
+		projectionSources["env-file:compose/runtime.env"] != "environment_files" {
+		t.Fatalf("inspect fileProjection should expose structured sources: %#v", projectionSources)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"agent-testbench/internal/environmentprojection"
 	"agent-testbench/internal/store"
 )
 
@@ -66,31 +67,68 @@ func closeCLIStore(runtime store.Store) {
 	}
 }
 
-func loadEnvironmentAndComponentGraphForCLI(ctx context.Context, storeRef string, legacyStoreURL string, id string) (store.Environment, store.EnvironmentComponentGraph, error) {
+func loadEnvironmentAndComponentGraphForCLI(ctx context.Context, storeRef string, legacyStoreURL string, id string) (store.Environment, store.EnvironmentComponentGraph, []store.EnvironmentFile, error) {
 	runtime, cleanup, err := openRequiredCLIStore(ctx, storeRef, legacyStoreURL)
 	if err != nil {
-		return store.Environment{}, store.EnvironmentComponentGraph{}, err
+		return store.Environment{}, store.EnvironmentComponentGraph{}, nil, err
 	}
 	defer cleanup()
 	env, err := runtime.GetEnvironment(ctx, id)
 	if err != nil {
-		return store.Environment{}, store.EnvironmentComponentGraph{}, err
+		return store.Environment{}, store.EnvironmentComponentGraph{}, nil, err
 	}
 	graph, err := runtime.GetEnvironmentComponentGraph(ctx, id)
 	if err != nil {
-		return store.Environment{}, store.EnvironmentComponentGraph{}, err
+		return store.Environment{}, store.EnvironmentComponentGraph{}, nil, err
 	}
-	return env, graph, nil
+	files, err := runtime.ListEnvironmentFiles(ctx, id)
+	if err != nil {
+		return store.Environment{}, store.EnvironmentComponentGraph{}, nil, err
+	}
+	return env, graph, files, nil
 }
 
 func printEnvironmentCommandResult(env store.Environment, jsonOutput bool, componentGraphs ...store.EnvironmentComponentGraph) error {
-	payload := map[string]any{"ok": true, "environment": environmentPayload(env)}
-	if len(componentGraphs) > 0 {
-		payload["componentGraph"] = environmentRestoreComponentGraphReport(env.ID, componentGraphs[0])
+	if len(componentGraphs) == 0 {
+		return printEnvironmentBasicResult(env, jsonOutput)
 	}
+	return printEnvironmentCommandResultWithFiles(env, jsonOutput, componentGraphs[0], nil)
+}
+
+func printEnvironmentCommandResultWithFiles(env store.Environment, jsonOutput bool, componentGraph store.EnvironmentComponentGraph, files []store.EnvironmentFile) error {
+	payload := map[string]any{"ok": true, "environment": environmentPayload(env)}
+	payload["componentGraph"] = environmentRestoreComponentGraphReport(env.ID, componentGraph)
+	payload["fileProjection"] = environmentprojection.FromEnvironmentWithEnvironmentFiles(env, componentGraph, files)
 	if jsonOutput {
 		return writeIndentedJSON(payload)
 	}
+	printEnvironmentSummary(env)
+	readiness := environmentRestoreComponentGraphReport(env.ID, componentGraph)
+	fmt.Printf("Component Restore-ready: %t\n", readiness.OK)
+	if len(readiness.BlockingOrder) > 0 {
+		fmt.Printf("Component Blocking Order: %s\n", strings.Join(readiness.BlockingOrder, " -> "))
+	}
+	if strings.TrimSpace(readiness.Error) != "" {
+		fmt.Printf("Component Readiness Error: %s\n", readiness.Error)
+	}
+	projection := environmentprojection.FromEnvironmentWithEnvironmentFiles(env, componentGraph, files)
+	fmt.Printf("File Projection Ready: %t\n", projection.OK)
+	if len(projection.Missing) > 0 {
+		fmt.Printf("File Projection Missing: %d\n", len(projection.Missing))
+	}
+	return nil
+}
+
+func printEnvironmentBasicResult(env store.Environment, jsonOutput bool) error {
+	payload := map[string]any{"ok": true, "environment": environmentPayload(env)}
+	if jsonOutput {
+		return writeIndentedJSON(payload)
+	}
+	printEnvironmentSummary(env)
+	return nil
+}
+
+func printEnvironmentSummary(env store.Environment) {
 	fmt.Printf("Environment: %s\n", env.ID)
 	fmt.Printf("Status: %s\n", env.Status)
 	fmt.Printf("Verified: %t\n", env.Verified)
@@ -102,17 +140,6 @@ func printEnvironmentCommandResult(env store.Environment, jsonOutput bool, compo
 	}
 	fmt.Printf("Evidence Complete: %t\n", env.EvidenceComplete)
 	fmt.Printf("SkyWalking Topology Complete: %t\n", env.TopologyComplete)
-	if len(componentGraphs) > 0 {
-		readiness := environmentRestoreComponentGraphReport(env.ID, componentGraphs[0])
-		fmt.Printf("Component Restore-ready: %t\n", readiness.OK)
-		if len(readiness.BlockingOrder) > 0 {
-			fmt.Printf("Component Blocking Order: %s\n", strings.Join(readiness.BlockingOrder, " -> "))
-		}
-		if strings.TrimSpace(readiness.Error) != "" {
-			fmt.Printf("Component Readiness Error: %s\n", readiness.Error)
-		}
-	}
-	return nil
 }
 
 func environmentPayloads(items []store.Environment) []map[string]any {

@@ -101,7 +101,7 @@ func runProfileExportJSON(t *testing.T, storePath string, outputDir string) prof
 func requireProfileExportReport(t *testing.T, report profileExportCommandReport, outputDir string) {
 	t.Helper()
 
-	if !report.OK || report.ProfileID != "profile.export" || report.Output != outputDir || report.Counts.TemplateConfigs != 2 {
+	if !report.OK || report.ProfileID != "profile.export" || report.Output != outputDir || report.Counts.TemplateConfigs != 1 {
 		t.Fatalf("export report = %#v", report)
 	}
 }
@@ -113,11 +113,11 @@ func requireExportedProfileBundle(t *testing.T, outputDir string) {
 	if err != nil {
 		t.Fatalf("load exported profile: %v", err)
 	}
-	if bundle.ID != "profile.export" || len(bundle.Services) != 1 || len(bundle.APICases) != 1 || len(bundle.TemplateConfigs) != 2 {
+	if bundle.ID != "profile.export" || len(bundle.Services) != 1 || len(bundle.APICases) != 1 || len(bundle.TemplateConfigs) != 1 {
 		t.Fatalf("exported bundle = %#v", bundle)
 	}
 	configs := caseExecutionConfigIDs(bundle.TemplateConfigs)
-	if configs["case.alpha"] != "cfg.case.alpha" || !strings.Contains(bundle.TemplateConfigs[1].ConfigJSON+bundle.TemplateConfigs[0].ConfigJSON, `"query":{"id":"item-001"}`) {
+	if configs["case.alpha"] != "cfg.case.alpha" || !strings.Contains(bundle.TemplateConfigs[0].ConfigJSON, `"query":{"id":"item-001"}`) {
 		t.Fatalf("exported template configs lost case query: %#v", bundle.TemplateConfigs)
 	}
 }

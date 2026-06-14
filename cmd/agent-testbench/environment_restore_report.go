@@ -154,6 +154,7 @@ func environmentRestoreSummaryCleanup(report environmentRestoreDockerCleanupRepo
 		"action":             report.Action,
 		"reviewCommandCount": len(report.BackupCommands),
 		"commandCount":       len(report.Commands),
+		"repairItemCount":    len(report.Linkage.RepairPlan),
 		"error":              report.Error,
 	}
 }
@@ -264,6 +265,15 @@ func printEnvironmentRestoreDockerCleanup(cleanup environmentRestoreDockerCleanu
 	}
 	for _, command := range cleanup.Commands {
 		fmt.Printf("    cleanup-command: %s\n", strings.Join(command, " "))
+	}
+	for _, item := range cleanup.Linkage.RepairPlan {
+		fmt.Printf("    repair: %s -> %s\n", item.Name, item.Action)
+		if len(item.Missing) > 0 {
+			fmt.Printf("      missing: %s\n", strings.Join(item.Missing, ", "))
+		}
+		if item.CommandHint != "" {
+			fmt.Printf("      hint: %s\n", item.CommandHint)
+		}
 	}
 	if cleanup.Error != "" {
 		fmt.Printf("    error: %s\n", cleanup.Error)

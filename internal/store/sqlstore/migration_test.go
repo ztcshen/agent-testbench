@@ -215,6 +215,12 @@ func TestCoreSchemaSQLUsesMySQLCompatibleIndexDDL(t *testing.T) {
 	if !strings.Contains(joined, "consumer_component_id varchar(128) not null") || !strings.Contains(joined, "provider_component_id varchar(128) not null") {
 		t.Fatalf("mysql component graph keys should stay bounded for composite indexes:\n%s", joined)
 	}
+	if !strings.Contains(joined, "repo_url mediumtext not null") {
+		t.Fatalf("mysql environment service repo URL should remain storeable as mediumtext:\n%s", joined)
+	}
+	if !strings.Contains(joined, "create index `idx_environment_services_repo`\n  on `environment_services`(`env_id`, `repo_url`(191), `service_id`);") {
+		t.Fatalf("mysql environment service repo index should use a text prefix length:\n%s", joined)
+	}
 }
 
 func TestCoreSchemaSQLIncludesEnvironmentCatalog(t *testing.T) {
@@ -531,6 +537,9 @@ func TestUpgradeSchemaWidensMySQLTextColumnsFromVersionSix(t *testing.T) {
 		"alter table `component_config_assets` modify column `content_inline` mediumtext not null",
 		"alter table `component_config_assets` modify column `sha256` mediumtext not null",
 	)
+	if strings.Contains(migration.execSQL(), "alter table `environment_files` modify column `file_path` mediumtext not null") {
+		t.Fatalf("mysql v6 upgrade must not widen indexed environment_files.file_path to mediumtext:\n%s", migration.execSQL())
+	}
 }
 
 func TestUpgradeSchemaWidensMySQLConfigVersionIdentifiersFromVersionSeven(t *testing.T) {
@@ -574,6 +583,25 @@ func TestUpgradeSchemaIgnoresExistingMySQLIndexesDuringReplay(t *testing.T) {
 
 	status := migration.upgradeSchema(t, dialect, "upgrade mysql v4 schema with existing index")
 	assertAppliedCoreSchema(t, status, "upgraded mysql v4 schema status")
+}
+
+func TestUpgradeSchemaIgnoresExistingMySQLIndexesDuringIncrementalReplay(t *testing.T) {
+	migration := newMigrationDB(t)
+	dialect := sqlstore.MySQLDialect{}
+	migration.queueExistingSchemaVersion(12)
+
+	for i := 0; i < len(sqlstore.CoreSchemaSQL(dialect))+1; i++ {
+		migration.state.queueExecError(nil)
+	}
+	migration.state.queueExecError(errors.New("Error 1061 (42000): Duplicate key name 'idx_environment_files_kind_order'"))
+	migration.queueExistingSchemaVersion(sqlstore.CurrentSchemaVersion)
+
+	status := migration.upgradeSchema(t, dialect, "upgrade mysql v12 schema with existing incremental index")
+	assertAppliedCoreSchema(t, status, "upgraded mysql v12 schema status")
+	assertSQLContains(t, migration.execSQL(), "mysql v12 incremental replay",
+		"create index `idx_environment_files_kind_order`",
+		"create index `idx_environment_services_repo`",
+	)
 }
 
 func TestUpgradeSchemaAppliesEnvironmentCatalogToVersionOneDatabase(t *testing.T) {

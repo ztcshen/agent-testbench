@@ -446,6 +446,14 @@ refs that already exist locally and will not fetch or compare `origin`. Add
 `--run-workflow` with `--execute` to run the recorded verification workflow
 after Docker health checks pass; the run, case runs, Evidence indexes, and
 Environment Catalog verification run status are written to the selected Store.
+If Docker restore or health does not pass, `--run-workflow` is skipped and the
+stream-json output emits a `workflow.acceptance` skipped event instead of
+calling the acceptance runner. With `--output-format stream-json`, restore also
+emits Docker phase events for preparation, Compose validation, cleanup gates,
+Docker-native Store asset projection, Compose execution, post-start edge
+assets, `docker.health` waiting observations for health probes, and
+acceptance-workflow waiting observations so agents can locate long-running or
+blocked phases without inspecting local runtime files.
 Restore records Evidence completeness from the workflow result but does not
 mark SkyWalking topology complete or publish the environment as verified; real
 topology collection and `publish-verified` remain separate gates. Use
@@ -455,16 +463,56 @@ workflow. Use `--workflow-output-dir` when you want a fixed local report
 directory. When `composeFile` is recorded, the
 file must exist under `--workspace` after optional repository preparation;
 restore fails before invoking Docker if it is missing.
+`environment inspect`, `environment bootstrap`, and `environment restore`
+include `fileProjection` in JSON output. The report lists each referenced
+`composeFiles` and Compose `envFiles` entry, generated `.agent-testbench`
+Compose env file, structured `environment_files` row, legacy Store
+`generatedFiles` item, and component config asset with its source and projection
+rule. New `environment register --compose-generated-file TARGET=SOURCE_FILE`
+runs write the file content into `environment_files`; `compose.generatedFiles`
+is kept as a compatibility view for older/imported environments. A referenced
+file is ready only when it can be traced to `environment_files`, a component
+config asset, generated Compose env metadata, legacy `compose.generatedFiles`,
+or an explicit environment package source; summary-only `startupFiles` entries
+without stored file content are reported as repair gaps.
+An `environment_files` row must carry materialized inline content to count as
+Store-backed file content. Explicitly stored empty files are valid, but a
+reference row with no materialized content still blocks restore readiness.
+New environment registration also stores service repositories and health checks
+as structured `environment_services` and `environment_health_checks` rows.
+The legacy `services_json`, `repos_json`, and `health_checks_json` fields are
+kept as compatibility views for older Store rows and imported packages. Restore
+uses the structured rows first. When a Store row is still mixed, structured
+services and health checks replace matching legacy entries by service id,
+health-check id, or equivalent health probe, while unmatched legacy entries
+remain compatibility inputs for older rows and imports.
+When `fileProjection.ok=false`, `fileProjection.repairPlan` groups the
+Store-backed repairs needed for summary-only startup files, unresolved Compose
+variables, and unprojected Compose env/config/secret/include/extends file
+references.
+
+Store remains the source of truth for configuration even when Docker-native
+runtime features are used. Component assets with kinds such as
+`compose-config`, `compose-secret`, and `env-file` are materialized from the
+Store into the restore workspace before Compose starts, so Compose can consume
+them through native `configs`, `secrets`, and `env_file` declarations without
+making local files authoritative. Secret-like or sensitive assets are written
+with owner-only file permissions; asset `summary_json` can also declare
+projection metadata such as `{"dockerNative":{"fileMode":"0600"}}` so the file
+mode remains shared through Store. Plain MySQL bootstrap SQL on a dependency
+edge is likewise projected as a Store-backed initdb file before clean Docker
+startup; later schema changes should be versioned migration assets instead.
 
 The restore report also includes `readiness`, the final pre-Docker review gate
 for a colleague-machine simulation. It checks that the sandbox SQL Store
 is outside the target Docker environment, the restore is anchored to a
 verification workflow, all recorded component repositories can be cloned or
-validated before Docker, a Compose/start plan exists, recorded Compose services
-cover the required component graph services and middleware images, at least one
-health probe is recorded, cleanup commands are reviewable when requested, and
-the operator pause is preserved before container/image deletion or long
-downloads. If a workflow
+validated before Docker, all referenced startup files have Store-backed
+projection rules, a Compose/start plan exists, recorded Compose services cover
+the required component graph services and middleware images, at least one health
+probe is recorded, cleanup commands are reviewable when requested, and the
+operator pause is preserved before container/image deletion or long downloads.
+If a workflow
 needs several application services, those services should appear as repository
 items or existing checkout items and must pass before Docker pull/build/up can
 start. Middleware such as config services or databases normally appears through the recorded
@@ -500,6 +548,36 @@ report; on timeout, inspect `docker.healthChecks` and
 status, and error. `--use-existing-containers` follows the same bounded health gate after
 adopting fixed-name containers, so it is safe to use for already-running local
 targets without starting new Compose services.
+
+Use environment lifecycle commands for quick state checks and non-destructive
+shutdowns instead of rerunning a full restore:
+
+```sh
+./bin/agent-testbench.sh environment status ENV_ID \
+  --store NAME_OR_DSN \
+  --workspace /tmp/agent-testbench-restore \
+  --json
+
+./bin/agent-testbench.sh environment stop ENV_ID \
+  --store NAME_OR_DSN \
+  --workspace /tmp/agent-testbench-restore \
+  --json
+```
+
+`environment status` writes Store-backed generated compose/env files when
+needed, then inspects recorded Compose services with `docker compose ps`; it
+reports per-service container state plus a health summary and does not run
+pull, build, up, stop, or down. It fails when no recorded or discoverable
+Compose services can be inspected. `environment stop` defaults to `docker
+compose stop SERVICE...`, preserving containers, volumes, and images, and
+records `summary.lastStop` on the Environment Catalog entry. The default stop
+path also requires recorded or discoverable services so it does not widen into
+an accidental whole-project stop. Use
+`environment stop --down --remove-orphans` only when you explicitly want Compose
+to remove the environment's containers. The destructive `--down` path uses the
+same Store-to-Compose linkage proof as restore cleanup; when the proof is
+missing, the command blocks and reports `docker.linkage.repairPlan` instead of
+running `docker compose down`.
 
 For sandbox diagnostics, prefer Store-backed read-only checks before inspecting
 containers or temporary files directly:
@@ -569,10 +647,13 @@ preconditions before running new SQL, and then records the applied version.
 `baseline` uses the same history table but records existing versions without
 running their SQL; use it when a target database already contains the schema.
 Regular `environment restore --execute` also applies versioned MySQL migration
-assets through this history path. When `environment restore
---use-existing-containers` adopts an already-running database, plain MySQL SQL
-bootstrap assets are skipped instead of replayed; use migrations, baseline, or a
-clean restore for changes that must be applied to the target database.
+assets through this history path. During a clean Docker restore, plain MySQL
+bootstrap SQL assets are materialized as Store-backed initdb files before
+Compose starts, so MySQL's native initialization path owns first-run bootstrap.
+When `environment restore --use-existing-containers` adopts an already-running
+database, plain MySQL SQL bootstrap assets are skipped instead of replayed; use
+migrations, baseline, or a clean restore for changes that must be applied to the
+target database.
 
 For a colleague-machine simulation, add `--clean-docker-state` during dry-run
 review to include a Compose-scoped cleanup plan before startup. Add
@@ -585,7 +666,18 @@ state snapshot for human inspection, not a backup of volumes, databases, or
 runtime data. During `--execute`, requested cleanup is blocked unless
 `--allow-destructive-docker-cleanup` is also present. This cleanup applies only
 to the recorded target Compose project; the sandbox SQL control-plane Store
-must stay outside that Docker environment.
+must stay outside that Docker environment. The allow flag is still not enough
+by itself: destructive cleanup also requires a complete Store-to-Compose
+linkage proof, including a recorded Compose project name, Store component graph,
+required component-to-service mapping, Store-backed Compose env injection, and
+Store-projected compose/env files.
+If that proof is missing, restore blocks with `cleanup-linkage-blocked` and
+reports `docker.cleanup.linkage.repairPlan` items instead of running
+`docker compose down`. Those repair items name the missing Store-backed fact,
+such as `compose.projectName`, `environment.componentGraph`,
+`componentGraph.components[].composeService`, `compose.services`, or
+`fileProjection.missing`, plus a command hint for repairing the Store metadata
+or asset projection before retrying cleanup.
 
 When you want to evaluate a new colleague machine without touching the current
 machine's running target containers, use `--assume-clean-docker` on a dry-run.

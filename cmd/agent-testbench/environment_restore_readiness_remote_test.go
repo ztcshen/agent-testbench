@@ -348,6 +348,28 @@ func TestEnvironmentRestorePreflightReportsMissingGitForMissingCheckout(t *testi
 	}
 }
 
+func TestEnvironmentRestorePreflightIgnoresPackageGitForSQLStoreRestore(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	fakeBin := t.TempDir()
+	writeFile(t, filepath.Join(fakeBin, "docker"), "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(filepath.Join(fakeBin, "docker"), 0o755); err != nil {
+		t.Fatalf("chmod fake docker: %v", err)
+	}
+	t.Setenv("PATH", fakeBin)
+	report, err := buildEnvironmentRestoreReport(context.Background(), store.Environment{
+		ID:                     "env.preflight.package-only",
+		ComposeJSON:            `{"composeFile":"docker-compose.yml","package":{"url":"https://example.com/team/env-package.git","checkout":"."},"generatedFiles":{"docker-compose.yml":"services: {}"}}`,
+		HealthChecksJSON:       `[]`,
+		VerificationWorkflowID: "workflow.core-10",
+	}, workspace, false, false, false, time.Second, environmentRestoreWorkflowOptions{StoreURL: "postgres://user:pass@127.0.0.1:5432/agent_testbench"}, environmentRestoreDockerCleanupOptions{})
+	if err != nil {
+		t.Fatalf("build restore preflight report: %v", err)
+	}
+	if !report.Preflight.OK || restoreTypedPreflightHasTool(report.Preflight.Tools, "git", false) || report.Package.Action != "ignored-for-sql-store-restore" {
+		t.Fatalf("SQL Store package-only restore should not require git preflight: package=%#v preflight=%#v", report.Package, report.Preflight)
+	}
+}
+
 func TestEnvironmentRestoreRequiresRemoteGitSourcesForSQLOneClickEnvironment(t *testing.T) {
 	for _, backend := range environmentRestoreReadinessProductStoreBackends() {
 		t.Run(backend.name, func(t *testing.T) {

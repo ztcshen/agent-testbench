@@ -11,6 +11,10 @@ import (
 	"agent-testbench/internal/store"
 )
 
+type sqlExecer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
 func utcNow() time.Time {
 	return time.Now().UTC()
 }
@@ -68,6 +72,37 @@ func decodeDBTime(value any) time.Time {
 	}
 }
 
+func applyAuditTimeDefaults(createdAt *time.Time, updatedAt *time.Time, now time.Time) {
+	if createdAt.IsZero() {
+		*createdAt = now
+	}
+	if updatedAt.IsZero() {
+		*updatedAt = now
+	}
+}
+
+func applyDecodedAuditTimes(createdAt any, updatedAt any, targetCreatedAt *time.Time, targetUpdatedAt *time.Time) {
+	*targetCreatedAt = decodeDBTime(createdAt)
+	*targetUpdatedAt = decodeDBTime(updatedAt)
+}
+
+func scanRowWithAuditTimes(row scanner, fields []any, createdAt *time.Time, updatedAt *time.Time, jsonFields ...*string) error {
+	var createdRaw, updatedRaw any
+	targets := make([]any, 0, len(fields)+2)
+	targets = append(targets, fields...)
+	targets = append(targets, &createdRaw, &updatedRaw)
+	if err := row.Scan(targets...); err != nil {
+		return err
+	}
+	for _, field := range jsonFields {
+		if field != nil {
+			*field = normalizeJSONText(*field)
+		}
+	}
+	applyDecodedAuditTimes(createdRaw, updatedRaw, createdAt, updatedAt)
+	return nil
+}
+
 func scanStoreRowError(err error) error {
 	if err == sql.ErrNoRows {
 		return store.ErrNotFound
@@ -82,6 +117,21 @@ func rollbackTxOnError(tx *sql.Tx, errp *error) {
 	if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
 		*errp = errors.Join(*errp, rollbackErr)
 	}
+}
+
+func (s *Store) runEnvironmentReplaceTx(ctx context.Context, replace func(sqlExecer) error) (err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer rollbackTxOnError(tx, &err)
+	if err := replace(tx); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func normalizeJSONText(value string) string {

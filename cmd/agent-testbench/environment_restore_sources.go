@@ -5,19 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"agent-testbench/internal/domain/environmentsource"
 	"agent-testbench/internal/server/controlplane"
 	"agent-testbench/internal/store"
 )
-
-type environmentRestoreSourcePolicy struct {
-	RemoteOnly bool     `json:"remoteOnly"`
-	OK         bool     `json:"ok"`
-	Violations []string `json:"violations,omitempty"`
-}
 
 type environmentRestorePackageReport struct {
 	Configured bool     `json:"configured"`
@@ -31,13 +24,6 @@ type environmentRestorePackageReport struct {
 	OK         bool     `json:"ok"`
 	Output     string   `json:"output,omitempty"`
 	Error      string   `json:"error,omitempty"`
-}
-
-type environmentRestorePackageSpec struct {
-	URL      string
-	Branch   string
-	Ref      string
-	Checkout string
 }
 
 type environmentRestoreRepoReport struct {
@@ -54,91 +40,9 @@ type environmentRestoreRepoReport struct {
 	Error     string   `json:"error,omitempty"`
 }
 
-type environmentRestoreRepoSpec struct {
-	ServiceID string
-	URL       string
-	Branch    string
-	Ref       string
-	Checkout  string
-}
-
-func environmentRestoreRepoSpecs(env store.Environment, workspace string) []environmentRestoreRepoSpec {
-	repoMap := jsonObjectString(env.ReposJSON)
-	services := jsonArrayString(env.ServicesJSON)
-	specByID := map[string]environmentRestoreRepoSpec{}
-	for id, raw := range repoMap {
-		spec := environmentRestoreRepoSpec{ServiceID: strings.TrimSpace(id)}
-		if item, ok := raw.(map[string]any); ok {
-			spec.URL = strings.TrimSpace(valueString(item["url"]))
-			spec.Branch = strings.TrimSpace(valueString(item["branch"]))
-			spec.Ref = strings.TrimSpace(valueString(item["ref"]))
-			spec.Checkout = strings.TrimSpace(valueString(item["checkout"]))
-		}
-		if spec.ServiceID != "" {
-			specByID[spec.ServiceID] = spec
-		}
-	}
-	for _, raw := range services {
-		item, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		id := strings.TrimSpace(valueString(item["id"]))
-		if id == "" {
-			continue
-		}
-		spec := specByID[id]
-		spec.ServiceID = id
-		if value := strings.TrimSpace(valueString(item["repo"])); value != "" {
-			spec.URL = value
-		}
-		if value := strings.TrimSpace(valueString(item["branch"])); value != "" {
-			spec.Branch = value
-		}
-		if value := strings.TrimSpace(valueString(item["ref"])); value != "" {
-			spec.Ref = value
-		}
-		if value := strings.TrimSpace(valueString(item["checkout"])); value != "" {
-			spec.Checkout = value
-		}
-		specByID[id] = spec
-	}
-	ids := make([]string, 0, len(specByID))
-	for id := range specByID {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	out := make([]environmentRestoreRepoSpec, 0, len(ids))
-	for _, id := range ids {
-		spec := specByID[id]
-		if spec.Checkout == "" {
-			spec.Checkout = filepath.Join(workspace, safeCheckoutDirName(id))
-		} else if !filepath.IsAbs(spec.Checkout) {
-			spec.Checkout = filepath.Join(workspace, spec.Checkout)
-		}
-		out = append(out, spec)
-	}
-	return out
-}
-
-func environmentRestorePackageSpecFromCompose(compose map[string]any, workspace string) environmentRestorePackageSpec {
-	pkg := mapFromReportAny(compose["package"])
-	spec := environmentRestorePackageSpec{
-		URL:    strings.TrimSpace(valueString(pkg["url"])),
-		Branch: strings.TrimSpace(valueString(pkg["branch"])),
-		Ref:    strings.TrimSpace(valueString(pkg["ref"])),
-	}
-	checkout := strings.TrimSpace(valueString(pkg["checkout"]))
-	if checkout == "" {
-		checkout = "."
-	}
-	if filepath.IsAbs(checkout) {
-		spec.Checkout = checkout
-	} else {
-		spec.Checkout = filepath.Join(workspace, checkout)
-	}
-	return spec
-}
+type environmentRestoreSourcePolicy = environmentsource.SourcePolicy
+type environmentRestorePackageSpec = environmentsource.PackageSpec
+type environmentRestoreRepoSpec = environmentsource.RepoSpec
 
 func environmentRestorePackage(ctx context.Context, spec environmentRestorePackageSpec, execute bool, pull bool, storeGeneratedRestore bool) environmentRestorePackageReport {
 	report := environmentRestorePackageReport{
@@ -186,201 +90,8 @@ func environmentRestoreRequiresRemoteSources(storeURL string) bool {
 	}
 }
 
-func environmentRestoreSourcePolicyReport(_ environmentRestorePackageSpec, specs []environmentRestoreRepoSpec, remoteOnly bool) environmentRestoreSourcePolicy {
-	report := environmentRestoreSourcePolicy{
-		RemoteOnly: remoteOnly,
-		OK:         true,
-	}
-	if !remoteOnly {
-		return report
-	}
-	addViolation := func(label string, rawURL string) {
-		rawURL = strings.TrimSpace(rawURL)
-		if rawURL == "" || environmentRestoreIsRemoteGitURL(rawURL) {
-			return
-		}
-		report.OK = false
-		report.Violations = append(report.Violations, label+" must use a remote Git URL, got local path/source: "+rawURL)
-	}
-	for _, spec := range specs {
-		addViolation("component "+spec.ServiceID, spec.URL)
-	}
-	return report
-}
-
 func environmentRestoreComponentGraphReport(envID string, graph store.EnvironmentComponentGraph) environmentRestoreComponentGraph {
 	return controlplane.EnvironmentComponentGraphReadinessReport(envID, graph)
-}
-
-func environmentRestoreOrderedComponentAssets(envID string, g store.EnvironmentComponentGraph) []store.ComponentConfigAsset {
-	out := append([]store.ComponentConfigAsset{}, g.Assets...)
-	if len(out) == 0 {
-		return out
-	}
-	componentOrder := controlplane.EnvironmentComponentGraphReadinessReport(envID, g).BlockingOrder
-	ownerIndex := map[string]int{}
-	for i, id := range componentOrder {
-		ownerIndex[id] = i
-	}
-	defaultRank := len(componentOrder) + len(g.Components) + 1
-	sort.SliceStable(out, func(i, j int) bool {
-		left := out[i]
-		right := out[j]
-		leftOwner := strings.TrimSpace(left.OwnerComponentID)
-		rightOwner := strings.TrimSpace(right.OwnerComponentID)
-		leftRank, leftOK := ownerIndex[leftOwner]
-		if !leftOK {
-			leftRank = defaultRank
-		}
-		rightRank, rightOK := ownerIndex[rightOwner]
-		if !rightOK {
-			rightRank = defaultRank
-		}
-		if leftRank != rightRank {
-			return leftRank < rightRank
-		}
-		if leftOwner != rightOwner {
-			return leftOwner < rightOwner
-		}
-		if left.ApplyOrder != right.ApplyOrder {
-			return left.ApplyOrder < right.ApplyOrder
-		}
-		if left.AssetID != right.AssetID {
-			return left.AssetID < right.AssetID
-		}
-		return left.TargetPath < right.TargetPath
-	})
-	return out
-}
-
-func environmentRestoreComponentAssetRemoteRefOK(asset store.ComponentConfigAsset) bool {
-	return environmentsource.ComponentAssetRemoteRefOK(asset.TargetPath, asset.RemoteRefJSON)
-}
-
-func environmentRestoreComposeWithComponentAssets(envID string, compose map[string]any, graph store.EnvironmentComponentGraph) map[string]any {
-	if len(graph.Assets) == 0 {
-		return compose
-	}
-	out := map[string]any{}
-	for key, value := range compose {
-		out[key] = value
-	}
-	generated := stringMapFromAny(out["generatedFiles"])
-	generatedOrder := stringSliceFromAny(out["generatedFileOrder"])
-	if len(generatedOrder) == 0 && len(generated) > 0 {
-		for target := range generated {
-			generatedOrder = append(generatedOrder, target)
-		}
-		sort.Strings(generatedOrder)
-	}
-	for _, asset := range environmentRestoreOrderedComponentAssets(envID, graph) {
-		target := filepath.Clean(strings.TrimSpace(asset.TargetPath))
-		if target == "." || target == "" || strings.HasPrefix(target, ".."+string(os.PathSeparator)) || filepath.IsAbs(target) {
-			continue
-		}
-		if strings.TrimSpace(asset.ContentInline) == "" {
-			continue
-		}
-		if _, exists := generated[target]; exists {
-			continue
-		}
-		generated[target] = asset.ContentInline
-		generatedOrder = append(generatedOrder, target)
-	}
-	if len(generated) > 0 {
-		out["generatedFiles"] = generated
-	}
-	if len(generatedOrder) > 0 {
-		out["generatedFileOrder"] = dedupeStrings(generatedOrder)
-	}
-	return out
-}
-
-func environmentRestoreRemoteComponentAssets(ctx context.Context, envID string, graph store.EnvironmentComponentGraph, workspace string, execute bool, pull bool) []environmentRestoreComponentAsset {
-	out := []environmentRestoreComponentAsset{}
-	for _, asset := range environmentRestoreOrderedComponentAssets(envID, graph) {
-		if strings.TrimSpace(asset.ContentInline) != "" || strings.TrimSpace(asset.RemoteRefJSON) == "" {
-			continue
-		}
-		ref := jsonObjectString(asset.RemoteRefJSON)
-		sourceURL := strings.TrimSpace(valueString(ref["url"]))
-		sourcePath := strings.TrimSpace(valueString(ref["path"]))
-		if sourcePath == "" {
-			sourcePath = strings.TrimSpace(asset.TargetPath)
-		}
-		checkout := strings.TrimSpace(valueString(ref["checkout"]))
-		if checkout == "" {
-			checkout = filepath.Join(workspace, ".agent-testbench", "component-assets", safeReportID(sourceURL))
-		} else if !filepath.IsAbs(checkout) {
-			checkout = filepath.Join(workspace, checkout)
-		}
-		report := environmentRestoreComponentAsset{
-			AssetID:          asset.AssetID,
-			OwnerComponentID: asset.OwnerComponentID,
-			SourceURL:        sourceURL,
-			SourcePath:       sourcePath,
-			Checkout:         checkout,
-			TargetPath:       restoreWorkspacePath(workspace, asset.TargetPath),
-			Bytes:            asset.SizeBytes,
-			ApplyOrder:       asset.ApplyOrder,
-			Action:           "plan-materialize",
-			OK:               true,
-		}
-		if !environmentRestoreComponentAssetRemoteRefOK(asset) {
-			report.OK = false
-			report.Error = "remote component asset requires remote Git URL plus relative source path"
-			out = append(out, report)
-			continue
-		}
-		if ok, errText := environmentRestoreGeneratedFileTargetOK(asset.TargetPath, workspace); !ok {
-			report.OK = false
-			report.Error = errText
-			out = append(out, report)
-			continue
-		}
-		spec := environmentRestoreRepoSpec{
-			ServiceID: "component-asset-" + safeReportID(asset.AssetID),
-			URL:       sourceURL,
-			Branch:    strings.TrimSpace(valueString(ref["branch"])),
-			Ref:       strings.TrimSpace(valueString(ref["ref"])),
-			Checkout:  checkout,
-		}
-		repo := environmentRestoreRepo(ctx, spec, execute, pull)
-		report.RepoAction = repo.Action
-		report.Command = repo.Command
-		if !repo.OK {
-			report.OK = false
-			report.Error = repo.Error
-			out = append(out, report)
-			continue
-		}
-		if !execute {
-			out = append(out, report)
-			continue
-		}
-		report.Action = "materialize"
-		sourceFile := filepath.Join(checkout, filepath.Clean(sourcePath))
-		raw, err := os.ReadFile(sourceFile)
-		if err != nil {
-			report.OK = false
-			report.Error = err.Error()
-			out = append(out, report)
-			continue
-		}
-		report.Bytes = int64(len(raw))
-		if err := os.MkdirAll(filepath.Dir(report.TargetPath), 0o755); err != nil {
-			report.OK = false
-			report.Error = err.Error()
-			out = append(out, report)
-			continue
-		}
-		if err := os.WriteFile(report.TargetPath, raw, 0o644); err != nil {
-			report.OK = false
-			report.Error = err.Error()
-		}
-		out = append(out, report)
-	}
-	return out
 }
 
 func environmentRestoreRepo(ctx context.Context, spec environmentRestoreRepoSpec, execute bool, pull bool) environmentRestoreRepoReport {
@@ -586,13 +297,4 @@ func restoreGitCloneArgs(spec environmentRestoreRepoSpec) []string {
 	}
 	args = append(args, strings.TrimSpace(spec.URL), strings.TrimSpace(spec.Checkout))
 	return args
-}
-
-func safeCheckoutDirName(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "service"
-	}
-	replacer := strings.NewReplacer("/", "-", "\\", "-", ":", "-", " ", "-")
-	return replacer.Replace(value)
 }

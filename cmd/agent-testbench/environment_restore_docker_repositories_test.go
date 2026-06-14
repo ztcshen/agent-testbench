@@ -143,7 +143,7 @@ func TestEnvironmentRestoreWritesStoreGeneratedComposeFileBeforeDocker(t *testin
 	if err := json.Unmarshal([]byte(dryRunOut), &dryRun); err != nil {
 		t.Fatalf("decode generated compose dry-run json: %v\n%s", err, dryRunOut)
 	}
-	if !dryRun.OK || len(dryRun.Docker.Generated) != 1 || dryRun.Docker.Generated[0].Action != "plan-write" || dryRun.Docker.Generated[0].Path != generatedPath || !dryRun.Docker.Generated[0].OK {
+	if !dryRun.OK || len(dryRun.Docker.Generated) != 1 || dryRun.Docker.Generated[0].Action != environmentRestoreGeneratedFileActionPlanWrite || dryRun.Docker.Generated[0].Path != generatedPath || !dryRun.Docker.Generated[0].OK {
 		t.Fatalf("generated compose dry-run = %#v", dryRun)
 	}
 	if _, err := os.Stat(generatedPath); !os.IsNotExist(err) {
@@ -165,7 +165,7 @@ func TestEnvironmentRestoreWritesStoreGeneratedComposeFileBeforeDocker(t *testin
 	if err := json.Unmarshal([]byte(executeOut), &executed); err != nil {
 		t.Fatalf("decode generated compose execute json: %v\n%s", err, executeOut)
 	}
-	if !executed.OK || executed.Docker.Action != "run-docker-compose" || len(executed.Docker.Generated) != 1 || executed.Docker.Generated[0].Action != "write" || !executed.Docker.Generated[0].OK {
+	if !executed.OK || executed.Docker.Action != "run-docker-compose" || len(executed.Docker.Generated) != 1 || executed.Docker.Generated[0].Action != environmentRestoreGeneratedFileActionWrite || !executed.Docker.Generated[0].OK {
 		t.Fatalf("generated compose execute = %#v", executed)
 	}
 	if raw, err := os.ReadFile(generatedPath); err != nil || !strings.Contains(string(raw), "generated-service") {
@@ -201,7 +201,7 @@ func TestEnvironmentRestorePrepareReposOnlyWritesStoreGeneratedComposeFile(t *te
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode generated prepare-only restore json: %v\n%s", err, out)
 	}
-	if !report.OK || report.Docker.Action != "skipped-after-repository-preparation" || len(report.Docker.Generated) != 1 || report.Docker.Generated[0].Action != "write" || report.Docker.Generated[0].Path != generatedPath || !report.Docker.Generated[0].OK {
+	if !report.OK || report.Docker.Action != "skipped-after-repository-preparation" || len(report.Docker.Generated) != 1 || report.Docker.Generated[0].Action != environmentRestoreGeneratedFileActionWrite || report.Docker.Generated[0].Path != generatedPath || !report.Docker.Generated[0].OK {
 		t.Fatalf("generated prepare-only report = %#v", report)
 	}
 	if raw, err := os.ReadFile(generatedPath); err != nil || !strings.Contains(string(raw), "generated-service") {

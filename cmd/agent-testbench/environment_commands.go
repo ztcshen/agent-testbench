@@ -29,6 +29,10 @@ func runEnvironment(ctx context.Context, args []string) error {
 		return runEnvironmentMigration(ctx, args[1:])
 	case "restore":
 		return runEnvironmentRestore(ctx, args[1:])
+	case "status":
+		return runEnvironmentStatus(ctx, args[1:])
+	case "stop":
+		return runEnvironmentStop(ctx, args[1:])
 	case "acceptance":
 		return runEnvironmentAcceptance(ctx, args[1:])
 	case "verify":

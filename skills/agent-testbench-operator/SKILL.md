@@ -28,6 +28,11 @@ Treat AgentTestBench as a CLI/service first. Do not read `cmd/`, `internal/`,
 or other source files unless the CLI/service behavior is broken, the user asks
 for implementation work, or a command's help/report is insufficient.
 
+SQLite, PostgreSQL, and MySQL are Store engines for the same logical SQL Store
+model. SQLite is the local single-file engine; do not treat it as a separate
+legacy table model when inspecting status, running workflows, or collecting
+Store evidence.
+
 ### Failure Boundary
 
 For integration-test and sandbox-operation tasks, stay on the AgentTestBench
@@ -140,8 +145,43 @@ running:
 ```bash
 ./skills/agent-testbench-operator/scripts/atb.sh environment restore ENV_ID --store STORE_NAME --workspace WORKSPACE --execute --output-format stream-json
 ./skills/agent-testbench-operator/scripts/atb.sh environment restore ENV_ID --store STORE_NAME --workspace WORKSPACE --execute --run-workflow --server-url SERVER_URL --output-format stream-json
+./skills/agent-testbench-operator/scripts/atb.sh environment status ENV_ID --store STORE_NAME --workspace WORKSPACE --json
+./skills/agent-testbench-operator/scripts/atb.sh environment stop ENV_ID --store STORE_NAME --workspace WORKSPACE --json
 ./skills/agent-testbench-operator/scripts/atb.sh environment migration apply ENV_ID --store STORE_NAME --edge OWNER:PROVIDER --database DB_NAME --workspace WORKSPACE --execute --output-format stream-json
 ```
+
+During `environment restore --output-format stream-json`, watch the
+`docker.prepare`, `docker.compose.validate`, `docker.cleanup`,
+`docker.native-assets`, `docker.compose.execute`, `docker.edge-assets`,
+`docker.health`, and `workflow.acceptance` phases. If Docker restore or health
+does not pass, `--run-workflow` must remain skipped instead of invoking the
+acceptance workflow. While Docker Compose startup commands are still running,
+the stream emits `docker.compose.execute` waiting observations for the active
+command. While Docker health probes are still waiting, the stream emits
+`docker.health` waiting observations with the current probe target and remaining
+time. While an acceptance run is still running, the stream emits
+`workflow.acceptance` waiting observations with the acceptance run id.
+During `environment migration apply|baseline --output-format stream-json`, the
+stream emits `environment.migration` waiting observations for the active
+migration asset while MySQL execution is still running.
+
+`environment status` is a read-only Compose inspection path: it can materialize
+Store-backed compose/env files, then uses `docker compose ps` without
+pull/build/up/down. `environment stop` defaults to `docker compose stop
+SERVICE...`; both commands require recorded or discoverable Compose services
+for their default service-scoped behavior. `environment stop --down` is a
+destructive Compose operation and is blocked unless the same Store-to-Compose
+linkage proof used by restore cleanup passes.
+Destructive restore cleanup still requires more than
+`--allow-destructive-docker-cleanup`: the cleanup linkage proof must show a
+recorded Compose project name, Store component graph, required component
+services, Store-backed Compose env injection, and a complete `fileProjection`
+report for compose/env/native Compose file references before `docker compose
+down` can run. Inspect `docker.cleanup.linkage.envInjection` to confirm
+Store-backed `compose.env` keys and generated env files used by the Compose
+command. When cleanup is blocked, read `docker.cleanup.linkage.repairPlan`;
+each item names the missing Store-backed fact and a command hint for repairing
+the Store metadata or file projection before retrying.
 
 Plan or apply Store-first SQL edge migrations:
 
@@ -152,9 +192,41 @@ Plan or apply Store-first SQL edge migrations:
 
 When adopting already-running containers with `environment restore
 --use-existing-containers`, plain MySQL SQL bootstrap assets are intentionally
-not reapplied. Use `environment migration add/plan/apply` or
-`environment migration baseline` for incremental SQL work against an existing
-database; use a clean restore when bootstrap SQL must be replayed from scratch.
+not reapplied. During clean Docker restore, bootstrap SQL is projected from the
+Store into MySQL initdb files before Compose starts. Use `environment migration
+add/plan/apply` or `environment migration baseline` for incremental SQL work
+against an existing database; use a clean restore when bootstrap SQL must be
+replayed from scratch.
+For Docker-native config/secret/env projections, Store asset `summary_json` may
+carry projection metadata such as `{"dockerNative":{"fileMode":"0600"}}`; do not
+patch generated workspace files by hand as the durable configuration.
+When inspecting or bootstrapping an environment, check the JSON `fileProjection`
+report. A referenced compose file, Compose `env_file`, config file, or secret
+file is not repair-complete until it is backed by structured
+`environment_files`, a component config asset, generated Compose env metadata,
+legacy `compose.generatedFiles`, or an explicit environment package projection;
+summary-only `startupFiles` entries are repair hints, not durable file content.
+An `environment_files` row is repair-complete only when it carries materialized
+inline content. Explicitly stored empty files are valid, but reference-only rows
+without materialized content must still be treated as projection gaps.
+New environment registration stores service repositories and health checks as
+structured `environment_services` and `environment_health_checks`; legacy
+`services_json`, `repos_json`, and `health_checks_json` are compatibility views.
+Restore consumes structured environment files, services, and health checks
+first. During migration or Store copy, structured rows replace matching legacy
+entries by path, service id, health-check id, or equivalent health probe; legacy
+entries that are not represented structurally remain compatibility inputs for older
+rows and imports.
+Dynamic Compose file paths, including nested Compose defaults such as
+`${A:-${B:-file.env}}`, are resolved only from Store-backed `compose.env` and
+Store-backed `compose.envFiles`. Absolute or
+home-directory paths remain blocking projection gaps even when they come from
+Store-backed env values, because they depend on a host-local file instead of
+Store-backed projection. `extends.file` scans only the named `extends.service`
+instead of every service in the referenced file. When
+`fileProjection.ok=false`, read `fileProjection.repairPlan`; it groups blocking
+Store repairs for summary-only startup files, unresolved Compose variables, and
+unprojected Compose env/config/secret/include/extends file references.
 
 ## Report Back
 

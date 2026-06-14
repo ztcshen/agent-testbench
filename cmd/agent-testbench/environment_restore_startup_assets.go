@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 
+	"agent-testbench/internal/domain/composefile"
+	"agent-testbench/internal/domain/environmentfiles"
 	"agent-testbench/internal/domain/environmentsource"
 )
 
@@ -26,7 +28,7 @@ type environmentRestoreStartupAssetCandidate struct {
 }
 
 func environmentRestoreStartupAssets(compose map[string]any, specs []environmentRestoreRepoSpec, workspace string) []environmentRestoreStartupAsset {
-	generated := stringMapFromAny(compose["generatedFiles"])
+	generated := generatedFileContentMapFromAny(compose["generatedFiles"])
 	generatedPaths := map[string]bool{}
 	for path := range generated {
 		generatedPaths[filepath.Clean(path)] = true
@@ -36,7 +38,9 @@ func environmentRestoreStartupAssets(compose map[string]any, specs []environment
 		if spec.Checkout == "" {
 			continue
 		}
-		repoCheckouts[filepath.Clean(spec.Checkout)] = true
+		if checkout := environmentRestoreStartupWorkspacePath(spec.Checkout, workspace); checkout != "" {
+			repoCheckouts[checkout] = true
+		}
 	}
 	candidates := []environmentRestoreStartupAssetCandidate{}
 	for _, composeFile := range environmentRestoreComposeFiles(compose) {
@@ -77,7 +81,7 @@ func environmentRestoreStartupAssets(compose map[string]any, specs []environment
 		}
 		if !environmentRestoreStartupAssetAvailable(clean, workspace, generatedPaths) {
 			asset.OK = false
-			asset.Error = "startup asset must exist in the restore workspace or be provided through Store generatedFiles"
+			asset.Error = "startup asset must exist in the restore workspace or be provided through Store-backed environment_files"
 		}
 		out = append(out, asset)
 	}
@@ -130,24 +134,7 @@ func environmentRestoreStartupAssetCandidates(content string, composeFile string
 }
 
 func parseComposeShortVolume(value string) (string, string, bool) {
-	value = strings.TrimSpace(value)
-	value = strings.Trim(value, `"'`)
-	if strings.HasPrefix(value, "[") || strings.Contains(value, "source:") || strings.Contains(value, "target:") {
-		return "", "", false
-	}
-	parts := strings.Split(value, ":")
-	if len(parts) < 2 {
-		return "", "", false
-	}
-	source := strings.Trim(parts[0], `"' `)
-	target := strings.Trim(parts[1], `"' `)
-	if source == "" || target == "" {
-		return "", "", false
-	}
-	if !composeHostSourceLooksLikePath(source) {
-		return "", "", false
-	}
-	return source, target, true
+	return composefile.ParseShortVolume(value)
 }
 
 func environmentRestoreStartupAssetPath(source string, composeDir string, compose map[string]any, workspace string) (string, bool) {
@@ -174,28 +161,38 @@ func environmentRestoreStartupAssetPath(source string, composeDir string, compos
 }
 
 func expandEnvironmentRestoreComposeSource(source string, compose map[string]any, workspace string) string {
-	values := stringMapFromAny(compose["env"])
+	values := environmentRestoreComposeEnvValues(compose, workspace)
 	expanded := strings.TrimSpace(source)
-	for key, value := range values {
-		value = strings.ReplaceAll(value, "$AGENT_TESTBENCH_WORKSPACE", workspace)
-		expanded = strings.ReplaceAll(expanded, "${"+key+"}", value)
-		expanded = strings.ReplaceAll(expanded, "$"+key, value)
-		for {
-			start := strings.Index(expanded, "${"+key+":-")
-			if start < 0 {
-				break
-			}
-			end := strings.Index(expanded[start:], "}")
-			if end < 0 {
-				break
-			}
-			end += start
-			expanded = expanded[:start] + value + expanded[end+1:]
+	if strings.Contains(expanded, "$") {
+		if resolved, ok := environmentfiles.InterpolateComposeText(expanded, values); ok {
+			expanded = resolved
 		}
 	}
-	expanded = strings.ReplaceAll(expanded, "$AGENT_TESTBENCH_WORKSPACE", workspace)
-	expanded = strings.ReplaceAll(expanded, "${AGENT_TESTBENCH_WORKSPACE}", workspace)
 	return expanded
+}
+
+func environmentRestoreComposeEnvValues(compose map[string]any, workspace string) map[string]string {
+	values := stringMapFromAny(compose["env"])
+	for key, value := range values {
+		values[key] = strings.ReplaceAll(strings.ReplaceAll(value, "$AGENT_TESTBENCH_WORKSPACE", workspace), "${AGENT_TESTBENCH_WORKSPACE}", workspace)
+	}
+	values["AGENT_TESTBENCH_WORKSPACE"] = workspace
+	return values
+}
+
+func environmentRestoreStartupWorkspacePath(path string, workspace string) string {
+	path = filepath.Clean(strings.TrimSpace(path))
+	if path == "" || path == "." {
+		return ""
+	}
+	if filepath.IsAbs(path) {
+		rel, err := filepath.Rel(workspace, path)
+		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			return ""
+		}
+		return filepath.Clean(rel)
+	}
+	return path
 }
 
 func environmentRestoreStartupAssetCoveredByRepo(path string, repoCheckouts map[string]bool) bool {

@@ -253,8 +253,10 @@ gates guard these boundaries.
   boundaries.
   SQL Store 是个人与团队工作流的当前产品主路径 Store：SQLite、PostgreSQL 与 MySQL
   都是 Store 引擎，适用于不同运行边界。
-- SQLite is supported for local and personal Stores; legacy migration remains
-  one compatibility use. SQLite 支持本地/个人 Store；旧数据迁移仍是兼容用途之一。
+- SQLite is supported for local and personal Stores using the same logical SQL
+  Store schema as PostgreSQL and MySQL; legacy data migration remains one
+  compatibility use. SQLite 支持本地/个人 Store，并与 PostgreSQL、MySQL 使用同一套逻辑
+  SQL Store schema；旧数据迁移仍是兼容用途之一。
 - Daily CLI/API operations use the active Store or `--store NAME_OR_DSN`; they
   do not maintain hidden Store engines for routine work. 日常 CLI/API 操作使用 active
   Store 或 `--store NAME_OR_DSN`，不为常规工作维护隐藏 Store 引擎。

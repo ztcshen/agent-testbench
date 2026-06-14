@@ -214,8 +214,8 @@ func caseRunIndexTimes(result apicase.RunResult) caseRunIndexClock {
 	now := time.Now().UTC()
 	startedAt := runResultTime(result.StartedAt, now)
 	finishedAt := runResultTime(result.FinishedAt, now)
-	if finishedAt.Before(startedAt) {
-		finishedAt = startedAt
+	if !finishedAt.After(startedAt) {
+		finishedAt = startedAt.Add(10 * time.Millisecond)
 	}
 	return caseRunIndexClock{now: now, startedAt: startedAt, finishedAt: finishedAt}
 }

@@ -6,15 +6,32 @@ import (
 	"strings"
 )
 
+// Dialect describes all SQL differences needed by the shared Store.
 type Dialect interface {
+	dialectIdentity
+	dialectBinder
+	dialectTypes
+	dialectDDL
+}
+
+type dialectIdentity interface {
 	Name() string
 	DriverName() string
+}
+
+type dialectBinder interface {
 	BindVar(index int) string
+}
+
+type dialectTypes interface {
 	TextType() string
 	KeyTextType() string
 	JSONType() string
 	TimeType() string
 	BoolType() string
+}
+
+type dialectDDL interface {
 	QuoteIdent(name string) string
 	UpsertClause(conflictColumn string, updateColumns []string) string
 	TableExistsSQL(tableName string) string

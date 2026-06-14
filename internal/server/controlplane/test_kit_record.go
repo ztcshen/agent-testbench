@@ -169,7 +169,7 @@ func testKitResultTimes(result map[string]any, finishedAt time.Time) (time.Time,
 		elapsed = intValue(mapFromAny(mapFromAny(result["result"])["response"])["elapsedMs"])
 	}
 	if elapsed <= 0 {
-		return finishedAt, finishedAt
+		elapsed = 10
 	}
 	return finishedAt.Add(-time.Duration(elapsed) * time.Millisecond), finishedAt
 }

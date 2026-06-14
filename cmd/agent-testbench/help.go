@@ -49,6 +49,8 @@ Usage:
   agent-testbench environment migration apply ENV_ID --edge OWNER:PROVIDER --database DB --workspace PATH [--through-version VERSION] [--execute] [--store NAME_OR_DSN] [--output-format text|json|stream-json] [--json]
   agent-testbench environment migration baseline ENV_ID --edge OWNER:PROVIDER --database DB --workspace PATH [--through-version VERSION] [--execute] [--store NAME_OR_DSN] [--output-format text|json|stream-json] [--json]
   agent-testbench environment restore ENV_ID --workspace PATH [--store NAME_OR_DSN] [--execute] [--pull] [--prepare-repos-only] [--assume-clean-docker] [--use-existing-containers] [--clean-docker-state] [--clean-docker-images] [--allow-destructive-docker-cleanup] [--run-workflow --server-url URL] [--base-url URL] [--workflow-output-dir PATH] [--health-timeout-seconds N] [--output-format text|json|stream-json] [--json]
+  agent-testbench environment status ENV_ID --workspace PATH [--store NAME_OR_DSN] [--json]
+  agent-testbench environment stop ENV_ID --workspace PATH [--store NAME_OR_DSN] [--down] [--remove-orphans] [--json]
   agent-testbench environment acceptance start ENV_ID --server-url URL --request-id ID [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
   agent-testbench environment acceptance report ENV_ID --server-url URL --run ID [--json]
   agent-testbench environment verify ENV_ID --run ID --status STATUS [--evidence-complete] [--topology-complete] [--store NAME_OR_DSN] [--json]

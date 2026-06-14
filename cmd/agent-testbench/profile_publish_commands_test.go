@@ -39,7 +39,7 @@ func TestConfigPublishCommandIndexesBundleInStore(t *testing.T) {
 	if strings.Join(report.ReadModels, ",") != "interface-nodes,catalog,dashboard" {
 		t.Fatalf("config publish read models = %#v", report.ReadModels)
 	}
-	if got := sqliteScalar(t, dbPath, "select value from kv where key = 'active_profile_id';"); got != "empty" {
+	if got := sqliteScalar(t, dbPath, "select profile_id from config_versions where active = 1;"); got != "empty" {
 		t.Fatalf("active config profile = %q", got)
 	}
 	if got := sqliteScalar(t, dbPath, "select bundle_digest from config_versions where active = 1;"); got != report.BundleDigest {

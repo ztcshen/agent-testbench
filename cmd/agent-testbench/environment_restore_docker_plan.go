@@ -6,8 +6,14 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
+
+	"agent-testbench/internal/store"
 )
+
+var environmentRestoreComposeExecuteProgressInterval = 5 * time.Second
 
 type environmentRestoreDockerReport struct {
 	OK            bool                                  `json:"ok"`
@@ -23,52 +29,78 @@ type environmentRestoreDockerReport struct {
 	HealthChecks  []environmentRestoreHealthCheckReport `json:"healthChecks,omitempty"`
 }
 
-type environmentRestoreGeneratedFile struct {
-	Path   string `json:"path"`
-	Bytes  int    `json:"bytes"`
-	Action string `json:"action"`
-	OK     bool   `json:"ok"`
-	Error  string `json:"error,omitempty"`
+type environmentRestoreDockerCleanupReport struct {
+	Requested           bool                                         `json:"requested,omitempty"`
+	Allowed             bool                                         `json:"allowed,omitempty"`
+	IncludeImages       bool                                         `json:"includeImages,omitempty"`
+	Action              string                                       `json:"action,omitempty"`
+	Linkage             environmentRestoreDockerCleanupLinkageReport `json:"linkage,omitempty"`
+	FixedContainerNames []string                                     `json:"fixedContainerNames,omitempty"`
+	BackupCommands      [][]string                                   `json:"backupCommands,omitempty"`
+	Commands            [][]string                                   `json:"commands,omitempty"`
+	Output              []string                                     `json:"output,omitempty"`
+	Error               string                                       `json:"error,omitempty"`
+	Warning             string                                       `json:"warning,omitempty"`
 }
 
-type environmentRestoreDockerCleanupReport struct {
-	Requested           bool       `json:"requested,omitempty"`
-	Allowed             bool       `json:"allowed,omitempty"`
-	IncludeImages       bool       `json:"includeImages,omitempty"`
-	Action              string     `json:"action,omitempty"`
-	FixedContainerNames []string   `json:"fixedContainerNames,omitempty"`
-	BackupCommands      [][]string `json:"backupCommands,omitempty"`
-	Commands            [][]string `json:"commands,omitempty"`
-	Output              []string   `json:"output,omitempty"`
-	Error               string     `json:"error,omitempty"`
-	Warning             string     `json:"warning,omitempty"`
+type environmentRestoreDockerCleanupLinkageReport struct {
+	OK                       bool                                        `json:"ok"`
+	ComposeProject           string                                      `json:"composeProject,omitempty"`
+	ComposeServices          []string                                    `json:"composeServices,omitempty"`
+	EnvInjection             environmentRestoreDockerEnvInjectionReport  `json:"envInjection,omitempty"`
+	RequiredComponents       []string                                    `json:"requiredComponents,omitempty"`
+	MissingComposeProject    bool                                        `json:"missingComposeProject,omitempty"`
+	MissingComponentGraph    bool                                        `json:"missingComponentGraph,omitempty"`
+	MissingComponentServices []string                                    `json:"missingComponentServices,omitempty"`
+	MissingComposeServices   []string                                    `json:"missingComposeServices,omitempty"`
+	MissingProjectedFiles    []string                                    `json:"missingProjectedFiles,omitempty"`
+	StoreAssets              int                                         `json:"storeAssets,omitempty"`
+	Error                    string                                      `json:"error,omitempty"`
+	RepairPlan               []environmentRestoreDockerCleanupRepairItem `json:"repairPlan,omitempty"`
+}
+
+type environmentRestoreDockerEnvInjectionReport struct {
+	GeneratedEnvFile string   `json:"generatedEnvFile,omitempty"`
+	StoreEnvKeys     []string `json:"storeEnvKeys,omitempty"`
+	EnvFiles         []string `json:"envFiles,omitempty"`
+}
+
+type environmentRestoreDockerCleanupRepairItem struct {
+	Name          string   `json:"name"`
+	Target        string   `json:"target"`
+	Missing       []string `json:"missing,omitempty"`
+	Action        string   `json:"action"`
+	CommandHint   string   `json:"commandHint,omitempty"`
+	StoreBacked   bool     `json:"storeBacked"`
+	BlocksCleanup bool     `json:"blocksCleanup"`
 }
 
 type environmentRestoreHealthCheckReport struct {
-	ID         string `json:"id,omitempty"`
-	Kind       string `json:"kind"`
-	URL        string `json:"url"`
-	Address    string `json:"address,omitempty"`
-	Command    string `json:"command,omitempty"`
-	Service    string `json:"service,omitempty"`
-	Container  string `json:"container,omitempty"`
-	Expect     string `json:"expect,omitempty"`
-	OneShot    bool   `json:"oneShot,omitempty"`
-	OK         bool   `json:"ok"`
-	StatusCode int    `json:"statusCode,omitempty"`
-	State      string `json:"state,omitempty"`
-	Health     string `json:"health,omitempty"`
-	ExitCode   int    `json:"exitCode,omitempty"`
-	Output     string `json:"output,omitempty"`
-	Error      string `json:"error,omitempty"`
+	ID          string `json:"id,omitempty"`
+	Kind        string `json:"kind"`
+	URL         string `json:"url"`
+	Address     string `json:"address,omitempty"`
+	Command     string `json:"command,omitempty"`
+	Service     string `json:"service,omitempty"`
+	Container   string `json:"container,omitempty"`
+	Expect      string `json:"expect,omitempty"`
+	OneShot     bool   `json:"oneShot,omitempty"`
+	OK          bool   `json:"ok"`
+	StatusCode  int    `json:"statusCode,omitempty"`
+	State       string `json:"state,omitempty"`
+	Health      string `json:"health,omitempty"`
+	ExitCode    int    `json:"exitCode,omitempty"`
+	HasExitCode bool   `json:"-"`
+	Output      string `json:"output,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
-func environmentRestoreDockerPlan(compose map[string]any, workspace string, cleanupOptions environmentRestoreDockerCleanupOptions) (environmentRestoreDockerReport, []string) {
+func environmentRestoreDockerPlan(graph store.EnvironmentComponentGraph, compose map[string]any, workspace string, cleanupOptions environmentRestoreDockerCleanupOptions) (environmentRestoreDockerReport, []string) {
 	report := environmentRestoreDockerReport{OK: true, Workdir: workspace}
 	composeFiles := environmentRestoreComposeFiles(compose)
 	startCommand := strings.TrimSpace(valueString(compose["startCommand"]))
 	if strings.TrimSpace(valueString(compose["composeFile"])) != "" {
-		baseArgs := environmentRestorePlanComposeCommands(&report, compose, workspace, composeFiles, cleanupOptions)
+		baseArgs := environmentRestorePlanComposeCommands(&report, graph, compose, workspace, composeFiles, cleanupOptions)
 		return report, baseArgs
 	}
 	if startCommand != "" {
@@ -80,13 +112,16 @@ func environmentRestoreDockerPlan(compose map[string]any, workspace string, clea
 	return report, nil
 }
 
-func environmentRestorePlanComposeCommands(report *environmentRestoreDockerReport, compose map[string]any, workspace string, composeFiles []string, cleanupOptions environmentRestoreDockerCleanupOptions) []string {
+func environmentRestorePlanComposeCommands(report *environmentRestoreDockerReport, graph store.EnvironmentComponentGraph, compose map[string]any, workspace string, composeFiles []string, cleanupOptions environmentRestoreDockerCleanupOptions) []string {
 	report.Action = "plan-docker-compose"
 	resolvedComposeFiles := environmentRestoreResolvedComposeFiles(workspace, composeFiles)
 	report.ComposeFile = strings.Join(resolvedComposeFiles, ",")
 	baseArgs := environmentRestoreComposeBaseArgs(compose, workspace, resolvedComposeFiles)
 	services := stringSliceFromAny(compose["services"])
 	report.Cleanup = environmentRestoreDockerCleanupPlan(baseArgs, cleanupOptions, environmentRestoreContainerNameConflicts(compose, workspace))
+	if report.Cleanup.Requested {
+		report.Cleanup.Linkage = environmentRestoreDockerCleanupLinkage(compose, graph, workspace, composeFiles)
+	}
 	imageServices, buildServices := environmentRestoreComposeCommandServices(compose, workspace, composeFiles, services)
 	imageServices = environmentRestoreFilterSkippedPullServices(imageServices, stringSliceFromAny(compose["skipPullServices"]))
 	if !boolFromReportAny(compose["skipPull"]) && len(imageServices) > 0 {
@@ -205,6 +240,13 @@ func environmentRestoreRunCleanup(ctx context.Context, report *environmentRestor
 		report.Error = report.Cleanup.Error
 		return false
 	}
+	if !report.Cleanup.Linkage.OK {
+		report.OK = false
+		report.Cleanup.Action = "cleanup-linkage-blocked"
+		report.Cleanup.Error = firstNonEmpty(report.Cleanup.Linkage.Error, "Docker cleanup requires complete Store-to-Compose environment linkage")
+		report.Error = report.Cleanup.Error
+		return false
+	}
 	report.Cleanup.Action = "run-cleanup"
 	for _, command := range append(report.Cleanup.BackupCommands, report.Cleanup.Commands...) {
 		output, errText := runRestoreCommand(ctx, workspace, command)
@@ -252,7 +294,7 @@ func environmentRestoreMarkDockerExecuting(report *environmentRestoreDockerRepor
 
 func environmentRestoreRunCommands(ctx context.Context, report *environmentRestoreDockerReport, workspace string) bool {
 	for _, command := range report.Commands {
-		output, errText := runRestoreCommand(ctx, workspace, command)
+		output, errText := runEnvironmentRestoreDockerCommandWithProgress(ctx, workspace, command)
 		if strings.TrimSpace(output) != "" {
 			report.Output = append(report.Output, output)
 		}
@@ -263,6 +305,52 @@ func environmentRestoreRunCommands(ctx context.Context, report *environmentResto
 		}
 	}
 	return true
+}
+
+func runEnvironmentRestoreDockerCommandWithProgress(ctx context.Context, workspace string, command []string) (string, string) {
+	if !agentHasEventStream(ctx) {
+		return runRestoreCommand(ctx, workspace, command)
+	}
+	started := time.Now()
+	resultCh := make(chan struct {
+		output string
+		err    string
+	}, 1)
+	go func() {
+		output, errText := runRestoreCommand(ctx, workspace, command)
+		resultCh <- struct {
+			output string
+			err    string
+		}{output: output, err: errText}
+	}()
+	ticker := time.NewTicker(environmentRestoreComposeExecuteProgressIntervalValue())
+	defer ticker.Stop()
+	for {
+		select {
+		case result := <-resultCh:
+			return result.output, result.err
+		case <-ticker.C:
+			agentEmitEvent(ctx, agentStreamEvent{
+				Type:      "tool_observation",
+				Phase:     "docker.compose.execute",
+				Status:    agentCommandStatusWaiting,
+				Target:    restoreCommandTarget(command),
+				Message:   "Docker Compose command still running",
+				Command:   append([]string(nil), command...),
+				Workdir:   workspace,
+				ElapsedMs: time.Since(started).Milliseconds(),
+			})
+		}
+	}
+}
+
+func environmentRestoreComposeExecuteProgressIntervalValue() time.Duration {
+	if raw := strings.TrimSpace(os.Getenv("AGENT_TESTBENCH_COMPOSE_EXECUTE_PROGRESS_INTERVAL_MS")); raw != "" {
+		if millis, err := strconv.Atoi(raw); err == nil && millis > 0 {
+			return time.Duration(millis) * time.Millisecond
+		}
+	}
+	return environmentRestoreComposeExecuteProgressInterval
 }
 
 func environmentRestoreDockerCleanupPlan(baseArgs []string, options environmentRestoreDockerCleanupOptions, fixedContainerNames []string) environmentRestoreDockerCleanupReport {
@@ -316,89 +404,6 @@ func environmentRestoreResolvedComposeFiles(workspace string, files []string) []
 	return out
 }
 
-func prepareEnvironmentRestoreGeneratedFiles(compose map[string]any, workspace string, execute bool) []environmentRestoreGeneratedFile {
-	files := stringMapFromAny(compose["generatedFiles"])
-	if len(files) == 0 {
-		return nil
-	}
-	paths := environmentRestoreGeneratedFilePaths(compose, files)
-	out := make([]environmentRestoreGeneratedFile, 0, len(paths))
-	for _, path := range paths {
-		content := files[path]
-		report := environmentRestoreGeneratedFile{
-			Path:   restoreWorkspacePath(workspace, path),
-			Bytes:  len(content),
-			Action: "plan-write",
-			OK:     true,
-		}
-		if ok, errText := environmentRestoreGeneratedFileTargetOK(path, workspace); !ok {
-			report.OK = false
-			report.Error = errText
-			out = append(out, report)
-			continue
-		}
-		if execute {
-			report.Action = "write"
-			if err := os.MkdirAll(filepath.Dir(report.Path), 0o755); err != nil {
-				report.OK = false
-				report.Error = err.Error()
-			} else if err := os.WriteFile(report.Path, []byte(content), 0o644); err != nil {
-				report.OK = false
-				report.Error = err.Error()
-			}
-		}
-		out = append(out, report)
-	}
-	return out
-}
-
-func environmentRestoreGeneratedFilePaths(compose map[string]any, files map[string]string) []string {
-	paths := make([]string, 0, len(files))
-	seen := map[string]bool{}
-	for _, path := range stringSliceFromAny(compose["generatedFileOrder"]) {
-		clean := filepath.Clean(strings.TrimSpace(path))
-		if clean == "." || clean == "" || seen[clean] {
-			continue
-		}
-		if _, exists := files[clean]; !exists {
-			continue
-		}
-		paths = append(paths, clean)
-		seen[clean] = true
-	}
-	remaining := make([]string, 0, len(files)-len(paths))
-	for path := range files {
-		clean := filepath.Clean(strings.TrimSpace(path))
-		if clean == "." || clean == "" || seen[clean] {
-			continue
-		}
-		remaining = append(remaining, clean)
-	}
-	sort.Strings(remaining)
-	paths = append(paths, remaining...)
-	return paths
-}
-
-func environmentRestoreGeneratedFileTargetOK(path string, workspace string) (bool, string) {
-	raw := strings.TrimSpace(path)
-	if raw == "" {
-		return false, "generated file path is empty"
-	}
-	if filepath.IsAbs(raw) {
-		return false, "generated file path must be relative to the restore workspace: " + raw
-	}
-	clean := filepath.Clean(raw)
-	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
-		return false, "generated file path must stay inside the restore workspace: " + raw
-	}
-	target := restoreWorkspacePath(workspace, clean)
-	rel, err := filepath.Rel(workspace, target)
-	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return false, "generated file path must stay inside the restore workspace: " + raw
-	}
-	return true, ""
-}
-
 func environmentRestoreComposeBaseArgs(compose map[string]any, workspace string, composeFiles []string) []string {
 	args := []string{}
 	for _, composeFile := range composeFiles {
@@ -417,10 +422,6 @@ func environmentRestoreComposeBaseArgs(compose map[string]any, workspace string,
 		args = append(args, "--profile", profile)
 	}
 	return args
-}
-
-func environmentRestoreGeneratedEnvFilePath(workspace string) string {
-	return filepath.Join(workspace, ".agent-testbench", "restore.env")
 }
 
 func environmentRestoreComposeCommandServices(compose map[string]any, workspace string, composeFiles []string, selected []string) ([]string, []string) {
@@ -458,7 +459,7 @@ func environmentRestoreComposeServiceDefinitions(compose map[string]any, workspa
 	known := map[string]bool{}
 	builds := map[string]bool{}
 	inspected := false
-	generated := stringMapFromAny(compose["generatedFiles"])
+	generated := generatedFileContentMapFromAny(compose["generatedFiles"])
 	for _, file := range composeFiles {
 		content := generated[filepath.Clean(file)]
 		if content == "" {
@@ -527,74 +528,4 @@ func environmentRestoreComposeBuildServicesFromText(content string) (map[string]
 		}
 	}
 	return known, builds
-}
-
-func writeEnvironmentRestoreGeneratedEnvFile(workspace string, compose map[string]any) (string, error) {
-	values := stringMapFromAny(compose["env"])
-	if len(values) == 0 {
-		return "", nil
-	}
-	path := environmentRestoreGeneratedEnvFilePath(workspace)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", err
-	}
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	var b strings.Builder
-	for _, key := range keys {
-		value := strings.ReplaceAll(values[key], "$AGENT_TESTBENCH_WORKSPACE", workspace)
-		b.WriteString(key)
-		b.WriteString("=")
-		b.WriteString(value)
-		b.WriteString("\n")
-	}
-	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
-		return "", err
-	}
-	return path, nil
-}
-
-func stringMapFromAny(value any) map[string]string {
-	out := map[string]string{}
-	switch typed := value.(type) {
-	case map[string]string:
-		for key, value := range typed {
-			if strings.TrimSpace(key) != "" {
-				out[strings.TrimSpace(key)] = strings.TrimSpace(value)
-			}
-		}
-	case map[string]any:
-		for key, value := range typed {
-			if strings.TrimSpace(key) != "" {
-				out[strings.TrimSpace(key)] = strings.TrimSpace(valueString(value))
-			}
-		}
-	}
-	return out
-}
-
-func stringSliceFromAny(value any) []string {
-	values, ok := value.([]any)
-	if !ok {
-		if typed, ok := value.([]string); ok {
-			out := make([]string, 0, len(typed))
-			for _, item := range typed {
-				if strings.TrimSpace(item) != "" {
-					out = append(out, strings.TrimSpace(item))
-				}
-			}
-			return out
-		}
-		return nil
-	}
-	out := make([]string, 0, len(values))
-	for _, item := range values {
-		if value := strings.TrimSpace(valueString(item)); value != "" {
-			out = append(out, value)
-		}
-	}
-	return out
 }

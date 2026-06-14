@@ -11,10 +11,59 @@ import (
 
 func (s *Store) UpsertEnvironment(ctx context.Context, e store.Environment) (store.Environment, error) {
 	var err error
+	e, err = store.PrepareEnvironmentForStructuredUpsert(ctx, s, e, utcNow())
+	if err != nil {
+		return store.Environment{}, err
+	}
+	if err := s.upsertEnvironment(ctx, s.db, e); err != nil {
+		return store.Environment{}, err
+	}
+	return e, nil
+}
+
+func (s *Store) UpsertEnvironmentStructuredState(ctx context.Context, e store.Environment, files []store.EnvironmentFile, services []store.EnvironmentService, checks []store.EnvironmentHealthCheck) (env store.Environment, err error) {
+	files = store.NormalizeEnvironmentFiles(files)
+	if err := store.ValidateEnvironmentFiles(e.ID, files); err != nil {
+		return store.Environment{}, err
+	}
+	services = store.NormalizeEnvironmentServices(services)
+	if err := store.ValidateEnvironmentServices(e.ID, services); err != nil {
+		return store.Environment{}, err
+	}
+	checks = store.NormalizeEnvironmentHealthChecks(checks)
+	if err := store.ValidateEnvironmentHealthChecks(e.ID, checks); err != nil {
+		return store.Environment{}, err
+	}
+	e = store.EnvironmentWithoutStructuredFiles(e, files)
+	e = store.EnvironmentWithoutStructuredRuntimeMetadata(e, services, checks)
 	e, err = store.PrepareEnvironmentForUpsert(e, utcNow())
 	if err != nil {
 		return store.Environment{}, err
 	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return store.Environment{}, err
+	}
+	defer rollbackTxOnError(tx, &err)
+	if err := s.upsertEnvironment(ctx, tx, e); err != nil {
+		return store.Environment{}, err
+	}
+	if err := s.replaceEnvironmentFilesTx(ctx, tx, e.ID, files); err != nil {
+		return store.Environment{}, err
+	}
+	if err := s.replaceEnvironmentServicesTx(ctx, tx, e.ID, services); err != nil {
+		return store.Environment{}, err
+	}
+	if err := s.replaceEnvironmentHealthChecksTx(ctx, tx, e.ID, checks); err != nil {
+		return store.Environment{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return store.Environment{}, err
+	}
+	return e, nil
+}
+
+func (s *Store) upsertEnvironment(ctx context.Context, execer sqlExecer, e store.Environment) error {
 	query := fmt.Sprintf(`
 insert into environments (
   id, display_name, description, status, verified, services_json, repos_json, compose_json,
@@ -27,15 +76,15 @@ values (%s)
 		"health_checks_json", "verification_workflow_id", "last_verification_run_id", "last_verification_status",
 		"evidence_complete", "topology_complete", "last_verified_at", "summary_json", "updated_at",
 	}))
-	if _, err := s.db.ExecContext(ctx, query,
+	if _, err := execer.ExecContext(ctx, query,
 		e.ID, e.DisplayName, e.Description, e.Status, e.Verified, stringDefault(e.ServicesJSON, "[]"),
 		stringDefault(e.ReposJSON, "{}"), stringDefault(e.ComposeJSON, "{}"), stringDefault(e.HealthChecksJSON, "[]"),
 		e.VerificationWorkflowID, e.LastVerificationRunID, e.LastVerificationStatus, e.EvidenceComplete, e.TopologyComplete,
 		dbTimeArg(s.dialect, e.LastVerifiedAt), stringDefault(e.SummaryJSON, "{}"), dbTimeArg(s.dialect, e.CreatedAt), dbTimeArg(s.dialect, e.UpdatedAt),
 	); err != nil {
-		return store.Environment{}, fmt.Errorf("upsert environment %q: %w", e.ID, err)
+		return fmt.Errorf("upsert environment %q: %w", e.ID, err)
 	}
-	return e, nil
+	return nil
 }
 
 func (s *Store) GetEnvironment(ctx context.Context, id string) (store.Environment, error) {
@@ -44,15 +93,29 @@ select id, display_name, description, status, verified, services_json, repos_jso
   health_checks_json, verification_workflow_id, last_verification_run_id, last_verification_status,
   evidence_complete, topology_complete, last_verified_at, summary_json, created_at, updated_at
 from environments where id = %s;`, s.dialect.BindVar(1))
-	return scanEnvironment(s.db.QueryRowContext(ctx, query, id))
+	env, err := scanEnvironment(s.db.QueryRowContext(ctx, query, id))
+	if err != nil {
+		return store.Environment{}, err
+	}
+	return store.HydrateEnvironmentStructuredState(ctx, s, env)
 }
 
 func (s *Store) ListEnvironments(ctx context.Context) ([]store.Environment, error) {
-	return queryStoreRows(ctx, s.db, `
+	items, err := queryStoreRows(ctx, s.db, `
 select id, display_name, description, status, verified, services_json, repos_json, compose_json,
   health_checks_json, verification_workflow_id, last_verification_run_id, last_verification_status,
   evidence_complete, topology_complete, last_verified_at, summary_json, created_at, updated_at
 from environments order by verified desc, updated_at desc, id;`, scanEnvironment)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		items[i], err = store.HydrateEnvironmentStructuredState(ctx, s, items[i])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
 }
 
 func (s *Store) ReplaceEnvironmentComponentGraph(ctx context.Context, envID string, graph store.EnvironmentComponentGraph) (err error) {
@@ -72,12 +135,7 @@ func (s *Store) ReplaceEnvironmentComponentGraph(ctx context.Context, envID stri
 	}
 	now := utcNow()
 	for _, component := range graph.Components {
-		if component.CreatedAt.IsZero() {
-			component.CreatedAt = now
-		}
-		if component.UpdatedAt.IsZero() {
-			component.UpdatedAt = now
-		}
+		applyAuditTimeDefaults(&component.CreatedAt, &component.UpdatedAt, now)
 		query := fmt.Sprintf(`
 insert into environment_components (
   env_id, component_id, display_name, kind, role, compose_service, image, required,
@@ -92,12 +150,7 @@ insert into environment_components (
 		}
 	}
 	for _, dep := range graph.Dependencies {
-		if dep.CreatedAt.IsZero() {
-			dep.CreatedAt = now
-		}
-		if dep.UpdatedAt.IsZero() {
-			dep.UpdatedAt = now
-		}
+		applyAuditTimeDefaults(&dep.CreatedAt, &dep.UpdatedAt, now)
 		query := fmt.Sprintf(`
 insert into component_dependencies (
   env_id, consumer_component_id, provider_component_id, phase, capability, required,
@@ -111,12 +164,7 @@ insert into component_dependencies (
 		}
 	}
 	for _, asset := range graph.Assets {
-		if asset.CreatedAt.IsZero() {
-			asset.CreatedAt = now
-		}
-		if asset.UpdatedAt.IsZero() {
-			asset.UpdatedAt = now
-		}
+		applyAuditTimeDefaults(&asset.CreatedAt, &asset.UpdatedAt, now)
 		if strings.TrimSpace(asset.TargetComponentID) == "" {
 			asset.TargetComponentID = asset.OwnerComponentID
 		}
@@ -233,50 +281,34 @@ func scanEnvironment(row scanner) (store.Environment, error) {
 
 func scanEnvironmentComponent(row scanner) (store.EnvironmentComponent, error) {
 	var item store.EnvironmentComponent
-	var createdAt, updatedAt any
-	if err := row.Scan(
+	if err := scanRowWithAuditTimes(row, []any{
 		&item.EnvID, &item.ComponentID, &item.DisplayName, &item.Kind, &item.Role, &item.ComposeService,
 		&item.Image, &item.Required, &item.RuntimeJSON, &item.HealthCheckJSON, &item.SummaryJSON,
-		&createdAt, &updatedAt,
-	); err != nil {
+	}, &item.CreatedAt, &item.UpdatedAt, &item.RuntimeJSON, &item.HealthCheckJSON, &item.SummaryJSON); err != nil {
 		return store.EnvironmentComponent{}, err
 	}
-	item.RuntimeJSON = normalizeJSONText(item.RuntimeJSON)
-	item.HealthCheckJSON = normalizeJSONText(item.HealthCheckJSON)
-	item.SummaryJSON = normalizeJSONText(item.SummaryJSON)
-	item.CreatedAt = decodeDBTime(createdAt)
-	item.UpdatedAt = decodeDBTime(updatedAt)
 	return item, nil
 }
 
 func scanComponentDependency(row scanner) (store.ComponentDependency, error) {
 	var item store.ComponentDependency
-	var createdAt, updatedAt any
-	if err := row.Scan(
+	if err := scanRowWithAuditTimes(row, []any{
 		&item.EnvID, &item.ConsumerComponentID, &item.ProviderComponentID, &item.Phase, &item.Capability,
-		&item.Required, &item.ProfileJSON, &createdAt, &updatedAt,
-	); err != nil {
+		&item.Required, &item.ProfileJSON,
+	}, &item.CreatedAt, &item.UpdatedAt, &item.ProfileJSON); err != nil {
 		return store.ComponentDependency{}, err
 	}
-	item.ProfileJSON = normalizeJSONText(item.ProfileJSON)
-	item.CreatedAt = decodeDBTime(createdAt)
-	item.UpdatedAt = decodeDBTime(updatedAt)
 	return item, nil
 }
 
 func scanComponentConfigAsset(row scanner) (store.ComponentConfigAsset, error) {
 	var item store.ComponentConfigAsset
-	var createdAt, updatedAt any
-	if err := row.Scan(
+	if err := scanRowWithAuditTimes(row, []any{
 		&item.EnvID, &item.OwnerComponentID, &item.AssetID, &item.AssetKind, &item.TargetComponentID,
 		&item.TargetPath, &item.ContentInline, &item.RemoteRefJSON, &item.SHA256, &item.SizeBytes,
-		&item.ApplyOrder, &item.Sensitive, &item.SummaryJSON, &createdAt, &updatedAt,
-	); err != nil {
+		&item.ApplyOrder, &item.Sensitive, &item.SummaryJSON,
+	}, &item.CreatedAt, &item.UpdatedAt, &item.RemoteRefJSON, &item.SummaryJSON); err != nil {
 		return store.ComponentConfigAsset{}, err
 	}
-	item.RemoteRefJSON = normalizeJSONText(item.RemoteRefJSON)
-	item.SummaryJSON = normalizeJSONText(item.SummaryJSON)
-	item.CreatedAt = decodeDBTime(createdAt)
-	item.UpdatedAt = decodeDBTime(updatedAt)
 	return item, nil
 }

@@ -86,7 +86,7 @@ func TestProfileVerifyCommandAuditsPublishesAndChecksReadModels(t *testing.T) {
 			t.Fatalf("profile verify check = %#v", check)
 		}
 	}
-	if got := sqliteScalar(t, dbPath, "select value from kv where key = 'active_profile_id';"); got != "empty" {
+	if got := sqliteScalar(t, dbPath, "select profile_id from config_versions where active = 1;"); got != "empty" {
 		t.Fatalf("active profile id after verify = %q", got)
 	}
 }

@@ -118,10 +118,45 @@ func TestEnvironmentMigrationApplyPersistsStatusForPlan(t *testing.T) {
 	}
 }
 
+func TestEnvironmentMigrationApplyStopsAfterFirstFailure(t *testing.T) {
+	fixture := writeEnvironmentMigrationStoreFixture(t)
+	seedEnvironmentMigrationAsset(t, fixture.storePath)
+	seedEnvironmentMigrationAssetVersion(t, fixture.storePath, "0012", "add risk flag", "ALTER TABLE app_result ADD COLUMN risk_flag VARCHAR(16) NULL;\n")
+	dockerEnv, callsPath := fakeDockerCommandFailingMigrationExec(t)
+
+	out := runCLIFailsWithEnv(t, dockerEnv, "environment", "migration", "apply", "env.migration",
+		"--store", "sqlite://"+fixture.storePath,
+		"--edge", "app:mysql",
+		"--database", "app_db",
+		"--workspace", fixture.workspace,
+		"--execute",
+		"--json",
+	)
+	report := decodeEnvironmentMigrationReport(t, extractJSONObject(t, out))
+	if report.OK || report.Count != 2 || len(report.Migrations) != 2 {
+		t.Fatalf("failed migration report = %#v", report)
+	}
+	if report.Migrations[0].OK || report.Migrations[0].Error == "" {
+		t.Fatalf("first migration should fail: %#v", report.Migrations[0])
+	}
+	if !report.Migrations[1].OK || report.Migrations[1].Status != "pending" || report.Migrations[1].Attempts != 0 {
+		t.Fatalf("second migration should remain unexecuted pending: %#v", report.Migrations[1])
+	}
+	rawCalls, err := os.ReadFile(callsPath)
+	if err != nil {
+		t.Fatalf("read docker calls: %v", err)
+	}
+	if strings.Count(string(rawCalls), "exec -T mysql") != 1 {
+		t.Fatalf("migration apply should stop after first failure:\n%s", rawCalls)
+	}
+}
+
 func TestEnvironmentMigrationApplyStreamJSONEmitsAgentEvents(t *testing.T) {
 	fixture := writeEnvironmentMigrationStoreFixture(t)
 	seedEnvironmentMigrationAsset(t, fixture.storePath)
 	dockerEnv, _, _ := fakeDockerCommandCapturingExecStdin(t)
+	dockerEnv = append(dockerEnv, "AGENT_TESTBENCH_FAKE_DOCKER_EXEC_SLEEP=0.05")
+	dockerEnv = append(dockerEnv, "AGENT_TESTBENCH_MIGRATION_PROGRESS_INTERVAL_MS=1")
 
 	out := runCLIWithEnv(t, dockerEnv, "environment", "migration", "apply", "env.migration",
 		"--store", "sqlite://"+fixture.storePath,
@@ -143,6 +178,9 @@ func TestEnvironmentMigrationApplyStreamJSONEmitsAgentEvents(t *testing.T) {
 	}
 	if !agentStreamHasEvent(events, "tool_call_started", "command", "started", "docker compose exec") {
 		t.Fatalf("stream missing docker compose exec start: %#v", events)
+	}
+	if !agentStreamHasEvent(events, "tool_observation", "environment.migration", "waiting", "app.mysql.migration.0011") {
+		t.Fatalf("stream missing migration waiting observation: %#v", events)
 	}
 	last := events[len(events)-1]
 	report := mapFromReportAny(last["report"])
@@ -223,7 +261,7 @@ func TestEnvironmentMigrationThroughVersionUsesNumericOrder(t *testing.T) {
 		t.Fatalf("version 0002 should not be after 0010")
 	}
 	if !environmentMigrationVersionAfter("B", 0, "A") {
-		t.Fatalf("non-numeric versions should fall back to lexical order")
+		t.Fatalf("non-numeric versions should use lexical order")
 	}
 }
 
@@ -420,14 +458,19 @@ func writeEnvironmentMigrationStoreFixture(t *testing.T) environmentMigrationSto
 
 func seedEnvironmentMigrationAsset(t *testing.T, storePath string) {
 	t.Helper()
-	sqlPath := filepath.Join(t.TempDir(), "V0011__add_score.sql")
-	writeFile(t, sqlPath, "ALTER TABLE app_result ADD COLUMN score DECIMAL(10,2) NULL;\n")
+	seedEnvironmentMigrationAssetVersion(t, storePath, "0011", "add score", "ALTER TABLE app_result ADD COLUMN score DECIMAL(10,2) NULL;\n")
+}
+
+func seedEnvironmentMigrationAssetVersion(t *testing.T, storePath string, version string, description string, sql string) {
+	t.Helper()
+	sqlPath := filepath.Join(t.TempDir(), "V"+version+"__migration.sql")
+	writeFile(t, sqlPath, sql)
 	runCLI(t, "environment", "migration", "add", "env.migration",
 		"--store", "sqlite://"+storePath,
 		"--edge", "app:mysql",
 		"--database", "app_db",
-		"--version", "0011",
-		"--description", "add score",
+		"--version", version,
+		"--description", description,
 		"--file", sqlPath,
 		"--json",
 	)
@@ -456,6 +499,9 @@ if [[ "$1" == "compose" && "$2" == "version" ]]; then
   exit 0
 fi
 if [[ "$*" == *" exec -T mysql "* ]]; then
+  if [[ -n "${AGENT_TESTBENCH_FAKE_DOCKER_EXEC_SLEEP:-}" ]]; then
+    sleep "$AGENT_TESTBENCH_FAKE_DOCKER_EXEC_SLEEP"
+  fi
   cat >> "$MYSQL_STDIN_FILE"
   printf '\n-- agent-testbench-call-boundary --\n' >> "$MYSQL_STDIN_FILE"
 fi
@@ -472,4 +518,35 @@ fi
 		"DOCKER_CALLS_FILE=" + callsPath,
 		"MYSQL_STDIN_FILE=" + stdinPath,
 	}, callsPath, stdinPath
+}
+
+func fakeDockerCommandFailingMigrationExec(t *testing.T) ([]string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	callsPath := filepath.Join(dir, "docker-calls.txt")
+	dockerPath := filepath.Join(dir, "docker")
+	writeFile(t, dockerPath, `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
+if [[ "$1" == "compose" && "$2" == "version" ]]; then
+  printf 'Docker Compose version v2.0.0\n'
+  exit 0
+fi
+if [[ "$*" == *" exec -T mysql "* ]]; then
+  cat >/dev/null
+  printf 'ERROR 1064 (42000): syntax error\n' >&2
+  exit 1
+fi
+if [[ "$*" == *" ps -a --format json "* ]]; then
+  service="${@: -1}"
+  printf '{"Name":"%s","Service":"%s","State":"running","Health":"healthy"}\n' "$service" "$service"
+fi
+`)
+	if err := os.Chmod(dockerPath, 0o755); err != nil {
+		t.Fatalf("chmod fake docker: %v", err)
+	}
+	return []string{
+		"PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"DOCKER_CALLS_FILE=" + callsPath,
+	}, callsPath
 }

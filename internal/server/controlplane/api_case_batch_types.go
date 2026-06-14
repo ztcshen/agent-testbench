@@ -9,16 +9,17 @@ import (
 )
 
 type apiCaseBatchRunRequest struct {
-	RequestID      string                    `json:"requestId"`
-	EnvironmentID  string                    `json:"environmentId,omitempty"`
-	CaseIDs        []string                  `json:"caseIds"`
-	NodeIDs        []string                  `json:"nodeIds"`
-	WorkflowID     string                    `json:"workflowId"`
-	Suite          apiCaseBatchSuiteSelector `json:"suite,omitempty"`
-	BaseURL        string                    `json:"baseUrl"`
-	EvidenceDir    string                    `json:"evidenceDir"`
-	TimeoutSeconds int                       `json:"timeoutSeconds"`
-	Overrides      map[string]any            `json:"overrides"`
+	RequestID             string                    `json:"requestId"`
+	EnvironmentID         string                    `json:"environmentId,omitempty"`
+	EnvironmentAcceptance bool                      `json:"-"`
+	CaseIDs               []string                  `json:"caseIds"`
+	NodeIDs               []string                  `json:"nodeIds"`
+	WorkflowID            string                    `json:"workflowId"`
+	Suite                 apiCaseBatchSuiteSelector `json:"suite,omitempty"`
+	BaseURL               string                    `json:"baseUrl"`
+	EvidenceDir           string                    `json:"evidenceDir"`
+	TimeoutSeconds        int                       `json:"timeoutSeconds"`
+	Overrides             map[string]any            `json:"overrides"`
 }
 
 type apiCaseBatchSuiteSelector struct {

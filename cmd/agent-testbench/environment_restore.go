@@ -3,18 +3,23 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"agent-testbench/internal/domain/environmentfiles"
+	"agent-testbench/internal/domain/environmentsource"
+	"agent-testbench/internal/environmentprojection"
 	"agent-testbench/internal/server/controlplane"
 	"agent-testbench/internal/store"
 )
 
-const environmentRestoreAttemptLimit = 20
+const (
+	environmentRestoreAttemptLimit                      = 20
+	environmentRestoreDockerActionSkippedFileProjection = "skipped-due-to-file-projection"
+)
 
 type environmentRestoreReport struct {
 	OK                   bool                                         `json:"ok"`
@@ -34,6 +39,7 @@ type environmentRestoreReport struct {
 	Compose              map[string]any                               `json:"compose"`
 	HealthChecks         []any                                        `json:"healthChecks"`
 	Preflight            environmentRestorePreflight                  `json:"preflight"`
+	FileProjection       environmentfiles.ProjectionReport            `json:"fileProjection"`
 	Readiness            environmentRestoreReadiness                  `json:"readiness"`
 	Docker               environmentRestoreDockerReport               `json:"docker"`
 	Workflow             environmentRestoreWorkflowRun                `json:"workflow"`
@@ -43,29 +49,6 @@ type environmentRestoreReport struct {
 
 type environmentRestoreComponentGraph = controlplane.EnvironmentComponentGraphReadiness
 
-type environmentRestoreDockerCleanupOptions struct {
-	Requested             bool
-	IncludeImages         bool
-	Allowed               bool
-	UseExistingContainers bool
-	AssumeCleanDocker     bool
-}
-
-type environmentRestoreCommandOptions struct {
-	EnvironmentID    string
-	StoreRef         string
-	StoreURL         string
-	Workspace        string
-	Execute          bool
-	Pull             bool
-	PrepareReposOnly bool
-	HealthTimeout    time.Duration
-	Workflow         environmentRestoreWorkflowOptions
-	Cleanup          environmentRestoreDockerCleanupOptions
-	OutputFormat     string
-	JSONOutput       bool
-}
-
 type environmentRestoreBuildPlan struct {
 	WorkflowID           string
 	Workspace            string
@@ -74,149 +57,11 @@ type environmentRestoreBuildPlan struct {
 	ComponentGraph       store.EnvironmentComponentGraph
 	PackageSpec          environmentRestorePackageSpec
 	HealthChecks         []any
+	StoreFiles           []store.EnvironmentFile
 	ComponentGraphReport environmentRestoreComponentGraph
 	ComponentStartupPlan controlplane.EnvironmentComponentStartupPlan
 	AttemptedAt          time.Time
 	RemoteOnly           bool
-}
-
-func parseEnvironmentRestoreCommandOptions(args []string) (environmentRestoreCommandOptions, error) {
-	flags := flag.NewFlagSet("environment restore", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	workspace := flags.String("workspace", "", "Local workspace for cloned or existing service checkouts")
-	execute := flags.Bool("execute", false, "Clone or update component repositories, run Docker Compose, and wait for health checks")
-	pull := flags.Bool("pull", false, "Run git pull --ff-only for existing checkouts when --execute is set")
-	prepareReposOnly := flags.Bool("prepare-repos-only", false, "When --execute is set, clone or validate repositories and stop before Docker startup")
-	runWorkflow := flags.Bool("run-workflow", false, "Run the environment verification workflow after Docker health checks pass")
-	serverURL := flags.String("server-url", "", "Running control plane base URL for async environment acceptance")
-	baseURL := flags.String("base-url", "", "Base URL for verification workflow execution")
-	workflowOutputDir := flags.String("workflow-output-dir", "", "Verification workflow report output directory")
-	acceptanceTimeoutSeconds := flags.Int("acceptance-timeout-seconds", 120, "Seconds to wait for async environment acceptance report")
-	healthTimeoutSeconds := flags.Int("health-timeout-seconds", 60, "Seconds to wait for recorded Docker service health checks")
-	useExistingContainers := flags.Bool("use-existing-containers", false, "Adopt already-running fixed-name Docker containers instead of running Docker Compose up")
-	assumeCleanDocker := flags.Bool("assume-clean-docker", false, "Dry-run as a colleague/new machine with no existing target Docker containers")
-	cleanDockerState := flags.Bool("clean-docker-state", false, "Plan or run Docker Compose cleanup before startup")
-	cleanDockerImages := flags.Bool("clean-docker-images", false, "Include Docker Compose image removal in cleanup plan")
-	allowDestructiveDockerCleanup := flags.Bool("allow-destructive-docker-cleanup", false, "Allow --execute to run requested Docker cleanup commands")
-	outputFormat := flags.String("output-format", "", "Output format: text, json, or stream-json")
-	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := parseInterspersedFlags(flags, args); err != nil {
-		return environmentRestoreCommandOptions{}, err
-	}
-	id := strings.TrimSpace(flags.Arg(0))
-	if id == "" {
-		return environmentRestoreCommandOptions{}, errors.New("environment id is required")
-	}
-	if err := validateEnvironmentRestoreCommandFlags(environmentRestoreCommandFlagValues{
-		workspace:                *workspace,
-		execute:                  *execute,
-		prepareReposOnly:         *prepareReposOnly,
-		runWorkflow:              *runWorkflow,
-		serverURL:                *serverURL,
-		healthTimeoutSeconds:     *healthTimeoutSeconds,
-		acceptanceTimeoutSeconds: *acceptanceTimeoutSeconds,
-		useExistingContainers:    *useExistingContainers,
-		assumeCleanDocker:        *assumeCleanDocker,
-		cleanDockerState:         *cleanDockerState,
-		cleanDockerImages:        *cleanDockerImages,
-	}); err != nil {
-		return environmentRestoreCommandOptions{}, err
-	}
-	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
-	if err != nil {
-		return environmentRestoreCommandOptions{}, err
-	}
-	resolvedOutputFormat, err := resolveCLIOutputFormat(*outputFormat, *jsonOutput)
-	if err != nil {
-		return environmentRestoreCommandOptions{}, err
-	}
-	return environmentRestoreCommandOptions{
-		EnvironmentID:    id,
-		StoreRef:         *storeRef,
-		StoreURL:         resolvedStoreURL,
-		Workspace:        *workspace,
-		Execute:          *execute,
-		Pull:             *pull,
-		PrepareReposOnly: *prepareReposOnly,
-		HealthTimeout:    time.Duration(*healthTimeoutSeconds) * time.Second,
-		Workflow: environmentRestoreWorkflowOptions{
-			Run:            *runWorkflow,
-			StoreRef:       *storeRef,
-			StoreURL:       resolvedStoreURL,
-			ServerURL:      *serverURL,
-			BaseURL:        *baseURL,
-			OutputDir:      *workflowOutputDir,
-			TimeoutSeconds: *acceptanceTimeoutSeconds,
-		},
-		Cleanup: environmentRestoreDockerCleanupOptions{
-			Requested:             *cleanDockerState || *cleanDockerImages,
-			IncludeImages:         *cleanDockerImages,
-			Allowed:               *allowDestructiveDockerCleanup,
-			UseExistingContainers: *useExistingContainers,
-			AssumeCleanDocker:     *assumeCleanDocker,
-		},
-		OutputFormat: resolvedOutputFormat,
-		JSONOutput:   resolvedOutputFormat == cliOutputFormatJSON,
-	}, nil
-}
-
-func resolveCLIOutputFormat(outputFormat string, jsonOutput bool) (string, error) {
-	outputFormat = strings.TrimSpace(outputFormat)
-	if outputFormat == "" {
-		outputFormat = cliOutputFormatText
-	}
-	if jsonOutput {
-		if outputFormat != cliOutputFormatText && outputFormat != cliOutputFormatJSON {
-			return "", errors.New("--json cannot be combined with --output-format " + outputFormat)
-		}
-		outputFormat = cliOutputFormatJSON
-	}
-	switch outputFormat {
-	case cliOutputFormatText, cliOutputFormatJSON, cliOutputFormatStreamJSON:
-		return outputFormat, nil
-	default:
-		return "", errors.New("--output-format must be text, json, or stream-json")
-	}
-}
-
-type environmentRestoreCommandFlagValues struct {
-	workspace                string
-	execute                  bool
-	prepareReposOnly         bool
-	runWorkflow              bool
-	serverURL                string
-	healthTimeoutSeconds     int
-	acceptanceTimeoutSeconds int
-	useExistingContainers    bool
-	assumeCleanDocker        bool
-	cleanDockerState         bool
-	cleanDockerImages        bool
-}
-
-func validateEnvironmentRestoreCommandFlags(values environmentRestoreCommandFlagValues) error {
-	checks := []struct {
-		invalid bool
-		message string
-	}{
-		{strings.TrimSpace(values.workspace) == "", "--workspace is required"},
-		{values.healthTimeoutSeconds <= 0, "--health-timeout-seconds must be positive"},
-		{values.runWorkflow && !values.execute, "--run-workflow requires --execute"},
-		{values.prepareReposOnly && !values.execute, "--prepare-repos-only requires --execute"},
-		{values.prepareReposOnly && values.runWorkflow, "--prepare-repos-only cannot be combined with --run-workflow"},
-		{values.useExistingContainers && (values.cleanDockerState || values.cleanDockerImages), "--use-existing-containers cannot be combined with Docker cleanup flags"},
-		{values.assumeCleanDocker && values.execute, "--assume-clean-docker is a dry-run planning mode and cannot be combined with --execute"},
-		{values.assumeCleanDocker && (values.useExistingContainers || values.cleanDockerState || values.cleanDockerImages), "--assume-clean-docker cannot be combined with Docker adoption or cleanup flags"},
-		{values.runWorkflow && strings.TrimSpace(values.serverURL) == "", "--run-workflow requires --server-url for async environment acceptance"},
-		{values.acceptanceTimeoutSeconds <= 0, "--acceptance-timeout-seconds must be positive"},
-	}
-	for _, check := range checks {
-		if check.invalid {
-			return errors.New(check.message)
-		}
-	}
-	return nil
 }
 
 func runEnvironmentRestore(ctx context.Context, args []string) error {
@@ -242,8 +87,20 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	files, err := runtime.ListEnvironmentFiles(ctx, env.ID)
+	if err != nil {
+		return err
+	}
+	services, err := runtime.ListEnvironmentServices(ctx, env.ID)
+	if err != nil {
+		return err
+	}
+	healthChecks, err := runtime.ListEnvironmentHealthChecks(ctx, env.ID)
+	if err != nil {
+		return err
+	}
 	options.Workflow.EnvironmentID = env.ID
-	report, err := buildEnvironmentRestoreReport(ctx, env, options.Workspace, options.Execute, options.Pull, options.PrepareReposOnly, options.HealthTimeout, options.Workflow, options.Cleanup, componentGraph)
+	report, err := buildEnvironmentRestoreReportWithStructuredState(ctx, env, options.Workspace, options.Execute, options.Pull, options.PrepareReposOnly, options.HealthTimeout, options.Workflow, options.Cleanup, files, services, healthChecks, componentGraph)
 	if err != nil {
 		return err
 	}
@@ -263,17 +120,26 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 }
 
 func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, workspace string, execute bool, pull bool, prepareReposOnly bool, healthTimeout time.Duration, workflowOptions environmentRestoreWorkflowOptions, cleanupOptions environmentRestoreDockerCleanupOptions, componentGraphs ...store.EnvironmentComponentGraph) (environmentRestoreReport, error) {
+	return buildEnvironmentRestoreReportWithFiles(ctx, env, workspace, execute, pull, prepareReposOnly, healthTimeout, workflowOptions, cleanupOptions, nil, componentGraphs...)
+}
+
+func buildEnvironmentRestoreReportWithFiles(ctx context.Context, env store.Environment, workspace string, execute bool, pull bool, prepareReposOnly bool, healthTimeout time.Duration, workflowOptions environmentRestoreWorkflowOptions, cleanupOptions environmentRestoreDockerCleanupOptions, files []store.EnvironmentFile, componentGraphs ...store.EnvironmentComponentGraph) (environmentRestoreReport, error) {
+	return buildEnvironmentRestoreReportWithStructuredState(ctx, env, workspace, execute, pull, prepareReposOnly, healthTimeout, workflowOptions, cleanupOptions, files, nil, nil, componentGraphs...)
+}
+
+func buildEnvironmentRestoreReportWithStructuredState(ctx context.Context, env store.Environment, workspace string, execute bool, pull bool, prepareReposOnly bool, healthTimeout time.Duration, workflowOptions environmentRestoreWorkflowOptions, cleanupOptions environmentRestoreDockerCleanupOptions, files []store.EnvironmentFile, services []store.EnvironmentService, checks []store.EnvironmentHealthCheck, componentGraphs ...store.EnvironmentComponentGraph) (environmentRestoreReport, error) {
 	workflowID := strings.TrimSpace(env.VerificationWorkflowID)
 	if workflowID == "" {
 		return environmentRestoreReport{}, fmt.Errorf("environment %s has no verification workflow; restore must be anchored to a verified workflow", env.ID)
 	}
-	plan, err := environmentRestoreBuildPlanFromEnvironment(env, workflowID, workspace, workflowOptions.StoreURL, componentGraphs...)
+	plan, err := environmentRestoreBuildPlanFromEnvironmentWithStructuredState(env, workflowID, workspace, workflowOptions.StoreURL, files, services, checks, componentGraphs...)
 	if err != nil {
 		return environmentRestoreReport{}, err
 	}
 	report := newEnvironmentRestoreReport(env, plan, execute, workflowOptions, cleanupOptions, prepareReposOnly)
 	environmentRestoreEmitRunStarted(ctx, report)
 	environmentRestoreAddSourceReports(ctx, &report, plan, execute, pull)
+	environmentRestoreApplyPreDockerReadinessGates(&report, cleanupOptions)
 	report.Docker = environmentRestoreDockerForReport(ctx, report, plan, execute, prepareReposOnly, healthTimeout, cleanupOptions)
 	if !report.Docker.OK {
 		report.OK = false
@@ -292,7 +158,7 @@ func buildEnvironmentRestoreReport(ctx context.Context, env store.Environment, w
 	return report, nil
 }
 
-func environmentRestoreBuildPlanFromEnvironment(env store.Environment, workflowID string, workspace string, storeURL string, componentGraphs ...store.EnvironmentComponentGraph) (environmentRestoreBuildPlan, error) {
+func environmentRestoreBuildPlanFromEnvironmentWithStructuredState(env store.Environment, workflowID string, workspace string, storeURL string, files []store.EnvironmentFile, services []store.EnvironmentService, checks []store.EnvironmentHealthCheck, componentGraphs ...store.EnvironmentComponentGraph) (environmentRestoreBuildPlan, error) {
 	workspace, err := filepath.Abs(strings.TrimSpace(workspace))
 	if err != nil {
 		return environmentRestoreBuildPlan{}, err
@@ -301,8 +167,16 @@ func environmentRestoreBuildPlanFromEnvironment(env store.Environment, workflowI
 	if len(componentGraphs) > 0 {
 		graph = componentGraphs[0]
 	}
-	compose := environmentRestoreComposeWithComponentAssets(env.ID, jsonObjectString(env.ComposeJSON), graph)
-	specs := environmentRestoreRepoSpecs(env, workspace)
+	env, err = environmentRestoreEnvironmentForPlan(env, services, checks)
+	if err != nil {
+		return environmentRestoreBuildPlan{}, err
+	}
+	compose, err := environmentRestoreComposeForPlan(env, files)
+	if err != nil {
+		return environmentRestoreBuildPlan{}, err
+	}
+	compose = environmentRestoreComposeWithComponentAssets(env.ID, compose, graph)
+	specs := environmentsource.RepoSpecs(env.ReposJSON, env.ServicesJSON, workspace)
 	compose = environmentRestoreComposeWithRepoCheckouts(compose, specs)
 	return environmentRestoreBuildPlan{
 		WorkflowID:           workflowID,
@@ -310,13 +184,34 @@ func environmentRestoreBuildPlanFromEnvironment(env store.Environment, workflowI
 		Specs:                specs,
 		Compose:              compose,
 		ComponentGraph:       graph,
-		PackageSpec:          environmentRestorePackageSpecFromCompose(compose, workspace),
+		PackageSpec:          environmentsource.PackageSpecFromCompose(compose, workspace),
 		HealthChecks:         environmentRestoreEffectiveHealthChecks(jsonArrayString(env.HealthChecksJSON), compose, graph, workspace),
+		StoreFiles:           store.NormalizeEnvironmentFiles(files),
 		ComponentGraphReport: environmentRestoreComponentGraphReport(env.ID, graph),
 		ComponentStartupPlan: controlplane.EnvironmentComponentStartupPlanReport(env.ID, graph),
 		AttemptedAt:          time.Now().UTC(),
 		RemoteOnly:           environmentRestoreRequiresRemoteSources(storeURL),
 	}, nil
+}
+
+func environmentRestoreEnvironmentForPlan(env store.Environment, services []store.EnvironmentService, checks []store.EnvironmentHealthCheck) (store.Environment, error) {
+	if len(services) == 0 && len(checks) == 0 {
+		return env, nil
+	}
+	return store.MergeEnvironmentRuntimeMetadataIntoJSON(env, services, checks)
+}
+
+func environmentRestoreComposeForPlan(env store.Environment, files []store.EnvironmentFile) (map[string]any, error) {
+	if len(files) == 0 {
+		return jsonObjectString(env.ComposeJSON), nil
+	}
+	base := env
+	base.ComposeJSON = mustCompactJSON(environmentComposeConfigWithoutMaterializedEnvironmentFiles(jsonObjectString(env.ComposeJSON), files))
+	projected, err := store.MergeEnvironmentFilesIntoComposeJSON(base, files)
+	if err != nil {
+		return nil, err
+	}
+	return jsonObjectString(projected.ComposeJSON), nil
 }
 
 func newEnvironmentRestoreReport(env store.Environment, plan environmentRestoreBuildPlan, execute bool, workflowOptions environmentRestoreWorkflowOptions, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool) environmentRestoreReport {
@@ -331,8 +226,9 @@ func newEnvironmentRestoreReport(env store.Environment, plan environmentRestoreB
 		HealthChecks:         plan.HealthChecks,
 		ComponentGraph:       plan.ComponentGraphReport,
 		ComponentStartupPlan: plan.ComponentStartupPlan,
-		Preflight:            environmentRestorePreflightReport(plan.PackageSpec, plan.Specs, plan.Compose, plan.Workspace, execute, cleanupOptions, prepareReposOnly),
-		SourcePolicy:         environmentRestoreSourcePolicyReport(plan.PackageSpec, plan.Specs, plan.RemoteOnly),
+		Preflight:            environmentRestorePreflightReport(plan.PackageSpec, plan.Specs, plan.Compose, plan.Workspace, execute, cleanupOptions, prepareReposOnly, plan.RemoteOnly),
+		FileProjection:       environmentRestoreFileProjection(env, plan),
+		SourcePolicy:         environmentsource.SourcePolicyReport(plan.Specs, plan.RemoteOnly),
 		Workflow: environmentRestoreWorkflowRun{
 			OK:         !workflowOptions.Run,
 			Action:     "not-requested",
@@ -352,6 +248,39 @@ func newEnvironmentRestoreReport(env store.Environment, plan environmentRestoreB
 		report.OK = false
 	}
 	return report
+}
+
+func environmentRestoreApplyPreDockerReadinessGates(report *environmentRestoreReport, cleanupOptions environmentRestoreDockerCleanupOptions) {
+	if environmentRestoreFileProjectionReadyForDocker(*report, cleanupOptions) {
+		return
+	}
+	report.OK = false
+	if strings.TrimSpace(report.Error) == "" {
+		report.Error = "file projection readiness did not pass before Docker startup"
+	}
+}
+
+func environmentRestoreFileProjectionReadyForDocker(report environmentRestoreReport, cleanupOptions environmentRestoreDockerCleanupOptions) bool {
+	if !environmentRestoreFileProjectionRequired(report, cleanupOptions) {
+		return true
+	}
+	if len(report.FileProjection.Files) == 0 && strings.TrimSpace(valueString(report.Compose["startCommand"])) != "" {
+		return true
+	}
+	return len(report.FileProjection.Files) > 0 && report.FileProjection.OK
+}
+
+func environmentRestoreFileProjection(env store.Environment, plan environmentRestoreBuildPlan) environmentfiles.ProjectionReport {
+	compose := plan.Compose
+	if plan.RemoteOnly {
+		compose = map[string]any{}
+		for key, value := range plan.Compose {
+			if key != "package" {
+				compose[key] = value
+			}
+		}
+	}
+	return environmentprojection.FromComposeWithEnvironmentFiles(compose, jsonObjectString(env.SummaryJSON), plan.ComponentGraph, plan.StoreFiles)
 }
 
 func environmentRestoreAddSourceReports(ctx context.Context, report *environmentRestoreReport, plan environmentRestoreBuildPlan, execute bool, pull bool) {
@@ -401,7 +330,7 @@ func environmentRestoreDockerForReport(ctx context.Context, report environmentRe
 		environmentRestoreEmitStep(ctx, "step_completed", "docker.restore", statusText(docker.OK), report.EnvironmentID, docker.Action, docker.Error)
 		return docker
 	}
-	docker = environmentRestoreSkippedDockerReport(report, plan.Workspace)
+	docker = environmentRestoreSkippedDockerReport(report, plan.Workspace, cleanupOptions)
 	environmentRestoreEmitStep(ctx, "step_completed", "docker.restore", statusText(docker.OK), report.EnvironmentID, docker.Action, docker.Error)
 	return docker
 }
@@ -437,21 +366,38 @@ func environmentRestorePrepareReposOnlyDockerReport(plan environmentRestoreBuild
 	return docker
 }
 
-func environmentRestoreSkippedDockerReport(report environmentRestoreReport, workspace string) environmentRestoreDockerReport {
-	if !report.Preflight.OK {
-		return environmentRestoreDockerReport{
-			OK:      false,
-			Action:  "skipped-due-to-preflight",
-			Workdir: workspace,
-			Error:   "restore preflight did not pass",
-		}
-	}
+func environmentRestoreSkippedDockerReport(report environmentRestoreReport, workspace string, cleanupOptions environmentRestoreDockerCleanupOptions) environmentRestoreDockerReport {
 	if !report.SourcePolicy.OK {
 		return environmentRestoreDockerReport{
 			OK:      false,
 			Action:  "skipped-due-to-source-policy",
 			Workdir: workspace,
 			Error:   "remote Git source policy did not pass",
+		}
+	}
+	if !environmentRestoreFileProjectionReadyForDocker(report, cleanupOptions) {
+		return environmentRestoreDockerReport{
+			OK:      false,
+			Action:  environmentRestoreDockerActionSkippedFileProjection,
+			Workdir: workspace,
+			Error:   "file projection readiness did not pass before Docker startup",
+		}
+	}
+	if !report.Preflight.OK {
+		if missing := environmentRestoreMissingComposeFile(report.Compose, workspace); missing != "" {
+			return environmentRestoreDockerReport{
+				OK:          false,
+				Action:      "missing-compose-file",
+				ComposeFile: missing,
+				Workdir:     workspace,
+				Error:       fmt.Sprintf("compose file is required before Docker execution: %s", missing),
+			}
+		}
+		return environmentRestoreDockerReport{
+			OK:      false,
+			Action:  "skipped-due-to-preflight",
+			Workdir: workspace,
+			Error:   "restore preflight did not pass",
 		}
 	}
 	return environmentRestoreDockerReport{
@@ -462,20 +408,45 @@ func environmentRestoreSkippedDockerReport(report environmentRestoreReport, work
 	}
 }
 
+func environmentRestoreMissingComposeFile(compose map[string]any, workspace string) string {
+	generated := generatedFileContentMapFromAny(compose["generatedFiles"])
+	for _, composeFile := range environmentRestoreComposeFiles(compose) {
+		clean := filepath.Clean(strings.TrimSpace(composeFile))
+		if clean == "" || clean == "." {
+			continue
+		}
+		if _, ok := generated[clean]; ok {
+			continue
+		}
+		resolved := restoreWorkspacePath(workspace, clean)
+		if stat, err := os.Stat(resolved); err != nil || stat.IsDir() {
+			return resolved
+		}
+	}
+	return ""
+}
+
 func environmentRestoreMaybeRunWorkflow(ctx context.Context, env *store.Environment, report *environmentRestoreReport, plan environmentRestoreBuildPlan, workflowOptions environmentRestoreWorkflowOptions) {
-	if report.OK && workflowOptions.Run {
-		report.Workflow = environmentRestoreRunWorkflow(ctx, plan.WorkflowID, plan.Workspace, workflowOptions)
-		if !report.Workflow.OK {
-			report.OK = false
-		}
-		if report.Workflow.RunID != "" {
-			env.LastVerificationRunID = report.Workflow.RunID
-			env.LastVerificationStatus = statusText(report.Workflow.OK)
-			env.EvidenceComplete = report.Workflow.OK && report.Workflow.Acceptance.OK
-			env.TopologyComplete = report.Workflow.OK && report.Workflow.Acceptance.OK
-			env.Verified = false
-			env.Status = "verification-recorded"
-		}
+	if !workflowOptions.Run {
+		return
+	}
+	if !report.OK {
+		environmentRestoreEmitStep(ctx, "step_completed", "workflow.acceptance", "skipped", plan.WorkflowID, "acceptance workflow skipped because environment restore is not ready", report.Error)
+		return
+	}
+	environmentRestoreEmitPhaseStarted(ctx, "workflow.acceptance", plan.WorkflowID, "running environment acceptance workflow")
+	report.Workflow = environmentRestoreRunWorkflow(ctx, plan.WorkflowID, plan.Workspace, workflowOptions)
+	environmentRestoreEmitPhaseCompleted(ctx, "workflow.acceptance", plan.WorkflowID, report.Workflow.OK, report.Workflow.Action, report.Workflow.Error)
+	if !report.Workflow.OK {
+		report.OK = false
+	}
+	if report.Workflow.RunID != "" {
+		env.LastVerificationRunID = report.Workflow.RunID
+		env.LastVerificationStatus = statusText(report.Workflow.OK)
+		env.EvidenceComplete = report.Workflow.OK && report.Workflow.Acceptance.OK
+		env.TopologyComplete = report.Workflow.OK && report.Workflow.Acceptance.OK
+		env.Verified = false
+		env.Status = "verification-recorded"
 	}
 }
 

@@ -22,6 +22,7 @@ const (
 	agentCommandStatusRunning   = "running"
 	agentCommandStatusCompleted = "completed"
 	agentCommandStatusFailed    = "failed"
+	agentCommandStatusWaiting   = "waiting"
 
 	dockerComposeCommandVersion = "version"
 )
@@ -191,6 +192,14 @@ func environmentMigrationReportError(report environmentMigrationReport) string {
 
 func environmentRestoreEmitStep(ctx context.Context, eventType string, phase string, status string, target string, message string, errText string) {
 	agentEmitStep(ctx, eventType, phase, status, target, message, errText)
+}
+
+func environmentRestoreEmitPhaseStarted(ctx context.Context, phase string, target string, message string) {
+	environmentRestoreEmitStep(ctx, "step_started", phase, "running", target, message, "")
+}
+
+func environmentRestoreEmitPhaseCompleted(ctx context.Context, phase string, target string, ok bool, message string, errText string) {
+	environmentRestoreEmitStep(ctx, "step_completed", phase, statusText(ok), target, message, errText)
 }
 
 func agentEmitStep(ctx context.Context, eventType string, phase string, status string, target string, message string, errText string) {

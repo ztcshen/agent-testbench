@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/environmentprojection"
 	"agent-testbench/internal/store"
 )
 
@@ -39,16 +40,25 @@ func handleEnvironmentCollection(w http.ResponseWriter, r *http.Request, runtime
 			writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
-		env, err := environmentFromAPIPayload(payload)
+		registration, err := environmentRegistrationFromAPIPayload(payload)
 		if err != nil {
 			writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
-		if err := validateEnvironmentVerificationWorkflow(env); err != nil {
+		if err := validateEnvironmentVerificationWorkflow(registration.env); err != nil {
 			writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
-		env, err = runtime.UpsertEnvironment(r.Context(), env)
+		env, err := runtime.UpsertEnvironment(r.Context(), registration.env)
+		if err != nil {
+			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		if err := replaceEnvironmentStructuredRegistration(r.Context(), runtime, env.ID, registration); err != nil {
+			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		env, err = runtime.GetEnvironment(r.Context(), env.ID)
 		if err != nil {
 			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 			return
@@ -89,7 +99,12 @@ func handleEnvironmentItem(w http.ResponseWriter, r *http.Request, runtime store
 		if !graphOK {
 			return
 		}
-		writeJSON(w, map[string]any{"ok": true, "environment": environmentAPIPayload(env), "componentGraph": EnvironmentComponentGraphReadinessReport(env.ID, componentGraph)})
+		files, filesOK := loadEnvironmentFilesAPI(w, r, runtime, id)
+		if !filesOK {
+			return
+		}
+		fileProjection := environmentprojection.FromEnvironmentWithEnvironmentFiles(env, componentGraph, files)
+		writeJSON(w, map[string]any{"ok": true, "environment": environmentAPIPayload(env), "componentGraph": EnvironmentComponentGraphReadinessReport(env.ID, componentGraph), "fileProjection": fileProjection})
 	case action == "bootstrap" && r.Method == http.MethodGet:
 		env, ok := loadEnvironmentAPI(w, r, runtime, id)
 		if !ok {
@@ -99,14 +114,21 @@ func handleEnvironmentItem(w http.ResponseWriter, r *http.Request, runtime store
 		if !graphOK {
 			return
 		}
+		files, filesOK := loadEnvironmentFilesAPI(w, r, runtime, id)
+		if !filesOK {
+			return
+		}
 		plan := EnvironmentBootstrapPlan(env)
 		componentReadiness := EnvironmentComponentGraphReadinessReport(env.ID, componentGraph)
 		componentStartupPlan := EnvironmentComponentStartupPlanReport(env.ID, componentGraph)
+		fileProjection := environmentprojection.FromEnvironmentWithEnvironmentFiles(env, componentGraph, files)
 		plan["componentGraph"] = componentReadiness
 		plan["componentStartupPlan"] = componentStartupPlan
+		plan["fileProjection"] = fileProjection
 		if restorePlan, ok := plan["restore"].(map[string]any); ok {
 			restorePlan["componentGraph"] = componentReadiness
 			restorePlan["componentStartupPlan"] = componentStartupPlan
+			restorePlan["fileProjection"] = fileProjection
 		}
 		writeJSON(w, map[string]any{"ok": true, "environment": environmentAPIPayload(env), "plan": plan})
 	case action == "verify" && r.Method == http.MethodPost:
@@ -116,6 +138,15 @@ func handleEnvironmentItem(w http.ResponseWriter, r *http.Request, runtime store
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+func loadEnvironmentFilesAPI(w http.ResponseWriter, r *http.Request, runtime store.Store, id string) ([]store.EnvironmentFile, bool) {
+	files, err := runtime.ListEnvironmentFiles(r.Context(), id)
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return nil, false
+	}
+	return files, true
 }
 
 func handleEnvironmentAcceptanceRuns(w http.ResponseWriter, r *http.Request, runtime store.Store, bundle profile.Bundle, runner *apiCaseBatchRunner, collector traceCollector, id string, parts []string) {
@@ -148,9 +179,10 @@ func handleEnvironmentAcceptanceRunStart(w http.ResponseWriter, r *http.Request,
 		requestID = "env-acceptance-" + time.Now().UTC().Format("20060102T150405.000000000Z")
 	}
 	request := apiCaseBatchRunRequest{
-		RequestID:     requestID,
-		EnvironmentID: env.ID,
-		WorkflowID:    env.VerificationWorkflowID,
+		RequestID:             requestID,
+		EnvironmentID:         env.ID,
+		EnvironmentAcceptance: true,
+		WorkflowID:            env.VerificationWorkflowID,
 	}
 	applyAPICaseBatchRunOptionsFromPayload(&request, payload)
 	report, status, err := startAPICaseBatchRun(r.Context(), bundle, runtime, runner, request, collector)
@@ -314,23 +346,49 @@ func loadEnvironmentComponentGraphAPI(w http.ResponseWriter, r *http.Request, ru
 	return graph, true
 }
 
-func environmentFromAPIPayload(payload map[string]any) (store.Environment, error) {
+type environmentAPIRegistration struct {
+	env          store.Environment
+	files        []store.EnvironmentFile
+	services     []store.EnvironmentService
+	healthChecks []store.EnvironmentHealthCheck
+}
+
+func environmentRegistrationFromAPIPayload(payload map[string]any) (environmentAPIRegistration, error) {
 	id := strings.TrimSpace(valueString(payload["id"]))
 	if id == "" {
-		return store.Environment{}, errors.New("id is required")
+		return environmentAPIRegistration{}, errors.New("id is required")
 	}
-	return store.Environment{
-		ID:                     id,
-		DisplayName:            strings.TrimSpace(valueString(payload["displayName"])),
-		Description:            strings.TrimSpace(valueString(payload["description"])),
-		Status:                 firstNonEmpty(strings.TrimSpace(valueString(payload["status"])), "draft"),
-		ServicesJSON:           compactJSON(defaultJSONArray(payload["services"])),
-		ReposJSON:              compactJSON(defaultJSONObject(payload["repos"])),
-		ComposeJSON:            compactJSON(defaultJSONObject(payload["compose"])),
-		HealthChecksJSON:       compactJSON(defaultJSONArray(payload["healthChecks"])),
-		VerificationWorkflowID: strings.TrimSpace(valueString(payload["verificationWorkflowId"])),
-		SummaryJSON:            compactJSON(defaultJSONObject(payload["summary"])),
+	compose := mapFromAny(defaultJSONObject(payload["compose"]))
+	services := arrayFromAny(defaultJSONArray(payload["services"]))
+	repos := mapFromAny(defaultJSONObject(payload["repos"]))
+	healthChecks := arrayFromAny(defaultJSONArray(payload["healthChecks"]))
+	return environmentAPIRegistration{
+		env: store.Environment{
+			ID:                     id,
+			DisplayName:            strings.TrimSpace(valueString(payload["displayName"])),
+			Description:            strings.TrimSpace(valueString(payload["description"])),
+			Status:                 firstNonEmpty(strings.TrimSpace(valueString(payload["status"])), "draft"),
+			ServicesJSON:           "[]",
+			ReposJSON:              "{}",
+			ComposeJSON:            compactJSON(store.EnvironmentComposeJSONWithoutGeneratedFiles(compose)),
+			HealthChecksJSON:       "[]",
+			VerificationWorkflowID: strings.TrimSpace(valueString(payload["verificationWorkflowId"])),
+			SummaryJSON:            compactJSON(defaultJSONObject(payload["summary"])),
+		},
+		files:        store.EnvironmentFilesFromComposeJSON(compose, "environment.api.register"),
+		services:     store.EnvironmentServicesFromJSON(services, repos, "environment.api.register"),
+		healthChecks: store.EnvironmentHealthChecksFromJSON(healthChecks, "environment.api.register"),
 	}, nil
+}
+
+func replaceEnvironmentStructuredRegistration(ctx context.Context, runtime store.Store, envID string, registration environmentAPIRegistration) error {
+	if err := runtime.ReplaceEnvironmentFiles(ctx, envID, registration.files); err != nil {
+		return err
+	}
+	if err := runtime.ReplaceEnvironmentServices(ctx, envID, registration.services); err != nil {
+		return err
+	}
+	return runtime.ReplaceEnvironmentHealthChecks(ctx, envID, registration.healthChecks)
 }
 
 func validateEnvironmentVerificationWorkflow(env store.Environment) error {
@@ -398,4 +456,11 @@ func defaultJSONArray(value any) any {
 		return []any{}
 	}
 	return value
+}
+
+func arrayFromAny(value any) []any {
+	if raw, ok := value.([]any); ok {
+		return raw
+	}
+	return []any{}
 }

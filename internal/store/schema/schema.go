@@ -6,9 +6,24 @@ type Change struct {
 	SQL     string
 }
 
-const CurrentVersion = 19
+const CurrentVersion = 21
 
-var changes = []Change{
+var changes = orderedChanges(coreChanges, environmentCatalogChanges, agentTaskChanges, environmentDockerChanges)
+
+func orderedChanges(groups ...[]Change) []Change {
+	var total int
+	for _, group := range groups {
+		total += len(group)
+	}
+
+	out := make([]Change, 0, total)
+	for _, group := range groups {
+		out = append(out, group...)
+	}
+	return out
+}
+
+var coreChanges = []Change{
 	{
 		Version: 1,
 		Name:    "create runtime store tables",
@@ -480,206 +495,6 @@ alter table evidence_records add column step_id text not null default '';
 
 create index if not exists idx_evidence_records_step
   on evidence_records(run_id, step_id, case_run_id, created_at, id);`,
-	},
-	{
-		Version: 15,
-		Name:    "add environment catalog",
-		SQL: `
-create table if not exists environments (
-  id text primary key,
-  display_name text not null default '',
-  description text not null default '',
-  status text not null default 'draft',
-  verified integer not null default 0,
-  services_json text not null default '[]',
-  repos_json text not null default '{}',
-  compose_json text not null default '{}',
-  health_checks_json text not null default '[]',
-  verification_workflow_id text not null default '',
-  last_verification_run_id text not null default '',
-  last_verification_status text not null default '',
-  evidence_complete integer not null default 0,
-  topology_complete integer not null default 0,
-  last_verified_at text,
-  summary_json text not null default '{}',
-  created_at text not null,
-  updated_at text not null
-);
-
-create index if not exists idx_environments_verified_status
-  on environments(verified, status, updated_at, id);
-
-create index if not exists idx_environments_verification
-  on environments(verification_workflow_id, last_verification_status, updated_at, id);`,
-	},
-	{
-		Version: 16,
-		Name:    "add environment component assets",
-		SQL: `
-create table if not exists environment_components (
-  env_id text not null,
-  component_id text not null,
-  display_name text not null default '',
-  kind text not null default '',
-  role text not null default '',
-  compose_service text not null default '',
-  image text not null default '',
-  required integer not null default 1,
-  runtime_json text not null default '{}',
-  healthcheck_json text not null default '{}',
-  summary_json text not null default '{}',
-  created_at text not null,
-  updated_at text not null,
-  primary key (env_id, component_id),
-  foreign key (env_id) references environments(id) on delete cascade
-);
-
-create index if not exists idx_environment_components_kind
-  on environment_components(env_id, kind, role, component_id);
-
-create table if not exists service_dependencies (
-  env_id text not null,
-  service_id text not null,
-  dependency_component_id text not null,
-  dependency_kind text not null default '',
-  required integer not null default 1,
-  profile_json text not null default '{}',
-  created_at text not null,
-  updated_at text not null,
-  primary key (env_id, service_id, dependency_component_id, dependency_kind),
-  foreign key (env_id, service_id) references environment_components(env_id, component_id) on delete cascade,
-  foreign key (env_id, dependency_component_id) references environment_components(env_id, component_id) on delete cascade
-);
-
-create index if not exists idx_service_dependencies_component
-  on service_dependencies(env_id, dependency_component_id, dependency_kind, service_id);
-
-create table if not exists service_config_assets (
-  env_id text not null,
-  service_id text not null,
-  asset_id text not null,
-  asset_kind text not null default '',
-  target_component_id text not null default '',
-  target_path text not null default '',
-  content_inline text not null default '',
-  remote_ref_json text not null default '{}',
-  sha256 text not null default '',
-  size_bytes integer not null default 0,
-  apply_order integer not null default 0,
-  sensitive integer not null default 0,
-  summary_json text not null default '{}',
-  created_at text not null,
-  updated_at text not null,
-  primary key (env_id, service_id, asset_id),
-  foreign key (env_id, service_id) references environment_components(env_id, component_id) on delete cascade,
-  foreign key (env_id, target_component_id) references environment_components(env_id, component_id) on delete cascade
-);
-
-create index if not exists idx_service_config_assets_target
-  on service_config_assets(env_id, target_component_id, asset_kind, apply_order, asset_id);
-
-create index if not exists idx_service_config_assets_service_order
-  on service_config_assets(env_id, service_id, apply_order, asset_id);`,
-	},
-	{
-		Version: 17,
-		Name:    "generalize environment component graph",
-		SQL: `
-create table if not exists component_dependencies (
-  env_id text not null,
-  consumer_component_id text not null,
-  provider_component_id text not null,
-  phase text not null default '',
-  capability text not null default '',
-  required integer not null default 1,
-  profile_json text not null default '{}',
-  created_at text not null,
-  updated_at text not null,
-  primary key (env_id, consumer_component_id, provider_component_id, phase, capability),
-  foreign key (env_id, consumer_component_id) references environment_components(env_id, component_id) on delete cascade,
-  foreign key (env_id, provider_component_id) references environment_components(env_id, component_id) on delete cascade
-);
-
-create index if not exists idx_component_dependencies_provider
-  on component_dependencies(env_id, provider_component_id, phase, capability, consumer_component_id);
-
-create index if not exists idx_component_dependencies_phase
-  on component_dependencies(env_id, phase, capability, consumer_component_id, provider_component_id);
-
-create table if not exists component_config_assets (
-  env_id text not null,
-  owner_component_id text not null,
-  asset_id text not null,
-  asset_kind text not null default '',
-  target_component_id text not null default '',
-  target_path text not null default '',
-  content_inline text not null default '',
-  remote_ref_json text not null default '{}',
-  sha256 text not null default '',
-  size_bytes integer not null default 0,
-  apply_order integer not null default 0,
-  sensitive integer not null default 0,
-  summary_json text not null default '{}',
-  created_at text not null,
-  updated_at text not null,
-  primary key (env_id, owner_component_id, asset_id),
-  foreign key (env_id, owner_component_id) references environment_components(env_id, component_id) on delete cascade,
-  foreign key (env_id, target_component_id) references environment_components(env_id, component_id) on delete cascade
-);
-
-create index if not exists idx_component_config_assets_target
-  on component_config_assets(env_id, target_component_id, asset_kind, apply_order, asset_id);
-
-create index if not exists idx_component_config_assets_owner_order
-  on component_config_assets(env_id, owner_component_id, apply_order, asset_id);`,
-	},
-	{
-		Version: 18,
-		Name:    "link workflow runs to environments",
-		SQL: `
-alter table runs add column environment_id text not null default '';`,
-	},
-	{
-		Version: 19,
-		Name:    "add agent task registry",
-		SQL: `
-create table if not exists agent_tasks (
-  id text primary key,
-  name text not null unique,
-  kind text not null default 'cli',
-  command text not null,
-  schedule text not null default '',
-  status text not null default 'active',
-  notify_json text not null default '{}',
-  summary_json text not null default '{}',
-  created_at text not null,
-  updated_at text not null
-);
-
-create index if not exists idx_agent_tasks_status_updated
-  on agent_tasks(status, updated_at, id);
-
-create table if not exists agent_task_runs (
-  id text primary key,
-  task_id text not null,
-  status text not null,
-  command text not null default '',
-  started_at text,
-  finished_at text,
-  duration_ms integer not null default 0,
-  exit_code integer not null default 0,
-  output text not null default '',
-  error text not null default '',
-  summary_json text not null default '{}',
-  created_at text not null,
-  foreign key (task_id) references agent_tasks(id) on delete cascade
-);
-
-create index if not exists idx_agent_task_runs_task_started
-  on agent_task_runs(task_id, started_at desc, id);
-
-create index if not exists idx_agent_task_runs_status_created
-  on agent_task_runs(status, created_at, id);`,
 	},
 }
 

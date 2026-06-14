@@ -20,6 +20,7 @@ func environmentRestoreReadinessReport(report environmentRestoreReport, packageS
 	environmentRestoreAddComponentReadiness(&builder, report)
 	environmentRestoreAddContainerConflictReadiness(&builder, report, cleanupOptions)
 	environmentRestoreAddSourceReadiness(&builder, report, packageSpec)
+	environmentRestoreAddFileProjectionReadiness(&builder, report, cleanupOptions)
 	startupAssetsOK, startupAssetsDetail := environmentRestoreStartupAssetsReadiness(report.Preflight.StartupAssets)
 	builder.add("startup-assets", true, startupAssetsOK, startupAssetsDetail)
 	environmentRestoreAddRepositoryReadiness(&builder, report, specs)
@@ -33,6 +34,39 @@ func environmentRestoreReadinessReport(report environmentRestoreReport, packageS
 	builder.add("operator-pause", true, true, "pause before deleting containers/images or running long image downloads for clean-machine validation")
 	environmentRestoreFinalizeReadiness(&readiness, report, cleanupOptions)
 	return readiness
+}
+
+func environmentRestoreAddFileProjectionReadiness(builder *environmentRestoreReadinessBuilder, report environmentRestoreReport, cleanupOptions environmentRestoreDockerCleanupOptions) {
+	projection := report.FileProjection
+	required := environmentRestoreFileProjectionRequired(report, cleanupOptions)
+	if len(projection.Files) == 0 {
+		if strings.TrimSpace(valueString(report.Compose["startCommand"])) != "" {
+			builder.add("file-projection", true, true, "restore uses a recorded start command; no file projection is required")
+			return
+		}
+		builder.add("file-projection", required, false, "restore has no file projection metadata; register Store-backed compose files, env files, or component assets")
+		return
+	}
+	if projection.OK {
+		builder.add("file-projection", true, true, fmt.Sprintf("%d referenced file(s), %d Store-backed projection(s)", projection.Counts.Referenced, projection.Counts.StoreBacked))
+		return
+	}
+	missing := make([]string, 0, len(projection.Missing))
+	for _, file := range projection.Missing {
+		missing = append(missing, file.Kind+":"+file.Path)
+	}
+	detail := "file references missing Store-backed projection rules: " + strings.Join(missing, ", ")
+	if !required {
+		detail += "; local workspace files can run this restore, but the environment is not clean-machine shareable yet"
+	}
+	builder.add("file-projection", required, false, detail)
+}
+
+func environmentRestoreFileProjectionRequired(report environmentRestoreReport, cleanupOptions environmentRestoreDockerCleanupOptions) bool {
+	if report.SourcePolicy.RemoteOnly || cleanupOptions.AssumeCleanDocker || cleanupOptions.Requested {
+		return true
+	}
+	return false
 }
 
 type environmentRestoreReadinessBuilder struct {
@@ -225,10 +259,16 @@ func environmentRestoreAddCleanupReadiness(builder *environmentRestoreReadinessB
 	cleanupDetail := "Docker cleanup not requested"
 	if cleanupOptions.Requested || report.Docker.Cleanup.Requested {
 		cleanupOK = report.Docker.Cleanup.Requested && len(report.Docker.Cleanup.BackupCommands) > 0 && len(report.Docker.Cleanup.Commands) > 0
+		if report.Docker.Cleanup.Linkage.Error != "" {
+			cleanupOK = false
+			cleanupDetail = report.Docker.Cleanup.Linkage.Error
+		}
 		if report.Executed && !report.Docker.Cleanup.Allowed {
 			cleanupOK = false
 		}
-		cleanupDetail = "Compose-scoped cleanup must be reviewed before simulating a clean colleague machine"
+		if cleanupDetail == "Docker cleanup not requested" {
+			cleanupDetail = "Compose-scoped cleanup must be reviewed before simulating a clean colleague machine"
+		}
 	}
 	builder.add("docker-cleanup-review", true, cleanupOK, cleanupDetail)
 }
@@ -281,6 +321,8 @@ func environmentRestoreReadinessDockerDetail(report environmentRestoreReport) st
 		return "repository preparation completed; Docker startup intentionally skipped"
 	case "skipped-due-to-source-policy":
 		return "Docker startup is blocked until package and component sources use remote Git URLs"
+	case environmentRestoreDockerActionSkippedFileProjection:
+		return "Docker startup is blocked until every referenced Compose file is Store-backed"
 	case "missing-docker-plan":
 		return "composeFile or startCommand is required"
 	default:
@@ -345,7 +387,7 @@ func environmentRestoreStoreStartupFilesReady(report environmentRestoreReport) (
 		}
 		return false, "composeFile or startCommand is required"
 	}
-	generated := stringMapFromAny(report.Compose["generatedFiles"])
+	generated := generatedFileContentMapFromAny(report.Compose["generatedFiles"])
 	missing := []string{}
 	for _, file := range composeFiles {
 		clean := filepath.Clean(strings.TrimSpace(file))
@@ -358,7 +400,7 @@ func environmentRestoreStoreStartupFilesReady(report environmentRestoreReport) (
 		missing = append(missing, file)
 	}
 	if len(missing) > 0 {
-		return false, "SQL Store restore must write compose startup files from compact Store metadata; missing generatedFiles for: " + strings.Join(missing, ", ")
+		return false, "SQL Store restore must write compose startup files from Store-backed file content; missing environment_files for: " + strings.Join(missing, ", ")
 	}
 	return true, fmt.Sprintf("%d compose startup file(s) will be generated from Store metadata", len(composeFiles))
 }
