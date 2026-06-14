@@ -159,6 +159,8 @@ func openDB(ctx context.Context, cfg Config) (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite store: %w", err)
 	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	if err := configureDB(ctx, db); err != nil {
 		closeSQLiteDB(db)
 		return nil, err

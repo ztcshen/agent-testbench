@@ -63,6 +63,9 @@ func normalizeLegacySchema(ctx context.Context, db *sql.DB) (bool, error) {
 			return false, fmt.Errorf("apply shared sqlite schema during legacy normalization: %w", err)
 		}
 	}
+	if err := ensureLegacySharedColumns(ctx, tx); err != nil {
+		return false, err
+	}
 	if err := migrateLegacyServiceGraph(ctx, tx); err != nil {
 		return false, err
 	}
@@ -134,7 +137,7 @@ insert or ignore into component_config_assets (
   summary_json, created_at, updated_at
 )
 select
-  env_id, service_id, asset_id, asset_kind, target_component_id, target_path,
+  env_id, service_id, asset_id, asset_kind, coalesce(nullif(target_component_id, ''), service_id), target_path,
   content_inline, remote_ref_json, sha256, size_bytes, apply_order, sensitive,
   summary_json, created_at, updated_at
 from service_config_assets;`); err != nil {
@@ -162,15 +165,100 @@ select
   coalesce(nullif(updated_at, ''), ?),
   json_object(
     'ProfileID', value,
-    'Services', json('[]'),
-    'Workflows', json('[]'),
-    'InterfaceNodes', json('[]'),
+    'Services', json(coalesce((select json_group_array(json_object(
+      'ID', id,
+      'DisplayName', display_name,
+      'Kind', role,
+      'AttachedTemplateIDs', json(attached_template_ids),
+      'GitURL', git_url,
+      'GitBranch', git_branch,
+      'RepoEnv', repo_env,
+      'ContainerName', container_name,
+      'Image', image,
+      'DockerService', docker_service,
+      'ServicePort', service_port,
+      'ManagementPort', management_port,
+      'MemoryMb', memory_mb,
+      'CPUMilli', cpu_milli,
+      'StartupCommand', startup_command,
+      'HealthURL', health_url,
+      'LogPath', log_path,
+      'Status', status,
+      'SortOrder', sort_order
+    )) from node_config), '[]')),
+    'Workflows', json(coalesce((select json_group_array(json_object(
+      'ID', id,
+      'DisplayName', name,
+      'Description', description
+    )) from workflow), '[]')),
+    'InterfaceNodes', json(coalesce((select json_group_array(json_object(
+      'ID', id,
+      'DisplayName', display_name,
+      'ServiceID', service_id,
+      'Operation', operation,
+      'Method', method,
+      'Path', path,
+      'TemplateID', template_id,
+      'Version', version,
+      'Status', status,
+      'Tags', json(tags_json),
+      'Description', description,
+      'SortOrder', sort_order,
+      'CreatedAt', created_at,
+      'UpdatedAt', updated_at
+    )) from interface_node), '[]')),
     'InterfaceFields', json('[]'),
-    'APICases', json('[]'),
-    'RequestTemplates', json('[]'),
-    'WorkflowBindings', json('[]'),
-    'CaseDependencies', json('[]'),
-    'Fixtures', json('[]'),
+    'APICases', json(coalesce((select json_group_array(json_object(
+      'ID', id,
+      'DisplayName', title,
+      'NodeID', node_id,
+      'CaseType', case_type,
+      'Scenario', scenario,
+      'PayloadTemplateJSON', payload_template_json,
+      'RequestTemplateID', request_template_id,
+      'PatchJSON', patch_json,
+      'RenderMode', render_mode,
+      'ExpectedJSON', expected_json,
+      'RequiredForAdmission', required_for_admission,
+      'Status', status,
+      'SortOrder', sort_order
+    )) from interface_node_case), '[]')),
+    'RequestTemplates', json(coalesce((select json_group_array(json_object(
+      'ID', id,
+      'DisplayName', name,
+      'NodeID', node_id,
+      'TemplateJSON', template_json,
+      'Version', version,
+      'Status', status,
+      'SortOrder', sort_order
+    )) from interface_node_request_template), '[]')),
+    'WorkflowBindings', json(coalesce((select json_group_array(json_object(
+      'WorkflowID', workflow_id,
+      'StepID', step_id,
+      'NodeID', node_id,
+      'CaseID', case_id,
+      'Required', required,
+      'SortOrder', sort_order
+    )) from workflow_interface_node), '[]')),
+    'CaseDependencies', json(coalesce((select json_group_array(json_object(
+      'ID', id,
+      'CaseID', case_id,
+      'FixtureID', fixture_profile_id,
+      'MappingsJSON', mappings_json,
+      'Required', required,
+      'Status', status,
+      'SortOrder', sort_order
+    )) from interface_node_case_dependency), '[]')),
+    'Fixtures', json(coalesce((select json_group_array(json_object(
+      'ID', id,
+      'DisplayName', name,
+      'Kind', source_type,
+      'SourceWorkflowID', source_workflow_id,
+      'SourceUntilStep', source_until_step,
+      'TTLSeconds', ttl_seconds,
+      'Status', status,
+      'SortOrder', sort_order
+    )) from fixture_profile), '[]')),
     'TemplateConfigs', json('[]')
   ),
   (select count(*) from node_config),
@@ -186,6 +274,27 @@ select
 from kv
 where key = 'active_profile_id' and value <> '';`, time.Now().UTC()); err != nil {
 		return fmt.Errorf("anchor legacy profile catalog: %w", err)
+	}
+	return nil
+}
+
+func ensureLegacySharedColumns(ctx context.Context, tx *sql.Tx) error {
+	hasRuns, err := txHasTable(ctx, tx, "runs")
+	if err != nil {
+		return err
+	}
+	if !hasRuns {
+		return nil
+	}
+	hasEnvironmentID, err := txHasColumn(ctx, tx, "runs", "environment_id")
+	if err != nil {
+		return err
+	}
+	if hasEnvironmentID {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, `alter table runs add column environment_id text not null default '';`); err != nil {
+		return fmt.Errorf("add missing legacy runs.environment_id column: %w", err)
 	}
 	return nil
 }
@@ -209,4 +318,30 @@ func txHasTable(ctx context.Context, tx *sql.Tx, table string) (bool, error) {
 		return false, fmt.Errorf("check sqlite table %q: %w", table, err)
 	}
 	return exists != 0, nil
+}
+
+func txHasColumn(ctx context.Context, tx *sql.Tx, table string, column string) (bool, error) {
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf("pragma table_info(%s);", sqlstore.SQLiteDialect{}.QuoteIdent(table)))
+	if err != nil {
+		return false, fmt.Errorf("list sqlite columns for %q: %w", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name string
+		var dataType string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &pk); err != nil {
+			return false, fmt.Errorf("scan sqlite column for %q: %w", table, err)
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("iterate sqlite columns for %q: %w", table, err)
+	}
+	return false, nil
 }

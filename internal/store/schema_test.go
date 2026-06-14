@@ -245,12 +245,46 @@ func TestSQLiteLegacySchemaMigratesToSharedCoreTableSet(t *testing.T) {
 	if got := sqliteCount(t, dbPath, "component_dependencies"); got != 1 {
 		t.Fatalf("migrated component dependency count = %d, want 1", got)
 	}
-	if got := sqliteCount(t, dbPath, "component_config_assets"); got != 1 {
-		t.Fatalf("migrated component config asset count = %d, want 1", got)
+	if got := sqliteCount(t, dbPath, "component_config_assets"); got != 2 {
+		t.Fatalf("migrated component config asset count = %d, want 2", got)
+	}
+	target := sqliteScalar(t, dbPath, `select target_component_id from component_config_assets where owner_component_id = 'app' and asset_id = 'owner-target';`)
+	if target != "app" {
+		t.Fatalf("blank legacy asset target should migrate to owner component, got %q", target)
+	}
+	catalogJSON := sqliteScalar(t, dbPath, `select catalog_json from profile_catalogs where profile_id = 'profile.legacy';`)
+	for _, want := range []string{"workflow.legacy", "node.alpha", "case.alpha", "template.alpha", "fixture.alpha"} {
+		if !strings.Contains(catalogJSON, want) {
+			t.Fatalf("legacy profile catalog should preserve %q in catalog_json: %s", want, catalogJSON)
+		}
+	}
+}
+
+func TestSQLiteLegacySchemaBeforeEnvironmentRunColumnNormalizesSharedColumns(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "legacy-before-env-run.sqlite")
+	createLegacySQLiteSchemaThroughVersion(t, dbPath, 17)
+	seedLegacyEnvironmentGraph(t, dbPath)
+
+	status, err := sqlite.UpgradeSchema(ctx, sqlite.Config{Path: dbPath})
+	if err != nil {
+		t.Fatalf("upgrade legacy sqlite schema: %v", err)
+	}
+	if status.CurrentVersion != sqlstore.CurrentSchemaVersion || status.HasPending() {
+		t.Fatalf("legacy upgraded status = %#v", status)
+	}
+	assertSQLiteCoreSchemaShape(t, dbPath)
+	if columns := sqliteTableColumns(t, dbPath, "runs"); !columns["environment_id"] {
+		t.Fatalf("legacy runs table missing environment_id after normalization: %#v", columns)
 	}
 }
 
 func createLegacySQLiteSchema(t *testing.T, dbPath string) {
+	t.Helper()
+	createLegacySQLiteSchemaThroughVersion(t, dbPath, schema.CurrentVersion)
+}
+
+func createLegacySQLiteSchemaThroughVersion(t *testing.T, dbPath string, maxVersion int) {
 	t.Helper()
 	createVersionTable := `
 create table if not exists schema_versions (
@@ -260,6 +294,9 @@ create table if not exists schema_versions (
 );`
 	sqliteExec(t, dbPath, createVersionTable)
 	for _, change := range schema.All() {
+		if change.Version > maxVersion {
+			break
+		}
 		sqliteExec(t, dbPath, change.SQL)
 		sqliteExec(t, dbPath, `insert into schema_versions (version, name, applied_at) values (`+sqliteInt(change.Version)+`, `+sqliteQuote(change.Name)+`, '2026-01-01T00:00:00Z');`)
 	}
@@ -294,10 +331,30 @@ insert into service_dependencies (
 insert into service_config_assets (
   env_id, service_id, asset_id, asset_kind, target_component_id, target_path, content_inline,
   remote_ref_json, sha256, size_bytes, apply_order, sensitive, summary_json, created_at, updated_at
-) values (
+) values
+(
   'env.legacy', 'app', 'schema', 'mysql-ddl', 'mysql', 'mysql/init/schema.sql', 'create database app;',
   '{}', 'abc123', 20, 1, 0, '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
+),
+(
+  'env.legacy', 'app', 'owner-target', 'env-file', '', 'app.env', 'APP_MODE=test',
+  '{}', 'def456', 13, 2, 0, '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
 );`)
+	sqliteExec(t, dbPath, `
+insert into kv (key, value, updated_at) values
+  ('active_profile_id', 'profile.legacy', '2026-01-01T00:00:00Z');
+insert into node_config (id, display_name, role, attached_template_ids, git_url, status, sort_order) values
+  ('node.alpha', 'Node Alpha', 'service', '[]', 'https://example.invalid/node-alpha.git', 'active', 1);
+insert into workflow (id, name, template_id, template_config_id, description, status, sort_order) values
+  ('workflow.legacy', 'Workflow Legacy', 'template.alpha', '', '', 'active', 1);
+insert into interface_node (id, display_name, service_id, operation, method, path, status, created_at, updated_at) values
+  ('iface.alpha', 'Interface Alpha', 'node.alpha', 'alpha', 'GET', '/alpha', 'active', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+insert into interface_node_case (id, node_id, title, case_type, scenario, payload_template_json, expected_json, created_at, updated_at) values
+  ('case.alpha', 'iface.alpha', 'Case Alpha', 'smoke', '', '{}', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+insert into interface_node_request_template (id, node_id, name, template_json, created_at, updated_at) values
+  ('template.alpha', 'iface.alpha', 'Template Alpha', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+insert into fixture_profile (id, name, description, created_at, updated_at) values
+  ('fixture.alpha', 'Fixture Alpha', '', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');`)
 }
 
 func sqliteTableNames(t *testing.T, dbPath string) map[string]bool {
@@ -335,6 +392,15 @@ func sqliteCount(t *testing.T, dbPath string, table string) int {
 		t.Fatalf("sqlite count rows for %s = %#v", table, rows)
 	}
 	return rows[0].Count
+}
+
+func sqliteScalar(t *testing.T, dbPath string, query string) string {
+	t.Helper()
+	out, err := exec.Command("sqlite3", "-noheader", dbPath, query).CombinedOutput()
+	if err != nil {
+		t.Fatalf("query sqlite scalar: %v: %s\n%s", err, out, query)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func sqliteTableColumns(t *testing.T, dbPath string, table string) map[string]bool {

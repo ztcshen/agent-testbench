@@ -18,7 +18,7 @@ func EnvironmentComposeJSONWithoutGeneratedFiles(compose map[string]any) map[str
 }
 
 func EnvironmentFilesFromComposeJSON(compose map[string]any, source string) []EnvironmentFile {
-	generated := stringMapFromJSONAny(compose["generatedFiles"])
+	generated := normalizedGeneratedFileContentMap(compose["generatedFiles"])
 	seen := map[string]bool{}
 	files := make([]EnvironmentFile, 0, len(generated))
 	add := func(kind string, path string, order int) {
@@ -56,6 +56,19 @@ func EnvironmentFilesFromComposeJSON(compose map[string]any, source string) []En
 		order++
 	}
 	return NormalizeEnvironmentFiles(files)
+}
+
+func normalizedGeneratedFileContentMap(value any) map[string]string {
+	raw := stringMapFromJSONAny(value)
+	out := make(map[string]string, len(raw))
+	for path, content := range raw {
+		cleanPath := cleanEnvironmentFilePath(path)
+		if cleanPath == "" {
+			continue
+		}
+		out[cleanPath] = content
+	}
+	return out
 }
 
 func EnvironmentFilesForGeneratedUpdates(compose map[string]any, generated map[string]string, source string) []EnvironmentFile {
