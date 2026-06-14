@@ -417,7 +417,7 @@ func environmentRestoreIsMySQLSQLAsset(asset store.ComponentConfigAsset, dep sto
 	hasMySQLToken := false
 	for _, token := range tokens {
 		switch token {
-		case "ddl", "schema", "seed", "sql":
+		case "ddl", "schema", environmentRestoreAssetTokenSeed, "sql":
 			hasSQLToken = true
 		case "mysql":
 			hasMySQLToken = true

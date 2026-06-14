@@ -219,7 +219,7 @@ func environmentRestoreObjectStorageKindSignal(kind string) bool {
 			objectCount++
 		case "storage":
 			hasStorage = true
-		case "s3", "bucket", "fixture", "seed":
+		case "s3", "bucket", "fixture", environmentRestoreAssetTokenSeed:
 			hasObjectFixture = true
 		}
 	}
@@ -240,7 +240,7 @@ func environmentRestoreObjectStorageKindIsProviderConfig(kind string) bool {
 		switch token {
 		case "config", "credential", "credentials", "env", "secret", "secrets", "setting", "settings", "policy":
 			hasConfig = true
-		case "s3", "bucket", "fixture", "seed":
+		case "s3", "bucket", "fixture", environmentRestoreAssetTokenSeed:
 			hasObjectFixture = true
 		case "object":
 			objectCount++

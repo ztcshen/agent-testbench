@@ -22,12 +22,7 @@ func (s *Store) ReplaceEnvironmentFiles(ctx context.Context, envID string, files
 	}
 	now := utcNow()
 	for _, file := range files {
-		if file.CreatedAt.IsZero() {
-			file.CreatedAt = now
-		}
-		if file.UpdatedAt.IsZero() {
-			file.UpdatedAt = now
-		}
+		applyAuditTimeDefaults(&file.CreatedAt, &file.UpdatedAt, now)
 		query := fmt.Sprintf(`
 insert into environment_files (
   env_id, file_path, file_kind, content_inline, required, apply_order,
@@ -69,15 +64,11 @@ order by apply_order, file_kind, file_path;`, s.dialect.BindVar(1)), envID)
 
 func scanEnvironmentFile(row scanner) (store.EnvironmentFile, error) {
 	var item store.EnvironmentFile
-	var createdAt, updatedAt any
-	if err := row.Scan(
+	if err := scanRowWithAuditTimes(row, []any{
 		&item.EnvID, &item.Path, &item.Kind, &item.ContentInline, &item.Required, &item.ApplyOrder,
-		&item.SummaryJSON, &createdAt, &updatedAt,
-	); err != nil {
+		&item.SummaryJSON,
+	}, &item.CreatedAt, &item.UpdatedAt, &item.SummaryJSON); err != nil {
 		return store.EnvironmentFile{}, err
 	}
-	item.SummaryJSON = normalizeJSONText(item.SummaryJSON)
-	item.CreatedAt = decodeDBTime(createdAt)
-	item.UpdatedAt = decodeDBTime(updatedAt)
 	return item, nil
 }

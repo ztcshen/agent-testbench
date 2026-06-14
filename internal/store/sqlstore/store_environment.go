@@ -86,12 +86,7 @@ func (s *Store) ReplaceEnvironmentComponentGraph(ctx context.Context, envID stri
 	}
 	now := utcNow()
 	for _, component := range graph.Components {
-		if component.CreatedAt.IsZero() {
-			component.CreatedAt = now
-		}
-		if component.UpdatedAt.IsZero() {
-			component.UpdatedAt = now
-		}
+		applyAuditTimeDefaults(&component.CreatedAt, &component.UpdatedAt, now)
 		query := fmt.Sprintf(`
 insert into environment_components (
   env_id, component_id, display_name, kind, role, compose_service, image, required,
@@ -106,12 +101,7 @@ insert into environment_components (
 		}
 	}
 	for _, dep := range graph.Dependencies {
-		if dep.CreatedAt.IsZero() {
-			dep.CreatedAt = now
-		}
-		if dep.UpdatedAt.IsZero() {
-			dep.UpdatedAt = now
-		}
+		applyAuditTimeDefaults(&dep.CreatedAt, &dep.UpdatedAt, now)
 		query := fmt.Sprintf(`
 insert into component_dependencies (
   env_id, consumer_component_id, provider_component_id, phase, capability, required,
@@ -125,12 +115,7 @@ insert into component_dependencies (
 		}
 	}
 	for _, asset := range graph.Assets {
-		if asset.CreatedAt.IsZero() {
-			asset.CreatedAt = now
-		}
-		if asset.UpdatedAt.IsZero() {
-			asset.UpdatedAt = now
-		}
+		applyAuditTimeDefaults(&asset.CreatedAt, &asset.UpdatedAt, now)
 		if strings.TrimSpace(asset.TargetComponentID) == "" {
 			asset.TargetComponentID = asset.OwnerComponentID
 		}
@@ -247,50 +232,34 @@ func scanEnvironment(row scanner) (store.Environment, error) {
 
 func scanEnvironmentComponent(row scanner) (store.EnvironmentComponent, error) {
 	var item store.EnvironmentComponent
-	var createdAt, updatedAt any
-	if err := row.Scan(
+	if err := scanRowWithAuditTimes(row, []any{
 		&item.EnvID, &item.ComponentID, &item.DisplayName, &item.Kind, &item.Role, &item.ComposeService,
 		&item.Image, &item.Required, &item.RuntimeJSON, &item.HealthCheckJSON, &item.SummaryJSON,
-		&createdAt, &updatedAt,
-	); err != nil {
+	}, &item.CreatedAt, &item.UpdatedAt, &item.RuntimeJSON, &item.HealthCheckJSON, &item.SummaryJSON); err != nil {
 		return store.EnvironmentComponent{}, err
 	}
-	item.RuntimeJSON = normalizeJSONText(item.RuntimeJSON)
-	item.HealthCheckJSON = normalizeJSONText(item.HealthCheckJSON)
-	item.SummaryJSON = normalizeJSONText(item.SummaryJSON)
-	item.CreatedAt = decodeDBTime(createdAt)
-	item.UpdatedAt = decodeDBTime(updatedAt)
 	return item, nil
 }
 
 func scanComponentDependency(row scanner) (store.ComponentDependency, error) {
 	var item store.ComponentDependency
-	var createdAt, updatedAt any
-	if err := row.Scan(
+	if err := scanRowWithAuditTimes(row, []any{
 		&item.EnvID, &item.ConsumerComponentID, &item.ProviderComponentID, &item.Phase, &item.Capability,
-		&item.Required, &item.ProfileJSON, &createdAt, &updatedAt,
-	); err != nil {
+		&item.Required, &item.ProfileJSON,
+	}, &item.CreatedAt, &item.UpdatedAt, &item.ProfileJSON); err != nil {
 		return store.ComponentDependency{}, err
 	}
-	item.ProfileJSON = normalizeJSONText(item.ProfileJSON)
-	item.CreatedAt = decodeDBTime(createdAt)
-	item.UpdatedAt = decodeDBTime(updatedAt)
 	return item, nil
 }
 
 func scanComponentConfigAsset(row scanner) (store.ComponentConfigAsset, error) {
 	var item store.ComponentConfigAsset
-	var createdAt, updatedAt any
-	if err := row.Scan(
+	if err := scanRowWithAuditTimes(row, []any{
 		&item.EnvID, &item.OwnerComponentID, &item.AssetID, &item.AssetKind, &item.TargetComponentID,
 		&item.TargetPath, &item.ContentInline, &item.RemoteRefJSON, &item.SHA256, &item.SizeBytes,
-		&item.ApplyOrder, &item.Sensitive, &item.SummaryJSON, &createdAt, &updatedAt,
-	); err != nil {
+		&item.ApplyOrder, &item.Sensitive, &item.SummaryJSON,
+	}, &item.CreatedAt, &item.UpdatedAt, &item.RemoteRefJSON, &item.SummaryJSON); err != nil {
 		return store.ComponentConfigAsset{}, err
 	}
-	item.RemoteRefJSON = normalizeJSONText(item.RemoteRefJSON)
-	item.SummaryJSON = normalizeJSONText(item.SummaryJSON)
-	item.CreatedAt = decodeDBTime(createdAt)
-	item.UpdatedAt = decodeDBTime(updatedAt)
 	return item, nil
 }

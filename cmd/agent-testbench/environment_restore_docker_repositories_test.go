@@ -143,7 +143,7 @@ func TestEnvironmentRestoreWritesStoreGeneratedComposeFileBeforeDocker(t *testin
 	if err := json.Unmarshal([]byte(dryRunOut), &dryRun); err != nil {
 		t.Fatalf("decode generated compose dry-run json: %v\n%s", err, dryRunOut)
 	}
-	if !dryRun.OK || len(dryRun.Docker.Generated) != 1 || dryRun.Docker.Generated[0].Action != "plan-write" || dryRun.Docker.Generated[0].Path != generatedPath || !dryRun.Docker.Generated[0].OK {
+	if !dryRun.OK || len(dryRun.Docker.Generated) != 1 || dryRun.Docker.Generated[0].Action != environmentRestoreGeneratedFileActionPlanWrite || dryRun.Docker.Generated[0].Path != generatedPath || !dryRun.Docker.Generated[0].OK {
 		t.Fatalf("generated compose dry-run = %#v", dryRun)
 	}
 	if _, err := os.Stat(generatedPath); !os.IsNotExist(err) {

@@ -160,14 +160,23 @@ func openDB(ctx context.Context, cfg Config) (*sql.DB, error) {
 		return nil, fmt.Errorf("open sqlite store: %w", err)
 	}
 	if err := configureDB(ctx, db); err != nil {
-		_ = db.Close()
+		closeSQLiteDB(db)
 		return nil, err
 	}
 	if err := db.PingContext(ctx); err != nil {
-		_ = db.Close()
+		closeSQLiteDB(db)
 		return nil, fmt.Errorf("ping sqlite store: %w", err)
 	}
 	return db, nil
+}
+
+func closeSQLiteDB(db *sql.DB) {
+	if db == nil {
+		return
+	}
+	if err := db.Close(); err != nil {
+		return
+	}
 }
 
 func configureDB(ctx context.Context, db *sql.DB) error {

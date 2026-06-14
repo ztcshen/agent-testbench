@@ -290,10 +290,6 @@ func environmentHealthCheckRows(urls stringListFlag, tcpAddresses stringListFlag
 	return out
 }
 
-func environmentHealthCheckRowsFromJSON(checks []any) []store.EnvironmentHealthCheck {
-	return store.EnvironmentHealthChecksFromJSON(checks, "environment.legacy-json")
-}
-
 func mergeEnvironmentFiles(existing []store.EnvironmentFile, updates []store.EnvironmentFile) []store.EnvironmentFile {
 	byKey := map[string]store.EnvironmentFile{}
 	for _, file := range existing {

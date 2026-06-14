@@ -22,12 +22,7 @@ func (s *Store) ReplaceEnvironmentServices(ctx context.Context, envID string, se
 	}
 	now := utcNow()
 	for _, service := range services {
-		if service.CreatedAt.IsZero() {
-			service.CreatedAt = now
-		}
-		if service.UpdatedAt.IsZero() {
-			service.UpdatedAt = now
-		}
+		applyAuditTimeDefaults(&service.CreatedAt, &service.UpdatedAt, now)
 		query := fmt.Sprintf(`
 insert into environment_services (
   env_id, service_id, repo_url, branch, ref, checkout,
@@ -82,12 +77,7 @@ func (s *Store) ReplaceEnvironmentHealthChecks(ctx context.Context, envID string
 	}
 	now := utcNow()
 	for _, check := range checks {
-		if check.CreatedAt.IsZero() {
-			check.CreatedAt = now
-		}
-		if check.UpdatedAt.IsZero() {
-			check.UpdatedAt = now
-		}
+		applyAuditTimeDefaults(&check.CreatedAt, &check.UpdatedAt, now)
 		query := fmt.Sprintf(`
 insert into environment_health_checks (
   env_id, check_id, check_kind, url, address, command, compose_service,
@@ -130,30 +120,22 @@ order by apply_order, check_id;`, s.dialect.BindVar(1)), envID)
 
 func scanEnvironmentService(row scanner) (store.EnvironmentService, error) {
 	var item store.EnvironmentService
-	var createdAt, updatedAt any
-	if err := row.Scan(
+	if err := scanRowWithAuditTimes(row, []any{
 		&item.EnvID, &item.ServiceID, &item.RepoURL, &item.Branch, &item.Ref, &item.Checkout,
-		&item.SummaryJSON, &createdAt, &updatedAt,
-	); err != nil {
+		&item.SummaryJSON,
+	}, &item.CreatedAt, &item.UpdatedAt, &item.SummaryJSON); err != nil {
 		return store.EnvironmentService{}, err
 	}
-	item.SummaryJSON = normalizeJSONText(item.SummaryJSON)
-	item.CreatedAt = decodeDBTime(createdAt)
-	item.UpdatedAt = decodeDBTime(updatedAt)
 	return item, nil
 }
 
 func scanEnvironmentHealthCheck(row scanner) (store.EnvironmentHealthCheck, error) {
 	var item store.EnvironmentHealthCheck
-	var createdAt, updatedAt any
-	if err := row.Scan(
+	if err := scanRowWithAuditTimes(row, []any{
 		&item.EnvID, &item.CheckID, &item.Kind, &item.URL, &item.Address, &item.Command, &item.ComposeService,
-		&item.Expect, &item.ApplyOrder, &item.SummaryJSON, &createdAt, &updatedAt,
-	); err != nil {
+		&item.Expect, &item.ApplyOrder, &item.SummaryJSON,
+	}, &item.CreatedAt, &item.UpdatedAt, &item.SummaryJSON); err != nil {
 		return store.EnvironmentHealthCheck{}, err
 	}
-	item.SummaryJSON = normalizeJSONText(item.SummaryJSON)
-	item.CreatedAt = decodeDBTime(createdAt)
-	item.UpdatedAt = decodeDBTime(updatedAt)
 	return item, nil
 }

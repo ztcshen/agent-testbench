@@ -59,7 +59,7 @@ func TestEnvironmentRestoreSQLStoreUsesStoreGeneratedStartupFiles(t *testing.T) 
 			if !report.SourcePolicy.OK || !report.SourcePolicy.RemoteOnly || report.Package.Action != "ignored-for-sql-store-restore" || report.Docker.Action != "plan-docker-compose" {
 				t.Fatalf("%s generated startup report = %#v", backend.name, report)
 			}
-			if len(report.Docker.Generated) != 1 || report.Docker.Generated[0].Action != "plan-write" || !report.Docker.Generated[0].OK {
+			if len(report.Docker.Generated) != 1 || report.Docker.Generated[0].Action != environmentRestoreGeneratedFileActionPlanWrite || !report.Docker.Generated[0].OK {
 				t.Fatalf("%s generated startup file report = %#v", backend.name, report.Docker.Generated)
 			}
 			if !restoreTypedReadinessHasItem(report.Readiness.Items, "store-startup-files", true, "generated from Store metadata") {

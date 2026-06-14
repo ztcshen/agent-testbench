@@ -117,7 +117,7 @@ func TestEnvironmentRestoreUsesStructuredEnvironmentFilesForDockerPlan(t *testin
 	}
 	generated := map[string]bool{}
 	for _, item := range report.Docker.Generated {
-		generated[filepath.ToSlash(item.Path)] = item.OK && item.Action == "plan-write"
+		generated[filepath.ToSlash(item.Path)] = item.OK && item.Action == environmentRestoreGeneratedFileActionPlanWrite
 	}
 	if !generated[filepath.ToSlash(filepath.Join(workspace, "compose/docker-compose.yml"))] || !generated[filepath.ToSlash(filepath.Join(workspace, "compose/runtime.env"))] {
 		t.Fatalf("structured files were not planned as generated files: %#v", report.Docker.Generated)
@@ -166,7 +166,7 @@ func TestEnvironmentRestorePreservesLegacyGeneratedFilesNotMaterializedInStore(t
 	}
 	planned := map[string]bool{}
 	for _, item := range report.Docker.Generated {
-		planned[filepath.ToSlash(item.Path)] = item.OK && item.Action == "plan-write"
+		planned[filepath.ToSlash(item.Path)] = item.OK && item.Action == environmentRestoreGeneratedFileActionPlanWrite
 	}
 	if !planned[filepath.ToSlash(filepath.Join(workspace, "compose/docker-compose.yml"))] || !planned[filepath.ToSlash(filepath.Join(workspace, "compose/legacy.env"))] {
 		t.Fatalf("mixed generated files were not both planned: %#v", report.Docker.Generated)

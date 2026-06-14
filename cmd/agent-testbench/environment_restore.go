@@ -158,14 +158,6 @@ func buildEnvironmentRestoreReportWithStructuredState(ctx context.Context, env s
 	return report, nil
 }
 
-func environmentRestoreBuildPlanFromEnvironment(env store.Environment, workflowID string, workspace string, storeURL string, componentGraphs ...store.EnvironmentComponentGraph) (environmentRestoreBuildPlan, error) {
-	return environmentRestoreBuildPlanFromEnvironmentWithFiles(env, workflowID, workspace, storeURL, nil, componentGraphs...)
-}
-
-func environmentRestoreBuildPlanFromEnvironmentWithFiles(env store.Environment, workflowID string, workspace string, storeURL string, files []store.EnvironmentFile, componentGraphs ...store.EnvironmentComponentGraph) (environmentRestoreBuildPlan, error) {
-	return environmentRestoreBuildPlanFromEnvironmentWithStructuredState(env, workflowID, workspace, storeURL, files, nil, nil, componentGraphs...)
-}
-
 func environmentRestoreBuildPlanFromEnvironmentWithStructuredState(env store.Environment, workflowID string, workspace string, storeURL string, files []store.EnvironmentFile, services []store.EnvironmentService, checks []store.EnvironmentHealthCheck, componentGraphs ...store.EnvironmentComponentGraph) (environmentRestoreBuildPlan, error) {
 	workspace, err := filepath.Abs(strings.TrimSpace(workspace))
 	if err != nil {

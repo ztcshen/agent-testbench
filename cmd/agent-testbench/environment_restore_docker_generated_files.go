@@ -7,7 +7,10 @@ import (
 	"strings"
 )
 
-const environmentRestoreGeneratedFileActionWrite = "write"
+const (
+	environmentRestoreGeneratedFileActionPlanWrite = "plan-write"
+	environmentRestoreGeneratedFileActionWrite     = "write"
+)
 
 type environmentRestoreGeneratedFile struct {
 	Path   string `json:"path"`
@@ -34,7 +37,7 @@ func prepareEnvironmentRestoreGeneratedFiles(compose map[string]any, workspace s
 		report := environmentRestoreGeneratedFile{
 			Path:   restoreWorkspacePath(workspace, path),
 			Bytes:  len(content),
-			Action: "plan-write",
+			Action: environmentRestoreGeneratedFileActionPlanWrite,
 			OK:     true,
 		}
 		if ok, errText := environmentRestoreGeneratedFileTargetOK(path, workspace); !ok {

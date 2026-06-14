@@ -68,6 +68,37 @@ func decodeDBTime(value any) time.Time {
 	}
 }
 
+func applyAuditTimeDefaults(createdAt *time.Time, updatedAt *time.Time, now time.Time) {
+	if createdAt.IsZero() {
+		*createdAt = now
+	}
+	if updatedAt.IsZero() {
+		*updatedAt = now
+	}
+}
+
+func applyDecodedAuditTimes(createdAt any, updatedAt any, targetCreatedAt *time.Time, targetUpdatedAt *time.Time) {
+	*targetCreatedAt = decodeDBTime(createdAt)
+	*targetUpdatedAt = decodeDBTime(updatedAt)
+}
+
+func scanRowWithAuditTimes(row scanner, fields []any, createdAt *time.Time, updatedAt *time.Time, jsonFields ...*string) error {
+	var createdRaw, updatedRaw any
+	targets := make([]any, 0, len(fields)+2)
+	targets = append(targets, fields...)
+	targets = append(targets, &createdRaw, &updatedRaw)
+	if err := row.Scan(targets...); err != nil {
+		return err
+	}
+	for _, field := range jsonFields {
+		if field != nil {
+			*field = normalizeJSONText(*field)
+		}
+	}
+	applyDecodedAuditTimes(createdRaw, updatedRaw, createdAt, updatedAt)
+	return nil
+}
+
 func scanStoreRowError(err error) error {
 	if err == sql.ErrNoRows {
 		return store.ErrNotFound

@@ -55,11 +55,7 @@ func normalizeLegacySchema(ctx context.Context, db *sql.DB) (bool, error) {
 		return false, fmt.Errorf("begin legacy sqlite schema normalization: %w", err)
 	}
 	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
+	defer rollbackLegacyTx(tx, &committed)
 
 	dialect := sqlstore.SQLiteDialect{}
 	for _, statement := range sqlstore.CoreSchemaSQL(dialect) {
@@ -96,6 +92,15 @@ values (?, ?, ?);`, sqlstore.CurrentSchemaVersion, sqlstore.CoreSchemaName, time
 	}
 	committed = true
 	return true, nil
+}
+
+func rollbackLegacyTx(tx *sql.Tx, committed *bool) {
+	if tx == nil || *committed {
+		return
+	}
+	if err := tx.Rollback(); err != nil {
+		return
+	}
 }
 
 func migrateLegacyServiceGraph(ctx context.Context, tx *sql.Tx) error {

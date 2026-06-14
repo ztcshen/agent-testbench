@@ -3,7 +3,8 @@ package sqlstore
 import "fmt"
 
 func coreEnvironmentCatalogSchemaSQL(d Dialect, types coreSchemaTypes) []string {
-	statements := []string{
+	statements := make([]string, 0, 16)
+	statements = append(statements,
 		fmt.Sprintf(`
 create table if not exists environments (
   id %s primary key,
@@ -86,7 +87,7 @@ create table if not exists component_config_assets (
 );`, types.keyText, types.keyText, types.keyText, types.keyText, types.keyText, types.text, types.text, types.jsonType, types.text, types.intType, types.intType, d.QuoteIdent("sensitive"), types.boolType, types.jsonType, types.timeType, types.timeType),
 		d.CreateIndexSQL("idx_component_config_assets_target", "component_config_assets", []string{"env_id", "target_component_id", "asset_kind", "apply_order", "asset_id"}),
 		d.CreateIndexSQL("idx_component_config_assets_owner_order", "component_config_assets", []string{"env_id", "owner_component_id", "apply_order", "asset_id"}),
-	}
+	)
 	statements = append(statements, coreEnvironmentFileSchemaSQL(d, types)...)
 	statements = append(statements, coreEnvironmentRuntimeMetadataSchemaSQL(d, types)...)
 	return statements
