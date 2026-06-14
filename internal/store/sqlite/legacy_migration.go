@@ -325,7 +325,7 @@ func txHasColumn(ctx context.Context, tx *sql.Tx, table string, column string) (
 	if err != nil {
 		return false, fmt.Errorf("list sqlite columns for %q: %w", table, err)
 	}
-	defer rows.Close()
+	defer closeSQLiteRows(rows)
 	for rows.Next() {
 		var cid int
 		var name string
@@ -344,4 +344,13 @@ func txHasColumn(ctx context.Context, tx *sql.Tx, table string, column string) (
 		return false, fmt.Errorf("iterate sqlite columns for %q: %w", table, err)
 	}
 	return false, nil
+}
+
+func closeSQLiteRows(rows *sql.Rows) {
+	if rows == nil {
+		return
+	}
+	if err := rows.Close(); err != nil {
+		return
+	}
 }
