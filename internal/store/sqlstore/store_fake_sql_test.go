@@ -39,11 +39,13 @@ type fakeRows struct {
 }
 
 type fakeSQLState struct {
-	mu       sync.Mutex
-	execs    []fakeSQLCall
-	queries  []fakeSQLCall
-	rows     []fakeRows
-	execErrs []error
+	mu        sync.Mutex
+	execs     []fakeSQLCall
+	queries   []fakeSQLCall
+	rows      []fakeRows
+	execErrs  []error
+	commits   int
+	rollbacks int
 }
 
 func (s *fakeSQLState) queueRows(rows fakeRows) {
@@ -88,6 +90,12 @@ func (s *fakeSQLState) clearExecs() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.execs = nil
+}
+
+func (s *fakeSQLState) txCounts() (int, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.commits, s.rollbacks
 }
 
 func (s *fakeSQLState) lastQuery(t *testing.T) fakeSQLCall {
@@ -150,7 +158,7 @@ func (c fakeSQLConn) Prepare(string) (driver.Stmt, error) {
 	return nil, errors.New("prepare not supported")
 }
 func (c fakeSQLConn) Close() error              { return nil }
-func (c fakeSQLConn) Begin() (driver.Tx, error) { return fakeSQLTx{}, nil }
+func (c fakeSQLConn) Begin() (driver.Tx, error) { return fakeSQLTx(c), nil }
 
 func (c fakeSQLConn) ExecContext(_ context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	c.state.mu.Lock()
@@ -178,10 +186,23 @@ func (c fakeSQLConn) QueryContext(_ context.Context, query string, args []driver
 	return &fakeSQLRows{columns: rows.columns, values: rows.values}, nil
 }
 
-type fakeSQLTx struct{}
+type fakeSQLTx struct {
+	state *fakeSQLState
+}
 
-func (fakeSQLTx) Commit() error   { return nil }
-func (fakeSQLTx) Rollback() error { return nil }
+func (tx fakeSQLTx) Commit() error {
+	tx.state.mu.Lock()
+	defer tx.state.mu.Unlock()
+	tx.state.commits++
+	return nil
+}
+
+func (tx fakeSQLTx) Rollback() error {
+	tx.state.mu.Lock()
+	defer tx.state.mu.Unlock()
+	tx.state.rollbacks++
+	return nil
+}
 
 func namedValues(values []driver.NamedValue) []any {
 	out := make([]any, 0, len(values))

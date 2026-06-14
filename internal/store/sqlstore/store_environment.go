@@ -15,6 +15,55 @@ func (s *Store) UpsertEnvironment(ctx context.Context, e store.Environment) (sto
 	if err != nil {
 		return store.Environment{}, err
 	}
+	if err := s.upsertEnvironment(ctx, s.db, e); err != nil {
+		return store.Environment{}, err
+	}
+	return e, nil
+}
+
+func (s *Store) UpsertEnvironmentStructuredState(ctx context.Context, e store.Environment, files []store.EnvironmentFile, services []store.EnvironmentService, checks []store.EnvironmentHealthCheck) (env store.Environment, err error) {
+	files = store.NormalizeEnvironmentFiles(files)
+	if err := store.ValidateEnvironmentFiles(e.ID, files); err != nil {
+		return store.Environment{}, err
+	}
+	services = store.NormalizeEnvironmentServices(services)
+	if err := store.ValidateEnvironmentServices(e.ID, services); err != nil {
+		return store.Environment{}, err
+	}
+	checks = store.NormalizeEnvironmentHealthChecks(checks)
+	if err := store.ValidateEnvironmentHealthChecks(e.ID, checks); err != nil {
+		return store.Environment{}, err
+	}
+	e = store.EnvironmentWithoutStructuredFiles(e, files)
+	e = store.EnvironmentWithoutStructuredRuntimeMetadata(e, services, checks)
+	e, err = store.PrepareEnvironmentForUpsert(e, utcNow())
+	if err != nil {
+		return store.Environment{}, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return store.Environment{}, err
+	}
+	defer rollbackTxOnError(tx, &err)
+	if err := s.upsertEnvironment(ctx, tx, e); err != nil {
+		return store.Environment{}, err
+	}
+	if err := s.replaceEnvironmentFilesTx(ctx, tx, e.ID, files); err != nil {
+		return store.Environment{}, err
+	}
+	if err := s.replaceEnvironmentServicesTx(ctx, tx, e.ID, services); err != nil {
+		return store.Environment{}, err
+	}
+	if err := s.replaceEnvironmentHealthChecksTx(ctx, tx, e.ID, checks); err != nil {
+		return store.Environment{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return store.Environment{}, err
+	}
+	return e, nil
+}
+
+func (s *Store) upsertEnvironment(ctx context.Context, execer sqlExecer, e store.Environment) error {
 	query := fmt.Sprintf(`
 insert into environments (
   id, display_name, description, status, verified, services_json, repos_json, compose_json,
@@ -27,15 +76,15 @@ values (%s)
 		"health_checks_json", "verification_workflow_id", "last_verification_run_id", "last_verification_status",
 		"evidence_complete", "topology_complete", "last_verified_at", "summary_json", "updated_at",
 	}))
-	if _, err := s.db.ExecContext(ctx, query,
+	if _, err := execer.ExecContext(ctx, query,
 		e.ID, e.DisplayName, e.Description, e.Status, e.Verified, stringDefault(e.ServicesJSON, "[]"),
 		stringDefault(e.ReposJSON, "{}"), stringDefault(e.ComposeJSON, "{}"), stringDefault(e.HealthChecksJSON, "[]"),
 		e.VerificationWorkflowID, e.LastVerificationRunID, e.LastVerificationStatus, e.EvidenceComplete, e.TopologyComplete,
 		dbTimeArg(s.dialect, e.LastVerifiedAt), stringDefault(e.SummaryJSON, "{}"), dbTimeArg(s.dialect, e.CreatedAt), dbTimeArg(s.dialect, e.UpdatedAt),
 	); err != nil {
-		return store.Environment{}, fmt.Errorf("upsert environment %q: %w", e.ID, err)
+		return fmt.Errorf("upsert environment %q: %w", e.ID, err)
 	}
-	return e, nil
+	return nil
 }
 
 func (s *Store) GetEnvironment(ctx context.Context, id string) (store.Environment, error) {

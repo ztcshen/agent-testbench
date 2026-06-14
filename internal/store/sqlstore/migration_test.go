@@ -537,6 +537,9 @@ func TestUpgradeSchemaWidensMySQLTextColumnsFromVersionSix(t *testing.T) {
 		"alter table `component_config_assets` modify column `content_inline` mediumtext not null",
 		"alter table `component_config_assets` modify column `sha256` mediumtext not null",
 	)
+	if strings.Contains(migration.execSQL(), "alter table `environment_files` modify column `file_path` mediumtext not null") {
+		t.Fatalf("mysql v6 upgrade must not widen indexed environment_files.file_path to mediumtext:\n%s", migration.execSQL())
+	}
 }
 
 func TestUpgradeSchemaWidensMySQLConfigVersionIdentifiersFromVersionSeven(t *testing.T) {

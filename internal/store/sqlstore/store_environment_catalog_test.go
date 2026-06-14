@@ -3,6 +3,7 @@ package sqlstore_test
 import (
 	"context"
 	"database/sql/driver"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +23,32 @@ func TestStoreEnvironmentCatalogUsesMySQLDialect(t *testing.T) {
 	assertMySQLAcceptedEnvironmentLookup(t, ctx, s, state, env, verifiedAt)
 	assertMySQLComponentGraphReplace(t, ctx, s, state, env)
 	assertMySQLComponentGraphLookup(t, ctx, s, state, env)
+}
+
+func TestUpsertEnvironmentStructuredStateRollsBackWhenStructuredWriteFails(t *testing.T) {
+	ctx := context.Background()
+	db, state := openFakeSQLDB(t)
+	defer db.Close()
+	s := sqlstore.New(db, sqlstore.SQLiteDialect{})
+	state.queueExecError(nil)
+	state.queueExecError(nil)
+	state.queueExecError(errors.New("insert file failed"))
+
+	_, err := s.UpsertEnvironmentStructuredState(ctx, store.Environment{
+		ID:                     "env.atomic",
+		Status:                 "draft",
+		VerificationWorkflowID: "workflow.core-10",
+		SummaryJSON:            "{}",
+	}, []store.EnvironmentFile{
+		{Path: "compose.yml", Kind: store.EnvironmentFileKindComposeFile, ContentInline: "services: {}\n", Required: true},
+	}, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "insert environment file") {
+		t.Fatalf("structured upsert error = %v", err)
+	}
+	commits, rollbacks := state.txCounts()
+	if commits != 0 || rollbacks != 1 {
+		t.Fatalf("structured upsert tx counts commits=%d rollbacks=%d", commits, rollbacks)
+	}
 }
 
 func mysqlAcceptedEnvironmentVerifiedAt() time.Time {

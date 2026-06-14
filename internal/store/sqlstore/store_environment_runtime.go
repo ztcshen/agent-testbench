@@ -12,12 +12,13 @@ func (s *Store) ReplaceEnvironmentServices(ctx context.Context, envID string, se
 	if err := store.ValidateEnvironmentServices(envID, services); err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer rollbackTxOnError(tx, &err)
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`delete from environment_services where env_id = %s;`, s.dialect.BindVar(1)), envID); err != nil {
+	return s.runEnvironmentReplaceTx(ctx, func(tx sqlExecer) error {
+		return s.replaceEnvironmentServicesTx(ctx, tx, envID, services)
+	})
+}
+
+func (s *Store) replaceEnvironmentServicesTx(ctx context.Context, execer sqlExecer, envID string, services []store.EnvironmentService) error {
+	if _, err := execer.ExecContext(ctx, fmt.Sprintf(`delete from environment_services where env_id = %s;`, s.dialect.BindVar(1)), envID); err != nil {
 		return fmt.Errorf("clear environment services for %q: %w", envID, err)
 	}
 	now := utcNow()
@@ -28,15 +29,12 @@ insert into environment_services (
   env_id, service_id, repo_url, branch, ref, checkout,
   summary_json, created_at, updated_at
 ) values (%s);`, s.bindVars(9))
-		if _, err := tx.ExecContext(ctx, query,
+		if _, err := execer.ExecContext(ctx, query,
 			envID, service.ServiceID, service.RepoURL, service.Branch, service.Ref, service.Checkout,
 			stringDefault(service.SummaryJSON, "{}"), dbTimeArg(s.dialect, service.CreatedAt), dbTimeArg(s.dialect, service.UpdatedAt),
 		); err != nil {
 			return fmt.Errorf("insert environment service %q: %w", service.ServiceID, err)
 		}
-	}
-	if err = tx.Commit(); err != nil {
-		return err
 	}
 	return nil
 }
@@ -67,12 +65,13 @@ func (s *Store) ReplaceEnvironmentHealthChecks(ctx context.Context, envID string
 	if err := store.ValidateEnvironmentHealthChecks(envID, checks); err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer rollbackTxOnError(tx, &err)
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`delete from environment_health_checks where env_id = %s;`, s.dialect.BindVar(1)), envID); err != nil {
+	return s.runEnvironmentReplaceTx(ctx, func(tx sqlExecer) error {
+		return s.replaceEnvironmentHealthChecksTx(ctx, tx, envID, checks)
+	})
+}
+
+func (s *Store) replaceEnvironmentHealthChecksTx(ctx context.Context, execer sqlExecer, envID string, checks []store.EnvironmentHealthCheck) error {
+	if _, err := execer.ExecContext(ctx, fmt.Sprintf(`delete from environment_health_checks where env_id = %s;`, s.dialect.BindVar(1)), envID); err != nil {
 		return fmt.Errorf("clear environment health checks for %q: %w", envID, err)
 	}
 	now := utcNow()
@@ -83,16 +82,13 @@ insert into environment_health_checks (
   env_id, check_id, check_kind, url, address, command, compose_service,
   expect, apply_order, summary_json, created_at, updated_at
 ) values (%s);`, s.bindVars(12))
-		if _, err := tx.ExecContext(ctx, query,
+		if _, err := execer.ExecContext(ctx, query,
 			envID, check.CheckID, check.Kind, check.URL, check.Address, check.Command, check.ComposeService,
 			check.Expect, check.ApplyOrder, stringDefault(check.SummaryJSON, "{}"),
 			dbTimeArg(s.dialect, check.CreatedAt), dbTimeArg(s.dialect, check.UpdatedAt),
 		); err != nil {
 			return fmt.Errorf("insert environment health check %q: %w", check.CheckID, err)
 		}
-	}
-	if err = tx.Commit(); err != nil {
-		return err
 	}
 	return nil
 }

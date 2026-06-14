@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -101,6 +102,35 @@ func TestEnvironmentRegisterStoresDockerFilesAsStructuredRows(t *testing.T) {
 	requireRawEnvironmentCompatibilityColumns(t, storePath)
 	requireStructuredEnvironmentRuntimeProjection(t, storePath)
 	requireStructuredEnvironmentInspectProjection(t, storePath)
+}
+
+func TestEnvironmentRegisterDoesNotPersistPartialRowsWhenStructuredFilesFail(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	composeSource := filepath.Join(t.TempDir(), "compose.yml")
+	writeFile(t, composeSource, strings.Repeat("x", store.EnvironmentFileInlineMaxBytes+1))
+
+	out := runCLIFails(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.partial.blocked",
+		"--compose-file", "compose/docker-compose.yml",
+		"--compose-generated-file", "compose/docker-compose.yml="+composeSource,
+		"--verification-workflow", "workflow.core-10",
+	)
+	if !strings.Contains(out, "write blocked") {
+		t.Fatalf("oversized structured file error = %q", out)
+	}
+
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = s.Close()
+	})
+	if _, err := s.GetEnvironment(ctx, "env.partial.blocked"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("failed environment registration should not leave a partial environment row, got err=%v", err)
+	}
 }
 
 func TestEnvironmentRepoSetPreservesMixedLegacyServices(t *testing.T) {

@@ -80,17 +80,8 @@ func runEnvironmentRegister(ctx context.Context, args []string) error {
 		VerificationWorkflowID: strings.TrimSpace(*verificationWorkflowID),
 		SummaryJSON:            mustCompactJSON(map[string]any{"source": "cli"}),
 	}
-	env, err = runtime.UpsertEnvironment(ctx, env)
+	env, err = upsertEnvironmentRegistrationState(ctx, runtime, env, environmentFiles, environmentServices, environmentHealthChecks)
 	if err != nil {
-		return err
-	}
-	if err := runtime.ReplaceEnvironmentFiles(ctx, env.ID, environmentFiles); err != nil {
-		return err
-	}
-	if err := runtime.ReplaceEnvironmentServices(ctx, env.ID, environmentServices); err != nil {
-		return err
-	}
-	if err := runtime.ReplaceEnvironmentHealthChecks(ctx, env.ID, environmentHealthChecks); err != nil {
 		return err
 	}
 	if len(environmentFiles) > 0 || len(environmentServices) > 0 || len(environmentHealthChecks) > 0 {
@@ -100,6 +91,39 @@ func runEnvironmentRegister(ctx context.Context, args []string) error {
 		}
 	}
 	return printEnvironmentCommandResult(env, *jsonOutput)
+}
+
+type environmentStructuredStateUpserter interface {
+	UpsertEnvironmentStructuredState(context.Context, store.Environment, []store.EnvironmentFile, []store.EnvironmentService, []store.EnvironmentHealthCheck) (store.Environment, error)
+}
+
+func upsertEnvironmentRegistrationState(ctx context.Context, runtime store.Store, env store.Environment, files []store.EnvironmentFile, services []store.EnvironmentService, checks []store.EnvironmentHealthCheck) (store.Environment, error) {
+	if atomic, ok := runtime.(environmentStructuredStateUpserter); ok {
+		return atomic.UpsertEnvironmentStructuredState(ctx, env, files, services, checks)
+	}
+	if err := store.ValidateEnvironmentFiles(env.ID, store.NormalizeEnvironmentFiles(files)); err != nil {
+		return store.Environment{}, err
+	}
+	if err := store.ValidateEnvironmentServices(env.ID, store.NormalizeEnvironmentServices(services)); err != nil {
+		return store.Environment{}, err
+	}
+	if err := store.ValidateEnvironmentHealthChecks(env.ID, store.NormalizeEnvironmentHealthChecks(checks)); err != nil {
+		return store.Environment{}, err
+	}
+	written, err := runtime.UpsertEnvironment(ctx, env)
+	if err != nil {
+		return store.Environment{}, err
+	}
+	if err := runtime.ReplaceEnvironmentFiles(ctx, written.ID, files); err != nil {
+		return store.Environment{}, err
+	}
+	if err := runtime.ReplaceEnvironmentServices(ctx, written.ID, services); err != nil {
+		return store.Environment{}, err
+	}
+	if err := runtime.ReplaceEnvironmentHealthChecks(ctx, written.ID, checks); err != nil {
+		return store.Environment{}, err
+	}
+	return written, nil
 }
 
 func runEnvironmentDiscover(ctx context.Context, args []string) error {

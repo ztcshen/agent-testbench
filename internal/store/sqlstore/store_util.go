@@ -11,6 +11,10 @@ import (
 	"agent-testbench/internal/store"
 )
 
+type sqlExecer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
 func utcNow() time.Time {
 	return time.Now().UTC()
 }
@@ -113,6 +117,21 @@ func rollbackTxOnError(tx *sql.Tx, errp *error) {
 	if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
 		*errp = errors.Join(*errp, rollbackErr)
 	}
+}
+
+func (s *Store) runEnvironmentReplaceTx(ctx context.Context, replace func(sqlExecer) error) (err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer rollbackTxOnError(tx, &err)
+	if err := replace(tx); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func normalizeJSONText(value string) string {

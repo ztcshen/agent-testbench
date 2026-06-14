@@ -12,12 +12,13 @@ func (s *Store) ReplaceEnvironmentFiles(ctx context.Context, envID string, files
 	if err := store.ValidateEnvironmentFiles(envID, files); err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer rollbackTxOnError(tx, &err)
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`delete from environment_files where env_id = %s;`, s.dialect.BindVar(1)), envID); err != nil {
+	return s.runEnvironmentReplaceTx(ctx, func(tx sqlExecer) error {
+		return s.replaceEnvironmentFilesTx(ctx, tx, envID, files)
+	})
+}
+
+func (s *Store) replaceEnvironmentFilesTx(ctx context.Context, execer sqlExecer, envID string, files []store.EnvironmentFile) error {
+	if _, err := execer.ExecContext(ctx, fmt.Sprintf(`delete from environment_files where env_id = %s;`, s.dialect.BindVar(1)), envID); err != nil {
 		return fmt.Errorf("clear environment files for %q: %w", envID, err)
 	}
 	now := utcNow()
@@ -28,15 +29,12 @@ insert into environment_files (
   env_id, file_path, file_kind, content_inline, required, apply_order,
   summary_json, created_at, updated_at
 ) values (%s);`, s.bindVars(9))
-		if _, err := tx.ExecContext(ctx, query,
+		if _, err := execer.ExecContext(ctx, query,
 			envID, file.Path, file.Kind, file.ContentInline, file.Required, file.ApplyOrder,
 			stringDefault(file.SummaryJSON, "{}"), dbTimeArg(s.dialect, file.CreatedAt), dbTimeArg(s.dialect, file.UpdatedAt),
 		); err != nil {
 			return fmt.Errorf("insert environment file %q kind=%q: %w", file.Path, file.Kind, err)
 		}
-	}
-	if err = tx.Commit(); err != nil {
-		return err
 	}
 	return nil
 }

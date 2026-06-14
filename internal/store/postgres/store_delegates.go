@@ -125,6 +125,10 @@ func (s *Store) UpsertEnvironment(ctx context.Context, e store.Environment) (sto
 	return s.core.UpsertEnvironment(ctx, e)
 }
 
+func (s *Store) UpsertEnvironmentStructuredState(ctx context.Context, e store.Environment, files []store.EnvironmentFile, services []store.EnvironmentService, checks []store.EnvironmentHealthCheck) (store.Environment, error) {
+	return s.core.UpsertEnvironmentStructuredState(ctx, e, files, services, checks)
+}
+
 func (s *Store) GetEnvironment(ctx context.Context, id string) (store.Environment, error) {
 	return s.core.GetEnvironment(ctx, id)
 }

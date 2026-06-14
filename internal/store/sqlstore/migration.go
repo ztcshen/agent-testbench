@@ -440,7 +440,6 @@ func mysqlMediumTextMigrationSQL() []string {
 		{"environments", "description"},
 		{"environment_components", "display_name"},
 		{"environment_components", "image"},
-		{"environment_files", "file_path"},
 		{"environment_files", "content_inline"},
 		{"environment_services", "repo_url"},
 		{"environment_services", "ref"},
