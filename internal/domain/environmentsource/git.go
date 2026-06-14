@@ -70,10 +70,10 @@ func jsonArrayString(raw string) []any {
 	return out
 }
 
-func decodeJSON(raw string, fallback string, target any) error {
+func decodeJSON(raw string, defaultValue string, target any) error {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		raw = fallback
+		raw = defaultValue
 	}
 	return json.Unmarshal([]byte(raw), target)
 }

@@ -303,7 +303,7 @@ func TestParseComposeImageReferencesIgnoresNestedImageKeys(t *testing.T) {
 	}
 }
 
-func TestParseComposeImageReferencesFallbackIgnoresNestedImageKeys(t *testing.T) {
+func TestParseComposeImageReferencesInvalidYAMLIgnoresNestedImageKeys(t *testing.T) {
 	got := parseComposeImageReferences(strings.Join([]string{
 		"x-invalid: [",
 		"services:",
@@ -317,7 +317,7 @@ func TestParseComposeImageReferencesFallbackIgnoresNestedImageKeys(t *testing.T)
 		"    image: busybox:1.36",
 	}, "\n") + "\n")
 	if got["app"] != "alpine:3.20" || got["worker"] != "busybox:1.36" {
-		t.Fatalf("fallback compose image refs = %#v", got)
+		t.Fatalf("invalid-yaml compose image refs = %#v", got)
 	}
 }
 

@@ -233,10 +233,10 @@ func environmentJSONDefault(raw string, defaultValue string) string {
 	return raw
 }
 
-func mustJSON(value any, fallback string) string {
+func mustJSON(value any, defaultValue string) string {
 	raw, err := json.Marshal(value)
 	if err != nil {
-		return fallback
+		return defaultValue
 	}
 	return string(raw)
 }
