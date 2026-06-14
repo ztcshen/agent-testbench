@@ -19,7 +19,9 @@ type sandboxStartCommandReport struct {
 	OK         bool                         `json:"ok"`
 	DryRun     bool                         `json:"dryRun"`
 	WorkflowID string                       `json:"workflowId"`
+	Runtime    statusRuntimeReport          `json:"runtime"`
 	Services   []sandboxStartCommandService `json:"services"`
+	Error      string                       `json:"error"`
 	Counts     struct {
 		Planned int `json:"planned"`
 		Failed  int `json:"failed"`
@@ -47,6 +49,14 @@ func TestSandboxStartCommandRunsStartupCommandsFromStore(t *testing.T) {
 	report := runSandboxStartJSON(t, "sqlite://"+fixture.storePath, "sandbox start")
 	requireSandboxStartServices(t, report)
 	requireSandboxStartupSideEffects(t, fixture)
+}
+
+func TestSandboxStartJSONIncludesRuntimeConsistencyEvidence(t *testing.T) {
+	fixture := writeSandboxStartStoreFixture(t)
+	report := runSandboxStartJSON(t, "sqlite://"+fixture.storePath, "sandbox start runtime evidence")
+	if strings.TrimSpace(report.Runtime.Path) == "" || strings.TrimSpace(report.Runtime.ActivePath) == "" {
+		t.Fatalf("sandbox start should include runtime evidence: %#v", report.Runtime)
+	}
 }
 
 func TestSandboxStartStreamJSONEmitsAgentEvents(t *testing.T) {
@@ -92,6 +102,39 @@ func TestSandboxStartMissingServiceExplainsRegistryBoundary(t *testing.T) {
 	if !strings.Contains(out, "profile service registry") || !strings.Contains(out, "environment restore") {
 		t.Fatalf("missing service error should explain registry boundary, got %q", out)
 	}
+}
+
+func TestSandboxStartRejectsEnvironmentBoundWorkflow(t *testing.T) {
+	fixture := writeSandboxStartStoreFixture(t)
+	ctx := context.Background()
+	s, err := openStore(ctx, "sqlite://"+fixture.storePath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+	if _, err := s.UpsertEnvironment(ctx, store.Environment{
+		ID:                     "env.fixture",
+		DisplayName:            "Fixture Environment",
+		VerificationWorkflowID: "workflow.fixture",
+	}); err != nil {
+		t.Fatalf("upsert environment: %v", err)
+	}
+
+	out := runCLIFails(t, "sandbox", "start", "--store", "sqlite://"+fixture.storePath, "--workflow", "workflow.fixture", "--dry-run", "--json")
+	if !strings.Contains(out, "environment restore env.fixture") ||
+		!strings.Contains(out, "--store STORE_NAME_OR_DSN") ||
+		!strings.Contains(out, "--workspace WORKSPACE") ||
+		!strings.Contains(out, "--run-workflow") {
+		t.Fatalf("environment-bound workflow should direct operator to environment restore, got %q", out)
+	}
+	var report sandboxStartCommandReport
+	if err := json.NewDecoder(strings.NewReader(out)).Decode(&report); err != nil {
+		t.Fatalf("environment-bound workflow should emit JSON failure report: %v\n%s", err, out)
+	}
+	if report.OK || !strings.Contains(report.Error, "environment restore env.fixture") {
+		t.Fatalf("environment-bound workflow JSON failure report = %#v", report)
+	}
+	requireSandboxNoStartupSideEffects(t, fixture)
 }
 
 func TestSandboxStartStreamJSONCompletesMissingServiceFailure(t *testing.T) {
@@ -311,6 +354,15 @@ func writeSandboxStartStoreFixture(t *testing.T) sandboxStartFixture {
 				Kind:        "external",
 				Status:      "active",
 			},
+		},
+		Workflows: []store.CatalogWorkflow{
+			{ID: "workflow.fixture", DisplayName: "Fixture Workflow"},
+		},
+		InterfaceNodes: []store.CatalogInterfaceNode{
+			{ID: "node.fixture.entry", ServiceID: "entry-service", Status: "active"},
+		},
+		WorkflowBindings: []store.CatalogWorkflowBinding{
+			{WorkflowID: "workflow.fixture", StepID: "entry", NodeID: "node.fixture.entry", Required: true, SortOrder: 1},
 		},
 	}); err != nil {
 		t.Fatalf("replace catalog: %v", err)

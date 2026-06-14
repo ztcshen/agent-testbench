@@ -129,7 +129,8 @@ Inspect sandbox service registration without starting services:
 ./skills/agent-testbench-operator/scripts/atb.sh sandbox service list --store STORE_NAME --json
 ./skills/agent-testbench-operator/scripts/atb.sh workflow discover --store STORE_NAME --service SERVICE_ID --json
 ./skills/agent-testbench-operator/scripts/atb.sh sandbox start --store STORE_NAME --dry-run --json
-./skills/agent-testbench-operator/scripts/atb.sh sandbox start --store STORE_NAME --workflow WORKFLOW_ID --dry-run --json
+./skills/agent-testbench-operator/scripts/atb.sh environment discover --store STORE_NAME --all --json
+./skills/agent-testbench-operator/scripts/atb.sh environment bootstrap ENV_ID --store STORE_NAME --json
 ```
 
 For long Docker-backed startup or restore execution, prefer the agent event
@@ -137,8 +138,8 @@ stream so the CLI emits one machine-readable event per line while work is still
 running:
 
 ```bash
-./skills/agent-testbench-operator/scripts/atb.sh sandbox start --store STORE_NAME --workflow WORKFLOW_ID --output-format stream-json
 ./skills/agent-testbench-operator/scripts/atb.sh environment restore ENV_ID --store STORE_NAME --workspace WORKSPACE --execute --output-format stream-json
+./skills/agent-testbench-operator/scripts/atb.sh environment restore ENV_ID --store STORE_NAME --workspace WORKSPACE --execute --run-workflow --server-url SERVER_URL --output-format stream-json
 ./skills/agent-testbench-operator/scripts/atb.sh environment migration apply ENV_ID --store STORE_NAME --edge OWNER:PROVIDER --database DB_NAME --workspace WORKSPACE --execute --output-format stream-json
 ```
 
@@ -149,6 +150,12 @@ Plan or apply Store-first SQL edge migrations:
 ./skills/agent-testbench-operator/scripts/atb.sh environment migration apply ENV_ID --store STORE_NAME --edge OWNER:KIND --database DB_NAME --workspace WORKSPACE --execute --json
 ```
 
+When adopting already-running containers with `environment restore
+--use-existing-containers`, plain MySQL SQL bootstrap assets are intentionally
+not reapplied. Use `environment migration add/plan/apply` or
+`environment migration baseline` for incremental SQL work against an existing
+database; use a clean restore when bootstrap SQL must be replayed from scratch.
+
 ## Report Back
 
 Always report:
@@ -156,6 +163,10 @@ Always report:
 - Store name/backend from `store current --json`.
 - Runtime freshness: whether the active shell command points at the repo
   runtime.
+- Sandbox runtime evidence: after any `sandbox start --json` pass, inspect the
+  report's `runtime.activeMatchesRuntime` and `runtime.fresh` fields; treat the
+  validation as incomplete when either is false until the runtime is rebuilt or
+  the wrapper points at `.runtime/bin/agent-testbench`.
 - Workflow, suite, or task counts: total, passed, failed, not-run when
   available.
 - Exact report paths for HTML, JSON, JUnit, task logs, or notification JSONL.

@@ -527,7 +527,9 @@ those commands. `sandbox start --workflow WORKFLOW_ID` narrows startup to the
 services bound to that workflow and fails if a required workflow service has no
 startup command, so a rebooted or temporary-asset-backed workflow cannot look
 startable when its Store service entry cannot regenerate the local runtime
-files.
+files. The JSON report also includes a `runtime` block from `status`; treat a
+passing sandbox run as incomplete validation when `runtime.activeMatchesRuntime`
+or `runtime.fresh` is false.
 
 When a consumer component already owns MySQL DDL on an edge such as
 `app:mysql`, add later table changes as versioned migration assets instead of
@@ -567,7 +569,10 @@ preconditions before running new SQL, and then records the applied version.
 `baseline` uses the same history table but records existing versions without
 running their SQL; use it when a target database already contains the schema.
 Regular `environment restore --execute` also applies versioned MySQL migration
-assets through this history path.
+assets through this history path. When `environment restore
+--use-existing-containers` adopts an already-running database, plain MySQL SQL
+bootstrap assets are skipped instead of replayed; use migrations, baseline, or a
+clean restore for changes that must be applied to the target database.
 
 For a colleague-machine simulation, add `--clean-docker-state` during dry-run
 review to include a Compose-scoped cleanup plan before startup. Add

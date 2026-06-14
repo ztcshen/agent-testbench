@@ -310,3 +310,43 @@ Durable feedback registered by local Codex sessions. Use
 - Evidence: a private validation workflow report failed at a message-triggered step because the local test endpoint connection was refused; related port probes were refused; docker ps could not connect to the Docker daemon; `sandbox start --workflow ... --dry-run` correctly returned `ok=false` because a required service had empty startup command metadata.
 - Suggestion: `sandbox service register --from-environment ENV_ID --id SERVICE_ID` now copies missing startup metadata from the matching environment component graph, using component `startupCommand` / `startCommand` metadata while preserving explicit CLI values. This gives workflow-required services a Store-first repair path before rerunning `sandbox start --workflow`.
 - Verification: `go test ./cmd/agent-testbench -run TestSandboxServiceRegisterRepairsStartupCommandFromEnvironmentComponent -count=1`
+## 2026-06-04 - Sandbox pass can miss local runtime failure
+- Area: environment
+- Severity: P1
+- Status: fixed
+- Source: User report during private validation plus operator status baseline on local Store.
+- Evidence: User reported latest code passed sandbox validation but the developer local environment could not run afterward. Operator baseline: store current returned local/sqlite, docker info succeeded, status reported runtime.fresh=true but activeMatchesRuntime=false and activePath pointed at a Go build cache binary instead of .runtime/bin/agent-testbench. This makes sandbox evidence insufficient to prove the same local runtime/entrypoint developers use.
+- Suggestion: `sandbox start --json` and stream reports now include runtime consistency evidence from `status`, including active path, expected runtime path, activeMatchesRuntime, freshness, build/source revision, and repair hints. The operator skill now treats a sandbox pass with mismatched or stale runtime evidence as incomplete validation until the repo runtime is rebuilt or the wrapper points at it.
+- Verification: `go test ./cmd/agent-testbench -run TestSandboxStartJSONIncludesRuntimeConsistencyEvidence -count=1`
+## 2026-06-05 - Message workflow cannot be rerun when bridge and SQL containers are stopped
+- Area: environment
+- Severity: P2
+- Status: fixed
+- Source: private message smoke via agent-testbench-operator on 2026-06-05
+- Evidence: A team Store contained a message-driven private workflow. The workflow report failed at a publish step because the local bridge endpoint refused the connection. `sandbox start --workflow ... --dry-run` failed because the bridge service had empty startup metadata. `environment restore --use-existing-containers ...` then failed because a required SQL container was stopped, so the CLI could not recover the already-written workflow without destructive Docker cleanup or manual container startup.
+- Suggestion: Environment-bound workflows are now blocked from direct `sandbox start --workflow` and directed to `environment restore ENV_ID --store STORE_NAME_OR_DSN --workspace WORKSPACE --execute --run-workflow --server-url URL`, so the workflow rerun is owned by the environment startup, health, asset, Evidence, and verification gate. For non-environment workflow services, `sandbox service register --from-environment ENV_ID --id SERVICE_ID` remains the Store-first repair path for missing startup metadata.
+- Verification: `go test ./cmd/agent-testbench -run 'TestSandbox(Start|Service|Register)' -count=1`; `go test ./cmd/agent-testbench -run TestSandboxStartRejectsEnvironmentBoundWorkflow -count=1`
+## 2026-06-05 - environment restore reports object storage metadata failure after s3-seed and workflow succeed
+- Area: environment
+- Severity: P2
+- Status: fixed
+- Source: private message restore on 2026-06-05
+- Evidence: Docker restore started all private message services and the object-storage seed service exited 0, but environment restore still returned ok=false with error `object storage asset requires provider objectStorage.seedCommand metadata`. A follow-up private workflow run passed 1/1, and database/log evidence showed the consumer, workflow, model decision, and final decision all succeeded.
+- Suggestion: Object-storage edge assets without provider `objectStorage.seedCommand` are now accepted when the provider compose service is a `service_completed_successfully` one-shot dependency from the generated Compose graph. The applied asset records `action=object-storage-seed-satisfied-by-compose` and `status=compose-service-completed` instead of failing after Docker startup succeeds.
+- Verification: `go test ./cmd/agent-testbench -run TestEnvironmentRestoreAcceptsComposeManagedObjectStorageSeed -count=1`
+## 2026-06-05 - Existing-container restore reapplies non-idempotent MySQL SQL assets
+- Area: environment
+- Severity: P2
+- Status: fixed
+- Source: local reproduction while reviewing 2026-06-05 restore feedback
+- Evidence: environment restore ENV --execute --use-existing-containers against an already-started Docker sandbox returned ok=false in docker phase because apply-mysql-sql retried schema assets and MySQL reported ERROR 1050 table already exists; object-storage asset checks were also planned later in the same report.
+- Suggestion: `--use-existing-containers` now skips plain MySQL SQL bootstrap assets instead of reapplying them to an already-started database. The applied asset records `action=skip-mysql-sql-use-existing-containers`, `status=skipped`, and a targeted hint to convert the SQL to an environment migration asset or rerun restore with clean Docker state when the SQL must be applied.
+- Verification: `go test ./cmd/agent-testbench -run TestEnvironmentRestoreUseExistingContainersSkipsPlainMySQLSQLAssets -count=1`
+## 2026-06-10 - Environment-bound workflow can bypass environment restore gate
+- Area: environment
+- Severity: P1
+- Status: fixed
+- Source: private typed-facade cleanup validation on a team Store, 2026-06-10
+- Evidence: An environment-bound private workflow had 11 steps in the Store. Direct `sandbox start --workflow` runs reported passed for the registered application services, but service health stayed `000`; several application services exited or failed to reach required upstream dependencies, and some required dependency services had no startup metadata or Store registration. `environment discover` returned no environments. A prior workflow batch completed 11/11 with 0 passed because upstream services were unavailable.
+- Suggestion: `sandbox start --workflow` now rejects workflows that are bound to an Environment Catalog entry and tells operators to use `environment restore ENV_ID --store STORE_NAME_OR_DSN --workspace WORKSPACE --execute --run-workflow --server-url URL`, keeping environment startup, health checks, workflow execution, Evidence, and verification on the environment lifecycle gate.
+- Verification: `go test ./cmd/agent-testbench -run 'TestSandbox(Start|Service|Register)' -count=1`; `go test ./cmd/agent-testbench -run TestSandboxStartRejectsEnvironmentBoundWorkflow -count=1`

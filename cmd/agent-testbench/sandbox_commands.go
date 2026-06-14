@@ -18,8 +18,10 @@ type sandboxStartReport struct {
 	DryRun     bool                        `json:"dryRun,omitempty"`
 	WorkflowID string                      `json:"workflowId,omitempty"`
 	StorePath  string                      `json:"storePath"`
+	Runtime    statusRuntimeReport         `json:"runtime"`
 	Services   []sandboxStartServiceResult `json:"services"`
 	Counts     sandboxStartReportCounts    `json:"counts"`
+	Error      string                      `json:"error,omitempty"`
 }
 
 type sandboxStartReportCounts struct {
@@ -440,6 +442,7 @@ func runSandboxStart(ctx context.Context, args []string) error {
 		DryRun:     *dryRun,
 		WorkflowID: strings.TrimSpace(*workflowID),
 		StorePath:  maskStoreURL(resolvedStoreURL),
+		Runtime:    sandboxStartRuntimeReport(ctx),
 	}
 	agentEmitRunStarted(ctx, newSandboxStartRunID(), "sandbox.start", sandboxStartTarget(report), "sandbox start started")
 	runtime, err := openStore(ctx, resolvedStoreURL)
@@ -448,6 +451,12 @@ func runSandboxStart(ctx context.Context, args []string) error {
 		return err
 	}
 	defer closeCLIStore(runtime)
+	if err := validateSandboxStartWorkflowNotEnvironmentBound(ctx, runtime, report.WorkflowID); err != nil {
+		report.OK = false
+		report.Error = err.Error()
+		emitSandboxStartFailure(ctx, report, resolvedOutputFormat)
+		return err
+	}
 	catalog, err := runtime.GetProfileCatalog(ctx)
 	if err != nil {
 		emitSandboxStartStreamFailure(ctx, report, err)
@@ -465,7 +474,9 @@ func runSandboxStart(ctx context.Context, args []string) error {
 	}
 	startSandboxServices(ctx, &report, catalog.Services, workflowRequired, filters, time.Duration(*timeoutSeconds)*time.Second, *dryRun)
 	if err := validateSandboxStartSelection(report, filters); err != nil {
-		emitSandboxStartStreamFailure(ctx, report, err)
+		report.OK = false
+		report.Error = err.Error()
+		emitSandboxStartFailure(ctx, report, resolvedOutputFormat)
 		return err
 	}
 	switch resolvedOutputFormat {
@@ -482,6 +493,43 @@ func runSandboxStart(ctx context.Context, args []string) error {
 		return errors.New("one or more sandbox services failed to start")
 	}
 	return nil
+}
+
+func emitSandboxStartFailure(ctx context.Context, report sandboxStartReport, outputFormat string) {
+	switch outputFormat {
+	case cliOutputFormatStreamJSON:
+		agentEmitRunCompleted(ctx, "sandbox.start", sandboxStartStatus(report), sandboxStartTarget(report), "sandbox start failed", sandboxStartError(report), report)
+	case cliOutputFormatJSON:
+		if err := writeIndentedJSON(report); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: write sandbox start failure report: %v\n", err)
+		}
+	}
+}
+
+func sandboxStartRuntimeReport(_ context.Context) statusRuntimeReport {
+	statusCtx := context.Background()
+	return statusRuntime(statusCtx, statusRepo(statusCtx))
+}
+
+func validateSandboxStartWorkflowNotEnvironmentBound(ctx context.Context, runtime store.Store, workflowID string) error {
+	workflowID = strings.TrimSpace(workflowID)
+	if workflowID == "" {
+		return nil
+	}
+	environments, err := runtime.ListEnvironments(ctx)
+	if err != nil {
+		return err
+	}
+	ids := []string{}
+	for _, env := range environments {
+		if strings.TrimSpace(env.VerificationWorkflowID) == workflowID {
+			ids = append(ids, strings.TrimSpace(env.ID))
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return fmt.Errorf("workflow %s is bound to environment %s; start and verify the environment with the same Store: agent-testbench environment restore %s --store STORE_NAME_OR_DSN --workspace WORKSPACE --execute --run-workflow --server-url URL", workflowID, strings.Join(ids, ", "), ids[0])
 }
 
 func emitSandboxStartStreamFailure(ctx context.Context, report sandboxStartReport, err error) {
@@ -563,6 +611,9 @@ func sandboxStartError(report sandboxStartReport) string {
 	if report.OK {
 		return ""
 	}
+	if strings.TrimSpace(report.Error) != "" {
+		return report.Error
+	}
 	return "one or more sandbox services failed to start"
 }
 
@@ -596,6 +647,9 @@ func printSandboxStartReport(report sandboxStartReport) {
 	fmt.Println("Sandbox Start")
 	fmt.Printf("OK: %t\n", report.OK)
 	fmt.Printf("Store: %s\n", report.StorePath)
+	if report.Error != "" {
+		fmt.Printf("Error: %s\n", report.Error)
+	}
 	if report.DryRun {
 		fmt.Println("Mode: dry-run")
 		fmt.Printf("Total: %d Planned: %d Skipped: %d Failed: %d\n", report.Counts.Total, report.Counts.Planned, report.Counts.Skipped, report.Counts.Failed)
