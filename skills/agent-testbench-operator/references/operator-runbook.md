@@ -244,7 +244,7 @@ as structured `environment_services` and `environment_health_checks`; legacy
 views for older rows and imports. Restore consumes structured environment
 files, services, and health checks first. In mixed migration rows, structured
 entries replace matching legacy entries by path, service id, health-check id,
-or equivalent health probe; unmatched legacy entries remain fallback inputs for
+or equivalent health probe; unmatched legacy entries remain compatibility inputs for
 older rows and imports.
 Variable paths, including nested Compose defaults such as
 `${A:-${B:-file.env}}`, are resolved from Store-backed `compose.env`; if

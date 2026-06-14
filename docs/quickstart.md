@@ -485,7 +485,7 @@ kept as compatibility views for older Store rows and imported packages. Restore
 uses the structured rows first. When a Store row is still mixed, structured
 services and health checks replace matching legacy entries by service id,
 health-check id, or equivalent health probe, while unmatched legacy entries
-remain fallback inputs for older rows and imports.
+remain compatibility inputs for older rows and imports.
 When `fileProjection.ok=false`, `fileProjection.repairPlan` groups the
 Store-backed repairs needed for summary-only startup files, unresolved Compose
 variables, and unprojected Compose env/config/secret/include/extends file
