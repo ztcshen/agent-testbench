@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -90,6 +92,65 @@ func TestEnvironmentRestoreStreamJSONEmitsAgentEvents(t *testing.T) {
 	report := mapFromReportAny(last["report"])
 	if valueString(last["type"]) != "run_completed" || valueString(last["status"]) != "passed" || !boolFromReportAny(report["ok"]) {
 		t.Fatalf("last stream event = %#v", last)
+	}
+}
+
+func TestEnvironmentRestoreStreamJSONEmitsRunStartedBeforePreflightDocker(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	fixture.writeDockerTool(t, `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
+if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
+  sleep 2
+  printf 'Docker Compose version v2.0.0\n'
+  exit 0
+fi
+`)
+	fixture.writeWorkspaceFile(t, "compose.yml", "services: {}\n")
+	runCLI(t, "environment", "register",
+		"--store", fixture.StoreDSN,
+		"--id", "env.stream.preflight",
+		"--compose-file", "compose.yml",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	cmd := exec.Command(os.Args[0], "environment", "restore",
+		"--store", fixture.StoreDSN,
+		"--workspace", fixture.Workspace,
+		"--execute",
+		"--output-format", "stream-json",
+		"env.stream.preflight",
+	)
+	cmd.Env = append(append(os.Environ(), fixture.DockerEnv...), "AGENT_TESTBENCH_TEST_CLI=1")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("stdout pipe: %v", err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start restore: %v", err)
+	}
+	defer func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = cmd.Wait()
+	}()
+
+	lines := make(chan string, 1)
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		if scanner.Scan() {
+			lines <- scanner.Text()
+			return
+		}
+		lines <- ""
+	}()
+	select {
+	case line := <-lines:
+		if !strings.Contains(line, `"type":"run_started"`) || !strings.Contains(line, `"phase":"environment.restore"`) {
+			t.Fatalf("first stream line = %q", line)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("restore should emit run_started before blocking Docker preflight")
 	}
 }
 
@@ -363,7 +424,7 @@ exit 0
 		Kind:      "container",
 		Container: "seed-running",
 		Expect:    "service_completed_successfully",
-	}, 20*time.Millisecond)
+	}, 500*time.Millisecond)
 	if running.OK || running.State != "running" {
 		t.Fatalf("completed one-shot container should not pass while still running: %#v", running)
 	}

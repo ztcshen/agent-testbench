@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -249,7 +250,7 @@ func environmentRestoreRunCleanup(ctx context.Context, report *environmentRestor
 	}
 	report.Cleanup.Action = "run-cleanup"
 	for _, command := range append(report.Cleanup.BackupCommands, report.Cleanup.Commands...) {
-		output, errText := runRestoreCommand(ctx, workspace, command)
+		output, errText := runEnvironmentRestoreDockerCommandWithPhaseProgress(ctx, workspace, command, "docker.cleanup", "Docker cleanup command")
 		if strings.TrimSpace(output) != "" {
 			report.Cleanup.Output = append(report.Cleanup.Output, output)
 		}
@@ -308,6 +309,10 @@ func environmentRestoreRunCommands(ctx context.Context, report *environmentResto
 }
 
 func runEnvironmentRestoreDockerCommandWithProgress(ctx context.Context, workspace string, command []string) (string, string) {
+	return runEnvironmentRestoreDockerCommandWithPhaseProgress(ctx, workspace, command, "docker.compose.execute", "Docker Compose command")
+}
+
+func runEnvironmentRestoreDockerCommandWithPhaseProgress(ctx context.Context, workspace string, command []string, phase string, label string) (string, string) {
 	if !agentHasEventStream(ctx) {
 		return runRestoreCommand(ctx, workspace, command)
 	}
@@ -329,13 +334,30 @@ func runEnvironmentRestoreDockerCommandWithProgress(ctx context.Context, workspa
 		select {
 		case result := <-resultCh:
 			return result.output, result.err
+		case <-ctx.Done():
+			errText := label + " canceled"
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				errText = label + " timed out"
+			}
+			agentEmitEvent(ctx, agentStreamEvent{
+				Type:      "tool_call_completed",
+				Phase:     phase,
+				Status:    agentCommandStatusFailed,
+				Target:    restoreCommandTarget(command),
+				Message:   label + " stopped",
+				Command:   append([]string(nil), command...),
+				Workdir:   workspace,
+				ElapsedMs: time.Since(started).Milliseconds(),
+				Error:     errText,
+			})
+			return "", errText
 		case <-ticker.C:
 			agentEmitEvent(ctx, agentStreamEvent{
 				Type:      "tool_observation",
-				Phase:     "docker.compose.execute",
+				Phase:     phase,
 				Status:    agentCommandStatusWaiting,
 				Target:    restoreCommandTarget(command),
-				Message:   "Docker Compose command still running",
+				Message:   label + " still running",
 				Command:   append([]string(nil), command...),
 				Workdir:   workspace,
 				ElapsedMs: time.Since(started).Milliseconds(),

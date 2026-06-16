@@ -29,13 +29,16 @@ type sandboxStartCommandReport struct {
 }
 
 type sandboxStartCommandService struct {
-	ID         string `json:"id"`
-	Command    string `json:"command"`
-	ExitCode   int    `json:"exitCode"`
-	Skipped    bool   `json:"skipped"`
-	Planned    bool   `json:"planned"`
-	SkipReason string `json:"skipReason"`
-	Error      string `json:"error"`
+	ID              string `json:"id"`
+	Command         string `json:"command"`
+	RecoveryCommand string `json:"recoveryCommand"`
+	Readiness       string `json:"readiness"`
+	ExitCode        int    `json:"exitCode"`
+	Skipped         bool   `json:"skipped"`
+	Planned         bool   `json:"planned"`
+	SkipReason      string `json:"skipReason"`
+	Warning         string `json:"warning"`
+	Error           string `json:"error"`
 }
 
 type sandboxStartFixture struct {
@@ -49,6 +52,85 @@ func TestSandboxStartCommandRunsStartupCommandsFromStore(t *testing.T) {
 	report := runSandboxStartJSON(t, "sqlite://"+fixture.storePath, "sandbox start")
 	requireSandboxStartServices(t, report)
 	requireSandboxStartupSideEffects(t, fixture)
+}
+
+func TestSandboxStartRecreatesMissingComposeBackedContainer(t *testing.T) {
+	storePath := writeSandboxComposeServiceFixture(t, "docker start sandbox-worker-service", "worker-service")
+	fakeEnv, callsPath := fakeDockerCommand(t)
+	installSandboxDockerTool(t, callsPath, `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
+if [ "$1" = "start" ]; then
+  printf 'Error response from daemon: No such container: %s\n' "$2" >&2
+  exit 1
+fi
+if [ "$1" = "compose" ] && [ "$2" = "up" ]; then
+  exit 0
+fi
+if [ "$1" = "compose" ] && [[ "$*" == *" ps -a --format json "* ]]; then
+  service="${@: -1}"
+  printf '{"Name":"sandbox-%s","Service":"%s","State":"running","Health":"healthy"}\n' "$service" "$service"
+  exit 0
+fi
+exit 0
+`)
+
+	out := runCLIWithEnv(t, fakeEnv, "sandbox", "start", "--store", "sqlite://"+storePath, "--service", "worker-service", "--json")
+	var report sandboxStartCommandReport
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode missing-container fallback report: %v\n%s", err, out)
+	}
+	if !report.OK || report.Counts.Failed != 0 || len(report.Services) != 1 {
+		t.Fatalf("missing-container fallback report = %#v", report)
+	}
+	service := report.Services[0]
+	if service.RecoveryCommand != "docker compose up -d worker-service" || service.Readiness != "compose-service-running" || !strings.Contains(service.Warning, "no healthUrl") {
+		t.Fatalf("missing-container fallback service = %#v", service)
+	}
+	calls, err := os.ReadFile(callsPath)
+	if err != nil {
+		t.Fatalf("read docker calls: %v", err)
+	}
+	joined := string(calls)
+	if !strings.Contains(joined, "start sandbox-worker-service") || !strings.Contains(joined, "compose up -d worker-service") || !strings.Contains(joined, "compose ps -a --format json worker-service") {
+		t.Fatalf("missing-container fallback docker calls:\n%s", joined)
+	}
+}
+
+func TestSandboxStartFailsWhenComposeServiceExitsAfterStartup(t *testing.T) {
+	storePath := writeSandboxComposeServiceFixture(t, "docker compose up -d worker-service", "worker-service")
+	fakeEnv, callsPath := fakeDockerCommand(t)
+	installSandboxDockerTool(t, callsPath, `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
+if [ "$1" = "compose" ] && [ "$2" = "up" ]; then
+  exit 0
+fi
+if [ "$1" = "compose" ] && [[ "$*" == *" ps -a --format json "* ]]; then
+  service="${@: -1}"
+  printf '{"Name":"sandbox-%s","Service":"%s","State":"exited","ExitCode":1}\n' "$service" "$service"
+  exit 0
+fi
+exit 0
+`)
+
+	out := runCLIFailsWithEnv(t, fakeEnv, "sandbox", "start", "--store", "sqlite://"+storePath, "--service", "worker-service", "--json")
+	var report sandboxStartCommandReport
+	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
+		t.Fatalf("decode compose-exited report: %v\n%s", err, out)
+	}
+	if report.OK || report.Counts.Failed != 1 || len(report.Services) != 1 {
+		t.Fatalf("compose-exited report = %#v", report)
+	}
+	service := report.Services[0]
+	if service.ExitCode == 0 || !strings.Contains(service.Error, "not running after startup") || service.Readiness != "compose-service-not-running" {
+		t.Fatalf("compose-exited service = %#v", service)
+	}
+	calls, err := os.ReadFile(callsPath)
+	if err != nil {
+		t.Fatalf("read docker calls: %v", err)
+	}
+	if !strings.Contains(string(calls), "compose ps -a --format json worker-service") {
+		t.Fatalf("compose-exited should inspect service state:\n%s", calls)
+	}
 }
 
 func TestSandboxStartJSONIncludesRuntimeConsistencyEvidence(t *testing.T) {
@@ -232,6 +314,42 @@ func writeSandboxStartStoreFixture(t *testing.T) sandboxStartFixture {
 		storePath:           storePath,
 		startedPath:         startedPath,
 		platformStartedPath: platformStartedPath,
+	}
+}
+
+func writeSandboxComposeServiceFixture(t *testing.T, startupCommand string, dockerService string) string {
+	t.Helper()
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open sandbox compose service store: %v", err)
+	}
+	defer s.Close()
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "sandbox-compose",
+		IndexedAt: time.Now().UTC(),
+		Services: []store.CatalogService{{
+			ID:             "worker-service",
+			DisplayName:    "Worker Service",
+			Kind:           "app",
+			ContainerName:  "sandbox-worker-service",
+			DockerService:  dockerService,
+			StartupCommand: startupCommand,
+			Status:         "active",
+		}},
+	}); err != nil {
+		t.Fatalf("replace sandbox compose service catalog: %v", err)
+	}
+	return storePath
+}
+
+func installSandboxDockerTool(t *testing.T, callsPath string, script string) {
+	t.Helper()
+	dockerPath := filepath.Join(filepath.Dir(callsPath), "docker")
+	writeFile(t, dockerPath, script)
+	if err := os.Chmod(dockerPath, 0o755); err != nil {
+		t.Fatalf("chmod fake sandbox docker: %v", err)
 	}
 }
 

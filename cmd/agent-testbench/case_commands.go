@@ -25,6 +25,8 @@ func runCase(ctx context.Context, args []string) error {
 		return runCaseDiagnose(ctx, args[1:])
 	case "gate":
 		return runCaseGate(ctx, args[1:])
+	case "config":
+		return runCaseConfig(ctx, args[1:])
 	case "timing":
 		return runCaseTiming(ctx, args[1:])
 	case "batch":

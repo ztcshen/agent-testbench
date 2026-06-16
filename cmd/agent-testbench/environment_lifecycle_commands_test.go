@@ -474,6 +474,73 @@ func TestEnvironmentStopDefaultsToComposeStopAndPersistsLastStop(t *testing.T) {
 	}
 }
 
+func TestEnvironmentServiceRestartScopesComposeServiceAndPersistsSummary(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	composeSource := filepath.Join(t.TempDir(), "compose.yml")
+	writeFile(t, composeSource, "services:\n  web:\n    image: alpine:3.20\n  worker:\n    image: alpine:3.20\n")
+	runCLI(t, "environment", "register",
+		"--store", fixture.StoreDSN,
+		"--id", "env.service.restart",
+		"--compose-file", "compose.yml",
+		"--compose-generated-file", "compose.yml="+composeSource,
+		"--compose-service", "web",
+		"--compose-service", "worker",
+		"--health-compose-service", "web",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIWithEnv(t, fixture.DockerEnv, "environment", "service", "restart",
+		"--store", fixture.StoreDSN,
+		"--workspace", fixture.Workspace,
+		"--service", "web",
+		"--health-timeout-seconds", "1",
+		"--json",
+		"env.service.restart",
+	)
+	var report struct {
+		OK          bool `json:"ok"`
+		Environment struct {
+			Summary struct {
+				LastServiceRestart struct {
+					OK      bool     `json:"ok"`
+					Service string   `json:"service"`
+					Command []string `json:"command"`
+				} `json:"lastServiceRestart"`
+			} `json:"summary"`
+		} `json:"environment"`
+		Docker struct {
+			Action       string                                `json:"action"`
+			Service      string                                `json:"service"`
+			Command      []string                              `json:"command"`
+			HealthChecks []environmentRestoreHealthCheckReport `json:"healthChecks"`
+		} `json:"docker"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode environment service restart report: %v\n%s", err, out)
+	}
+	want := []string{"docker", "compose", "-f", filepath.Join(fixture.Workspace, "compose.yml"), "restart", "web"}
+	if !report.OK || report.Docker.Action != "compose-service-restart" || report.Docker.Service != "web" || !reflect.DeepEqual(report.Docker.Command, want) {
+		t.Fatalf("environment service restart report = %#v want command %#v", report, want)
+	}
+	if len(report.Docker.HealthChecks) != 1 || !report.Docker.HealthChecks[0].OK || report.Docker.HealthChecks[0].Service != "web" {
+		t.Fatalf("environment service restart health checks = %#v", report.Docker.HealthChecks)
+	}
+	if !report.Environment.Summary.LastServiceRestart.OK || report.Environment.Summary.LastServiceRestart.Service != "web" || !reflect.DeepEqual(report.Environment.Summary.LastServiceRestart.Command, want) {
+		t.Fatalf("environment lastServiceRestart summary = %#v", report.Environment.Summary.LastServiceRestart)
+	}
+	callsRaw, err := os.ReadFile(fixture.DockerCallsPath)
+	if err != nil {
+		t.Fatalf("read fake docker calls: %v", err)
+	}
+	calls := string(callsRaw)
+	if !strings.Contains(calls, "compose -f "+filepath.Join(fixture.Workspace, "compose.yml")+" restart web") {
+		t.Fatalf("service restart should run compose restart for web:\n%s", calls)
+	}
+	if strings.Contains(calls, "restart worker") {
+		t.Fatalf("service restart must not restart worker:\n%s", calls)
+	}
+}
+
 func TestEnvironmentStopRequiresRecordedComposeFileBeforeComposeOptions(t *testing.T) {
 	fixture := newEnvironmentRestoreDockerCLIFixture(t)
 	runCLI(t, "environment", "register",

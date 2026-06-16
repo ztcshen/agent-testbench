@@ -63,8 +63,9 @@ type DryRunRequestPlan struct {
 }
 
 type DryRunAssertionPlan struct {
-	ExpectedStatusCodes   []int `json:"expectedStatusCodes"`
-	ResponseContainsCount int   `json:"responseContainsCount"`
+	ExpectedStatusCodes      []int `json:"expectedStatusCodes"`
+	ResponseContainsCount    int   `json:"responseContainsCount"`
+	ResponseNotContainsCount int   `json:"responseNotContainsCount"`
 }
 
 type DryRunEffectsPlan struct {
@@ -108,8 +109,9 @@ func Plan(options RunOptions) (DryRunPlan, error) {
 			BodyKeys:   sortedAnyMapKeys(item.Request.Body),
 		},
 		Assertions: DryRunAssertionPlan{
-			ExpectedStatusCodes:   append([]int(nil), item.Assertions.ExpectedStatusCodes...),
-			ResponseContainsCount: len(item.Assertions.ResponseContains),
+			ExpectedStatusCodes:      append([]int(nil), item.Assertions.ExpectedStatusCodes...),
+			ResponseContainsCount:    len(item.Assertions.ResponseContains),
+			ResponseNotContainsCount: len(item.Assertions.ResponseNotContains),
 		},
 		Effects: DryRunEffectsPlan{
 			HTTPRequest:         false,
@@ -344,6 +346,14 @@ func assertResponse(assertions Assertions, response ResponseEvidence) AssertionE
 	for _, fragment := range assertions.ResponseContains {
 		if !strings.Contains(response.Body, fragment) {
 			failures = append(failures, fmt.Sprintf("response did not contain %q", fragment))
+		}
+	}
+	for _, fragment := range assertions.ResponseNotContains {
+		if strings.TrimSpace(fragment) == "" {
+			continue
+		}
+		if strings.Contains(response.Body, fragment) {
+			failures = append(failures, fmt.Sprintf("response must not contain %q", fragment))
 		}
 	}
 	if len(failures) > 0 {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +20,8 @@ import (
 const (
 	environmentRestoreAttemptLimit                      = 20
 	environmentRestoreDockerActionSkippedFileProjection = "skipped-due-to-file-projection"
+	environmentRestorePlanProgressEnv                   = "AGENT_TESTBENCH_RESTORE_PLAN_PROGRESS_INTERVAL_MS"
+	environmentRestorePlanTimeoutEnv                    = "AGENT_TESTBENCH_RESTORE_PLAN_TIMEOUT_MS"
 )
 
 type environmentRestoreReport struct {
@@ -62,6 +65,12 @@ type environmentRestoreBuildPlan struct {
 	ComponentStartupPlan controlplane.EnvironmentComponentStartupPlan
 	AttemptedAt          time.Time
 	RemoteOnly           bool
+}
+
+type environmentRestorePlanBuildResult struct {
+	Plan   environmentRestoreBuildPlan
+	Report environmentRestoreReport
+	Err    error
 }
 
 func runEnvironmentRestore(ctx context.Context, args []string) error {
@@ -132,12 +141,20 @@ func buildEnvironmentRestoreReportWithStructuredState(ctx context.Context, env s
 	if workflowID == "" {
 		return environmentRestoreReport{}, fmt.Errorf("environment %s has no verification workflow; restore must be anchored to a verified workflow", env.ID)
 	}
-	plan, err := environmentRestoreBuildPlanFromEnvironmentWithStructuredState(env, workflowID, workspace, workflowOptions.StoreURL, files, services, checks, componentGraphs...)
-	if err != nil {
-		return environmentRestoreReport{}, err
+	attemptedAt := time.Now().UTC()
+	environmentRestoreEmitRunPlanningStarted(ctx, env.ID, attemptedAt)
+	result, timedOut := environmentRestoreBuildPlanAndReportWithWatchdog(ctx, env, workflowID, workspace, execute, workflowOptions, cleanupOptions, prepareReposOnly, files, services, checks, attemptedAt, componentGraphs...)
+	if result.Err != nil {
+		if timedOut {
+			report := newEnvironmentRestorePlanErrorReport(env, workflowID, workspace, execute, attemptedAt, result.Err.Error())
+			environmentRestoreEmitStep(ctx, "step_completed", "environment.restore.plan", "failed", report.EnvironmentID, "environment restore plan failed", report.Error)
+			return report, nil
+		}
+		return environmentRestoreReport{}, result.Err
 	}
-	report := newEnvironmentRestoreReport(env, plan, execute, workflowOptions, cleanupOptions, prepareReposOnly)
-	environmentRestoreEmitRunStarted(ctx, report)
+	plan := result.Plan
+	report := result.Report
+	environmentRestoreEmitStep(ctx, "step_completed", "environment.restore.plan", "passed", report.EnvironmentID, "environment restore plan prepared", "")
 	environmentRestoreAddSourceReports(ctx, &report, plan, execute, pull)
 	environmentRestoreApplyPreDockerReadinessGates(&report, cleanupOptions)
 	report.Docker = environmentRestoreDockerForReport(ctx, report, plan, execute, prepareReposOnly, healthTimeout, cleanupOptions)
@@ -156,6 +173,97 @@ func buildEnvironmentRestoreReportWithStructuredState(ctx context.Context, env s
 	report.CleanMachine = environmentRestoreCleanMachinePlanForReport(report, workflowOptions, cleanupOptions)
 	environmentRestoreMaybePersist(ctx, &env, &report, plan, workflowOptions, cleanupOptions)
 	return report, nil
+}
+
+func environmentRestoreBuildPlanAndReportWithWatchdog(ctx context.Context, env store.Environment, workflowID string, workspace string, execute bool, workflowOptions environmentRestoreWorkflowOptions, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool, files []store.EnvironmentFile, services []store.EnvironmentService, checks []store.EnvironmentHealthCheck, attemptedAt time.Time, componentGraphs ...store.EnvironmentComponentGraph) (environmentRestorePlanBuildResult, bool) {
+	results := make(chan environmentRestorePlanBuildResult, 1)
+	started := time.Now()
+	go func() {
+		plan, err := environmentRestoreBuildPlanFromEnvironmentWithStructuredState(env, workflowID, workspace, workflowOptions.StoreURL, files, services, checks, componentGraphs...)
+		if err != nil {
+			results <- environmentRestorePlanBuildResult{Err: err}
+			return
+		}
+		plan.AttemptedAt = attemptedAt
+		results <- environmentRestorePlanBuildResult{
+			Plan:   plan,
+			Report: newEnvironmentRestoreReport(env, plan, execute, workflowOptions, cleanupOptions, prepareReposOnly),
+		}
+	}()
+
+	interval := environmentRestorePlanProgressInterval()
+	timeout := environmentRestorePlanTimeout()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		select {
+		case result := <-results:
+			return result, false
+		case <-ticker.C:
+			elapsed := time.Since(started)
+			agentEmitEvent(ctx, agentStreamEvent{
+				Type:      "tool_observation",
+				Phase:     "environment.restore.plan",
+				Status:    agentCommandStatusWaiting,
+				Target:    "docker.compose.version",
+				Message:   "environment restore plan still running before Docker execution",
+				ElapsedMs: elapsed.Milliseconds(),
+			})
+		case <-timer.C:
+			return environmentRestorePlanBuildResult{Err: fmt.Errorf("environment restore plan timed out after %s before Docker execution; last observed operation: docker.compose.version", timeout)}, true
+		case <-ctx.Done():
+			return environmentRestorePlanBuildResult{Err: fmt.Errorf("environment restore plan canceled before Docker execution: %w", ctx.Err())}, true
+		}
+	}
+}
+
+func environmentRestorePlanProgressInterval() time.Duration {
+	return positiveDurationFromEnv(environmentRestorePlanProgressEnv, 5*time.Second)
+}
+
+func environmentRestorePlanTimeout() time.Duration {
+	return positiveDurationFromEnv(environmentRestorePlanTimeoutEnv, 2*time.Minute)
+}
+
+func positiveDurationFromEnv(name string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	ms, err := strconv.Atoi(raw)
+	if err != nil || ms <= 0 {
+		return fallback
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
+func newEnvironmentRestorePlanErrorReport(env store.Environment, workflowID string, workspace string, execute bool, attemptedAt time.Time, errText string) environmentRestoreReport {
+	absoluteWorkspace := strings.TrimSpace(workspace)
+	if absoluteWorkspace != "" {
+		if resolved, err := filepath.Abs(absoluteWorkspace); err == nil {
+			absoluteWorkspace = resolved
+		}
+	}
+	return environmentRestoreReport{
+		OK:                   false,
+		RestoreID:            "restore." + safeReportID(env.ID) + "." + attemptedAt.Format("20060102T150405.000000000Z"),
+		Executed:             execute,
+		EnvironmentID:        env.ID,
+		VerificationWorkflow: workflowID,
+		Workspace:            absoluteWorkspace,
+		Error:                errText,
+		Workflow: environmentRestoreWorkflowRun{
+			OK:         false,
+			Action:     "not-started",
+			WorkflowID: workflowID,
+			Error:      errText,
+		},
+		NextActions: []string{
+			"retry environment restore after the reported Store or Docker preflight blocker is resolved",
+		},
+	}
 }
 
 func environmentRestoreBuildPlanFromEnvironmentWithStructuredState(env store.Environment, workflowID string, workspace string, storeURL string, files []store.EnvironmentFile, services []store.EnvironmentService, checks []store.EnvironmentHealthCheck, componentGraphs ...store.EnvironmentComponentGraph) (environmentRestoreBuildPlan, error) {

@@ -31,17 +31,31 @@ func runRestoreExecCommand(ctx context.Context, workdir string, command []string
 }
 
 func configureRestoreCommandCancellation(cmd *exec.Cmd) {
+	configureObservedCommandCancellation(cmd)
+}
+
+func configureObservedCommandCancellation(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
-		if cmd.Process == nil {
+		return cancelObservedCommand(cmd)
+	}
+}
+
+func cancelObservedCommand(cmd *exec.Cmd) error {
+	if cmd == nil {
+		return os.ErrProcessDone
+	}
+	if cmd.Process == nil {
+		return os.ErrProcessDone
+	}
+	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+		if err == syscall.ESRCH {
 			return os.ErrProcessDone
 		}
-		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
-			if err == syscall.ESRCH {
-				return os.ErrProcessDone
-			}
+		if killErr := cmd.Process.Kill(); killErr != nil {
 			return err
 		}
 		return nil
 	}
+	return nil
 }

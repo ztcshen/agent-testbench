@@ -18,19 +18,20 @@ type runnableAPICase struct {
 }
 
 type caseExecutionConfig struct {
-	Method                string         `json:"method"`
-	NodeID                string         `json:"nodeId"`
-	Path                  string         `json:"path"`
-	Query                 map[string]any `json:"query"`
-	Headers               map[string]any `json:"headers"`
-	Auth                  map[string]any `json:"auth"`
-	Body                  any            `json:"body"`
-	ExpectedHTTPCodes     []int          `json:"expectedHttpCodes"`
-	ExpectedResponse      []string       `json:"expectedResponseContains"`
-	RequireRequestID      bool           `json:"requireRequestId"`
-	Signed                bool           `json:"signed"`
-	TraceEndpoint         string         `json:"traceEndpoint"`
-	TraceCorrelatorFields []string       `json:"traceCorrelatorFields"`
+	Method                 string         `json:"method"`
+	NodeID                 string         `json:"nodeId"`
+	Path                   string         `json:"path"`
+	Query                  map[string]any `json:"query"`
+	Headers                map[string]any `json:"headers"`
+	Auth                   map[string]any `json:"auth"`
+	Body                   any            `json:"body"`
+	ExpectedHTTPCodes      []int          `json:"expectedHttpCodes"`
+	ExpectedResponse       []string       `json:"expectedResponseContains"`
+	ExpectedResponseAbsent []string       `json:"expectedResponseNotContains"`
+	RequireRequestID       bool           `json:"requireRequestId"`
+	Signed                 bool           `json:"signed"`
+	TraceEndpoint          string         `json:"traceEndpoint"`
+	TraceCorrelatorFields  []string       `json:"traceCorrelatorFields"`
 }
 
 type caseExecutionTemplateConfig struct {

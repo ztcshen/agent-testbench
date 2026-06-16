@@ -98,6 +98,18 @@ func registerEnvironmentAcceptance(t *testing.T, serverURL string) {
 	}
 }
 
+func registerEnvironmentAcceptanceWithSummary(t *testing.T, serverURL string, summary string) {
+	t.Helper()
+	registered := postJSONResponse(t, serverURL+"/api/environments", fmt.Sprintf(`{
+  "id": "env.acceptance",
+  "verificationWorkflowId": "workflow.env.acceptance",
+  "summary": %s
+}`, summary), http.StatusOK)
+	if registered["ok"] != true {
+		t.Fatalf("register environment = %#v", registered)
+	}
+}
+
 func replaceEnvironmentAcceptanceGraph(t *testing.T, ctx context.Context, s store.Store, targetURL string) {
 	t.Helper()
 	err := s.ReplaceEnvironmentComponentGraph(ctx, "env.acceptance", store.EnvironmentComponentGraph{
@@ -162,5 +174,34 @@ func requirePersistedEnvironmentAcceptanceReport(t *testing.T, bundle profile.Bu
 	persisted := decodeJSONResponse(t, restarted.URL+reportURL, http.StatusOK)
 	if persisted["environmentId"] != "env.acceptance" || persisted["batchRunId"] != batchRunID {
 		t.Fatalf("persisted environment acceptance report = %#v", persisted)
+	}
+}
+
+func TestEnvironmentAcceptanceAllowsOptionalTopologyBusinessPass(t *testing.T) {
+	ctx := context.Background()
+	s := openAcceptanceRouteStore(t, ctx)
+	defer s.Close()
+	target := newEnvironmentAcceptanceTarget(t)
+	defer target.Close()
+	bundle := environmentAcceptanceBundle(t, target.URL)
+	server := httptest.NewServer(controlplane.NewWithOptions(bundle, controlplane.Options{Runtime: s}))
+	defer server.Close()
+
+	registerEnvironmentAcceptanceWithSummary(t, server.URL, `{"topologyRequired":false}`)
+	replaceEnvironmentAcceptanceGraph(t, ctx, s, target.URL)
+	reportURL := startEnvironmentAcceptanceRun(t, server.URL)
+	report := waitAPICaseBatchReport(t, server.URL+reportURL)
+	if !report.OK || report.Status != store.StatusPassed || !report.Acceptance.OK || !report.Acceptance.BusinessOK {
+		t.Fatalf("optional topology acceptance should preserve business pass: %#v", report.Acceptance)
+	}
+	if report.Acceptance.TopologyRequired || report.Acceptance.TopologyAvailable || report.Acceptance.Steps[0].TopologyComplete {
+		t.Fatalf("optional topology flags = %#v", report.Acceptance)
+	}
+	env, err := s.GetEnvironment(ctx, "env.acceptance")
+	if err != nil {
+		t.Fatalf("get optional topology environment: %v", err)
+	}
+	if env.LastVerificationStatus != store.StatusPassed || !env.EvidenceComplete || env.TopologyComplete {
+		t.Fatalf("optional topology environment state = %#v", env)
 	}
 }

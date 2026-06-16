@@ -320,6 +320,73 @@ func TestEnvironmentRestoreRunsAllowedDockerCleanupBeforeStartup(t *testing.T) {
 	}
 }
 
+func TestEnvironmentRestoreStreamJSONEmitsCleanupCommandProgress(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	fixture.writeDockerTool(t, `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
+if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
+  printf 'Docker Compose version v2.0.0\n'
+  exit 0
+fi
+if [ "$1" = "compose" ]; then
+  saw_down=0
+  collect_services=0
+  prev=""
+  for arg in "$@"; do
+    if [ "$arg" = "down" ]; then
+      saw_down=1
+    fi
+    if [ "$prev" = "--format" ] && [ "$arg" = "json" ]; then
+      collect_services=1
+      prev="$arg"
+      continue
+    fi
+    if [ "$collect_services" = "1" ] && [ "${arg#-}" = "$arg" ]; then
+      printf '{"Name":"%s","Service":"%s","State":"running","Health":"healthy"}\n' "$arg" "$arg"
+    fi
+    prev="$arg"
+  done
+  if [ "$saw_down" = "1" ]; then
+    sleep 0.05
+  fi
+fi
+`)
+	composeSource := filepath.Join(t.TempDir(), "compose.yml")
+	writeFile(t, composeSource, "services:\n  web:\n    image: alpine:3.20\n")
+	runCLI(t, "environment", "register",
+		"--store", fixture.StoreDSN,
+		"--id", "env.cleanup.stream",
+		"--compose-file", "compose.yml",
+		"--compose-generated-file", "compose.yml="+composeSource,
+		"--compose-project-name", "demo-stream",
+		"--compose-service", "web",
+		"--compose-skip-pull",
+		"--compose-skip-build",
+		"--health-url", newHealthyTestURL(t),
+		"--verification-workflow", "workflow.core-10",
+	)
+	seedCleanupLinkedGraph(t, fixture.StorePath, "env.cleanup.stream", "web")
+
+	env := append([]string{}, fixture.DockerEnv...)
+	env = append(env, "AGENT_TESTBENCH_COMPOSE_EXECUTE_PROGRESS_INTERVAL_MS=1")
+	out := runCLIWithEnv(t, env, "environment", "restore",
+		"--store", fixture.StoreDSN,
+		"--workspace", fixture.Workspace,
+		"--execute",
+		"--clean-docker-state",
+		"--allow-destructive-docker-cleanup",
+		"--output-format", "stream-json",
+		"env.cleanup.stream",
+	)
+	events := decodeAgentStreamEvents(t, out)
+	if !agentStreamHasEvent(events, "tool_observation", "docker.cleanup", "waiting", "docker compose down") {
+		t.Fatalf("stream missing docker cleanup waiting observation: %#v", events)
+	}
+	if !agentStreamHasEvent(events, "tool_call_started", "command", "started", "docker compose down") {
+		t.Fatalf("stream missing docker cleanup command start: %#v", events)
+	}
+}
+
 func TestEnvironmentRestoreCleanupRemovesConflictingFixedContainerNames(t *testing.T) {
 	fixture := newEnvironmentRestoreDockerCLIFixture(t)
 	fixture.writeDockerTool(t, `#!/usr/bin/env bash

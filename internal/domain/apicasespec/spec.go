@@ -20,6 +20,7 @@ type Request struct {
 type Assertions struct {
 	ExpectedStatusCodes []int    `json:"expectedStatusCodes,omitempty"`
 	ResponseContains    []string `json:"responseContains,omitempty"`
+	ResponseNotContains []string `json:"responseNotContains,omitempty"`
 }
 
 func NewHTTPCase(id string, title string, method string, path string, headers map[string]string, body map[string]any, statusCode int) Case {

@@ -138,6 +138,16 @@ Inspect sandbox service registration without starting services:
 ./skills/agent-testbench-operator/scripts/atb.sh environment bootstrap ENV_ID --store STORE_NAME --json
 ```
 
+For compose-backed sandbox services, `sandbox start --json` reports
+`recoveryCommand`, `readiness`, and `warning` on each service result when
+applicable. If a registered `docker start CONTAINER` command fails because the
+container is missing and the service has a recorded Compose service,
+AgentTestBench retries with `docker compose up -d SERVICE`. After a Compose
+startup command, the CLI checks `docker compose ps -a --format json SERVICE`;
+without `healthUrl`, treat `readiness=compose-service-running` as container
+evidence only, not full application readiness. Add a `healthUrl` to turn a
+start pass into an application-readiness check.
+
 For long Docker-backed startup or restore execution, prefer the agent event
 stream so the CLI emits one machine-readable event per line while work is still
 running:
@@ -147,20 +157,25 @@ running:
 ./skills/agent-testbench-operator/scripts/atb.sh environment restore ENV_ID --store STORE_NAME --workspace WORKSPACE --execute --run-workflow --server-url SERVER_URL --output-format stream-json
 ./skills/agent-testbench-operator/scripts/atb.sh environment status ENV_ID --store STORE_NAME --workspace WORKSPACE --json
 ./skills/agent-testbench-operator/scripts/atb.sh environment stop ENV_ID --store STORE_NAME --workspace WORKSPACE --json
+./skills/agent-testbench-operator/scripts/atb.sh environment service restart ENV_ID --store STORE_NAME --workspace WORKSPACE --service SERVICE_OR_COMPONENT --json
 ./skills/agent-testbench-operator/scripts/atb.sh environment migration apply ENV_ID --store STORE_NAME --edge OWNER:PROVIDER --database DB_NAME --workspace WORKSPACE --execute --output-format stream-json
 ```
 
 During `environment restore --output-format stream-json`, watch the
-`docker.prepare`, `docker.compose.validate`, `docker.cleanup`,
-`docker.native-assets`, `docker.compose.execute`, `docker.edge-assets`,
-`docker.health`, and `workflow.acceptance` phases. If Docker restore or health
-does not pass, `--run-workflow` must remain skipped instead of invoking the
-acceptance workflow. While Docker Compose startup commands are still running,
-the stream emits `docker.compose.execute` waiting observations for the active
-command. While Docker health probes are still waiting, the stream emits
-`docker.health` waiting observations with the current probe target and remaining
-time. While an acceptance run is still running, the stream emits
-`workflow.acceptance` waiting observations with the acceptance run id.
+`environment.restore.plan`, `docker.prepare`, `docker.compose.validate`,
+`docker.cleanup`, `docker.native-assets`, `docker.compose.execute`,
+`docker.edge-assets`, `docker.health`, and `workflow.acceptance` phases. If
+Docker restore or health does not pass, `--run-workflow` must remain skipped
+instead of invoking the acceptance workflow. While restore report construction
+or Docker preflight is still running before the first Docker action, the stream
+emits `environment.restore.plan` waiting observations and returns a structured
+timeout report if that phase exceeds its bounded watchdog. While Docker Compose
+startup commands are still running, the stream emits `docker.compose.execute`
+waiting observations for the active command. While Docker health probes are
+still waiting, the stream emits `docker.health` waiting observations with the
+current probe target and remaining time. While an acceptance run is still
+running, the stream emits `workflow.acceptance` waiting observations with the
+acceptance run id.
 During `environment migration apply|baseline --output-format stream-json`, the
 stream emits `environment.migration` waiting observations for the active
 migration asset while MySQL execution is still running.
@@ -169,8 +184,12 @@ migration asset while MySQL execution is still running.
 Store-backed compose/env files, then uses `docker compose ps` without
 pull/build/up/down. `environment stop` defaults to `docker compose stop
 SERVICE...`; both commands require recorded or discoverable Compose services
-for their default service-scoped behavior. `environment stop --down` is a
-destructive Compose operation and is blocked unless the same Store-to-Compose
+for their default service-scoped behavior. Use `environment service restart
+ENV_ID --service SERVICE_OR_COMPONENT --workspace WORKSPACE` when a running app
+only needs a cache/config refresh; `--service` accepts either a recorded Compose
+service or a component id that maps to one through the Store component graph,
+then waits for the scoped service health evidence. `environment stop --down` is
+a destructive Compose operation and is blocked unless the same Store-to-Compose
 linkage proof used by restore cleanup passes.
 Destructive restore cleanup still requires more than
 `--allow-destructive-docker-cleanup`: the cleanup linkage proof must show a
@@ -239,6 +258,9 @@ Always report:
   report's `runtime.activeMatchesRuntime` and `runtime.fresh` fields; treat the
   validation as incomplete when either is false until the runtime is rebuilt or
   the wrapper points at `.runtime/bin/agent-testbench`.
+- Sandbox service readiness evidence: inspect each service's `readiness`,
+  `recoveryCommand`, and `warning`; when a service lacks `healthUrl`, a Compose
+  running-state pass is not the same as end-to-end application readiness.
 - Workflow, suite, or task counts: total, passed, failed, not-run when
   available.
 - Exact report paths for HTML, JSON, JUnit, task logs, or notification JSONL.
