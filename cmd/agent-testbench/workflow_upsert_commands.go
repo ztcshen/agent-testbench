@@ -100,20 +100,29 @@ func runWorkflowRegister(ctx context.Context, args []string) error {
 	if *baseStepTimeoutMs < 0 || *timeoutOffsetMs < 0 {
 		return errors.New("--base-step-timeout-ms and --timeout-offset-ms must be non-negative")
 	}
-	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	storeDSN, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
-	report, err := upsertWorkflowCatalogWorkflow(ctx, runtime, workflowRegisterOptions{
-		ProfileID:         *profileID,
-		WorkflowID:        *workflowID,
-		DisplayName:       *displayName,
-		Description:       *description,
-		BaseStepTimeoutMs: *baseStepTimeoutMs,
-		TimeoutOffsetMs:   *timeoutOffsetMs,
-		Audit:             *auditOutput,
-		PassedFlags:       passedFlags,
+	runtime, err := openStore(ctx, storeDSN)
+	if err != nil {
+		return err
+	}
+	defer closeCLIStore(runtime)
+	var report workflowCatalogUpsertReport
+	err = withProfileCatalogWriteLock(storeDSN, func() error {
+		var upsertErr error
+		report, upsertErr = upsertWorkflowCatalogWorkflow(ctx, runtime, workflowRegisterOptions{
+			ProfileID:         *profileID,
+			WorkflowID:        *workflowID,
+			DisplayName:       *displayName,
+			Description:       *description,
+			BaseStepTimeoutMs: *baseStepTimeoutMs,
+			TimeoutOffsetMs:   *timeoutOffsetMs,
+			Audit:             *auditOutput,
+			PassedFlags:       passedFlags,
+		})
+		return upsertErr
 	})
 	if err != nil {
 		return err
@@ -164,21 +173,30 @@ func runWorkflowBindingRegister(ctx context.Context, args []string) error {
 	if *sortOrder < 0 {
 		return errors.New("--sort-order must be non-negative")
 	}
-	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	storeDSN, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
-	report, err := upsertWorkflowCatalogBinding(ctx, runtime, workflowBindingRegisterOptions{
-		ProfileID:   *profileID,
-		WorkflowID:  *workflowID,
-		StepID:      *stepID,
-		NodeID:      *nodeID,
-		CaseID:      *caseID,
-		Required:    *required,
-		SortOrder:   *sortOrder,
-		Audit:       *auditOutput,
-		PassedFlags: passedFlags,
+	runtime, err := openStore(ctx, storeDSN)
+	if err != nil {
+		return err
+	}
+	defer closeCLIStore(runtime)
+	var report workflowCatalogUpsertReport
+	err = withProfileCatalogWriteLock(storeDSN, func() error {
+		var upsertErr error
+		report, upsertErr = upsertWorkflowCatalogBinding(ctx, runtime, workflowBindingRegisterOptions{
+			ProfileID:   *profileID,
+			WorkflowID:  *workflowID,
+			StepID:      *stepID,
+			NodeID:      *nodeID,
+			CaseID:      *caseID,
+			Required:    *required,
+			SortOrder:   *sortOrder,
+			Audit:       *auditOutput,
+			PassedFlags: passedFlags,
+		})
+		return upsertErr
 	})
 	if err != nil {
 		return err

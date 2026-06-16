@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os/exec"
 	"strings"
@@ -110,6 +111,12 @@ func agentEmitEvent(ctx context.Context, event agentStreamEvent) {
 
 func environmentRestoreEmitRunStarted(ctx context.Context, report environmentRestoreReport) {
 	agentEmitRunStarted(ctx, report.RestoreID, "environment.restore", report.EnvironmentID, "environment restore started")
+}
+
+func environmentRestoreEmitRunPlanningStarted(ctx context.Context, environmentID string, attemptedAt time.Time) {
+	runID := "restore." + safeReportID(environmentID) + "." + attemptedAt.Format("20060102T150405.000000000Z")
+	agentEmitRunStarted(ctx, runID, "environment.restore", environmentID, "environment restore started")
+	environmentRestoreEmitStep(ctx, "step_started", "environment.restore.plan", "running", environmentID, "preparing environment restore plan", "")
 }
 
 func agentEmitRunStarted(ctx context.Context, runID string, phase string, target string, message string) {
@@ -258,6 +265,7 @@ func runAgentObservedCommand(ctx context.Context, options agentObservedCommandOp
 		return agentObservedCommandResult{Error: "empty command", Err: errAgentObservedCommandEmpty, ExitCode: 1}
 	}
 	cmd := exec.CommandContext(ctx, options.Command[0], options.Command[1:]...)
+	configureObservedCommandCancellation(cmd)
 	if options.Configure != nil {
 		options.Configure(cmd)
 	}
@@ -285,22 +293,72 @@ func runAgentObservedCommand(ctx context.Context, options agentObservedCommandOp
 		resultCh <- result
 	}()
 	if !agentHasEventStream(ctx) {
-		return <-resultCh
+		select {
+		case result := <-resultCh:
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return agentObservedCommandCanceledResult(ctxErr, result.Output)
+			}
+			return result
+		case <-ctx.Done():
+			return waitForAgentObservedCommandCancel(ctx, cmd, resultCh)
+		}
 	}
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
 		case result := <-resultCh:
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				result = agentObservedCommandCanceledResult(ctxErr, result.Output)
+			}
 			status := agentCommandStatusCompleted
 			if result.Error != "" {
 				status = agentCommandStatusFailed
 			}
 			agentEmitCommand(ctx, status, options.Workdir, options.Command, started, result.Output, result.Error)
 			return result
+		case <-ctx.Done():
+			result := waitForAgentObservedCommandCancel(ctx, cmd, resultCh)
+			agentEmitCommand(ctx, agentCommandStatusFailed, options.Workdir, options.Command, started, result.Output, result.Error)
+			return result
 		case <-ticker.C:
 			agentEmitCommand(ctx, agentCommandStatusRunning, options.Workdir, options.Command, started, "command still running", "")
 		}
+	}
+}
+
+func waitForAgentObservedCommandCancel(ctx context.Context, cmd *exec.Cmd, resultCh <-chan agentObservedCommandResult) agentObservedCommandResult {
+	ctxErr := ctx.Err()
+	if ctxErr == nil {
+		ctxErr = context.Canceled
+	}
+	cancelObservedCommand(cmd)
+	select {
+	case result := <-resultCh:
+		return agentObservedCommandCanceledResult(ctxErr, result.Output)
+	case <-time.After(2 * time.Second):
+		return agentObservedCommandCanceledResult(ctxErr, "")
+	}
+}
+
+func agentObservedCommandCanceledResult(err error, output string) agentObservedCommandResult {
+	message := "command canceled"
+	exitCode := 130
+	if errors.Is(err, context.DeadlineExceeded) {
+		message = "command timed out"
+		exitCode = 124
+	}
+	if err != nil {
+		message += ": " + err.Error()
+	}
+	if strings.TrimSpace(output) != "" {
+		message += ": " + strings.TrimSpace(output)
+	}
+	return agentObservedCommandResult{
+		Output:   strings.TrimSpace(output),
+		Error:    message,
+		Err:      err,
+		ExitCode: exitCode,
 	}
 }
 

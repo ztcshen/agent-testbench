@@ -317,6 +317,14 @@ func workflowGateSteps(summaryJSON string) []map[string]any {
 	return out
 }
 
+func workflowGateSummaryCaseRunIDs(steps []map[string]any) []string {
+	out := make([]string, 0, len(steps))
+	for _, step := range steps {
+		out = append(out, valueString(step["caseRunId"]))
+	}
+	return compactUniqueStringListPreserveOrder(out)
+}
+
 func workflowGateStepFrom(step map[string]any, caseRunByID map[string]store.APICaseRun, caseRunsByStep map[string][]store.APICaseRun, caseRunsByCase map[string][]store.APICaseRun, evidenceCountByCaseRun map[string]int, evidenceCountByStep map[string]int) workflowGateStep {
 	out := workflowGateStep{
 		StepID:    firstNonEmpty(valueString(step["stepId"]), valueString(step["id"])),

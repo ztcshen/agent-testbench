@@ -14,18 +14,21 @@ import (
 const environmentWorkflowSkyWalkingTemplateID = "environment.workflow.skywalking.v1"
 
 type workflowAcceptanceReport struct {
-	OK               bool                            `json:"ok"`
-	TemplateID       string                          `json:"templateId"`
-	WorkflowID       string                          `json:"workflowId"`
-	ExpectedSteps    int                             `json:"expectedSteps"`
-	CompletedSteps   int                             `json:"completedSteps"`
-	PassedSteps      int                             `json:"passedSteps"`
-	FailedSteps      int                             `json:"failedSteps"`
-	TopologyProvider string                          `json:"topologyProvider"`
-	HealthSummary    workflowAcceptanceHealthSummary `json:"healthSummary"`
-	NodeHealth       []workflowAcceptanceNodeHealth  `json:"nodeHealth,omitempty"`
-	Requirements     []workflowAcceptanceRequirement `json:"requirements,omitempty"`
-	Steps            []workflowAcceptanceStep        `json:"steps"`
+	OK                bool                            `json:"ok"`
+	TemplateID        string                          `json:"templateId"`
+	WorkflowID        string                          `json:"workflowId"`
+	ExpectedSteps     int                             `json:"expectedSteps"`
+	CompletedSteps    int                             `json:"completedSteps"`
+	PassedSteps       int                             `json:"passedSteps"`
+	FailedSteps       int                             `json:"failedSteps"`
+	BusinessOK        bool                            `json:"businessOk"`
+	TopologyProvider  string                          `json:"topologyProvider"`
+	TopologyRequired  bool                            `json:"topologyRequired"`
+	TopologyAvailable bool                            `json:"topologyAvailable"`
+	HealthSummary     workflowAcceptanceHealthSummary `json:"healthSummary"`
+	NodeHealth        []workflowAcceptanceNodeHealth  `json:"nodeHealth,omitempty"`
+	Requirements      []workflowAcceptanceRequirement `json:"requirements,omitempty"`
+	Steps             []workflowAcceptanceStep        `json:"steps"`
 }
 
 type workflowAcceptanceHealthSummary struct {
@@ -73,6 +76,7 @@ func buildWorkflowAcceptanceReport(ctx context.Context, runtime store.Store, rep
 		PassedSteps:      report.Passed,
 		FailedSteps:      report.Failed,
 		TopologyProvider: "skywalking",
+		TopologyRequired: workflowAcceptanceTopologyRequired(ctx, runtime, report.EnvironmentID),
 		Steps:            make([]workflowAcceptanceStep, 0, len(report.Cases)),
 	}
 	if workflowID == "" {
@@ -112,12 +116,19 @@ func buildWorkflowAcceptanceReport(ctx context.Context, runtime store.Store, rep
 	stepsOK := acceptance.ExpectedSteps > 0 && acceptance.CompletedSteps == acceptance.ExpectedSteps && len(acceptance.Steps) == acceptance.ExpectedSteps
 	passedOK := stepsOK && acceptance.PassedSteps == acceptance.ExpectedSteps && acceptance.FailedSteps == 0 && report.Status == store.StatusPassed
 	healthOK := acceptance.HealthSummary.Total == 0 || acceptance.HealthSummary.Failed == 0
+	acceptance.BusinessOK = stepsOK && passedOK && healthOK && evidenceOK
+	acceptance.TopologyAvailable = topologyOK
+	topologyRequirementOK := topologyOK || !acceptance.TopologyRequired
+	topologyMessage := "each workflow step must have complete real SkyWalking topology"
+	if !acceptance.TopologyRequired {
+		topologyMessage = "SkyWalking topology is optional for this environment"
+	}
 	acceptance.Requirements = []workflowAcceptanceRequirement{
 		{ID: "workflow-steps", OK: stepsOK, Message: fmt.Sprintf("%d/%d workflow steps completed", acceptance.CompletedSteps, acceptance.ExpectedSteps)},
 		{ID: "passed-steps", OK: passedOK, Message: fmt.Sprintf("%d/%d workflow steps passed", acceptance.PassedSteps, acceptance.ExpectedSteps)},
 		{ID: "node-health", OK: healthOK, Message: fmt.Sprintf("%d/%d environment health checks passed", acceptance.HealthSummary.Passed, acceptance.HealthSummary.Total)},
 		{ID: "evidence", OK: evidenceOK, Message: "each workflow interface step must have indexed Evidence"},
-		{ID: "skywalking-topology", OK: topologyOK, Message: "each workflow step must have complete real SkyWalking topology"},
+		{ID: "skywalking-topology", OK: topologyRequirementOK, Message: topologyMessage},
 	}
 	for _, requirement := range acceptance.Requirements {
 		if !requirement.OK {
@@ -126,6 +137,58 @@ func buildWorkflowAcceptanceReport(ctx context.Context, runtime store.Store, rep
 		}
 	}
 	return acceptance
+}
+
+func workflowAcceptanceTopologyRequired(ctx context.Context, runtime store.Store, environmentID string) bool {
+	if runtime == nil || strings.TrimSpace(environmentID) == "" {
+		return true
+	}
+	env, err := runtime.GetEnvironment(ctx, environmentID)
+	if err != nil {
+		return true
+	}
+	summary := jsonObject(env.SummaryJSON)
+	if workflowAcceptanceSummaryDisablesTopology(summary) {
+		return false
+	}
+	for _, key := range []string{"acceptance", "topology"} {
+		if workflowAcceptanceSummaryDisablesTopology(workflowAcceptanceMap(summary[key])) {
+			return false
+		}
+	}
+	return true
+}
+
+func workflowAcceptanceSummaryDisablesTopology(summary map[string]any) bool {
+	if len(summary) == 0 {
+		return false
+	}
+	if workflowAcceptanceBool(summary["topologyOptional"]) {
+		return true
+	}
+	if value, ok := summary["topologyRequired"]; ok && !workflowAcceptanceBool(value) {
+		return true
+	}
+	return false
+}
+
+func workflowAcceptanceMap(value any) map[string]any {
+	item, ok := value.(map[string]any)
+	if !ok {
+		return nil
+	}
+	return item
+}
+
+func workflowAcceptanceBool(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.EqualFold(strings.TrimSpace(typed), "true")
+	default:
+		return false
+	}
 }
 
 func workflowAcceptanceNodeHealthChecks(ctx context.Context, runtime store.Store, environmentID string) []workflowAcceptanceNodeHealth {
@@ -309,7 +372,7 @@ func workflowAcceptancePassed(summaryJSON string, workflowID string) error {
 		return fmt.Errorf("acceptance report must cover every workflow step")
 	}
 	for _, step := range acceptance.Steps {
-		if step.Status != store.StatusPassed || !step.EvidenceComplete || !step.TopologyComplete {
+		if step.Status != store.StatusPassed || !step.EvidenceComplete || (acceptance.TopologyRequired && !step.TopologyComplete) {
 			return fmt.Errorf("acceptance report step %s is incomplete", step.StepID)
 		}
 	}

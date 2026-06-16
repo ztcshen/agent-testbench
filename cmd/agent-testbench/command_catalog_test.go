@@ -31,6 +31,9 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	if !strings.Contains(out, "agent-testbench case gate") {
 		t.Fatalf("top-level help should expose CI-ready case gates:\n%s", out)
 	}
+	if !strings.Contains(out, "agent-testbench case config upsert") || !strings.Contains(out, "--response-not-contains") {
+		t.Fatalf("top-level help should expose Store-backed case config upsert:\n%s", out)
+	}
 	if !strings.Contains(out, "agent-testbench workflow gate") {
 		t.Fatalf("top-level help should expose workflow orchestration gates:\n%s", out)
 	}
@@ -154,7 +157,7 @@ func TestCommandsCatalogIncludesEnvironmentLifecycleCommands(t *testing.T) {
 			Tags       []string
 		}{Usage: item.Usage, StoreAware: item.StoreAware, Tags: item.Tags}
 	}
-	for _, command := range []string{"environment status", "environment stop"} {
+	for _, command := range []string{"environment status", "environment stop", "environment service restart"} {
 		item, ok := commands[command]
 		if !report.OK || !ok || !item.StoreAware || !strings.Contains(item.Usage, "--workspace PATH") || !stringSliceContains(item.Tags, "store-first") {
 			t.Fatalf("environment lifecycle command %q catalog item = %#v report ok=%t", command, item, report.OK)

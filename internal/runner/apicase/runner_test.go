@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"agent-testbench/internal/runner/apicase"
@@ -93,6 +94,48 @@ func TestRunExecutesHTTPCaseAndWritesResponseEvidence(t *testing.T) {
 	}
 	readJSONFile(t, filepath.Join(result.EvidencePath, "assertions.json"), &assertions)
 	if assertions.Status != "passed" {
+		t.Fatalf("assertions = %#v", assertions)
+	}
+}
+
+func TestRunFailsWhenResponseContainsForbiddenFragment(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"status":"created","trial_available":true}`)
+	}))
+	defer server.Close()
+
+	casePath := filepath.Join(t.TempDir(), "case.json")
+	raw := []byte(`{
+  "id": "case.no-forbidden-field",
+  "request": {"method": "GET", "path": "/v1/items"},
+  "assertions": {
+    "expectedStatusCodes": [200],
+    "responseNotContains": ["\"trial_available\""]
+  }
+}`)
+	if err := os.WriteFile(casePath, raw, 0o644); err != nil {
+		t.Fatalf("write case file: %v", err)
+	}
+
+	result, err := apicase.Run(context.Background(), apicase.RunOptions{
+		CasePath:    casePath,
+		EvidenceDir: filepath.Join(t.TempDir(), "evidence"),
+		RunID:       "run-forbidden",
+		BaseURL:     server.URL,
+	})
+	if err != nil {
+		t.Fatalf("run api case: %v", err)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("forbidden response field should fail assertions: %#v", result)
+	}
+	var assertions struct {
+		Status string   `json:"status"`
+		Errors []string `json:"errors"`
+	}
+	readJSONFile(t, filepath.Join(result.EvidencePath, "assertions.json"), &assertions)
+	if assertions.Status != "failed" || len(assertions.Errors) != 1 || !strings.Contains(assertions.Errors[0], "must not contain") {
 		t.Fatalf("assertions = %#v", assertions)
 	}
 }

@@ -254,7 +254,7 @@ func finalizeEnvironmentAcceptanceRun(ctx context.Context, runtime store.Store, 
 	if report.Acceptance.OK {
 		env.LastVerificationStatus = store.StatusPassed
 		env.EvidenceComplete = true
-		env.TopologyComplete = true
+		env.TopologyComplete = report.Acceptance.TopologyAvailable
 		env.Status = "verified-ready"
 		env.LastVerifiedAt = time.Now().UTC()
 	} else {

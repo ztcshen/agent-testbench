@@ -34,14 +34,17 @@ type apiCaseBatchReportForTest struct {
 	Passed               int    `json:"passed"`
 	Failed               int    `json:"failed"`
 	Acceptance           struct {
-		OK               bool   `json:"ok"`
-		TemplateID       string `json:"templateId"`
-		WorkflowID       string `json:"workflowId"`
-		ExpectedSteps    int    `json:"expectedSteps"`
-		CompletedSteps   int    `json:"completedSteps"`
-		PassedSteps      int    `json:"passedSteps"`
-		TopologyProvider string `json:"topologyProvider"`
-		HealthSummary    struct {
+		OK                bool   `json:"ok"`
+		TemplateID        string `json:"templateId"`
+		WorkflowID        string `json:"workflowId"`
+		ExpectedSteps     int    `json:"expectedSteps"`
+		CompletedSteps    int    `json:"completedSteps"`
+		PassedSteps       int    `json:"passedSteps"`
+		BusinessOK        bool   `json:"businessOk"`
+		TopologyProvider  string `json:"topologyProvider"`
+		TopologyRequired  bool   `json:"topologyRequired"`
+		TopologyAvailable bool   `json:"topologyAvailable"`
+		HealthSummary     struct {
 			Total  int `json:"total"`
 			Passed int `json:"passed"`
 			Failed int `json:"failed"`

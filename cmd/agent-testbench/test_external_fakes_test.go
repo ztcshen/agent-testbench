@@ -61,6 +61,9 @@ func fakeDockerCommand(t *testing.T) ([]string, string) {
 	writeFile(t, dockerPath, `#!/bin/sh
 printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
 if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
+  if [ -n "${AGENT_TESTBENCH_FAKE_DOCKER_COMPOSE_VERSION_SLEEP:-}" ]; then
+    sleep "$AGENT_TESTBENCH_FAKE_DOCKER_COMPOSE_VERSION_SLEEP"
+  fi
   printf 'Docker Compose version v2.0.0\n'
   exit 0
 fi

@@ -32,19 +32,22 @@ type sandboxStartReportCounts struct {
 }
 
 type sandboxStartServiceResult struct {
-	ID             string `json:"id"`
-	DisplayName    string `json:"displayName"`
-	Kind           string `json:"kind"`
-	ContainerName  string `json:"containerName,omitempty"`
-	ServicePort    int    `json:"servicePort,omitempty"`
-	ManagementPort int    `json:"managementPort,omitempty"`
-	Command        string `json:"command,omitempty"`
-	Skipped        bool   `json:"skipped"`
-	Planned        bool   `json:"planned,omitempty"`
-	SkipReason     string `json:"skipReason,omitempty"`
-	ExitCode       int    `json:"exitCode"`
-	Output         string `json:"output,omitempty"`
-	Error          string `json:"error,omitempty"`
+	ID              string `json:"id"`
+	DisplayName     string `json:"displayName"`
+	Kind            string `json:"kind"`
+	ContainerName   string `json:"containerName,omitempty"`
+	ServicePort     int    `json:"servicePort,omitempty"`
+	ManagementPort  int    `json:"managementPort,omitempty"`
+	Command         string `json:"command,omitempty"`
+	RecoveryCommand string `json:"recoveryCommand,omitempty"`
+	Readiness       string `json:"readiness,omitempty"`
+	Skipped         bool   `json:"skipped"`
+	Planned         bool   `json:"planned,omitempty"`
+	SkipReason      string `json:"skipReason,omitempty"`
+	ExitCode        int    `json:"exitCode"`
+	Output          string `json:"output,omitempty"`
+	Warning         string `json:"warning,omitempty"`
+	Error           string `json:"error,omitempty"`
 }
 
 type sandboxStartFilters struct {

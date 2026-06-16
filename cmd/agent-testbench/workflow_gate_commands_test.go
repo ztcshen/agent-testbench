@@ -127,6 +127,50 @@ func TestWorkflowGateCountsEvidenceStoredUnderCaseRunID(t *testing.T) {
 	}
 }
 
+func TestWorkflowGateCountsEvidenceForCaseRunOnlyReferencedBySummary(t *testing.T) {
+	dir := t.TempDir()
+	storePath := filepath.Join(dir, "store.sqlite")
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	runID := "run.workflow.summary-only"
+	caseRunID := "run.workflow.summary-only.case"
+	started := time.Date(2026, 6, 15, 9, 0, 0, 0, time.UTC)
+	if _, err := s.CreateRun(ctx, store.Run{
+		ID:          runID,
+		ProfileID:   "sample",
+		WorkflowID:  "workflow.summary-only",
+		Status:      store.StatusPassed,
+		SummaryJSON: `{"steps":[{"stepId":"trial","caseId":"case.trial","caseRunId":"` + caseRunID + `","status":"passed"}]}`,
+		StartedAt:   started,
+		FinishedAt:  started.Add(time.Second),
+		CreatedAt:   started,
+		UpdatedAt:   started.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("create workflow run: %v", err)
+	}
+	if _, err := s.RecordEvidence(ctx, store.EvidenceRecord{
+		ID:        "evidence.summary-only.response",
+		RunID:     caseRunID,
+		CaseRunID: caseRunID,
+		StepID:    "trial",
+		Kind:      "response",
+		URI:       filepath.Join(dir, "response.json"),
+		CreatedAt: started,
+	}); err != nil {
+		t.Fatalf("record summary-only case evidence: %v", err)
+	}
+
+	out := runCLI(t, "workflow", "gate", "--store", "sqlite://"+storePath, "--run", runID, "--require-passed", "--require-steps", "--require-evidence", "--json")
+	report := decodeWorkflowGateFullReport(t, out)
+	if !report.OK || report.Counts.EvidenceComplete != 1 || !report.Gates.EvidenceComplete {
+		t.Fatalf("workflow gate should count summary caseRunId evidence = %#v", report)
+	}
+}
+
 func TestWorkflowGateDoesNotUseStepEvidenceForAPIWorkflowSteps(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()

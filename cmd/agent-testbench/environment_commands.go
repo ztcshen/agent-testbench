@@ -33,6 +33,8 @@ func runEnvironment(ctx context.Context, args []string) error {
 		return runEnvironmentStatus(ctx, args[1:])
 	case "stop":
 		return runEnvironmentStop(ctx, args[1:])
+	case "service":
+		return runEnvironmentService(ctx, args[1:])
 	case "acceptance":
 		return runEnvironmentAcceptance(ctx, args[1:])
 	case "verify":

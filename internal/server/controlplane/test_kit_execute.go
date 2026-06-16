@@ -92,6 +92,19 @@ func executeTestKitCase(ctx context.Context, bundle profile.Bundle, runtime stor
 			}
 		}
 	}
+	if passed {
+		for _, forbidden := range request.forbiddenResponse {
+			forbidden = strings.TrimSpace(forbidden)
+			if forbidden == "" {
+				continue
+			}
+			if strings.Contains(string(responseBody), forbidden) {
+				passed = false
+				failureReason = fmt.Sprintf("response body must not contain %q", forbidden)
+				break
+			}
+		}
+	}
 	return caseExecutionResult{
 		ok:            passed,
 		httpCode:      response.StatusCode,
@@ -114,6 +127,7 @@ type caseHTTPRequest struct {
 	body              any
 	expectedHTTPCodes []int
 	expectedResponse  []string
+	forbiddenResponse []string
 	nodeID            string
 	signed            bool
 }
@@ -160,6 +174,7 @@ func buildCaseHTTPRequest(ctx context.Context, bundle profile.Bundle, runtime st
 		body:              rendered.Body,
 		expectedHTTPCodes: rendered.ExpectedHTTPCodes,
 		expectedResponse:  rendered.ExpectedResponse,
+		forbiddenResponse: rendered.ExpectedResponseAbsent,
 		nodeID:            rendered.NodeID,
 		signed:            rendered.Signed,
 	}

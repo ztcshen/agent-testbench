@@ -165,7 +165,8 @@ func buildWorkflowGateReport(ctx context.Context, runtime store.Store, options w
 	if err != nil {
 		return workflowGateReport{}, err
 	}
-	evidence, err := workflowGateEvidenceRecords(ctx, runtime, run.ID, caseRuns)
+	steps := workflowGateSteps(run.SummaryJSON)
+	evidence, err := workflowGateEvidenceRecords(ctx, runtime, run.ID, caseRuns, workflowGateSummaryCaseRunIDs(steps))
 	if err != nil {
 		return workflowGateReport{}, err
 	}
@@ -182,7 +183,6 @@ func buildWorkflowGateReport(ctx context.Context, runtime store.Store, options w
 		NextActions:     []string{},
 		Warnings:        []string{},
 	}
-	steps := workflowGateSteps(run.SummaryJSON)
 	report.Counts.Steps = len(steps)
 	report.Counts.CaseRuns = len(caseRuns)
 	for _, rawStep := range steps {
@@ -202,7 +202,7 @@ func buildWorkflowGateReport(ctx context.Context, runtime store.Store, options w
 	return report, nil
 }
 
-func workflowGateEvidenceRecords(ctx context.Context, runtime store.Store, runID string, caseRuns []store.APICaseRun) ([]store.EvidenceRecord, error) {
+func workflowGateEvidenceRecords(ctx context.Context, runtime store.Store, runID string, caseRuns []store.APICaseRun, summaryCaseRunIDs []string) ([]store.EvidenceRecord, error) {
 	out, err := runtime.ListEvidence(ctx, runID)
 	if err != nil {
 		return nil, err
@@ -211,13 +211,18 @@ func workflowGateEvidenceRecords(ctx context.Context, runtime store.Store, runID
 	for _, row := range out {
 		seen[row.ID] = true
 	}
+	caseRunIDs := make([]string, 0, len(caseRuns)+len(summaryCaseRunIDs))
 	for _, caseRun := range caseRuns {
-		if strings.TrimSpace(caseRun.ID) == "" || strings.TrimSpace(caseRun.ID) == runID {
+		caseRunIDs = append(caseRunIDs, caseRun.ID)
+	}
+	caseRunIDs = append(caseRunIDs, summaryCaseRunIDs...)
+	for _, caseRunID := range compactUniqueStringListPreserveOrder(caseRunIDs) {
+		if strings.TrimSpace(caseRunID) == "" || strings.TrimSpace(caseRunID) == runID {
 			continue
 		}
-		rows, err := runtime.ListEvidence(ctx, caseRun.ID)
+		rows, err := runtime.ListEvidence(ctx, caseRunID)
 		if err != nil {
-			return nil, fmt.Errorf("list case-run evidence %s: %w", caseRun.ID, err)
+			return nil, fmt.Errorf("list case-run evidence %s: %w", caseRunID, err)
 		}
 		for _, row := range rows {
 			if seen[row.ID] {
