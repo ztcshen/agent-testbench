@@ -134,7 +134,7 @@ Usage:
   agent-testbench case runs [--store NAME_OR_DSN] [--run ID] [--json]
   agent-testbench case evidence [--store NAME_OR_DSN] [--case-run ID | --run ID [--case-id ID] [--step-id ID]] [--json]
   agent-testbench case timing [--store NAME_OR_DSN] [--kind KIND] [--max-age-minutes N] [--json]
-  agent-testbench case config upsert --case ID [--store NAME_OR_DSN] [--method METHOD] [--path PATH] [--body-json JSON] [--expected-status CODE]... [--response-contains TEXT]... [--response-not-contains TEXT]... [--json]
+  agent-testbench case config upsert --case ID [--store NAME_OR_DSN] [--config-id ID] [--node-id ID] [--method METHOD] [--path PATH] [--body-json JSON] [--header KEY=VALUE]... [--headers-json JSON] [--auth-json JSON] [--signed] [--trace-endpoint URL] [--expected-status CODE]... [--response-contains TEXT]... [--response-not-contains TEXT]... [--json]
   agent-testbench case batch start --server-url URL [--case ID]... [--node ID]... [--workflow ID] [--suite NAME] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
   agent-testbench case batch report --server-url URL --run ID [--json]
   agent-testbench case run --case PATH [--base-url URL] [--override KEY=VALUE] [--evidence-dir PATH] [--run-id ID] [--dry-run] [--json]

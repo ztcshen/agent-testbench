@@ -62,6 +62,9 @@ func runCaseDiagnose(ctx context.Context, args []string) error {
 
 func diagnoseCaseEvidence(ctx context.Context, runtime store.Store, caseRunID string, runID string, caseID string, stepID string) (caseDiagnosisReport, error) {
 	payload, err := readCaseEvidence(ctx, runtime, caseRunID, runID, caseID, stepID)
+	if errors.Is(err, controlplane.ErrCaseEvidenceNotFound) {
+		return diagnoseMissingCaseEvidence(ctx, runtime, caseRunID, runID, caseID, stepID), nil
+	}
 	if err != nil {
 		return caseDiagnosisReport{}, err
 	}
@@ -116,6 +119,68 @@ func diagnoseCaseEvidence(ctx context.Context, runtime store.Store, caseRunID st
 	report.Warnings = append(report.Warnings, caseDiagnosisDiagnosticWarnings(report, report.Diagnostics)...)
 	report.NextActions = caseDiagnosisNextActions(report, httpStatus, errorCount, artifacts.MissingLocalEvidence, report.Diagnostics)
 	return report, nil
+}
+
+func diagnoseMissingCaseEvidence(ctx context.Context, runtime store.Store, caseRunID string, runID string, caseID string, stepID string) caseDiagnosisReport {
+	runID = strings.TrimSpace(runID)
+	caseID = strings.TrimSpace(caseID)
+	stepID = strings.TrimSpace(stepID)
+	status := "no-evidence"
+	if runID != "" {
+		if run, err := runtime.GetRun(ctx, runID); err == nil {
+			status = firstNonEmpty(run.Status, status)
+			if caseID == "" && stepID != "" {
+				caseID = caseIDForWorkflowStepSummary(run.SummaryJSON, stepID)
+			}
+			if stepID == "" && caseID != "" {
+				stepID = stepIDForCaseInWorkflowSummary(run.SummaryJSON, caseID)
+			}
+		}
+	}
+	report := caseDiagnosisReport{
+		OK:             false,
+		CaseRunID:      strings.TrimSpace(caseRunID),
+		RunID:          runID,
+		CaseID:         caseID,
+		Status:         status,
+		StepID:         stepID,
+		Category:       "no-evidence",
+		PrimaryFinding: "no case evidence is persisted for the selected run",
+		Diagnostics:    caseDiagnosisDiagnostics{},
+		Signals: []caseDiagnosisSignal{
+			{Name: "evidence.case_runs", Value: "0"},
+		},
+		NextActions: []string{
+			"agent-testbench case batch report --run " + firstNonEmpty(runID, "<RUN_ID>") + " --json",
+			"rerun the failed case with evidence capture enabled before diagnosing request/response details",
+		},
+		Warnings: []string{"no persisted case evidence matched the selected run/case/step"},
+	}
+	return report
+}
+
+func caseIDForWorkflowStepSummary(summaryJSON string, stepID string) string {
+	summary := jsonObjectString(summaryJSON)
+	for _, raw := range listFromReportAny(summary["steps"]) {
+		step, ok := raw.(map[string]any)
+		if !ok || strings.TrimSpace(valueString(step["stepId"])) != stepID {
+			continue
+		}
+		return strings.TrimSpace(valueString(step["caseId"]))
+	}
+	return ""
+}
+
+func stepIDForCaseInWorkflowSummary(summaryJSON string, caseID string) string {
+	summary := jsonObjectString(summaryJSON)
+	for _, raw := range listFromReportAny(summary["steps"]) {
+		step, ok := raw.(map[string]any)
+		if !ok || strings.TrimSpace(valueString(step["caseId"])) != caseID {
+			continue
+		}
+		return strings.TrimSpace(valueString(step["stepId"]))
+	}
+	return ""
 }
 
 func readCaseDiagnosisArtifacts(ctx context.Context, runtime store.Store, runID string, caseRunID string) (caseDiagnosisArtifacts, error) {

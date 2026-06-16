@@ -162,6 +162,51 @@ func TestCaseDiagnoseReportsMissingRuntimeAndDependencyDiagnostics(t *testing.T)
 	}
 }
 
+func TestCaseDiagnoseReportsNoEvidenceForFailedRunWithoutCaseRuns(t *testing.T) {
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "diagnosis-no-evidence.sqlite")
+	runtime, err := openStore(ctx, "sqlite://"+storePath)
+	if err != nil {
+		t.Fatalf("open Store: %v", err)
+	}
+	defer runtime.Close()
+	if _, err := runtime.CreateRun(ctx, store.Run{
+		ID:          "run.no-evidence",
+		ProfileID:   "sample",
+		WorkflowID:  "workflow.no-evidence",
+		Status:      store.StatusFailed,
+		SummaryJSON: `{"steps":[{"stepId":"step.query","caseId":"case.query","status":"failed","summary":{"actualHttpCode":404,"error":"HTTP 404"}}]}`,
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	out := runCLI(t, "case", "diagnose", "--run", "run.no-evidence", "--case-id", "case.query", "--store", "sqlite://"+storePath, "--json")
+	var report struct {
+		OK             bool     `json:"ok"`
+		RunID          string   `json:"runId"`
+		CaseID         string   `json:"caseId"`
+		Category       string   `json:"category"`
+		PrimaryFinding string   `json:"primaryFinding"`
+		Warnings       []string `json:"warnings"`
+		NextActions    []string `json:"nextActions"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode no-evidence diagnosis json: %v\n%s", err, out)
+	}
+	if report.OK || report.RunID != "run.no-evidence" || report.CaseID != "case.query" || report.Category != "no-evidence" {
+		t.Fatalf("no-evidence diagnosis report = %#v", report)
+	}
+	if !strings.Contains(report.PrimaryFinding, "no case evidence") {
+		t.Fatalf("no-evidence primary finding = %q", report.PrimaryFinding)
+	}
+	if !strings.Contains(strings.Join(report.Warnings, "\n"), "no persisted case evidence") {
+		t.Fatalf("no-evidence warnings = %#v", report.Warnings)
+	}
+	if !strings.Contains(strings.Join(report.NextActions, "\n"), "case batch report") {
+		t.Fatalf("no-evidence next actions = %#v", report.NextActions)
+	}
+}
+
 func seedReadableCaseDiagnosisEvidence(t *testing.T, evidenceURI func(string) string) string {
 	t.Helper()
 	ctx := context.Background()

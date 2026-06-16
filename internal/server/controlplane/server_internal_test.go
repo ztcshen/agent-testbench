@@ -142,7 +142,7 @@ func TestAPICaseBatchWorkflowPlansResolveBundlePathFromProfileIndex(t *testing.T
 		t.Fatalf("upsert profile index: %v", err)
 	}
 
-	plans := apiCaseBatchWorkflowPlans(ctx, profile.Bundle{
+	plans, err := apiCaseBatchWorkflowPlans(ctx, profile.Bundle{
 		ID:             "sample",
 		APICases:       []profile.APICase{{ID: "case.workflow", NodeID: "node.workflow", CasePath: "cases/case.workflow.json"}},
 		InterfaceNodes: []profile.InterfaceNode{{ID: "node.workflow"}},
@@ -153,6 +153,9 @@ func TestAPICaseBatchWorkflowPlansResolveBundlePathFromProfileIndex(t *testing.T
 			CaseID:     "case.workflow",
 		}},
 	}, runtime, apiCaseBatchRunRequest{WorkflowID: "workflow.sample"})
+	if err != nil {
+		t.Fatalf("workflow plans: %v", err)
+	}
 	if len(plans) != 1 || plans[0].CasePath != casePath {
 		t.Fatalf("plans = %#v", plans)
 	}

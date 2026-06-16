@@ -136,6 +136,9 @@ func environmentRestoreGeneratedEnvFilePath(workspace string) string {
 
 func writeEnvironmentRestoreGeneratedEnvFile(workspace string, compose map[string]any) (string, error) {
 	values := stringMapFromAny(compose["env"])
+	if strings.TrimSpace(workspace) != "" {
+		values["AGENT_TESTBENCH_WORKSPACE"] = workspace
+	}
 	if len(values) == 0 {
 		return "", nil
 	}
@@ -150,7 +153,7 @@ func writeEnvironmentRestoreGeneratedEnvFile(workspace string, compose map[strin
 	sort.Strings(keys)
 	var b strings.Builder
 	for _, key := range keys {
-		value := strings.ReplaceAll(values[key], "$AGENT_TESTBENCH_WORKSPACE", workspace)
+		value := strings.ReplaceAll(strings.ReplaceAll(values[key], "$AGENT_TESTBENCH_WORKSPACE", workspace), "${AGENT_TESTBENCH_WORKSPACE}", workspace)
 		b.WriteString(key)
 		b.WriteString("=")
 		b.WriteString(value)

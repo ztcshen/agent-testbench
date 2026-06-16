@@ -175,6 +175,14 @@ func interfaceNodesByID(nodes []profile.InterfaceNode) map[string]profile.Interf
 	return out
 }
 
+func servicesByID(services []profile.Service) map[string]profile.Service {
+	out := make(map[string]profile.Service, len(services))
+	for _, service := range services {
+		out[service.ID] = service
+	}
+	return out
+}
+
 func caseCountsByNode(cases []profile.APICase) map[string]int {
 	out := map[string]int{}
 	for _, item := range cases {

@@ -541,6 +541,37 @@ func TestEnvironmentServiceRestartScopesComposeServiceAndPersistsSummary(t *test
 	}
 }
 
+func TestEnvironmentServiceRestartMaterializesWorkspaceEnv(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	composeSource := filepath.Join(t.TempDir(), "compose.yml")
+	writeFile(t, composeSource, "services:\n  web:\n    image: alpine:3.20\n    volumes:\n      - ${AGENT_TESTBENCH_WORKSPACE}/app:/workspace/app\n")
+	runCLI(t, "environment", "register",
+		"--store", fixture.StoreDSN,
+		"--id", "env.service.restart.workspace",
+		"--compose-file", "compose.yml",
+		"--compose-generated-file", "compose.yml="+composeSource,
+		"--compose-service", "web",
+		"--health-compose-service", "web",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	runCLIWithEnv(t, fixture.DockerEnv, "environment", "service", "restart",
+		"--store", fixture.StoreDSN,
+		"--workspace", fixture.Workspace,
+		"--service", "web",
+		"--health-timeout-seconds", "1",
+		"--json",
+		"env.service.restart.workspace",
+	)
+	rawEnv, err := os.ReadFile(environmentRestoreGeneratedEnvFilePath(fixture.Workspace))
+	if err != nil {
+		t.Fatalf("read generated compose env: %v", err)
+	}
+	if !strings.Contains(string(rawEnv), "AGENT_TESTBENCH_WORKSPACE="+fixture.Workspace+"\n") {
+		t.Fatalf("generated compose env should materialize workspace:\n%s", rawEnv)
+	}
+}
+
 func TestEnvironmentStopRequiresRecordedComposeFileBeforeComposeOptions(t *testing.T) {
 	fixture := newEnvironmentRestoreDockerCLIFixture(t)
 	runCLI(t, "environment", "register",

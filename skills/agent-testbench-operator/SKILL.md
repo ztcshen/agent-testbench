@@ -161,6 +161,20 @@ running:
 ./skills/agent-testbench-operator/scripts/atb.sh environment migration apply ENV_ID --store STORE_NAME --edge OWNER:PROVIDER --database DB_NAME --workspace WORKSPACE --execute --output-format stream-json
 ```
 
+For Store-backed API cases, prefer updating the config selected by the current
+runner. `case config upsert --case CASE_ID` now updates that selected config
+when present; use `--config-id` only when intentionally targeting another
+template config. Add signed or gateway-specific request metadata with repeated
+`--header KEY=VALUE`, `--headers-json`, `--auth-json`, `--signed`, and
+`--trace-endpoint`. Before running a suite, `case suite inspect --json` includes
+`serviceId`, `serviceReady`, and `serviceIssues`; a case can be runnable but
+blocked when its node's service has no startup command or health URL. Workflow
+batch start fails fast if any selected workflow binding cannot be converted into
+a runnable case plan, instead of silently running only the later steps. When a
+failed batch has no indexed case Evidence, use `case diagnose --run RUN_ID
+--case-id CASE_ID --json`; the report points back to the batch report instead
+of crashing or hiding the missing Evidence.
+
 During `environment restore --output-format stream-json`, watch the
 `environment.restore.plan`, `docker.prepare`, `docker.compose.validate`,
 `docker.cleanup`, `docker.native-assets`, `docker.compose.execute`,

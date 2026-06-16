@@ -92,7 +92,7 @@ func readCaseEvidence(ctx context.Context, runtime store.Store, caseRunID string
 		return nil, err
 	}
 	if !ok {
-		return nil, errors.New("case evidence not found")
+		return nil, controlplane.ErrCaseEvidenceNotFound
 	}
 	return payload, nil
 }
