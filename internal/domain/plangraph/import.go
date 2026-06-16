@@ -49,6 +49,9 @@ func ImportCatalog(snapshot catalog.ProfileCatalog, options ImportOptions) (Grap
 	builder.importValidationCases()
 	builder.importMaterializations()
 	builder.finalize()
+	if err := ValidateDAG(builder.graph); err != nil {
+		return Graph{}, err
+	}
 	return builder.graph, nil
 }
 

@@ -111,20 +111,54 @@ func TestExplainCaseSelectsReplayPrefixForValidationDiff(t *testing.T) {
 	if explain.Operations[1].Kind != OperationRunCase || explain.Operations[1].CaseID != "case.apply.days.required" || explain.Operations[1].PatchJSON == "" {
 		t.Fatalf("run-case operation = %#v", explain.Operations[1])
 	}
+	if len(explain.CandidatePaths) != 2 {
+		t.Fatalf("candidate paths = %#v", explain.CandidatePaths)
+	}
+	if explain.CandidatePaths[0].PathID != "workflow.withdraw.success" || !explain.CandidatePaths[0].Selected {
+		t.Fatalf("selected candidate = %#v", explain.CandidatePaths)
+	}
+	if len(explain.RejectedReasons) != 1 || explain.RejectedReasons[0].PathID != "workflow.withdraw.query" {
+		t.Fatalf("rejected reasons = %#v", explain.RejectedReasons)
+	}
+}
+
+func TestValidateDAGRejectsControlCycles(t *testing.T) {
+	graph := Graph{
+		Map: Map{ID: "map.cycle"},
+		Nodes: []Node{
+			{MapID: "map.cycle", ID: "case.a", CaseID: "case.a"},
+			{MapID: "map.cycle", ID: "case.b", CaseID: "case.b"},
+		},
+		Edges: []Edge{
+			{MapID: "map.cycle", ID: "edge.a.b", FromNodeID: "case.a", ToNodeID: "case.b", Kind: EdgeKindControl},
+			{MapID: "map.cycle", ID: "edge.b.a", FromNodeID: "case.b", ToNodeID: "case.a", Kind: EdgeKindFixture},
+		},
+	}
+
+	err := ValidateDAG(graph)
+	if err == nil || !strings.Contains(err.Error(), "cycle") {
+		t.Fatalf("validate dag error = %v", err)
+	}
 }
 
 func plannerFixtureCatalog() catalog.ProfileCatalog {
 	return catalog.ProfileCatalog{
 		ProfileID: "profile.withdraw",
-		Workflows: []catalog.Workflow{{ID: "workflow.withdraw.success"}},
+		Workflows: []catalog.Workflow{
+			{ID: "workflow.withdraw.success"},
+			{ID: "workflow.withdraw.query"},
+		},
 		APICases: []catalog.APICase{
 			{ID: "case.quote", NodeID: "node.quote", RequestTemplateID: "template.quote", Status: "active", SortOrder: 1},
 			{ID: "case.apply.success", NodeID: "node.apply", RequestTemplateID: "template.apply", Status: "active", SortOrder: 2},
 			{ID: "case.apply.days.required", NodeID: "node.apply", CaseType: "negative", RequestTemplateID: "template.apply", RenderMode: "template_patch", PatchJSON: `[{"op":"remove","path":"$.body.days"}]`, ExpectedJSON: `{"status":400}`, Status: "active", SortOrder: 3},
+			{ID: "case.query", NodeID: "node.query", RequestTemplateID: "template.query", Status: "active", SortOrder: 4},
 		},
 		WorkflowBindings: []catalog.WorkflowBinding{
 			{WorkflowID: "workflow.withdraw.success", StepID: "step.quote", NodeID: "node.quote", CaseID: "case.quote", Required: true, SortOrder: 1},
 			{WorkflowID: "workflow.withdraw.success", StepID: "step.apply", NodeID: "node.apply", CaseID: "case.apply.success", Required: true, SortOrder: 2},
+			{WorkflowID: "workflow.withdraw.query", StepID: "step.quote", NodeID: "node.quote", CaseID: "case.quote", Required: true, SortOrder: 1},
+			{WorkflowID: "workflow.withdraw.query", StepID: "step.query", NodeID: "node.query", CaseID: "case.query", Required: true, SortOrder: 2},
 		},
 		Fixtures: []catalog.Fixture{{
 			ID: "fixture.before.apply", Kind: "workflow_prefix", SourceWorkflowID: "workflow.withdraw.success", SourceUntilStep: "step.quote", Status: "active",

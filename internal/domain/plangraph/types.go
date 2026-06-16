@@ -121,8 +121,23 @@ type Explanation struct {
 	RequiredPropertyJSON string              `json:"requiredPropertyJson,omitempty"`
 	ProvidedPropertyJSON string              `json:"providedPropertyJson,omitempty"`
 	PathID               string              `json:"pathId,omitempty"`
+	LogicalPath          []PathStep          `json:"logicalPath,omitempty"`
 	PathSteps            []PathStep          `json:"pathSteps,omitempty"`
+	CandidatePaths       []CandidatePath     `json:"candidatePaths,omitempty"`
+	RejectedReasons      []RejectedReason    `json:"rejectedReasons,omitempty"`
 	Operations           []PhysicalOperation `json:"operations"`
+}
+
+type CandidatePath struct {
+	PathID     string `json:"pathId"`
+	WorkflowID string `json:"workflowId,omitempty"`
+	Selected   bool   `json:"selected,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+type RejectedReason struct {
+	PathID string `json:"pathId"`
+	Reason string `json:"reason"`
 }
 
 type PhysicalOperation struct {

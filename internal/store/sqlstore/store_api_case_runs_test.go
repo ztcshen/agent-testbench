@@ -36,7 +36,7 @@ func TestStoreRecordsAndReadsAPICaseRunsThroughDatabaseSQL(t *testing.T) {
 		t.Fatalf("created case run timestamp = %#v", created)
 	}
 	exec := state.lastExec(t)
-	if !strings.Contains(exec.query, "insert into api_case_runs") || strings.Contains(exec.query, "$1") || !strings.Contains(exec.query, "values (?, ?, ?, ?, ?, ?, ?, ?, ?)") {
+	if !strings.Contains(exec.query, "insert into api_case_runs") || strings.Contains(exec.query, "$1") || !strings.Contains(exec.query, "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)") {
 		t.Fatalf("case run query did not use mysql bind vars:\n%s", exec.query)
 	}
 	if exec.args[2] != "case.alpha" || exec.args[4] != `{"method":"GET"}` {
@@ -44,9 +44,10 @@ func TestStoreRecordsAndReadsAPICaseRunsThroughDatabaseSQL(t *testing.T) {
 	}
 
 	state.queueRows(fakeRows{
-		columns: []string{"id", "run_id", "case_id", "status", "request_summary_json", "assertion_summary_json", "started_at", "finished_at", "created_at"},
+		columns: []string{"id", "run_id", "case_id", "status", "request_summary_json", "assertion_summary_json", "test_plan_node_id", "test_plan_operation", "planner_summary_json", "started_at", "finished_at", "created_at"},
 		values: [][]driver.Value{{
 			"case-run-001", "run-001", "case.alpha", store.StatusPassed, `{"method":"GET"}`, `{"passed":1}`,
+			"", "", "{}",
 			started.Format(time.RFC3339Nano), finished.Format(time.RFC3339Nano), created.CreatedAt.Format(time.RFC3339Nano),
 		}},
 	})
@@ -80,9 +81,10 @@ func TestStoreListsLatestAPICaseRunsThroughDatabaseSQL(t *testing.T) {
 			createdAt := time.Date(2026, 5, 19, 9, 30, 0, 0, time.UTC)
 
 			state.queueRows(fakeRows{
-				columns: []string{"id", "run_id", "case_id", "status", "request_summary_json", "assertion_summary_json", "started_at", "finished_at", "created_at"},
+				columns: []string{"id", "run_id", "case_id", "status", "request_summary_json", "assertion_summary_json", "test_plan_node_id", "test_plan_operation", "planner_summary_json", "started_at", "finished_at", "created_at"},
 				values: [][]driver.Value{{
 					"case-run-latest", "run-001", "case.alpha", store.StatusPassed, `{"method":"GET"}`, `{"passed":true}`,
+					"case.alpha", "run_case", `{"nodeId":"case.alpha"}`,
 					createdAt.Add(-time.Second), createdAt, createdAt,
 				}},
 			})
