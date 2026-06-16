@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	CurrentSchemaVersion = 14
+	CurrentSchemaVersion = 15
 	CoreSchemaName       = "create shared sql store schema"
 	mysqlVarchar255Type  = "varchar(255)"
 	sha256ColumnName     = "sha256"
@@ -47,7 +47,7 @@ func UpgradeSchema(ctx context.Context, db *sql.DB, d Dialect) (SchemaStatusResu
 			if isIdempotentSchemaReplayError(d, statement, err) {
 				continue
 			}
-			return SchemaStatusResult{}, fmt.Errorf("apply shared sql store schema: %w", err)
+			return SchemaStatusResult{}, fmt.Errorf("apply shared sql store schema %q: %w", schemaStatementSummary(statement), err)
 		}
 	}
 	for _, statement := range incrementalSchemaSQL(d, current) {
@@ -55,7 +55,7 @@ func UpgradeSchema(ctx context.Context, db *sql.DB, d Dialect) (SchemaStatusResu
 			if isIdempotentSchemaReplayError(d, statement, err) {
 				continue
 			}
-			return SchemaStatusResult{}, fmt.Errorf("apply shared sql store migration: %w", err)
+			return SchemaStatusResult{}, fmt.Errorf("apply shared sql store migration %q: %w", schemaStatementSummary(statement), err)
 		}
 	}
 	if current < 11 {
@@ -79,6 +79,17 @@ values (%s)
 	}
 	status.AppliedCount = applied
 	return status, nil
+}
+
+func schemaStatementSummary(statement string) string {
+	fields := strings.Fields(statement)
+	if len(fields) == 0 {
+		return ""
+	}
+	if len(fields) > 10 {
+		fields = fields[:10]
+	}
+	return strings.Join(fields, " ")
 }
 
 func currentSchemaVersion(ctx context.Context, db *sql.DB, d Dialect) (int, error) {
@@ -112,6 +123,7 @@ func CoreSchemaSQL(d Dialect) []string {
 	statements = append(statements, coreObservabilitySchemaSQL(d, types)...)
 	statements = append(statements, coreAgentTaskSchemaSQL(d, types)...)
 	statements = append(statements, coreProfileConfigSchemaSQL(d, types)...)
+	statements = append(statements, corePlanGraphSchemaSQL(d, types)...)
 	return append(statements, coreEnvironmentCatalogSchemaSQL(d, types)...)
 }
 
@@ -398,6 +410,20 @@ create table if not exists environment_files (
 				intType:  "integer",
 				timeType: d.TimeType(),
 				jsonType: d.JSONType(),
+			})...,
+		)
+	}
+	if current < 15 {
+		statements = append(statements,
+			corePlanGraphSchemaSQL(d, coreSchemaTypes{
+				text:          d.TextType(),
+				keyText:       d.KeyTextType(),
+				profileIDText: profileIdentifierTextType(d),
+				runIDText:     runIdentifierTextType(d),
+				intType:       "integer",
+				timeType:      d.TimeType(),
+				jsonType:      d.JSONType(),
+				boolType:      d.BoolType(),
 			})...,
 		)
 	}

@@ -56,6 +56,7 @@ var rootCommands = map[string]rootCommand{
 	"replay":             runReplay,
 	"executor":           func(args []string) error { return runExecutor(context.Background(), args) },
 	"workflow":           runWorkflow,
+	"map":                func(args []string) error { return runMap(context.Background(), args) },
 	"baseline":           func(args []string) error { return runBaseline(context.Background(), args) },
 	"template":           runTemplate,
 	"case":               func(args []string) error { return runCase(context.Background(), args) },

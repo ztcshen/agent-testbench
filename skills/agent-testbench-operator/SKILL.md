@@ -138,6 +138,13 @@ Inspect sandbox service registration without starting services:
 ./skills/agent-testbench-operator/scripts/atb.sh environment bootstrap ENV_ID --store STORE_NAME --json
 ```
 
+Build and inspect a Store-backed workflow map without running target services:
+
+```bash
+./skills/agent-testbench-operator/scripts/atb.sh map import-workflows --store STORE_NAME --json
+./skills/agent-testbench-operator/scripts/atb.sh map explain --store STORE_NAME --map MAP_ID --case CASE_ID --json
+```
+
 For compose-backed sandbox services, `sandbox start --json` reports
 `recoveryCommand`, `readiness`, and `warning` on each service result when
 applicable. If a registered `docker start CONTAINER` command fails because the

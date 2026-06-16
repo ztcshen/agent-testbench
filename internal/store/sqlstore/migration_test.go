@@ -275,6 +275,32 @@ func TestCoreSchemaSQLIncludesEnvironmentComponentAssets(t *testing.T) {
 	)
 }
 
+func TestCoreSchemaSQLIncludesTestPlanGraph(t *testing.T) {
+	statements := sqlstore.CoreSchemaSQL(sqlstore.PostgresDialect{})
+	joined := strings.Join(statements, "\n")
+	assertSQLContains(t, joined, "core schema test plan graph",
+		"create table if not exists test_plan_maps",
+		"map_id text primary key",
+		"profile_id text not null",
+		"create table if not exists test_plan_nodes",
+		"base_case_id text not null",
+		"anchor_node_id text not null",
+		"required_property_json jsonb not null",
+		"provided_property_json jsonb not null",
+		"create table if not exists test_plan_edges",
+		"from_node_id text not null",
+		"to_node_id text not null",
+		"create table if not exists test_plan_paths",
+		"workflow_id text not null",
+		"create table if not exists test_plan_path_steps",
+		"step_index integer not null",
+		"create table if not exists test_plan_materializations",
+		"source_until_node_id text not null",
+		"idx_test_plan_nodes_case",
+		"idx_test_plan_edges_to",
+	)
+}
+
 func TestCoreSchemaSQLDoesNotApplyCommentsBeforeIncrementalMigrations(t *testing.T) {
 	for _, dialect := range []sqlstore.Dialect{sqlstore.PostgresDialect{}, sqlstore.MySQLDialect{}} {
 		t.Run(dialect.Name(), func(t *testing.T) {
