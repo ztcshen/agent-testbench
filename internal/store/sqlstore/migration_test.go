@@ -279,25 +279,25 @@ func TestCoreSchemaSQLIncludesTestPlanGraph(t *testing.T) {
 	statements := sqlstore.CoreSchemaSQL(sqlstore.PostgresDialect{})
 	joined := strings.Join(statements, "\n")
 	assertSQLContains(t, joined, "core schema test plan graph",
-		"create table if not exists test_plan_maps",
+		"create table if not exists test_maps",
 		"map_id text primary key",
 		"profile_id text not null",
-		"create table if not exists test_plan_nodes",
+		"create table if not exists test_map_nodes",
 		"base_case_id text not null",
 		"anchor_node_id text not null",
 		"required_property_json jsonb not null",
 		"provided_property_json jsonb not null",
-		"create table if not exists test_plan_edges",
+		"create table if not exists test_map_edges",
 		"from_node_id text not null",
 		"to_node_id text not null",
-		"create table if not exists test_plan_paths",
+		"create table if not exists test_map_paths",
 		"workflow_id text not null",
-		"create table if not exists test_plan_path_steps",
+		"create table if not exists test_map_path_steps",
 		"step_index integer not null",
 		"create table if not exists test_plan_materializations",
 		"source_until_node_id text not null",
-		"idx_test_plan_nodes_case",
-		"idx_test_plan_edges_to",
+		"idx_test_map_nodes_case",
+		"idx_test_map_edges_to",
 	)
 }
 

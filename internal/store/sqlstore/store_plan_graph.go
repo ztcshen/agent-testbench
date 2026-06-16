@@ -68,7 +68,7 @@ func (s *Store) GetTestPlanGraph(ctx context.Context, mapID string) (store.TestP
 select map_id, node_id, case_id, interface_node_id, request_template_id, base_case_id, anchor_node_id,
   role, state_effect, render_mode, patch_json, expected_json, required_property_json, provided_property_json,
   summary_json, sort_order
-from test_plan_nodes
+from test_map_nodes
 where map_id = %s
 order by sort_order, node_id;`, mapIDBind), scanTestPlanNode, mapID)
 	if err != nil {
@@ -77,7 +77,7 @@ order by sort_order, node_id;`, mapIDBind), scanTestPlanNode, mapID)
 	edges, err := queryStoreRows(ctx, s.db, fmt.Sprintf(`
 select map_id, edge_id, from_node_id, to_node_id, kind, path_id, materialization_id, required,
   mappings_json, summary_json, sort_order
-from test_plan_edges
+from test_map_edges
 where map_id = %s
 order by sort_order, edge_id;`, mapIDBind), scanTestPlanEdge, mapID)
 	if err != nil {
@@ -86,7 +86,7 @@ order by sort_order, edge_id;`, mapIDBind), scanTestPlanEdge, mapID)
 	paths, err := queryStoreRows(ctx, s.db, fmt.Sprintf(`
 select map_id, path_id, workflow_id, display_name, status, required_property_json, provided_property_json,
   summary_json, sort_order
-from test_plan_paths
+from test_map_paths
 where map_id = %s
 order by sort_order, path_id;`, mapIDBind), scanTestPlanPath, mapID)
 	if err != nil {
@@ -94,7 +94,7 @@ order by sort_order, path_id;`, mapIDBind), scanTestPlanPath, mapID)
 	}
 	pathSteps, err := queryStoreRows(ctx, s.db, fmt.Sprintf(`
 select map_id, path_id, step_index, step_id, node_id, case_id, required, materialize_after, summary_json
-from test_plan_path_steps
+from test_map_path_steps
 where map_id = %s
 order by path_id, step_index;`, mapIDBind), scanTestPlanPathStep, mapID)
 	if err != nil {
@@ -198,12 +198,12 @@ func prepareTestPlanMaterializationForInsert(mapID string, item store.TestPlanMa
 
 func (s *Store) deleteTestPlanGraph(ctx context.Context, tx *sql.Tx, mapID string) error {
 	for _, tableName := range []string{
-		"test_plan_edges",
+		"test_map_edges",
 		"test_plan_materializations",
-		"test_plan_path_steps",
-		"test_plan_paths",
-		"test_plan_nodes",
-		"test_plan_maps",
+		"test_map_path_steps",
+		"test_map_paths",
+		"test_map_nodes",
+		"test_maps",
 	} {
 		query := fmt.Sprintf("delete from %s where map_id = %s;", s.dialect.QuoteIdent(tableName), s.dialect.BindVar(1))
 		if _, err := tx.ExecContext(ctx, query, mapID); err != nil {
@@ -215,7 +215,7 @@ func (s *Store) deleteTestPlanGraph(ctx context.Context, tx *sql.Tx, mapID strin
 
 func (s *Store) insertTestPlanMap(ctx context.Context, tx *sql.Tx, item store.TestPlanMap) error {
 	query := fmt.Sprintf(`
-insert into test_plan_maps (
+insert into test_maps (
   map_id, profile_id, display_name, description, status, summary_json, created_at, updated_at
 )
 values (%s);`, s.bindVars(8))
@@ -231,7 +231,7 @@ values (%s);`, s.bindVars(8))
 
 func (s *Store) insertTestPlanNode(ctx context.Context, tx *sql.Tx, item store.TestPlanNode) error {
 	query := fmt.Sprintf(`
-insert into test_plan_nodes (
+insert into test_map_nodes (
   map_id, node_id, case_id, interface_node_id, request_template_id, base_case_id, anchor_node_id,
   role, state_effect, render_mode, patch_json, expected_json, required_property_json, provided_property_json,
   summary_json, sort_order
@@ -250,7 +250,7 @@ values (%s);`, s.bindVars(16))
 
 func (s *Store) insertTestPlanEdge(ctx context.Context, tx *sql.Tx, item store.TestPlanEdge) error {
 	query := fmt.Sprintf(`
-insert into test_plan_edges (
+insert into test_map_edges (
   map_id, edge_id, from_node_id, to_node_id, kind, path_id, materialization_id, required,
   mappings_json, summary_json, sort_order
 )
@@ -267,7 +267,7 @@ values (%s);`, s.bindVars(11))
 
 func (s *Store) insertTestPlanPath(ctx context.Context, tx *sql.Tx, item store.TestPlanPath) error {
 	query := fmt.Sprintf(`
-insert into test_plan_paths (
+insert into test_map_paths (
   map_id, path_id, workflow_id, display_name, status, required_property_json, provided_property_json,
   summary_json, sort_order
 )
@@ -284,7 +284,7 @@ values (%s);`, s.bindVars(9))
 
 func (s *Store) insertTestPlanPathStep(ctx context.Context, tx *sql.Tx, item store.TestPlanPathStep) error {
 	query := fmt.Sprintf(`
-insert into test_plan_path_steps (
+insert into test_map_path_steps (
   map_id, path_id, step_index, step_id, node_id, case_id, required, materialize_after, summary_json
 )
 values (%s);`, s.bindVars(9))
@@ -317,7 +317,7 @@ values (%s);`, s.bindVars(12))
 func (s *Store) getTestPlanMap(ctx context.Context, mapID string) (store.TestPlanMap, error) {
 	query := fmt.Sprintf(`
 select map_id, profile_id, display_name, description, status, summary_json, created_at, updated_at
-from test_plan_maps
+from test_maps
 where map_id = %s;`, s.dialect.BindVar(1))
 	row := s.db.QueryRowContext(ctx, query, mapID)
 	var item store.TestPlanMap
