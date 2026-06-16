@@ -10,7 +10,12 @@ import (
 	"agent-testbench/internal/store"
 )
 
-const sandboxStartupCommandEmpty = "startup command is empty"
+const (
+	sandboxStartupCommandEmpty             = "startup command is empty"
+	sandboxComposeServiceRunningReadiness  = "compose-service-running"
+	sandboxComposeServiceStoppedReadiness  = "compose-service-not-running"
+	sandboxDockerComposeLegacyCommandToken = "docker-compose"
+)
 
 func sandboxWorkflowRequiredServiceReasons(catalog store.ProfileCatalog, workflowID string) (map[string]string, error) {
 	workflowID = strings.TrimSpace(workflowID)
@@ -170,12 +175,15 @@ func verifySandboxServiceHealthURL(ctx context.Context, healthURL string, timeou
 		resp, err := client.Do(req)
 		if err == nil {
 			statusCode := resp.StatusCode
-			_ = resp.Body.Close()
-			if statusCode >= 200 && statusCode < 300 {
+			closeErr := resp.Body.Close()
+			if closeErr != nil {
+				lastErr = "healthUrl response body close failed: " + closeErr.Error()
+			} else if statusCode >= 200 && statusCode < 300 {
 				result.Readiness = "health-url-ready"
 				return result
+			} else {
+				lastErr = fmt.Sprintf("healthUrl returned HTTP %d", statusCode)
 			}
-			lastErr = fmt.Sprintf("healthUrl returned HTTP %d", statusCode)
 		} else {
 			lastErr = err.Error()
 		}
@@ -206,23 +214,23 @@ func verifySandboxComposeServiceRunning(ctx context.Context, composeService stri
 	if commandCtx.Err() == context.DeadlineExceeded {
 		result.ExitCode = 124
 		result.Error = "compose service readiness check timed out"
-		result.Readiness = "compose-service-not-running"
+		result.Readiness = sandboxComposeServiceStoppedReadiness
 		return result
 	}
 	if commandResult.Err != nil {
 		result.ExitCode = commandResult.ExitCode
 		result.Error = "compose service readiness check failed: " + commandResult.Err.Error()
-		result.Readiness = "compose-service-not-running"
+		result.Readiness = sandboxComposeServiceStoppedReadiness
 		return result
 	}
 	state, health, exitCode, hasExitCode := parseComposeServiceHealth(commandResult.Output)
 	if state == "running" && (health == "" || health == "healthy") {
-		result.Readiness = "compose-service-running"
+		result.Readiness = sandboxComposeServiceRunningReadiness
 		result.Warning = "service has no healthUrl; readiness verified only by Docker Compose running state"
 		return result
 	}
 	result.ExitCode = 1
-	result.Readiness = "compose-service-not-running"
+	result.Readiness = sandboxComposeServiceStoppedReadiness
 	detail := "state=" + firstNonEmpty(state, "unknown")
 	if health != "" {
 		detail += " health=" + health
@@ -266,7 +274,7 @@ func sandboxStartComposeService(service store.CatalogService, command string) st
 		if field == "" || strings.HasPrefix(field, "-") {
 			continue
 		}
-		if field == "docker" || field == "compose" || field == "docker-compose" {
+		if field == "docker" || field == "compose" || field == sandboxDockerComposeLegacyCommandToken {
 			continue
 		}
 		return field
@@ -276,7 +284,7 @@ func sandboxStartComposeService(service store.CatalogService, command string) st
 
 func sandboxStartCommandUsesCompose(fields []string) bool {
 	for index, field := range fields {
-		if field == "docker-compose" {
+		if field == sandboxDockerComposeLegacyCommandToken {
 			return true
 		}
 		if field == "docker" && index+1 < len(fields) && fields[index+1] == "compose" {

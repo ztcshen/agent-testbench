@@ -9,7 +9,7 @@ import (
 	"syscall"
 )
 
-func withProfileCatalogWriteLock(storeIdentity string, fn func() error) error {
+func withProfileCatalogWriteLock(storeIdentity string, fn func() error) (err error) {
 	lockPath, err := profileCatalogWriteLockPath(storeIdentity)
 	if err != nil {
 		return err
@@ -18,11 +18,19 @@ func withProfileCatalogWriteLock(storeIdentity string, fn func() error) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
 		return err
 	}
-	defer syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+	defer func() {
+		if unlockErr := syscall.Flock(int(file.Fd()), syscall.LOCK_UN); unlockErr != nil && err == nil {
+			err = unlockErr
+		}
+	}()
 	return fn()
 }
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -332,12 +333,15 @@ func waitForAgentObservedCommandCancel(ctx context.Context, cmd *exec.Cmd, resul
 	if ctxErr == nil {
 		ctxErr = context.Canceled
 	}
-	cancelObservedCommand(cmd)
+	cancelOutput := ""
+	if cancelErr := cancelObservedCommand(cmd); cancelErr != nil && !errors.Is(cancelErr, os.ErrProcessDone) {
+		cancelOutput = "cancel command failed: " + cancelErr.Error()
+	}
 	select {
 	case result := <-resultCh:
-		return agentObservedCommandCanceledResult(ctxErr, result.Output)
+		return agentObservedCommandCanceledResult(ctxErr, strings.TrimSpace(result.Output+"\n"+cancelOutput))
 	case <-time.After(2 * time.Second):
-		return agentObservedCommandCanceledResult(ctxErr, "")
+		return agentObservedCommandCanceledResult(ctxErr, cancelOutput)
 	}
 }
 
