@@ -25,6 +25,22 @@ func TestOperatorWrapperStatusPrefersRepoRuntime(t *testing.T) {
 	}
 }
 
+func TestRepoWrapperStatusPrefersRepoRuntime(t *testing.T) {
+	repo := t.TempDir()
+	writeExecutable(t, filepath.Join(repo, ".runtime", "bin", "agent-testbench"), "#!/usr/bin/env sh\necho runtime \"$@\"\n")
+	copyFile(t, filepath.Join(repoRootForTest(t), "bin", "agent-testbench.sh"), filepath.Join(repo, "bin", "agent-testbench.sh"), 0o755)
+
+	cmd := exec.Command(filepath.Join(repo, "bin", "agent-testbench.sh"), "status", "--json")
+	cmd.Env = append(os.Environ(), "ATB_BIN=")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run repo wrapper: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(string(out)) != "runtime status --json" {
+		t.Fatalf("repo wrapper status should use repo runtime, got %q", out)
+	}
+}
+
 func writeExecutable(t *testing.T, path string, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -32,6 +48,20 @@ func writeExecutable(t *testing.T, path string, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
 		t.Fatalf("write executable %s: %v", path, err)
+	}
+}
+
+func copyFile(t *testing.T, src string, dst string, mode os.FileMode) {
+	t.Helper()
+	raw, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("read %s: %v", src, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(dst), err)
+	}
+	if err := os.WriteFile(dst, raw, mode); err != nil {
+		t.Fatalf("write %s: %v", dst, err)
 	}
 }
 
