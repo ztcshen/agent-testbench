@@ -13,7 +13,7 @@ func writeInterfaceNodeCoverageProfile(t *testing.T) string {
 	writeFile(t, filepath.Join(dir, "profile.json"), `{
   "id": "sample",
   "displayName": "Sample Profile",
-  "services": [{"id":"service.alpha","displayName":"Service Alpha"}],
+  "services": [{"id":"service.alpha","displayName":"Service Alpha","startupCommand":"true"}],
   "workflows": [{"id":"workflow.alpha","displayName":"Workflow Alpha"}],
   "interfaceNodes": [{"id":"node.alpha","displayName":"Node Alpha","serviceId":"service.alpha"}],
   "apiCases": [{"id":"case.alpha","displayName":"Case Alpha","nodeId":"node.alpha"}],
@@ -31,7 +31,7 @@ func writeInterfaceNodeBatchReportProfile(t *testing.T) string {
 	writeFile(t, filepath.Join(dir, "profile.json"), `{
   "id": "sample",
   "displayName": "Sample Profile",
-  "services": [{"id":"service.alpha","displayName":"Service Alpha"}],
+  "services": [{"id":"service.alpha","displayName":"Service Alpha","startupCommand":"true"}],
   "workflows": [],
   "interfaceNodes": [{"id":"node.alpha","displayName":"Result Lookup","serviceId":"service.alpha","operation":"Result Lookup","method":"GET","path":"/lookup"}],
   "apiCases": [
@@ -84,7 +84,7 @@ func writeUniqueInterfaceNodeBatchReportProfile(t *testing.T) interfaceNodeBatch
 	writeFile(t, filepath.Join(fixture.profileDir, "profile.json"), fmt.Sprintf(`{
   "id": %q,
   "displayName": "Sample Profile",
-  "services": [{"id":"service.alpha","displayName":"Service Alpha"}],
+  "services": [{"id":"service.alpha","displayName":"Service Alpha","startupCommand":"true"}],
   "workflows": [],
   "interfaceNodes": [{"id":%q,"displayName":"Result Lookup","serviceId":"service.alpha","operation":"Result Lookup","method":"GET","path":"/lookup"}],
   "apiCases": [
