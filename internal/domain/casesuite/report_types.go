@@ -70,6 +70,9 @@ type InspectionItem struct {
 	Description        string   `json:"description,omitempty"`
 	NodeID             string   `json:"nodeId,omitempty"`
 	NodeName           string   `json:"nodeName,omitempty"`
+	ServiceID          string   `json:"serviceId,omitempty"`
+	ServiceReady       bool     `json:"serviceReady,omitempty"`
+	ServiceIssues      []string `json:"serviceIssues,omitempty"`
 	Tags               []string `json:"tags,omitempty"`
 	Priority           string   `json:"priority,omitempty"`
 	Owner              string   `json:"owner,omitempty"`

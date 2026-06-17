@@ -15,11 +15,13 @@ import (
 )
 
 type caseConfigUpsertReport struct {
-	OK      bool                      `json:"ok"`
-	CaseID  string                    `json:"caseId"`
-	Created bool                      `json:"created"`
-	Updated bool                      `json:"updated"`
-	Config  caseConfigUpsertConfigRef `json:"config"`
+	OK               bool                      `json:"ok"`
+	CaseID           string                    `json:"caseId"`
+	Created          bool                      `json:"created"`
+	Updated          bool                      `json:"updated"`
+	Config           caseConfigUpsertConfigRef `json:"config"`
+	SelectedByRunner bool                      `json:"selectedByRunner"`
+	Warnings         []string                  `json:"warnings,omitempty"`
 }
 
 type caseConfigUpsertConfigRef struct {
@@ -47,10 +49,18 @@ func runCaseConfigUpsert(ctx context.Context, args []string) error {
 	method := flags.String("method", "", "HTTP method")
 	path := flags.String("path", "", "Request path")
 	bodyJSON := flags.String("body-json", "", "Request body JSON")
+	nodeID := flags.String("node-id", "", "Override interface node id")
+	configID := flags.String("config-id", "", "Template config id to update")
+	authJSON := flags.String("auth-json", "", "Request auth JSON")
+	headersJSON := flags.String("headers-json", "", "Request headers JSON object")
+	signed := flags.Bool("signed", false, "Enable request signing with the configured auth block")
+	traceEndpoint := flags.String("trace-endpoint", "", "Trace endpoint associated with this case execution")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	headers := stringListFlag{}
 	expectedStatuses := stringListFlag{}
 	responseContains := stringListFlag{}
 	responseNotContains := stringListFlag{}
+	flags.Var(&headers, "header", "Request header as Name=Value; repeat for multiple headers")
 	flags.Var(&expectedStatuses, "expected-status", "Expected HTTP status; repeat for multiple values")
 	flags.Var(&responseContains, "response-contains", "Required response fragment; repeat for multiple values")
 	flags.Var(&responseNotContains, "response-not-contains", "Forbidden response fragment; repeat for multiple values")
@@ -77,9 +87,16 @@ func runCaseConfigUpsert(ctx context.Context, args []string) error {
 		var upsertErr error
 		report, upsertErr = upsertCaseExecutionConfig(ctx, runtime, caseConfigUpsertOptions{
 			CaseID:              *caseID,
+			ConfigID:            *configID,
 			Method:              *method,
 			Path:                *path,
 			BodyJSON:            *bodyJSON,
+			NodeID:              *nodeID,
+			Headers:             headers.Values(),
+			HeadersJSON:         *headersJSON,
+			AuthJSON:            *authJSON,
+			Signed:              *signed,
+			TraceEndpoint:       *traceEndpoint,
 			ExpectedStatuses:    expectedStatuses.Values(),
 			ResponseContains:    responseContains.Values(),
 			ResponseNotContains: responseNotContains.Values(),
@@ -98,9 +115,16 @@ func runCaseConfigUpsert(ctx context.Context, args []string) error {
 
 type caseConfigUpsertOptions struct {
 	CaseID              string
+	ConfigID            string
 	Method              string
 	Path                string
 	BodyJSON            string
+	NodeID              string
+	Headers             []string
+	HeadersJSON         string
+	AuthJSON            string
+	Signed              bool
+	TraceEndpoint       string
 	ExpectedStatuses    []string
 	ResponseContains    []string
 	ResponseNotContains []string
@@ -116,7 +140,15 @@ func upsertCaseExecutionConfig(ctx context.Context, runtime store.Store, options
 	if !ok {
 		return caseConfigUpsertReport{}, fmt.Errorf("api case not found in Store catalog: %s", caseID)
 	}
-	body, err := parseOptionalJSONObject(options.BodyJSON)
+	body, hasBody, err := parseOptionalJSONValue("body-json", options.BodyJSON)
+	if err != nil {
+		return caseConfigUpsertReport{}, err
+	}
+	headers, err := parseHeadersOptions(options.Headers, options.HeadersJSON)
+	if err != nil {
+		return caseConfigUpsertReport{}, err
+	}
+	auth, hasAuth, err := parseOptionalJSONObject("auth-json", options.AuthJSON)
 	if err != nil {
 		return caseConfigUpsertReport{}, err
 	}
@@ -124,50 +156,162 @@ func upsertCaseExecutionConfig(ctx context.Context, runtime store.Store, options
 	if err != nil {
 		return caseConfigUpsertReport{}, err
 	}
-	configID := "config." + safeReportID(caseID) + ".execution"
+	configID := strings.TrimSpace(options.ConfigID)
+	if configID == "" {
+		configID = selectedCaseExecutionTemplateConfigID(catalog, caseID)
+	}
+	if configID == "" {
+		configID = "config." + safeReportID(caseID) + ".execution"
+	}
 	config, exists := findCatalogTemplateConfig(catalog.TemplateConfigs, configID)
 	config.ID = configID
-	config.ScopeType = "case"
+	if !exists || !isCaseExecutionConfigScope(config.ScopeType) {
+		config.ScopeType = "case"
+	}
 	config.ScopeID = caseID
 	config.Status = "active"
-	configJSON, err := compactJSON(map[string]any{
-		"caseId": caseID,
-		"caseExecution": map[string]any{
-			"method":                      firstNonEmpty(strings.TrimSpace(options.Method), apiCaseMethod(catalog, apiCase)),
-			"nodeId":                      apiCase.NodeID,
-			"path":                        firstNonEmpty(strings.TrimSpace(options.Path), apiCasePath(catalog, apiCase)),
-			"body":                        body,
-			"expectedHttpCodes":           statuses,
-			"expectedResponseContains":    options.ResponseContains,
-			"expectedResponseNotContains": options.ResponseNotContains,
-		},
+	configJSON, err := mergeCaseExecutionConfigJSON(config.ConfigJSON, caseID, apiCase, catalog, caseConfigExecutionPatch{
+		Method:              strings.TrimSpace(options.Method),
+		Path:                strings.TrimSpace(options.Path),
+		Body:                body,
+		HasBody:             hasBody,
+		NodeID:              strings.TrimSpace(options.NodeID),
+		Headers:             headers,
+		Auth:                auth,
+		HasAuth:             hasAuth,
+		Signed:              options.Signed,
+		TraceEndpoint:       strings.TrimSpace(options.TraceEndpoint),
+		ExpectedStatuses:    statuses,
+		ResponseContains:    options.ResponseContains,
+		ResponseNotContains: options.ResponseNotContains,
 	})
 	if err != nil {
 		return caseConfigUpsertReport{}, err
 	}
 	config.ConfigJSON = configJSON
 	catalog.TemplateConfigs = upsertCatalogTemplateConfig(catalog.TemplateConfigs, config)
+	selectedID := selectedCaseExecutionTemplateConfigID(catalog, caseID)
 	catalog.IndexedAt = time.Now().UTC()
 	if err := runtime.ReplaceProfileCatalog(ctx, catalog); err != nil {
 		return caseConfigUpsertReport{}, err
 	}
 	return caseConfigUpsertReport{
-		OK:      true,
-		CaseID:  caseID,
-		Created: !exists,
-		Updated: exists,
-		Config:  caseConfigUpsertConfigRef{ID: configID},
+		OK:               true,
+		CaseID:           caseID,
+		Created:          !exists,
+		Updated:          exists,
+		Config:           caseConfigUpsertConfigRef{ID: configID},
+		SelectedByRunner: selectedID == configID,
 	}, nil
 }
 
-func parseOptionalJSONObject(raw string) (any, error) {
+type caseConfigExecutionPatch struct {
+	Method              string
+	Path                string
+	Body                any
+	HasBody             bool
+	NodeID              string
+	Headers             map[string]any
+	Auth                any
+	HasAuth             bool
+	Signed              bool
+	TraceEndpoint       string
+	ExpectedStatuses    []int
+	ResponseContains    []string
+	ResponseNotContains []string
+}
+
+func mergeCaseExecutionConfigJSON(raw string, caseID string, apiCase store.CatalogAPICase, catalog store.ProfileCatalog, patch caseConfigExecutionPatch) (string, error) {
+	doc := map[string]any{}
+	if strings.TrimSpace(raw) != "" {
+		if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+			return "", fmt.Errorf("decode existing template config JSON: %w", err)
+		}
+	}
+	execution := mapFromReportAny(doc["caseExecution"])
+	execution["method"] = firstNonEmpty(patch.Method, valueString(execution["method"]), apiCaseMethod(catalog, apiCase))
+	execution["nodeId"] = firstNonEmpty(patch.NodeID, valueString(execution["nodeId"]), apiCase.NodeID)
+	execution["path"] = firstNonEmpty(patch.Path, valueString(execution["path"]), apiCasePath(catalog, apiCase))
+	if patch.HasBody {
+		execution["body"] = patch.Body
+	}
+	if len(patch.ExpectedStatuses) > 0 {
+		execution["expectedHttpCodes"] = patch.ExpectedStatuses
+	}
+	if len(patch.ResponseContains) > 0 {
+		execution["expectedResponseContains"] = patch.ResponseContains
+	}
+	if len(patch.ResponseNotContains) > 0 {
+		execution["expectedResponseNotContains"] = patch.ResponseNotContains
+	}
+	if len(patch.Headers) > 0 {
+		existingHeaders := mapFromReportAny(execution["headers"])
+		for key, value := range patch.Headers {
+			existingHeaders[key] = value
+		}
+		execution["headers"] = existingHeaders
+	}
+	if patch.HasAuth {
+		execution["auth"] = patch.Auth
+	}
+	if patch.Signed {
+		execution["signed"] = true
+	}
+	if patch.TraceEndpoint != "" {
+		execution["traceEndpoint"] = patch.TraceEndpoint
+	}
+	doc["caseId"] = caseID
+	doc["caseExecution"] = execution
+	return compactJSON(doc)
+}
+
+func parseOptionalJSONValue(name string, raw string) (any, bool, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return nil, nil
+		return nil, false, nil
 	}
 	var out any
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		return nil, fmt.Errorf("decode --body-json: %w", err)
+		return nil, false, fmt.Errorf("decode --%s: %w", name, err)
+	}
+	return out, true, nil
+}
+
+func parseOptionalJSONObject(name string, raw string) (any, bool, error) {
+	value, ok, err := parseOptionalJSONValue(name, raw)
+	if err != nil || !ok {
+		return value, ok, err
+	}
+	if _, valid := value.(map[string]any); !valid {
+		return nil, false, fmt.Errorf("--%s must be a JSON object", name)
+	}
+	return value, true, nil
+}
+
+func parseHeadersOptions(values []string, rawJSON string) (map[string]any, error) {
+	out := map[string]any{}
+	if strings.TrimSpace(rawJSON) != "" {
+		parsed, ok, err := parseOptionalJSONObject("headers-json", rawJSON)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			headers, valid := parsed.(map[string]any)
+			if !valid {
+				return nil, fmt.Errorf("--headers-json must be a JSON object")
+			}
+			for key, value := range headers {
+				out[key] = value
+			}
+		}
+	}
+	for _, value := range values {
+		key, headerValue, ok := strings.Cut(value, "=")
+		key = strings.TrimSpace(key)
+		if !ok || key == "" {
+			return nil, fmt.Errorf("invalid --header %q, expected Name=Value", value)
+		}
+		out[key] = strings.TrimSpace(headerValue)
 	}
 	return out, nil
 }
@@ -203,6 +347,40 @@ func findCatalogTemplateConfig(items []store.CatalogTemplateConfig, id string) (
 		}
 	}
 	return store.CatalogTemplateConfig{}, false
+}
+
+func selectedCaseExecutionTemplateConfigID(catalog store.ProfileCatalog, caseID string) string {
+	for _, config := range catalog.TemplateConfigs {
+		if config.Status != "" && config.Status != "active" {
+			continue
+		}
+		if !isCaseExecutionConfigScope(config.ScopeType) {
+			continue
+		}
+		if config.ScopeID != "" && config.ScopeID != caseID {
+			continue
+		}
+		var parsed struct {
+			CaseID        string         `json:"caseId"`
+			CaseExecution map[string]any `json:"caseExecution"`
+		}
+		if err := json.Unmarshal([]byte(config.ConfigJSON), &parsed); err != nil {
+			continue
+		}
+		if parsed.CaseID != caseID {
+			continue
+		}
+		if valueString(parsed.CaseExecution["method"]) == "" && valueString(parsed.CaseExecution["path"]) == "" && valueString(parsed.CaseExecution["nodeId"]) == "" {
+			continue
+		}
+		return config.ID
+	}
+	return ""
+}
+
+func isCaseExecutionConfigScope(scopeType string) bool {
+	scopeType = strings.TrimSpace(scopeType)
+	return scopeType == "" || scopeType == "case" || scopeType == "api-case"
 }
 
 func upsertCatalogTemplateConfig(items []store.CatalogTemplateConfig, next store.CatalogTemplateConfig) []store.CatalogTemplateConfig {

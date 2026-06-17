@@ -225,7 +225,18 @@ func qualityNodeMatchesFilter(node profile.InterfaceNode, filter Filter) bool {
 	if filter.NodeID != "" && node.ID != filter.NodeID {
 		return false
 	}
+	if filter.Status != "" && !strings.EqualFold(interfaceNodeStatus(node), filter.Status) {
+		return false
+	}
 	return MatchesText(filter.Filter, node.ID, node.DisplayName, node.ServiceID, node.Operation, node.Method, node.Path, node.Description, strings.Join(node.Tags, " "))
+}
+
+func interfaceNodeStatus(node profile.InterfaceNode) string {
+	status := strings.ToLower(strings.TrimSpace(node.Status))
+	if status == "" {
+		return CaseLifecycleActive
+	}
+	return status
 }
 
 func missingMetadataFields(item QualityCase) []string {

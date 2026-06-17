@@ -59,6 +59,10 @@ func startAPICaseBatchRun(ctx context.Context, bundle profile.Bundle, runtime st
 	}
 	plans, err := apiCaseBatchPlans(ctx, bundle, runtime, request)
 	if err != nil {
+		var planErr apiCaseBatchPlanError
+		if errors.As(err, &planErr) {
+			return apiCaseBatchRunReport{}, planErr.Status, planErr
+		}
 		return apiCaseBatchRunReport{}, http.StatusInternalServerError, err
 	}
 	if len(plans) == 0 {

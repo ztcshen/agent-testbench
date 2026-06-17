@@ -17,11 +17,13 @@ func (s *Store) CreateRun(ctx context.Context, r store.Run) (store.Run, error) {
 		r.UpdatedAt = r.CreatedAt
 	}
 	r.SummaryJSON = stringDefault(r.SummaryJSON, "{}")
+	r.PlannerSummaryJSON = stringDefault(r.PlannerSummaryJSON, "{}")
 	query := fmt.Sprintf(`
-insert into runs (id, profile_id, environment_id, workflow_id, status, evidence_root, summary_json, started_at, finished_at, created_at, updated_at)
-values (%s);`, s.bindVars(11))
+insert into runs (id, profile_id, environment_id, workflow_id, status, evidence_root, summary_json, test_plan_map_id, test_plan_path_id, planner_summary_json, started_at, finished_at, created_at, updated_at)
+values (%s);`, s.bindVars(14))
 	if _, err := s.db.ExecContext(ctx, query,
 		r.ID, r.ProfileID, r.EnvironmentID, r.WorkflowID, r.Status, r.EvidenceRoot, r.SummaryJSON,
+		r.TestPlanMapID, r.TestPlanPathID, r.PlannerSummaryJSON,
 		dbTimeArg(s.dialect, r.StartedAt), dbTimeArg(s.dialect, r.FinishedAt), dbTimeArg(s.dialect, r.CreatedAt), dbTimeArg(s.dialect, r.UpdatedAt)); err != nil {
 		return store.Run{}, fmt.Errorf("create run %q: %w", r.ID, err)
 	}
@@ -30,7 +32,7 @@ values (%s);`, s.bindVars(11))
 
 func (s *Store) GetRun(ctx context.Context, id string) (store.Run, error) {
 	query := fmt.Sprintf(`
-	select id, profile_id, environment_id, workflow_id, status, evidence_root, summary_json, started_at, finished_at, created_at, updated_at
+	select id, profile_id, environment_id, workflow_id, status, evidence_root, summary_json, test_plan_map_id, test_plan_path_id, planner_summary_json, started_at, finished_at, created_at, updated_at
 from runs where id = %s;`, s.dialect.BindVar(1))
 	r, err := scanRun(s.db.QueryRowContext(ctx, query, id))
 	if err != nil {
@@ -41,7 +43,7 @@ from runs where id = %s;`, s.dialect.BindVar(1))
 
 func (s *Store) ListRuns(ctx context.Context) ([]store.Run, error) {
 	return queryStoreRows(ctx, s.db, `
-select id, profile_id, environment_id, workflow_id, status, evidence_root, summary_json, started_at, finished_at, created_at, updated_at
+select id, profile_id, environment_id, workflow_id, status, evidence_root, summary_json, test_plan_map_id, test_plan_path_id, planner_summary_json, started_at, finished_at, created_at, updated_at
 from runs order by created_at, id;`, scanRun)
 }
 
@@ -50,6 +52,7 @@ func scanRun(row scanner) (store.Run, error) {
 	var startedAt, finishedAt, createdAt, updatedAt any
 	if err := row.Scan(
 		&r.ID, &r.ProfileID, &r.EnvironmentID, &r.WorkflowID, &r.Status, &r.EvidenceRoot, &r.SummaryJSON,
+		&r.TestPlanMapID, &r.TestPlanPathID, &r.PlannerSummaryJSON,
 		&startedAt, &finishedAt, &createdAt, &updatedAt,
 	); err != nil {
 		if err == sql.ErrNoRows {
@@ -58,6 +61,7 @@ func scanRun(row scanner) (store.Run, error) {
 		return store.Run{}, err
 	}
 	r.SummaryJSON = normalizeJSONText(r.SummaryJSON)
+	r.PlannerSummaryJSON = normalizeJSONText(r.PlannerSummaryJSON)
 	r.StartedAt = decodeDBTime(startedAt)
 	r.FinishedAt = decodeDBTime(finishedAt)
 	r.CreatedAt = decodeDBTime(createdAt)

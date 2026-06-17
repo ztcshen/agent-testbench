@@ -54,7 +54,7 @@ func exerciseStoreRecordsAndReadsRuns(t *testing.T, tt runDialectExpectation) {
 		t.Fatalf("created run timestamps = %#v", created)
 	}
 	exec := state.lastExec(t)
-	assertSQLContains(t, exec.query, "create run query", "insert into runs", sqlValuesClause(tt.dialect, 11))
+	assertSQLContains(t, exec.query, "create run query", "insert into runs", sqlValuesClause(tt.dialect, 14))
 	assertSQLOmits(t, exec.query, "create run query", tt.reject)
 	if exec.args[0] != "run-001" || exec.args[6] != `{"stepCount":1}` {
 		t.Fatalf("create run args = %#v", exec.args)
@@ -86,9 +86,10 @@ func exerciseStoreRecordsAndReadsRuns(t *testing.T, tt runDialectExpectation) {
 
 func queueRunRow(state *fakeSQLState, run store.Run, started time.Time, summaryJSON string) {
 	state.queueRows(fakeRows{
-		columns: []string{"id", "profile_id", "environment_id", "workflow_id", "status", "evidence_root", "summary_json", "started_at", "finished_at", "created_at", "updated_at"},
+		columns: []string{"id", "profile_id", "environment_id", "workflow_id", "status", "evidence_root", "summary_json", "test_plan_map_id", "test_plan_path_id", "planner_summary_json", "started_at", "finished_at", "created_at", "updated_at"},
 		values: [][]driver.Value{{
 			"run-001", "profile.alpha", "env.alpha", "workflow.alpha", store.StatusPassed, ".runtime/evidence/run-001", summaryJSON,
+			run.TestPlanMapID, run.TestPlanPathID, "{}",
 			started.Format(time.RFC3339Nano), "", run.CreatedAt.Format(time.RFC3339Nano), run.UpdatedAt.Format(time.RFC3339Nano),
 		}},
 	})
@@ -115,10 +116,10 @@ func TestPostgresStoreUsesNullForZeroTimestampArgs(t *testing.T) {
 		t.Fatalf("create run: %v", err)
 	}
 	exec := state.lastExec(t)
-	if exec.args[7] != started {
-		t.Fatalf("started_at arg = %#v, want time.Time", exec.args[7])
+	if exec.args[10] != started {
+		t.Fatalf("started_at arg = %#v, want time.Time", exec.args[10])
 	}
-	if exec.args[8] != nil {
-		t.Fatalf("finished_at arg = %#v, want nil for zero time", exec.args[8])
+	if exec.args[11] != nil {
+		t.Fatalf("finished_at arg = %#v, want nil for zero time", exec.args[11])
 	}
 }

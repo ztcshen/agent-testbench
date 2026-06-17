@@ -162,6 +162,9 @@ func findCaseEvidenceRunByCaseRunID(ctx context.Context, runtime store.Store, ca
 }
 
 func selectCaseEvidenceRun(caseRuns []store.APICaseRun, caseRunID string, caseID string, stepID string, summaryJSON string) (store.APICaseRun, bool) {
+	if len(caseRuns) == 0 {
+		return store.APICaseRun{}, false
+	}
 	caseRunID = strings.TrimSpace(caseRunID)
 	if caseRunID != "" {
 		for _, item := range caseRuns {

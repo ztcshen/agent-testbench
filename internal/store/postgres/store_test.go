@@ -69,7 +69,7 @@ func TestOpenUsesConfiguredSQLDriverAndDelegatesRuntimeStoreMethods(t *testing.T
 		t.Fatalf("create run through postgres store: %v", err)
 	}
 	exec := state.lastExec(t)
-	if !strings.Contains(exec.query, "insert into runs") || !strings.Contains(exec.query, "values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)") {
+	if !strings.Contains(exec.query, "insert into runs") || !strings.Contains(exec.query, "values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)") {
 		t.Fatalf("delegated create run did not use postgres sqlstore dialect:\n%s", exec.query)
 	}
 

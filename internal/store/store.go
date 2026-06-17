@@ -7,6 +7,7 @@ import (
 
 	"agent-testbench/internal/domain/catalog"
 	"agent-testbench/internal/domain/execution"
+	"agent-testbench/internal/domain/plangraph"
 )
 
 var ErrNotFound = execution.ErrNotFound
@@ -25,6 +26,7 @@ type Store interface {
 	EvidenceStore
 	BaselineGateStore
 	ProfileCatalogStore
+	PlanGraphStore
 	EnvironmentStore
 	AgentTaskStore
 }
@@ -68,6 +70,11 @@ type ProfileCatalogStore interface {
 	ReplaceProfileCatalog(context.Context, ProfileCatalog) error
 	GetProfileCatalog(context.Context) (ProfileCatalog, error)
 	GetProfileCatalogIndex(context.Context) (ProfileCatalogIndex, error)
+}
+
+type PlanGraphStore interface {
+	ReplaceTestPlanGraph(context.Context, TestPlanGraph) error
+	GetTestPlanGraph(context.Context, string) (TestPlanGraph, error)
 }
 
 type EnvironmentStore interface {
@@ -255,3 +262,11 @@ type CatalogWorkflowBinding = catalog.WorkflowBinding
 type CatalogCaseDependency = catalog.CaseDependency
 type CatalogFixture = catalog.Fixture
 type CatalogTemplateConfig = catalog.TemplateConfig
+
+type TestPlanGraph = plangraph.Graph
+type TestPlanMap = plangraph.Map
+type TestPlanNode = plangraph.Node
+type TestPlanEdge = plangraph.Edge
+type TestPlanPath = plangraph.Path
+type TestPlanPathStep = plangraph.PathStep
+type TestPlanMaterialization = plangraph.Materialization

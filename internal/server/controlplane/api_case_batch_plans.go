@@ -2,6 +2,8 @@ package controlplane
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -11,12 +13,21 @@ import (
 	"agent-testbench/internal/store"
 )
 
+type apiCaseBatchPlanError struct {
+	Status  int
+	Message string
+}
+
+func (e apiCaseBatchPlanError) Error() string {
+	return e.Message
+}
+
 func apiCaseBatchPlans(ctx context.Context, bundle profile.Bundle, runtime store.Store, request apiCaseBatchRunRequest) ([]apiCaseBatchCasePlan, error) {
 	if len(request.CaseIDs) > 0 {
 		return apiCaseBatchExactCasePlans(ctx, bundle, runtime, request), nil
 	}
 	if strings.TrimSpace(request.WorkflowID) != "" {
-		return apiCaseBatchWorkflowPlans(ctx, bundle, runtime, request), nil
+		return apiCaseBatchWorkflowPlans(ctx, bundle, runtime, request)
 	}
 	if request.Suite.configured() {
 		return apiCaseBatchSuitePlans(ctx, bundle, runtime, request)
@@ -99,7 +110,7 @@ func apiCaseBatchPlansFromCases(ctx context.Context, bundle profile.Bundle, runt
 	return out
 }
 
-func apiCaseBatchWorkflowPlans(ctx context.Context, bundle profile.Bundle, runtime store.Store, request apiCaseBatchRunRequest) []apiCaseBatchCasePlan {
+func apiCaseBatchWorkflowPlans(ctx context.Context, bundle profile.Bundle, runtime store.Store, request apiCaseBatchRunRequest) ([]apiCaseBatchCasePlan, error) {
 	nodesByID := apiCaseBatchNodesByID(bundle)
 	casesByID := make(map[string]profile.APICase, len(bundle.APICases))
 	for _, item := range bundle.APICases {
@@ -118,9 +129,13 @@ func apiCaseBatchWorkflowPlans(ctx context.Context, bundle profile.Bundle, runti
 		return bindings[i].StepID < bindings[j].StepID
 	})
 	out := make([]apiCaseBatchCasePlan, 0, len(bindings))
+	missing := []string{}
 	for _, binding := range bindings {
 		item, ok := casesByID[binding.CaseID]
 		if !ok {
+			if binding.Required {
+				missing = append(missing, fmt.Sprintf("step %s references missing case %s", binding.StepID, binding.CaseID))
+			}
 			continue
 		}
 		nodeID := firstNonEmpty(binding.NodeID, item.NodeID)
@@ -129,9 +144,19 @@ func apiCaseBatchWorkflowPlans(ctx context.Context, bundle profile.Bundle, runti
 		plan, ok := apiCaseBatchPlanFromCase(ctx, bundle, runtime, request, item, nodeID, node, binding.StepID, payload)
 		if ok {
 			out = append(out, plan)
+			continue
+		}
+		if binding.Required {
+			missing = append(missing, fmt.Sprintf("step %s case %s missing runnable case execution", binding.StepID, binding.CaseID))
 		}
 	}
-	return out
+	if len(missing) > 0 {
+		return nil, apiCaseBatchPlanError{
+			Status:  http.StatusConflict,
+			Message: "workflow " + request.WorkflowID + " has unrunnable steps: " + strings.Join(missing, "; "),
+		}
+	}
+	return out, nil
 }
 
 func apiCaseBatchPlanFromCase(ctx context.Context, bundle profile.Bundle, runtime store.Store, request apiCaseBatchRunRequest, item profile.APICase, nodeID string, node profile.InterfaceNode, stepID string, payload map[string]any) (apiCaseBatchCasePlan, bool) {

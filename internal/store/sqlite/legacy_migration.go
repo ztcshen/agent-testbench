@@ -279,22 +279,42 @@ where key = 'active_profile_id' and value <> '';`, time.Now().UTC()); err != nil
 }
 
 func ensureLegacySharedColumns(ctx context.Context, tx *sql.Tx) error {
-	hasRuns, err := txHasTable(ctx, tx, "runs")
-	if err != nil {
-		return err
+	const (
+		legacyRunsTable         = "runs"
+		legacyTextDefaultEmpty  = "text not null default ''"
+		legacyTextDefaultObject = "text not null default '{}'"
+	)
+	columns := []struct {
+		table     string
+		column    string
+		ddlSuffix string
+	}{
+		{legacyRunsTable, "environment_id", legacyTextDefaultEmpty},
+		{legacyRunsTable, "test_plan_map_id", legacyTextDefaultEmpty},
+		{legacyRunsTable, "test_plan_path_id", legacyTextDefaultEmpty},
+		{legacyRunsTable, "planner_summary_json", legacyTextDefaultObject},
+		{"api_case_runs", "test_plan_node_id", legacyTextDefaultEmpty},
+		{"api_case_runs", "test_plan_operation", legacyTextDefaultEmpty},
+		{"api_case_runs", "planner_summary_json", legacyTextDefaultObject},
 	}
-	if !hasRuns {
-		return nil
-	}
-	hasEnvironmentID, err := txHasColumn(ctx, tx, "runs", "environment_id")
-	if err != nil {
-		return err
-	}
-	if hasEnvironmentID {
-		return nil
-	}
-	if _, err := tx.ExecContext(ctx, `alter table runs add column environment_id text not null default '';`); err != nil {
-		return fmt.Errorf("add missing legacy runs.environment_id column: %w", err)
+	for _, item := range columns {
+		hasTable, err := txHasTable(ctx, tx, item.table)
+		if err != nil {
+			return err
+		}
+		if !hasTable {
+			continue
+		}
+		hasColumn, err := txHasColumn(ctx, tx, item.table, item.column)
+		if err != nil {
+			return err
+		}
+		if hasColumn {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("alter table %s add column %s %s;", item.table, item.column, item.ddlSuffix)); err != nil {
+			return fmt.Errorf("add missing legacy %s.%s column: %w", item.table, item.column, err)
+		}
 	}
 	return nil
 }

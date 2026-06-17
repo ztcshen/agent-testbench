@@ -16,6 +16,10 @@ func TestServerExposesCaseSuiteImpactPlan(t *testing.T) {
 	_, s := openCaseSuiteRouteStore(t)
 	bundle := profile.Bundle{
 		ID: "sample",
+		Services: []profile.Service{
+			{ID: "service.alpha", DisplayName: "Service Alpha", Status: "active", HealthURL: "http://127.0.0.1/alpha/health"},
+			{ID: "service.beta", DisplayName: "Service Beta", Status: "active", HealthURL: "http://127.0.0.1/beta/health"},
+		},
 		InterfaceNodes: []profile.InterfaceNode{
 			{ID: "node.create", DisplayName: "Create Item", ServiceID: "service.alpha", Operation: "Create", Method: "POST", Path: "/v1/items"},
 			{ID: "node.other", DisplayName: "Other", ServiceID: "service.beta", Operation: "Other", Method: "GET", Path: "/v1/other"},
@@ -82,6 +86,9 @@ func TestServerStartsCaseSuiteImpactBatchRun(t *testing.T) {
 	}
 	bundle := profile.Bundle{
 		ID: "sample",
+		Services: []profile.Service{
+			{ID: "service.alpha", DisplayName: "Service Alpha", Status: "active", HealthURL: "http://127.0.0.1/alpha/health"},
+		},
 		InterfaceNodes: []profile.InterfaceNode{
 			{ID: "node.create", DisplayName: "Create Item", ServiceID: "service.alpha", Operation: "Create", Method: "GET", Path: "/v1/items"},
 		},

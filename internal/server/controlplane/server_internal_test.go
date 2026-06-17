@@ -142,7 +142,7 @@ func TestAPICaseBatchWorkflowPlansResolveBundlePathFromProfileIndex(t *testing.T
 		t.Fatalf("upsert profile index: %v", err)
 	}
 
-	plans := apiCaseBatchWorkflowPlans(ctx, profile.Bundle{
+	plans, err := apiCaseBatchWorkflowPlans(ctx, profile.Bundle{
 		ID:             "sample",
 		APICases:       []profile.APICase{{ID: "case.workflow", NodeID: "node.workflow", CasePath: "cases/case.workflow.json"}},
 		InterfaceNodes: []profile.InterfaceNode{{ID: "node.workflow"}},
@@ -153,7 +153,40 @@ func TestAPICaseBatchWorkflowPlansResolveBundlePathFromProfileIndex(t *testing.T
 			CaseID:     "case.workflow",
 		}},
 	}, runtime, apiCaseBatchRunRequest{WorkflowID: "workflow.sample"})
+	if err != nil {
+		t.Fatalf("workflow plans: %v", err)
+	}
 	if len(plans) != 1 || plans[0].CasePath != casePath {
+		t.Fatalf("plans = %#v", plans)
+	}
+}
+
+func TestAPICaseBatchWorkflowPlansSkipUnrunnableOptionalBinding(t *testing.T) {
+	ctx := context.Background()
+	casePath := filepath.Join(t.TempDir(), "case.required.json")
+	if err := os.WriteFile(casePath, []byte(`{"id":"case.required","request":{"method":"GET","path":"/ready"}}`), 0o644); err != nil {
+		t.Fatalf("write case: %v", err)
+	}
+
+	plans, err := apiCaseBatchWorkflowPlans(ctx, profile.Bundle{
+		ID: "sample",
+		APICases: []profile.APICase{
+			{ID: "case.required", NodeID: "node.required", CasePath: casePath},
+			{ID: "case.optional", NodeID: "node.optional"},
+		},
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.required"},
+			{ID: "node.optional"},
+		},
+		WorkflowBindings: []profile.WorkflowBinding{
+			{WorkflowID: "workflow.sample", StepID: "required", NodeID: "node.required", CaseID: "case.required", Required: true, SortOrder: 1},
+			{WorkflowID: "workflow.sample", StepID: "optional", NodeID: "node.optional", CaseID: "case.optional", Required: false, SortOrder: 2},
+		},
+	}, nil, apiCaseBatchRunRequest{WorkflowID: "workflow.sample"})
+	if err != nil {
+		t.Fatalf("workflow plans should skip unrunnable optional binding: %v", err)
+	}
+	if len(plans) != 1 || plans[0].ID != "case.required" {
 		t.Fatalf("plans = %#v", plans)
 	}
 }

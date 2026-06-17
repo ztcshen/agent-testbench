@@ -15,11 +15,13 @@ func (s *Store) RecordAPICaseRun(ctx context.Context, r store.APICaseRun) (store
 	}
 	r.RequestSummaryJSON = stringDefault(r.RequestSummaryJSON, "{}")
 	r.AssertionSummaryJSON = stringDefault(r.AssertionSummaryJSON, "{}")
+	r.PlannerSummaryJSON = stringDefault(r.PlannerSummaryJSON, "{}")
 	query := fmt.Sprintf(`
-insert into api_case_runs (id, run_id, case_id, status, request_summary_json, assertion_summary_json, started_at, finished_at, created_at)
-values (%s);`, s.bindVars(9))
+insert into api_case_runs (id, run_id, case_id, status, request_summary_json, assertion_summary_json, test_plan_node_id, test_plan_operation, planner_summary_json, started_at, finished_at, created_at)
+values (%s);`, s.bindVars(12))
 	if _, err := s.db.ExecContext(ctx, query,
 		r.ID, r.RunID, r.CaseID, r.Status, r.RequestSummaryJSON, r.AssertionSummaryJSON,
+		r.TestPlanNodeID, r.TestPlanOperation, r.PlannerSummaryJSON,
 		dbTimeArg(s.dialect, r.StartedAt), dbTimeArg(s.dialect, r.FinishedAt), dbTimeArg(s.dialect, r.CreatedAt)); err != nil {
 		return store.APICaseRun{}, fmt.Errorf("record api case run %q: %w", r.ID, err)
 	}
@@ -28,16 +30,16 @@ values (%s);`, s.bindVars(9))
 
 func (s *Store) ListAPICaseRuns(ctx context.Context, runID string) ([]store.APICaseRun, error) {
 	query := fmt.Sprintf(`
-select id, run_id, case_id, status, request_summary_json, assertion_summary_json, started_at, finished_at, created_at
+select id, run_id, case_id, status, request_summary_json, assertion_summary_json, test_plan_node_id, test_plan_operation, planner_summary_json, started_at, finished_at, created_at
 from api_case_runs where run_id = %s order by created_at, id;`, s.dialect.BindVar(1))
 	return s.queryAPICaseRuns(ctx, query, runID)
 }
 
 func (s *Store) ListLatestAPICaseRuns(ctx context.Context) ([]store.APICaseRun, error) {
 	return s.queryAPICaseRuns(ctx, `
-select id, run_id, case_id, status, request_summary_json, assertion_summary_json, started_at, finished_at, created_at
+select id, run_id, case_id, status, request_summary_json, assertion_summary_json, test_plan_node_id, test_plan_operation, planner_summary_json, started_at, finished_at, created_at
 from (
-  select id, run_id, case_id, status, request_summary_json, assertion_summary_json, started_at, finished_at, created_at,
+  select id, run_id, case_id, status, request_summary_json, assertion_summary_json, test_plan_node_id, test_plan_operation, planner_summary_json, started_at, finished_at, created_at,
     row_number() over (partition by case_id order by created_at desc, id desc) as rn
   from api_case_runs
   where case_id <> ''
@@ -60,8 +62,10 @@ func (s *Store) ListAPICaseRunRecordsForCaseIDs(ctx context.Context, caseIDs []s
 	query := fmt.Sprintf(`
 select
   r.id, r.profile_id, r.environment_id, r.workflow_id, r.status, r.evidence_root, r.summary_json,
+  r.test_plan_map_id, r.test_plan_path_id, r.planner_summary_json,
   r.started_at, r.finished_at, r.created_at, r.updated_at,
   acr.id, acr.run_id, acr.case_id, acr.status, acr.request_summary_json, acr.assertion_summary_json,
+  acr.test_plan_node_id, acr.test_plan_operation, acr.planner_summary_json,
   acr.started_at, acr.finished_at, acr.created_at
 from api_case_runs acr
 join runs r on r.id = acr.run_id
@@ -81,20 +85,24 @@ func scanAPICaseRunRecord(row scanner) (store.APICaseRunRecord, error) {
 	if err := row.Scan(
 		&record.Run.ID, &record.Run.ProfileID, &record.Run.EnvironmentID, &record.Run.WorkflowID,
 		&record.Run.Status, &record.Run.EvidenceRoot, &record.Run.SummaryJSON,
+		&record.Run.TestPlanMapID, &record.Run.TestPlanPathID, &record.Run.PlannerSummaryJSON,
 		&runStartedAt, &runFinishedAt, &runCreatedAt, &runUpdatedAt,
 		&record.CaseRun.ID, &record.CaseRun.RunID, &record.CaseRun.CaseID, &record.CaseRun.Status,
 		&record.CaseRun.RequestSummaryJSON, &record.CaseRun.AssertionSummaryJSON,
+		&record.CaseRun.TestPlanNodeID, &record.CaseRun.TestPlanOperation, &record.CaseRun.PlannerSummaryJSON,
 		&caseStartedAt, &caseFinishedAt, &caseCreatedAt,
 	); err != nil {
 		return store.APICaseRunRecord{}, err
 	}
 	record.Run.SummaryJSON = normalizeJSONText(record.Run.SummaryJSON)
+	record.Run.PlannerSummaryJSON = normalizeJSONText(record.Run.PlannerSummaryJSON)
 	record.Run.StartedAt = decodeDBTime(runStartedAt)
 	record.Run.FinishedAt = decodeDBTime(runFinishedAt)
 	record.Run.CreatedAt = decodeDBTime(runCreatedAt)
 	record.Run.UpdatedAt = decodeDBTime(runUpdatedAt)
 	record.CaseRun.RequestSummaryJSON = normalizeJSONText(record.CaseRun.RequestSummaryJSON)
 	record.CaseRun.AssertionSummaryJSON = normalizeJSONText(record.CaseRun.AssertionSummaryJSON)
+	record.CaseRun.PlannerSummaryJSON = normalizeJSONText(record.CaseRun.PlannerSummaryJSON)
 	record.CaseRun.StartedAt = decodeDBTime(caseStartedAt)
 	record.CaseRun.FinishedAt = decodeDBTime(caseFinishedAt)
 	record.CaseRun.CreatedAt = decodeDBTime(caseCreatedAt)
@@ -106,6 +114,7 @@ func scanAPICaseRun(row scanner) (store.APICaseRun, error) {
 	var startedAt, finishedAt, createdAt any
 	if err := row.Scan(
 		&r.ID, &r.RunID, &r.CaseID, &r.Status, &r.RequestSummaryJSON, &r.AssertionSummaryJSON,
+		&r.TestPlanNodeID, &r.TestPlanOperation, &r.PlannerSummaryJSON,
 		&startedAt, &finishedAt, &createdAt,
 	); err != nil {
 		if err == sql.ErrNoRows {
@@ -115,6 +124,7 @@ func scanAPICaseRun(row scanner) (store.APICaseRun, error) {
 	}
 	r.RequestSummaryJSON = normalizeJSONText(r.RequestSummaryJSON)
 	r.AssertionSummaryJSON = normalizeJSONText(r.AssertionSummaryJSON)
+	r.PlannerSummaryJSON = normalizeJSONText(r.PlannerSummaryJSON)
 	r.StartedAt = decodeDBTime(startedAt)
 	r.FinishedAt = decodeDBTime(finishedAt)
 	r.CreatedAt = decodeDBTime(createdAt)

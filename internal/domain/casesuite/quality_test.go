@@ -50,6 +50,128 @@ func TestQualityAuditsMaintainedCaseAuthoringGaps(t *testing.T) {
 	}
 }
 
+func TestQualityActiveFilterIgnoresInactiveInterfaceNodes(t *testing.T) {
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.active", DisplayName: "Active Node", Status: "active"},
+			{ID: "node.inactive", DisplayName: "Inactive Node", Status: "inactive"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.active", DisplayName: "Active Case", Description: "Ready.", NodeID: "node.active", CasePath: "cases/active.json", Tags: []string{"regression"}, Priority: "p0", Owner: "team-a", Status: "active"},
+		},
+		TemplateConfigs: []profile.TemplateConfig{
+			{ID: "cfg.case.active", ScopeType: "case", ScopeID: "case.active", Status: "active", ConfigJSON: `{"caseId":"case.active","caseExecution":{"method":"GET","path":"/active"}}`},
+		},
+	}
+	cases := SelectCases(bundle, Filter{Status: "active"})
+
+	report, err := Quality(context.Background(), bundle, recordStore{}, Filter{Status: "active"}, cases)
+	if err != nil {
+		t.Fatalf("quality: %v", err)
+	}
+	if !report.OK || report.Counts.Nodes != 1 || report.Counts.NodesWithoutCases != 0 || len(report.Nodes) != 0 {
+		t.Fatalf("active quality should ignore inactive nodes: counts=%#v nodes=%#v", report.Counts, report.Nodes)
+	}
+}
+
+func TestInspectBlocksCaseWhenDependencyServiceCannotBeStartedOrChecked(t *testing.T) {
+	bundle := profile.Bundle{
+		ID: "sample",
+		Services: []profile.Service{
+			{ID: "service.bridge", DisplayName: "Bridge", Status: "active"},
+		},
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.bridge", DisplayName: "Bridge Node", ServiceID: "service.bridge"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.bridge", DisplayName: "Bridge Case", Description: "Requires a local bridge.", NodeID: "node.bridge", CasePath: "cases/bridge.json", Tags: []string{"regression"}, Priority: "p0", Owner: "team-a", Status: "active"},
+		},
+		TemplateConfigs: []profile.TemplateConfig{
+			{ID: "cfg.case.bridge", ScopeType: "case", ScopeID: "case.bridge", Status: "active", ConfigJSON: `{"caseId":"case.bridge","caseExecution":{"method":"POST","path":"/bridge"}}`},
+		},
+	}
+	cases := SelectCases(bundle, Filter{Status: "active"})
+
+	report, err := Inspect(context.Background(), bundle, recordStore{}, Filter{Status: "active"}, cases)
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+	if report.OK || report.Counts.Ready != 0 || report.Counts.Blocked != 1 || len(report.Items) != 1 {
+		t.Fatalf("inspection counts = %#v items=%#v", report.Counts, report.Items)
+	}
+	item := report.Items[0]
+	if item.Ready || item.ServiceID != "service.bridge" || item.ServiceReady || !containsString(item.ServiceIssues, "missing-service-startup-command") {
+		t.Fatalf("inspection should expose service readiness blocker: %#v", item)
+	}
+}
+
+func TestInspectBlocksCaseWhenDependencyServiceCatalogIsMissing(t *testing.T) {
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.bridge", DisplayName: "Bridge Node", ServiceID: "service.bridge"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.bridge", DisplayName: "Bridge Case", Description: "Requires a registered service.", NodeID: "node.bridge", CasePath: "cases/bridge.json", Tags: []string{"regression"}, Priority: "p0", Owner: "team-a", Status: "active"},
+		},
+		TemplateConfigs: []profile.TemplateConfig{
+			{ID: "cfg.case.bridge", ScopeType: "case", ScopeID: "case.bridge", Status: "active", ConfigJSON: `{"caseId":"case.bridge","caseExecution":{"method":"POST","path":"/bridge"}}`},
+		},
+	}
+	cases := SelectCases(bundle, Filter{Status: "active"})
+
+	report, err := Inspect(context.Background(), bundle, recordStore{}, Filter{Status: "active"}, cases)
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+	if report.OK || report.Counts.Ready != 0 || report.Counts.Blocked != 1 || len(report.Items) != 1 {
+		t.Fatalf("inspection counts = %#v items=%#v", report.Counts, report.Items)
+	}
+	item := report.Items[0]
+	if item.Ready || item.ServiceID != "service.bridge" || item.ServiceReady || !containsString(item.ServiceIssues, "missing-service") {
+		t.Fatalf("inspection should expose missing service catalog blocker: %#v", item)
+	}
+}
+
+func TestInspectAcceptsComposeManagedDependencyService(t *testing.T) {
+	bundle := profile.Bundle{
+		ID: "sample",
+		Services: []profile.Service{
+			{
+				ID:            "service.compose",
+				DisplayName:   "Compose Service",
+				Status:        "active",
+				DockerService: "compose-api",
+				ContainerName: "sample-compose-api",
+				Image:         "example/compose-api:1",
+			},
+		},
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.compose", DisplayName: "Compose Node", ServiceID: "service.compose"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.compose", DisplayName: "Compose Case", Description: "Uses a compose service.", NodeID: "node.compose", CasePath: "cases/compose.json", Tags: []string{"regression"}, Priority: "p0", Owner: "team-a", Status: "active"},
+		},
+		TemplateConfigs: []profile.TemplateConfig{
+			{ID: "cfg.case.compose", ScopeType: "case", ScopeID: "case.compose", Status: "active", ConfigJSON: `{"caseId":"case.compose","caseExecution":{"method":"GET","path":"/compose"}}`},
+		},
+	}
+	cases := SelectCases(bundle, Filter{Status: "active"})
+
+	report, err := Inspect(context.Background(), bundle, recordStore{}, Filter{Status: "active"}, cases)
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+	if !report.OK || report.Counts.Ready != 1 || report.Counts.Blocked != 0 || len(report.Items) != 1 {
+		t.Fatalf("inspection counts = %#v items=%#v", report.Counts, report.Items)
+	}
+	item := report.Items[0]
+	if !item.Ready || !item.ServiceReady || containsString(item.ServiceIssues, "missing-service-startup-command") {
+		t.Fatalf("compose-managed service should be ready: %#v", item)
+	}
+}
+
 func TestQualityAuditsCaseLifecycleStatus(t *testing.T) {
 	bundle := profile.Bundle{
 		ID: "sample",

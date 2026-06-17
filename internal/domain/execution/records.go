@@ -16,17 +16,20 @@ const (
 )
 
 type Run struct {
-	ID            string
-	ProfileID     string
-	EnvironmentID string
-	WorkflowID    string
-	Status        string
-	EvidenceRoot  string
-	SummaryJSON   string
-	StartedAt     time.Time
-	FinishedAt    time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID                 string
+	ProfileID          string
+	EnvironmentID      string
+	WorkflowID         string
+	Status             string
+	EvidenceRoot       string
+	SummaryJSON        string
+	TestPlanMapID      string
+	TestPlanPathID     string
+	PlannerSummaryJSON string
+	StartedAt          time.Time
+	FinishedAt         time.Time
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 type APICaseRun struct {
@@ -36,6 +39,9 @@ type APICaseRun struct {
 	Status               string
 	RequestSummaryJSON   string
 	AssertionSummaryJSON string
+	TestPlanNodeID       string
+	TestPlanOperation    string
+	PlannerSummaryJSON   string
 	StartedAt            time.Time
 	FinishedAt           time.Time
 	CreatedAt            time.Time

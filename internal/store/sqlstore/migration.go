@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	CurrentSchemaVersion = 14
+	CurrentSchemaVersion = 16
 	CoreSchemaName       = "create shared sql store schema"
 	mysqlVarchar255Type  = "varchar(255)"
 	sha256ColumnName     = "sha256"
@@ -47,7 +47,7 @@ func UpgradeSchema(ctx context.Context, db *sql.DB, d Dialect) (SchemaStatusResu
 			if isIdempotentSchemaReplayError(d, statement, err) {
 				continue
 			}
-			return SchemaStatusResult{}, fmt.Errorf("apply shared sql store schema: %w", err)
+			return SchemaStatusResult{}, fmt.Errorf("apply shared sql store schema %q: %w", schemaStatementSummary(statement), err)
 		}
 	}
 	for _, statement := range incrementalSchemaSQL(d, current) {
@@ -55,7 +55,7 @@ func UpgradeSchema(ctx context.Context, db *sql.DB, d Dialect) (SchemaStatusResu
 			if isIdempotentSchemaReplayError(d, statement, err) {
 				continue
 			}
-			return SchemaStatusResult{}, fmt.Errorf("apply shared sql store migration: %w", err)
+			return SchemaStatusResult{}, fmt.Errorf("apply shared sql store migration %q: %w", schemaStatementSummary(statement), err)
 		}
 	}
 	if current < 11 {
@@ -79,6 +79,17 @@ values (%s)
 	}
 	status.AppliedCount = applied
 	return status, nil
+}
+
+func schemaStatementSummary(statement string) string {
+	fields := strings.Fields(statement)
+	if len(fields) == 0 {
+		return ""
+	}
+	if len(fields) > 10 {
+		fields = fields[:10]
+	}
+	return strings.Join(fields, " ")
 }
 
 func currentSchemaVersion(ctx context.Context, db *sql.DB, d Dialect) (int, error) {
@@ -112,6 +123,7 @@ func CoreSchemaSQL(d Dialect) []string {
 	statements = append(statements, coreObservabilitySchemaSQL(d, types)...)
 	statements = append(statements, coreAgentTaskSchemaSQL(d, types)...)
 	statements = append(statements, coreProfileConfigSchemaSQL(d, types)...)
+	statements = append(statements, corePlanGraphSchemaSQL(d, types)...)
 	return append(statements, coreEnvironmentCatalogSchemaSQL(d, types)...)
 }
 
@@ -144,11 +156,14 @@ create table if not exists runs (
   status %s not null,
   evidence_root %s not null,
   summary_json %s not null,
+  test_plan_map_id %s not null,
+  test_plan_path_id %s not null,
+  planner_summary_json %s not null,
   started_at %s,
   finished_at %s,
   created_at %s not null,
   updated_at %s not null
-);`, types.runIDText, types.keyText, types.keyText, types.keyText, types.keyText, types.text, types.jsonType, types.timeType, types.timeType, types.timeType, types.timeType),
+);`, types.runIDText, types.keyText, types.keyText, types.keyText, types.keyText, types.text, types.jsonType, types.keyText, types.keyText, types.jsonType, types.timeType, types.timeType, types.timeType, types.timeType),
 		fmt.Sprintf(`
 create table if not exists api_case_runs (
   id %s primary key,
@@ -157,10 +172,13 @@ create table if not exists api_case_runs (
   status %s not null,
   request_summary_json %s not null,
   assertion_summary_json %s not null,
+  test_plan_node_id %s not null,
+  test_plan_operation %s not null,
+  planner_summary_json %s not null,
   started_at %s,
   finished_at %s,
   created_at %s not null
-);`, types.runIDText, types.runIDText, types.keyText, types.keyText, types.jsonType, types.jsonType, types.timeType, types.timeType, types.timeType),
+);`, types.runIDText, types.runIDText, types.keyText, types.keyText, types.jsonType, types.jsonType, types.keyText, types.keyText, types.jsonType, types.timeType, types.timeType, types.timeType),
 		d.CreateIndexSQL("idx_api_case_runs_run_id_created_at", "api_case_runs", []string{"run_id", "created_at", "id"}),
 		fmt.Sprintf(`
 create table if not exists evidence_records (
@@ -401,7 +419,50 @@ create table if not exists environment_files (
 			})...,
 		)
 	}
+	if current < 15 {
+		statements = append(statements,
+			corePlanGraphSchemaSQL(d, coreSchemaTypes{
+				text:          d.TextType(),
+				keyText:       d.KeyTextType(),
+				profileIDText: profileIdentifierTextType(d),
+				runIDText:     runIdentifierTextType(d),
+				intType:       "integer",
+				timeType:      d.TimeType(),
+				jsonType:      d.JSONType(),
+				boolType:      d.BoolType(),
+			})...,
+		)
+	}
+	if current < 16 {
+		statements = append(statements, plannerAssociationMigrationSQL(d)...)
+	}
 	return statements
+}
+
+func plannerAssociationMigrationSQL(d Dialect) []string {
+	if d.Name() == "mysql" {
+		return []string{
+			"alter table `runs` add column `test_plan_map_id` varchar(128) not null default '';",
+			"alter table `runs` add column `test_plan_path_id` varchar(128) not null default '';",
+			"alter table `runs` add column `planner_summary_json` json null;",
+			"update `runs` set `planner_summary_json` = json_object() where `planner_summary_json` is null;",
+			"alter table `runs` modify column `planner_summary_json` json not null;",
+			"alter table `api_case_runs` add column `test_plan_node_id` varchar(128) not null default '';",
+			"alter table `api_case_runs` add column `test_plan_operation` varchar(128) not null default '';",
+			"alter table `api_case_runs` add column `planner_summary_json` json null;",
+			"update `api_case_runs` set `planner_summary_json` = json_object() where `planner_summary_json` is null;",
+			"alter table `api_case_runs` modify column `planner_summary_json` json not null;",
+		}
+	}
+	jsonDefault := "'{}'"
+	return []string{
+		fmt.Sprintf("alter table %s add column %s %s not null default '';", d.QuoteIdent("runs"), d.QuoteIdent("test_plan_map_id"), d.KeyTextType()),
+		fmt.Sprintf("alter table %s add column %s %s not null default '';", d.QuoteIdent("runs"), d.QuoteIdent("test_plan_path_id"), d.KeyTextType()),
+		fmt.Sprintf("alter table %s add column %s %s not null default %s;", d.QuoteIdent("runs"), d.QuoteIdent("planner_summary_json"), d.JSONType(), jsonDefault),
+		fmt.Sprintf("alter table %s add column %s %s not null default '';", d.QuoteIdent("api_case_runs"), d.QuoteIdent("test_plan_node_id"), d.KeyTextType()),
+		fmt.Sprintf("alter table %s add column %s %s not null default '';", d.QuoteIdent("api_case_runs"), d.QuoteIdent("test_plan_operation"), d.KeyTextType()),
+		fmt.Sprintf("alter table %s add column %s %s not null default %s;", d.QuoteIdent("api_case_runs"), d.QuoteIdent("planner_summary_json"), d.JSONType(), jsonDefault),
+	}
 }
 
 func profileIdentifierTextType(d Dialect) string {
@@ -464,11 +525,15 @@ func isIdempotentSchemaReplayError(d Dialect, statement string, err error) bool 
 		return false
 	}
 	normalizedStatement := strings.ToLower(strings.TrimSpace(statement))
-	if !strings.HasPrefix(normalizedStatement, "create index ") {
+	if strings.HasPrefix(normalizedStatement, "create index ") {
+		normalizedError := strings.ToLower(err.Error())
+		return strings.Contains(normalizedError, "duplicate key name") || strings.Contains(normalizedError, "error 1061")
+	}
+	if !strings.HasPrefix(normalizedStatement, "alter table ") || !strings.Contains(normalizedStatement, " add column ") {
 		return false
 	}
 	normalizedError := strings.ToLower(err.Error())
-	return strings.Contains(normalizedError, "duplicate key name") || strings.Contains(normalizedError, "error 1061")
+	return strings.Contains(normalizedError, "duplicate column name") || strings.Contains(normalizedError, "error 1060")
 }
 
 func bindVars(d Dialect, count int) string {

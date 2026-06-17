@@ -75,6 +75,7 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	activeVersion := requireConfigVersionContract(t, ctx, s, started)
 	requireReadModelContract(t, ctx, s, activeVersion, started)
 	requireProfileCatalogContract(t, ctx, s, started)
+	requirePlanGraphContract(t, ctx, s, started)
 	requireMissingRunError(t, ctx, s)
 }
 
@@ -82,13 +83,16 @@ func requireRunContract(t *testing.T, ctx context.Context, s store.Store, starte
 	t.Helper()
 
 	run, err := s.CreateRun(ctx, store.Run{
-		ID:           contractRunID,
-		ProfileID:    contractProfileID,
-		WorkflowID:   contractWorkflowID,
-		Status:       store.StatusRunning,
-		EvidenceRoot: "evidence/run-001",
-		SummaryJSON:  `{"stepCount":1}`,
-		StartedAt:    started,
+		ID:                 contractRunID,
+		ProfileID:          contractProfileID,
+		WorkflowID:         contractWorkflowID,
+		Status:             store.StatusRunning,
+		EvidenceRoot:       "evidence/run-001",
+		SummaryJSON:        `{"stepCount":1}`,
+		TestPlanMapID:      "map.contract",
+		TestPlanPathID:     "workflow.alpha",
+		PlannerSummaryJSON: `{"selectedPath":"workflow.alpha"}`,
+		StartedAt:          started,
 	})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
@@ -107,6 +111,9 @@ func requireRunContract(t *testing.T, ctx context.Context, s store.Store, starte
 	if loadedRun.SummaryJSON != `{"stepCount":1}` {
 		t.Fatalf("loaded run summary = %q", loadedRun.SummaryJSON)
 	}
+	if loadedRun.TestPlanMapID != "map.contract" || loadedRun.TestPlanPathID != "workflow.alpha" || loadedRun.PlannerSummaryJSON != `{"selectedPath":"workflow.alpha"}` {
+		t.Fatalf("loaded run planner fields = %#v", loadedRun)
+	}
 	runs, err := s.ListRuns(ctx)
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
@@ -116,6 +123,9 @@ func requireRunContract(t *testing.T, ctx context.Context, s store.Store, starte
 	}
 	if runs[0].SummaryJSON != `{"stepCount":1}` {
 		t.Fatalf("listed run summary = %q", runs[0].SummaryJSON)
+	}
+	if runs[0].TestPlanMapID != "map.contract" || runs[0].TestPlanPathID != "workflow.alpha" || runs[0].PlannerSummaryJSON != `{"selectedPath":"workflow.alpha"}` {
+		t.Fatalf("listed run planner fields = %#v", runs[0])
 	}
 }
 
@@ -129,6 +139,9 @@ func requireAPICaseRunContract(t *testing.T, ctx context.Context, s store.Store,
 		Status:               store.StatusPassed,
 		RequestSummaryJSON:   `{"method":"GET"}`,
 		AssertionSummaryJSON: `{"passed":1}`,
+		TestPlanNodeID:       "case.alpha",
+		TestPlanOperation:    "run_case",
+		PlannerSummaryJSON:   `{"nodeId":"case.alpha"}`,
 		StartedAt:            started,
 		FinishedAt:           started.Add(250 * time.Millisecond),
 	})
@@ -149,6 +162,9 @@ func requireAPICaseRunContract(t *testing.T, ctx context.Context, s store.Store,
 	if caseRuns[0].RequestSummaryJSON != `{"method":"GET"}` || caseRuns[0].AssertionSummaryJSON != `{"passed":1}` {
 		t.Fatalf("case run summaries = %#v", caseRuns[0])
 	}
+	if caseRuns[0].TestPlanNodeID != "case.alpha" || caseRuns[0].TestPlanOperation != "run_case" || caseRuns[0].PlannerSummaryJSON != `{"nodeId":"case.alpha"}` {
+		t.Fatalf("case run planner fields = %#v", caseRuns[0])
+	}
 	latestCaseStore, ok := s.(interface {
 		ListLatestAPICaseRuns(context.Context) ([]store.APICaseRun, error)
 	})
@@ -159,6 +175,9 @@ func requireAPICaseRunContract(t *testing.T, ctx context.Context, s store.Store,
 		}
 		if len(latestCaseRuns) != 1 || latestCaseRuns[0].ID != contractCaseRunID || latestCaseRuns[0].CaseID != contractCaseID {
 			t.Fatalf("latest case runs = %#v", latestCaseRuns)
+		}
+		if latestCaseRuns[0].TestPlanNodeID != "case.alpha" || latestCaseRuns[0].PlannerSummaryJSON != `{"nodeId":"case.alpha"}` {
+			t.Fatalf("latest case run planner fields = %#v", latestCaseRuns[0])
 		}
 	}
 }

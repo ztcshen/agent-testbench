@@ -108,7 +108,7 @@ func writeUniqueCaseSuiteCoverageProfile(t *testing.T) caseSuiteCoverageFixture 
 	writeFile(t, filepath.Join(fixture.profileDir, "profile.json"), fmt.Sprintf(`{
   "id": %q,
   "displayName": "Sample Profile",
-  "services": [{"id":"service.alpha","displayName":"Service Alpha"}],
+  "services": [{"id":"service.alpha","displayName":"Service Alpha","startupCommand":"true"}],
   "workflows": [],
   "interfaceNodes": [{"id":%q,"displayName":"Node Alpha","serviceId":"service.alpha","operation":"Alpha","method":"GET","path":"/alpha"}],
   "apiCases": [

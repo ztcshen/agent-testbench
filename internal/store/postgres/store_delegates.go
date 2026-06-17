@@ -121,6 +121,14 @@ func (s *Store) GetProfileCatalogIndex(ctx context.Context) (store.ProfileCatalo
 	return s.core.GetProfileCatalogIndex(ctx)
 }
 
+func (s *Store) ReplaceTestPlanGraph(ctx context.Context, graph store.TestPlanGraph) error {
+	return s.core.ReplaceTestPlanGraph(ctx, graph)
+}
+
+func (s *Store) GetTestPlanGraph(ctx context.Context, mapID string) (store.TestPlanGraph, error) {
+	return s.core.GetTestPlanGraph(ctx, mapID)
+}
+
 func (s *Store) UpsertEnvironment(ctx context.Context, e store.Environment) (store.Environment, error) {
 	return s.core.UpsertEnvironment(ctx, e)
 }

@@ -67,6 +67,40 @@ func TestServerRejectsGenericBatchRunForEnvironmentVerificationWorkflow(t *testi
 	}
 }
 
+func TestServerRejectsWorkflowBatchWhenBindingHasNoRunnableCasePlan(t *testing.T) {
+	_, s := openAPICaseBatchSQLiteStore(t)
+	dir := t.TempDir()
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer target.Close()
+	bundle := profile.Bundle{
+		ID:        "sample",
+		Workflows: []profile.Workflow{{ID: "workflow.prepare", DisplayName: "Prepare Workflow"}},
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.prepare", DisplayName: "Prepare"},
+			{ID: "node.verify", DisplayName: "Verify"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.prepare", DisplayName: "Prepare Case", NodeID: "node.prepare"},
+			{ID: "case.verify", DisplayName: "Verify Case", NodeID: "node.verify", CasePath: writeAPICaseBatchGETCase(t, dir, "case.verify", "/verify"), BaseURL: target.URL},
+		},
+		WorkflowBindings: []profile.WorkflowBinding{
+			{WorkflowID: "workflow.prepare", StepID: "prepare", NodeID: "node.prepare", CaseID: "case.prepare", Required: true, SortOrder: 1},
+			{WorkflowID: "workflow.prepare", StepID: "verify", NodeID: "node.verify", CaseID: "case.verify", Required: true, SortOrder: 2},
+		},
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
+	defer server.Close()
+
+	payload := postJSONResponse(t, server.URL+"/api/cases/batch-runs", `{"requestId":"workflow-prepare-001","workflowId":"workflow.prepare"}`, http.StatusConflict)
+	errorText, _ := payload["error"].(string)
+	if !strings.Contains(errorText, "prepare") || !strings.Contains(errorText, "case.prepare") || !strings.Contains(errorText, "missing runnable case execution") {
+		t.Fatalf("workflow missing step error = %#v", payload)
+	}
+}
+
 func TestServerRejectsAsyncAPICaseBatchWithoutNodes(t *testing.T) {
 	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample"}, nil))
 	defer server.Close()

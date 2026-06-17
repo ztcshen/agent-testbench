@@ -74,10 +74,11 @@ func sqliteImportScript(options SQLiteImportOptions) string {
 	ATTACH DATABASE %s AS source_runtime;
 BEGIN;
 
-INSERT OR IGNORE INTO runs (id, profile_id, workflow_id, status, evidence_root, summary_json, started_at, finished_at, created_at, updated_at)
+INSERT OR IGNORE INTO runs (id, profile_id, environment_id, workflow_id, status, evidence_root, summary_json, test_plan_map_id, test_plan_path_id, planner_summary_json, started_at, finished_at, created_at, updated_at)
 SELECT
   'legacy-workflow-' || id,
   %s,
+  '',
   workflow_id,
   CASE lower(status)
     WHEN 'passed' THEN 'passed'
@@ -87,16 +88,20 @@ SELECT
   END,
   '',
   substr(summary_json, 1, 8192),
+  '',
+  '',
+  '{}',
   created_at,
   '',
   created_at,
   created_at
 FROM source_runtime.workflow_runs;
 
-INSERT OR IGNORE INTO runs (id, profile_id, workflow_id, status, evidence_root, summary_json, started_at, finished_at, created_at, updated_at)
+INSERT OR IGNORE INTO runs (id, profile_id, environment_id, workflow_id, status, evidence_root, summary_json, test_plan_map_id, test_plan_path_id, planner_summary_json, started_at, finished_at, created_at, updated_at)
 SELECT
   run_id,
   %s,
+  '',
   '',
   CASE lower(status)
     WHEN 'passed' THEN 'passed'
@@ -106,6 +111,9 @@ SELECT
   END,
   evidence_path,
   substr(summary_json, 1, 8192),
+  '',
+  '',
+  '{}',
   created_at,
   created_at,
   created_at,
@@ -113,7 +121,7 @@ SELECT
 FROM source_runtime.interface_node_case_run
 GROUP BY run_id;
 
-INSERT OR IGNORE INTO api_case_runs (id, run_id, case_id, status, request_summary_json, assertion_summary_json, started_at, finished_at, created_at)
+INSERT OR IGNORE INTO api_case_runs (id, run_id, case_id, status, request_summary_json, assertion_summary_json, test_plan_node_id, test_plan_operation, planner_summary_json, started_at, finished_at, created_at)
 SELECT
   'legacy-case-run-' || id,
   run_id,
@@ -132,6 +140,9 @@ SELECT
     'elapsedMs', elapsed_ms,
     'summary', substr(summary_json, 1, 8192)
   ),
+  case_id,
+  'run_case',
+  json_object('source', 'legacy_runtime'),
   created_at,
   created_at,
   created_at
