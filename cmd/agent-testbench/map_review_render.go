@@ -7,8 +7,11 @@ import (
 	"strings"
 )
 
-func renderMapReviewHTML(document mapReviewDocument) string {
-	raw, _ := json.Marshal(document)
+func renderMapReviewHTML(document mapReviewDocument) (string, error) {
+	raw, err := json.Marshal(document)
+	if err != nil {
+		return "", err
+	}
 	data := strings.ReplaceAll(string(raw), "</", "<\\/")
 	var b strings.Builder
 	b.WriteString(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>`)
@@ -34,7 +37,7 @@ func renderMapReviewHTML(document mapReviewDocument) string {
 	b.WriteString(`</span></div></header><section class="toolbar"><button id="back-node" type="button">Back</button><label>Search <input id="case-search" type="search" placeholder="case, node, template, workflow"></label><label>Workflow <select id="workflow-filter"><option value="">All workflows</option></select></label><button id="focus-node" type="button">Focus</button><button id="fit-selected" type="button">Fit</button><button id="path-finder-open" type="button">Path Finder</button><button id="reset-view" type="button">Reset</button></section><main><section class="graph-shell"><svg id="edge-layer" aria-hidden="true"></svg><div id="node-layer"></div><svg id="map-review-minimap" aria-label="Map minimap"></svg></section><aside><div id="node-history"></div><div id="details"></div></aside></main><div id="path-finder" class="modal hidden"><div class="modal-card"><div class="modal-head"><h2>Path Finder</h2><button id="path-finder-close" type="button">Close</button></div><div class="path-form"><label>From <select id="path-from"></select></label><label>To <select id="path-to"></select></label><button id="path-find-run" type="button">Find Path</button></div><div id="path-finder-result"></div></div></div></div><script>`)
 	b.WriteString(mapReviewJS())
 	b.WriteString(`</script></body></html>`)
-	return b.String()
+	return b.String(), nil
 }
 
 func mapReviewCSS() string {

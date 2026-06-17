@@ -294,7 +294,11 @@ func parseHeadersOptions(values []string, rawJSON string) (map[string]any, error
 			return nil, err
 		}
 		if ok {
-			for key, value := range parsed.(map[string]any) {
+			headers, valid := parsed.(map[string]any)
+			if !valid {
+				return nil, fmt.Errorf("--headers-json must be a JSON object")
+			}
+			for key, value := range headers {
 				out[key] = value
 			}
 		}

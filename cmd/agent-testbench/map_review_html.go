@@ -85,7 +85,11 @@ func writeMapReviewHTML(path string, document mapReviewDocument) error {
 			return err
 		}
 	}
-	return os.WriteFile(path, []byte(renderMapReviewHTML(document)), 0o644)
+	content, err := renderMapReviewHTML(document)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(content), 0o644)
 }
 
 func printMapReviewHTMLReport(report mapReviewHTMLReport) {

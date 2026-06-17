@@ -279,18 +279,23 @@ where key = 'active_profile_id' and value <> '';`, time.Now().UTC()); err != nil
 }
 
 func ensureLegacySharedColumns(ctx context.Context, tx *sql.Tx) error {
+	const (
+		legacyRunsTable         = "runs"
+		legacyTextDefaultEmpty  = "text not null default ''"
+		legacyTextDefaultObject = "text not null default '{}'"
+	)
 	columns := []struct {
 		table     string
 		column    string
 		ddlSuffix string
 	}{
-		{"runs", "environment_id", "text not null default ''"},
-		{"runs", "test_plan_map_id", "text not null default ''"},
-		{"runs", "test_plan_path_id", "text not null default ''"},
-		{"runs", "planner_summary_json", "text not null default '{}'"},
-		{"api_case_runs", "test_plan_node_id", "text not null default ''"},
-		{"api_case_runs", "test_plan_operation", "text not null default ''"},
-		{"api_case_runs", "planner_summary_json", "text not null default '{}'"},
+		{legacyRunsTable, "environment_id", legacyTextDefaultEmpty},
+		{legacyRunsTable, "test_plan_map_id", legacyTextDefaultEmpty},
+		{legacyRunsTable, "test_plan_path_id", legacyTextDefaultEmpty},
+		{legacyRunsTable, "planner_summary_json", legacyTextDefaultObject},
+		{"api_case_runs", "test_plan_node_id", legacyTextDefaultEmpty},
+		{"api_case_runs", "test_plan_operation", legacyTextDefaultEmpty},
+		{"api_case_runs", "planner_summary_json", legacyTextDefaultObject},
 	}
 	for _, item := range columns {
 		hasTable, err := txHasTable(ctx, tx, item.table)

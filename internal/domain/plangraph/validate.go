@@ -5,7 +5,9 @@ import "fmt"
 func ValidateDAG(graph Graph) error {
 	outgoing := map[string][]string{}
 	for _, node := range graph.Nodes {
-		outgoing[node.ID] = outgoing[node.ID]
+		if _, ok := outgoing[node.ID]; !ok {
+			outgoing[node.ID] = nil
+		}
 	}
 	for _, edge := range graph.Edges {
 		if edge.FromNodeID == "" || edge.ToNodeID == "" {
