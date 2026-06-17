@@ -118,14 +118,14 @@ func runSandboxServiceStartup(ctx context.Context, service store.CatalogService,
 		result.ExitCode = commandResult.ExitCode
 		result.Error = commandResult.Err.Error()
 		if composeService != "" && sandboxStartMissingContainer(commandResult.Output, result.Error) {
-			return runSandboxServiceComposeFallback(ctx, service, timeout, started, composeService, result)
+			return runSandboxServiceComposeRecovery(ctx, service, timeout, started, composeService, result)
 		}
 		return result
 	}
 	return verifySandboxServiceStartupReadiness(ctx, service, timeout, started, composeService, result)
 }
 
-func runSandboxServiceComposeFallback(ctx context.Context, service store.CatalogService, timeout time.Duration, started time.Time, composeService string, result sandboxStartServiceResult) sandboxStartServiceResult {
+func runSandboxServiceComposeRecovery(ctx context.Context, service store.CatalogService, timeout time.Duration, started time.Time, composeService string, result sandboxStartServiceResult) sandboxStartServiceResult {
 	recoveryCommand := "docker compose up -d " + composeService
 	result.RecoveryCommand = recoveryCommand
 	commandCtx, cancel := context.WithTimeout(ctx, sandboxStartRemainingTimeout(timeout, started))

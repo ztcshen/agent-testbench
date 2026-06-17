@@ -227,14 +227,14 @@ func environmentRestorePlanTimeout() time.Duration {
 	return positiveDurationFromEnv(environmentRestorePlanTimeoutEnv, 2*time.Minute)
 }
 
-func positiveDurationFromEnv(name string, fallback time.Duration) time.Duration {
+func positiveDurationFromEnv(name string, defaultDuration time.Duration) time.Duration {
 	raw := strings.TrimSpace(os.Getenv(name))
 	if raw == "" {
-		return fallback
+		return defaultDuration
 	}
 	ms, err := strconv.Atoi(raw)
 	if err != nil || ms <= 0 {
-		return fallback
+		return defaultDuration
 	}
 	return time.Duration(ms) * time.Millisecond
 }

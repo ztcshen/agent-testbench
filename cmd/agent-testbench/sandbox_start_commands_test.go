@@ -77,14 +77,14 @@ exit 0
 	out := runCLIWithEnv(t, fakeEnv, "sandbox", "start", "--store", "sqlite://"+storePath, "--service", "worker-service", "--json")
 	var report sandboxStartCommandReport
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode missing-container fallback report: %v\n%s", err, out)
+		t.Fatalf("decode missing-container compose recovery report: %v\n%s", err, out)
 	}
 	if !report.OK || report.Counts.Failed != 0 || len(report.Services) != 1 {
-		t.Fatalf("missing-container fallback report = %#v", report)
+		t.Fatalf("missing-container compose recovery report = %#v", report)
 	}
 	service := report.Services[0]
 	if service.RecoveryCommand != "docker compose up -d worker-service" || service.Readiness != "compose-service-running" || !strings.Contains(service.Warning, "no healthUrl") {
-		t.Fatalf("missing-container fallback service = %#v", service)
+		t.Fatalf("missing-container compose recovery service = %#v", service)
 	}
 	calls, err := os.ReadFile(callsPath)
 	if err != nil {
@@ -92,7 +92,7 @@ exit 0
 	}
 	joined := string(calls)
 	if !strings.Contains(joined, "start sandbox-worker-service") || !strings.Contains(joined, "compose up -d worker-service") || !strings.Contains(joined, "compose ps -a --format json worker-service") {
-		t.Fatalf("missing-container fallback docker calls:\n%s", joined)
+		t.Fatalf("missing-container compose recovery docker calls:\n%s", joined)
 	}
 }
 

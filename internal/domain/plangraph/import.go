@@ -503,18 +503,18 @@ func isDiffCase(apiCase catalog.APICase) bool {
 	return patch != "" && patch != "[]" && patch != "{}"
 }
 
-func stringDefault(value string, fallback string) string {
+func stringDefault(value string, defaultValue string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return fallback
+		return defaultValue
 	}
 	return value
 }
 
-func jsonDefault(value string, fallback string) string {
+func jsonDefault(value string, defaultValue string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return fallback
+		return defaultValue
 	}
 	var decoded any
 	if err := json.Unmarshal([]byte(value), &decoded); err != nil {

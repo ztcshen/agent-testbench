@@ -386,10 +386,10 @@ func normalizeTestPlanNodeJSON(item *store.TestPlanNode) {
 	item.SummaryJSON = normalizeJSONText(item.SummaryJSON)
 }
 
-func jsonForDB(value string, fallback string) string {
+func jsonForDB(value string, defaultValue string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return fallback
+		return defaultValue
 	}
 	return normalizeJSONText(value)
 }
