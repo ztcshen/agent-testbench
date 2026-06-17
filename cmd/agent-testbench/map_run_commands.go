@@ -67,7 +67,7 @@ func runMapRun(ctx context.Context, args []string) error {
 	} else {
 		printMapRunReport(report)
 	}
-	if report.Status == store.StatusFailed || report.Status == mapplanner.TaskStatusBlocked {
+	if !report.OK {
 		return errors.New("map run failed")
 	}
 	return nil
@@ -120,6 +120,9 @@ func parseMapRunOptions(args []string) (mapRunOptions, error) {
 	if mapRunHasResumeControls(options) && options.planID == "" {
 		return mapRunOptions{}, errors.New("--resume, --retry-failed, --skip-passed, and --rerun-task require --plan")
 	}
+	if options.planID != "" && mapRunHasConcreteTarget(options) {
+		return mapRunOptions{}, errors.New("--case, --node, --path, and --workflow cannot be combined with --plan; use --rerun-task for saved plans")
+	}
 	return options, nil
 }
 
@@ -129,11 +132,15 @@ func openMapRunRuntime(ctx context.Context, options mapRunOptions) (store.Store,
 		return nil, store.TestPlanGraph{}, func() {}, err
 	}
 	mapID := options.mapID
-	if mapID == "" && options.planID != "" {
+	if options.planID != "" {
 		record, err := runtime.GetTestMapPlan(ctx, options.planID)
 		if err != nil {
 			cleanup()
 			return nil, store.TestPlanGraph{}, func() {}, err
+		}
+		if mapID != "" && mapID != record.Instance.MapID {
+			cleanup()
+			return nil, store.TestPlanGraph{}, func() {}, errors.New("--map " + mapID + " does not match plan map " + record.Instance.MapID)
 		}
 		mapID = record.Instance.MapID
 	}
@@ -228,6 +235,13 @@ func mapRunHasResumeControls(options mapRunOptions) bool {
 	return options.resumeRun || options.retryFailed || options.skipPassed || len(options.rerunTaskIDs) > 0
 }
 
+func mapRunHasConcreteTarget(options mapRunOptions) bool {
+	return strings.TrimSpace(options.caseID) != "" ||
+		strings.TrimSpace(options.nodeID) != "" ||
+		strings.TrimSpace(options.pathID) != "" ||
+		strings.TrimSpace(options.workflowID) != ""
+}
+
 func mapRunTaskSelectedForExecution(task store.TestMapPlanTask, options mapRunOptions) bool {
 	if task.Kind == mapplanner.TaskSkip || task.Status == mapplanner.TaskStatusSkipped {
 		return false
@@ -291,7 +305,6 @@ func runMapRunExplain(ctx context.Context, args []string) error {
 		return err
 	}
 	report := mapRunReportFromRecord(record)
-	report.OK = true
 	if *jsonOutput {
 		return writeIndentedJSON(report)
 	}

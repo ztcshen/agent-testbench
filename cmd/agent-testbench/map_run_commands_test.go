@@ -26,6 +26,95 @@ func TestMapRunExecutesPlanTasksAndExplainReadsResult(t *testing.T) {
 	assertMapRunExplainCommandReport(t, runCLI(t, "map", "run", "explain", "--store", storeRef, "--plan", report.PlanID, "--json"), report.PlanID)
 }
 
+func TestMapRunPropagatesWorkflowStepExports(t *testing.T) {
+	ctx := context.Background()
+	storeRef := seedExecutableMapCommandStoreWithExports(t, ctx)
+
+	runCLI(t, "map", "import-workflows", "--store", storeRef, "--json")
+	report := decodeMapRunCommandReport(t, runCLI(t, "map", "run", "--store", storeRef, "--map", "map.profile.flow", "--scope", "workflows", "--json"))
+
+	if !report.OK || report.Status != store.StatusPassed || len(report.Tasks) != 1 {
+		t.Fatalf("map run should pass exported workflow inputs = %#v", report)
+	}
+	if report.Tasks[0].WorkflowRunID == "" {
+		t.Fatalf("workflow task should record run id = %#v", report.Tasks[0])
+	}
+}
+
+func TestMapRunRerunTaskUsesFreshChildRunID(t *testing.T) {
+	ctx := context.Background()
+	storeRef := seedExecutableMapCommandStore(t, ctx)
+
+	runCLI(t, "map", "import-workflows", "--store", storeRef, "--json")
+	first := decodeMapRunCommandReport(t, runCLI(t, "map", "run", "--store", storeRef, "--map", "map.profile.flow", "--scope", "workflows", "--json"))
+	if len(first.Tasks) != 1 || first.Tasks[0].WorkflowRunID == "" {
+		t.Fatalf("first map run = %#v", first)
+	}
+
+	rerun := decodeMapRunCommandReport(t, runCLI(t, "map", "run", "--store", storeRef, "--plan", first.PlanID, "--rerun-task", first.Tasks[0].ID, "--json"))
+	if !rerun.OK || rerun.Tasks[0].Status != store.StatusPassed {
+		t.Fatalf("rerun task should pass = %#v", rerun)
+	}
+	if rerun.Tasks[0].WorkflowRunID == first.Tasks[0].WorkflowRunID {
+		t.Fatalf("rerun should use a fresh workflow run id, first=%q rerun=%q", first.Tasks[0].WorkflowRunID, rerun.Tasks[0].WorkflowRunID)
+	}
+}
+
+func TestMapRunRejectsMismatchedPlanAndMap(t *testing.T) {
+	ctx := context.Background()
+	storeRef := seedExecutableMapCommandStore(t, ctx)
+
+	runCLI(t, "map", "import-workflows", "--store", storeRef, "--json")
+	report := decodeMapRunCommandReport(t, runCLI(t, "map", "run", "--store", storeRef, "--map", "map.profile.flow", "--scope", "workflows", "--json"))
+	out := runCLIFails(t, "map", "run", "--store", storeRef, "--plan", report.PlanID, "--map", "map.other", "--json")
+	if !strings.Contains(out, "--map map.other does not match plan map map.profile.flow") {
+		t.Fatalf("mismatched plan/map error = %s", out)
+	}
+}
+
+func TestMapRunExplainPreservesFailedStatus(t *testing.T) {
+	ctx := context.Background()
+	storeRef := "sqlite://" + filepath.Join(t.TempDir(), "map-run-explain-failed.sqlite")
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	now := time.Now().UTC()
+	record := store.TestMapPlanRecord{
+		Instance: store.TestMapPlanInstance{
+			ID:        "plan.failed",
+			MapID:     "map.failed",
+			ProfileID: "profile.failed",
+			Mode:      mapplanner.ModeRun,
+			Status:    store.StatusFailed,
+			Scope:     mapplanner.ScopeWorkflows,
+			StartedAt: now,
+		},
+		Tasks: []store.TestMapPlanTask{{
+			ID:        "task.failed",
+			PlanID:    "plan.failed",
+			Index:     1,
+			Kind:      mapplanner.TaskRunCase,
+			Status:    store.StatusFailed,
+			CaseID:    "case.failed",
+			StartedAt: now,
+		}},
+	}
+	if err := runtime.SaveTestMapPlan(ctx, record); err != nil {
+		t.Fatalf("save failed plan: %v", err)
+	}
+	closeCLIStore(runtime)
+
+	out := runCLI(t, "map", "run", "explain", "--store", storeRef, "--plan", "plan.failed", "--json")
+	var report mapRunExplainCommandReport
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode explain: %v\n%s", err, out)
+	}
+	if report.OK || report.Status != store.StatusFailed {
+		t.Fatalf("explain should preserve failed OK/status = %#v", report)
+	}
+}
+
 func TestPrepareExistingMapRunRecordResumeKeepsPassedTasks(t *testing.T) {
 	record := mapRunResumeFixture()
 
@@ -114,6 +203,45 @@ func TestMapRunExecutorRetryFailedRunsOnlyFailedTasks(t *testing.T) {
 	}
 	if executed.Tasks[2].Status != mapplanner.TaskStatusPlanned || !executed.Tasks[2].StartedAt.IsZero() {
 		t.Fatalf("retry failed should not execute unrelated planned task = %#v", executed.Tasks[2])
+	}
+}
+
+func TestMapRunExecutorSchedulesTaskDAGBeforeStoredOrder(t *testing.T) {
+	record := mapRunResumeFixture()
+	record.Tasks = []store.TestMapPlanTask{
+		{
+			ID:     "task.second",
+			PlanID: "plan.resume",
+			Index:  2,
+			Kind:   mapplanner.TaskRunPath,
+			Status: mapplanner.TaskStatusPlanned,
+			PathID: "path.empty",
+		},
+		{
+			ID:     "task.first",
+			PlanID: "plan.resume",
+			Index:  1,
+			Kind:   mapplanner.TaskRunPath,
+			Status: mapplanner.TaskStatusPlanned,
+			PathID: "path.empty",
+		},
+	}
+	record.TaskEdges = []store.TestMapPlanTaskEdge{{
+		PlanID:     record.Instance.ID,
+		FromTaskID: "task.first",
+		ToTaskID:   "task.second",
+		Kind:       "control",
+		Required:   true,
+	}}
+	graph := store.TestPlanGraph{Paths: []store.TestPlanPath{{ID: "path.empty"}}}
+
+	executed := newMapRunExecutor(context.Background(), nil, graph, mapRunOptions{}).execute(record)
+
+	if executed.Tasks[0].Status == mapplanner.TaskStatusBlocked {
+		t.Fatalf("dependent task should wait for dependency instead of blocking from stored order = %#v", executed.Tasks)
+	}
+	if executed.Tasks[0].Status != mapplanner.TaskStatusSkipped || executed.Tasks[1].Status != mapplanner.TaskStatusSkipped {
+		t.Fatalf("topological execution statuses = %#v", executed.Tasks)
 	}
 }
 
@@ -226,6 +354,54 @@ func seedExecutableMapCommandStore(t *testing.T, ctx context.Context) string {
 		t.Fatalf("open store: %v", err)
 	}
 	if err := runtime.ReplaceProfileCatalog(ctx, mapCommandExecutableProfileCatalogFixture(server.URL)); err != nil {
+		t.Fatalf("seed executable profile catalog: %v", err)
+	}
+	closeCLIStore(runtime)
+	return storeRef
+}
+
+func seedExecutableMapCommandStoreWithExports(t *testing.T, ctx context.Context) string {
+	t.Helper()
+	submitSeen := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/prepare":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"item_id":"item-123"}`)
+		case "/submit":
+			if r.URL.Query().Get("item_id") != "item-123" {
+				t.Fatalf("submit should receive exported item_id, query=%s", r.URL.RawQuery)
+			}
+			submitSeen = true
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, `{"ok":true}`)
+		default:
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+	}))
+	t.Cleanup(func() {
+		server.Close()
+		if !submitSeen {
+			t.Fatalf("submit endpoint was not called")
+		}
+	})
+
+	storePath := filepath.Join(t.TempDir(), "map-run-exports.sqlite")
+	storeRef := "sqlite://" + storePath
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	catalog := mapCommandExecutableProfileCatalogFixture(server.URL)
+	for i := range catalog.TemplateConfigs {
+		switch catalog.TemplateConfigs[i].ScopeID {
+		case "case.prepare":
+			catalog.TemplateConfigs[i].ConfigJSON = `{"caseId":"case.prepare","caseExecution":{"method":"GET","nodeId":"node.prepare","path":"/prepare","expectedHttpCodes":[200]},"exports":[{"name":"item_id","from":"responseBody","path":"item_id"}]}`
+		case "case.submit.success":
+			catalog.TemplateConfigs[i].ConfigJSON = `{"caseId":"case.submit.success","caseExecution":{"method":"POST","nodeId":"node.submit","path":"/submit","query":{"item_id":"{{override:item_id}}"},"body":{"field":"ok"},"expectedHttpCodes":[200]},"inputs":[{"name":"item_id","source":"previous"}]}`
+		}
+	}
+	if err := runtime.ReplaceProfileCatalog(ctx, catalog); err != nil {
 		t.Fatalf("seed executable profile catalog: %v", err)
 	}
 	closeCLIStore(runtime)

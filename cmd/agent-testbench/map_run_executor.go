@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/json"
 	"fmt"
 	"net/http/httptest"
 	"sort"
@@ -27,13 +29,14 @@ type mapRunExecutor struct {
 }
 
 type mapRunStepResult struct {
-	StepID       string `json:"stepId"`
-	NodeID       string `json:"nodeId"`
-	CaseID       string `json:"caseId"`
-	RunID        string `json:"runId"`
-	APICaseRunID string `json:"apiCaseRunId"`
-	Status       string `json:"status"`
-	Error        string `json:"error,omitempty"`
+	StepID       string         `json:"stepId"`
+	NodeID       string         `json:"nodeId"`
+	CaseID       string         `json:"caseId"`
+	RunID        string         `json:"runId"`
+	APICaseRunID string         `json:"apiCaseRunId"`
+	Status       string         `json:"status"`
+	Error        string         `json:"error,omitempty"`
+	Raw          map[string]any `json:"-"`
 }
 
 func newMapRunExecutor(ctx context.Context, runtime store.Store, graph store.TestPlanGraph, options mapRunOptions) mapRunExecutor {
@@ -66,7 +69,7 @@ func newMapRunExecutor(ctx context.Context, runtime store.Store, graph store.Tes
 
 func (e mapRunExecutor) execute(record store.TestMapPlanRecord) store.TestMapPlanRecord {
 	now := time.Now().UTC()
-	for i := range record.Tasks {
+	for _, i := range mapRunTaskExecutionOrder(record.Tasks, record.TaskEdges) {
 		task := &record.Tasks[i]
 		if task.Status == mapplanner.TaskStatusSkipped || task.Kind == mapplanner.TaskSkip {
 			e.statusByTask[task.ID] = mapplanner.TaskStatusSkipped
@@ -101,6 +104,57 @@ func (e mapRunExecutor) execute(record store.TestMapPlanRecord) store.TestMapPla
 	return record
 }
 
+func mapRunTaskExecutionOrder(tasks []store.TestMapPlanTask, edges []store.TestMapPlanTaskEdge) []int {
+	taskIndex := map[string]int{}
+	for i, task := range tasks {
+		taskIndex[task.ID] = i
+	}
+	indegree := make([]int, len(tasks))
+	dependents := map[int][]int{}
+	for _, edge := range edges {
+		if !edge.Required {
+			continue
+		}
+		from, fromOK := taskIndex[edge.FromTaskID]
+		to, toOK := taskIndex[edge.ToTaskID]
+		if !fromOK || !toOK {
+			continue
+		}
+		indegree[to]++
+		dependents[from] = append(dependents[from], to)
+	}
+	ready := make([]int, 0, len(tasks))
+	for i := range tasks {
+		if indegree[i] == 0 {
+			ready = append(ready, i)
+		}
+	}
+	order := make([]int, 0, len(tasks))
+	queued := map[int]bool{}
+	for len(ready) > 0 {
+		sort.Ints(ready)
+		current := ready[0]
+		ready = ready[1:]
+		if queued[current] {
+			continue
+		}
+		queued[current] = true
+		order = append(order, current)
+		for _, dependent := range dependents[current] {
+			indegree[dependent]--
+			if indegree[dependent] == 0 {
+				ready = append(ready, dependent)
+			}
+		}
+	}
+	for i := range tasks {
+		if !queued[i] {
+			order = append(order, i)
+		}
+	}
+	return order
+}
+
 func mapRunTaskRunnable(task store.TestMapPlanTask, options mapRunOptions) bool {
 	if task.Status == "" || task.Status == mapplanner.TaskStatusPlanned || task.Status == mapplanner.TaskStatusRunning {
 		return true
@@ -124,15 +178,19 @@ func (e mapRunExecutor) blockedByDependency(edges []store.TestMapPlanTaskEdge, t
 
 func (e mapRunExecutor) executePathTask(instance store.TestMapPlanInstance, task *store.TestMapPlanTask, untilNodeID string) {
 	steps := e.stepsForTask(*task, untilNodeID)
-	runID := "run." + safeReportID(instance.ID) + "." + safeReportID(task.ID)
+	runID := e.taskRunID(instance, *task)
 	results := make([]mapRunStepResult, 0, len(steps))
+	overrides := map[string]any{}
 	status := store.StatusPassed
 	for _, step := range steps {
-		result := e.executeStepCase(instance, *task, step, runID)
+		result := e.executeStepCase(instance, *task, step, runID, overrides)
 		results = append(results, result)
 		if result.Status != store.StatusPassed {
 			status = store.StatusFailed
 			break
+		}
+		for key, value := range e.stepExportedValues(*task, step, result.Raw) {
+			overrides[key] = value
 		}
 	}
 	finishedAt := time.Now().UTC()
@@ -167,8 +225,8 @@ func (e mapRunExecutor) executePathTask(instance store.TestMapPlanInstance, task
 }
 
 func (e mapRunExecutor) executeCaseTask(instance store.TestMapPlanInstance, task *store.TestMapPlanTask) {
-	runID := "run." + safeReportID(instance.ID) + "." + safeReportID(task.ID)
-	result, err := e.runCatalogCase(instance, *task, mapRunCaseStep(*task), runID)
+	runID := e.taskRunID(instance, *task)
+	result, err := e.runCatalogCase(instance, *task, mapRunCaseStep(*task), runID, nil)
 	summary := map[string]any{"result": result}
 	status := valueString(result["status"])
 	if status == "" {
@@ -178,19 +236,19 @@ func (e mapRunExecutor) executeCaseTask(instance store.TestMapPlanInstance, task
 		status = store.StatusFailed
 		summary["error"] = err.Error()
 	}
-	task.APICaseRunID = runID + ".case"
+	task.APICaseRunID = valueString(result["caseRunId"])
 	task.EvidenceRoot = mapRunEvidenceRoot(result)
 	e.finishTask(task, status, summary, time.Now().UTC())
 }
 
-func (e mapRunExecutor) executeStepCase(instance store.TestMapPlanInstance, task store.TestMapPlanTask, step store.TestPlanPathStep, workflowRunID string) mapRunStepResult {
+func (e mapRunExecutor) executeStepCase(instance store.TestMapPlanInstance, task store.TestMapPlanTask, step store.TestPlanPathStep, workflowRunID string, overrides map[string]any) mapRunStepResult {
 	caseID := firstNonEmpty(step.CaseID, e.nodeByID[step.NodeID].CaseID)
 	stepID := firstNonEmpty(step.StepID, step.NodeID, caseID)
-	runID := workflowRunID + "." + safeReportID(stepID)
+	runID := workflowRunID + "." + safeBoundedReportID(stepID, 40)
 	stepTask := task
 	stepTask.NodeID = firstNonEmpty(step.NodeID, stepTask.NodeID)
 	stepTask.CaseID = caseID
-	result, err := e.runCatalogCase(instance, stepTask, step, runID)
+	result, err := e.runCatalogCase(instance, stepTask, step, runID, overrides)
 	status := valueString(result["status"])
 	if status == "" {
 		status = store.StatusFailed
@@ -200,8 +258,9 @@ func (e mapRunExecutor) executeStepCase(instance store.TestMapPlanInstance, task
 		NodeID:       step.NodeID,
 		CaseID:       caseID,
 		RunID:        runID,
-		APICaseRunID: runID + ".case",
+		APICaseRunID: valueString(result["caseRunId"]),
 		Status:       status,
+		Raw:          result,
 	}
 	if err != nil {
 		out.Status = store.StatusFailed
@@ -212,7 +271,7 @@ func (e mapRunExecutor) executeStepCase(instance store.TestMapPlanInstance, task
 	return out
 }
 
-func (e mapRunExecutor) runCatalogCase(instance store.TestMapPlanInstance, task store.TestMapPlanTask, step store.TestPlanPathStep, runID string) (map[string]any, error) {
+func (e mapRunExecutor) runCatalogCase(instance store.TestMapPlanInstance, task store.TestMapPlanTask, step store.TestPlanPathStep, runID string, overrides map[string]any) (map[string]any, error) {
 	caseID := firstNonEmpty(step.CaseID, task.CaseID)
 	payload := map[string]any{
 		"caseId":             caseID,
@@ -233,7 +292,67 @@ func (e mapRunExecutor) runCatalogCase(instance store.TestMapPlanInstance, task 
 	if e.options.timeoutSeconds <= 0 {
 		delete(payload, "timeoutSeconds")
 	}
+	if len(overrides) > 0 {
+		payload["overrides"] = overrides
+	}
 	return runCatalogCaseOnRuntime(e.ctx, e.runtime, instance.ProfileID, payload)
+}
+
+func (e mapRunExecutor) taskRunID(instance store.TestMapPlanInstance, task store.TestMapPlanTask) string {
+	runID := "run." + safeBoundedReportID(instance.ID, 96) + "." + safeBoundedReportID(task.ID, 64)
+	if strings.TrimSpace(e.options.planID) != "" {
+		runID += ".attempt." + time.Now().UTC().Format("20060102T150405.000000000Z")
+	}
+	return runID
+}
+
+func safeBoundedReportID(value string, limit int) string {
+	safe := safeReportID(value)
+	if limit <= 0 || len(safe) <= limit {
+		return safe
+	}
+	sum := sha1.Sum([]byte(safe))
+	hash := fmt.Sprintf("%x", sum[:4])
+	prefixLimit := limit - len(hash) - 1
+	if prefixLimit < 1 {
+		return hash[:limit]
+	}
+	return safe[:prefixLimit] + "-" + hash
+}
+
+func (e mapRunExecutor) stepExportedValues(task store.TestMapPlanTask, step store.TestPlanPathStep, result map[string]any) map[string]any {
+	config := e.stepExecutionConfig(task, step)
+	if len(config) == 0 {
+		return nil
+	}
+	return workflowExportedValues(config, result)
+}
+
+func (e mapRunExecutor) stepExecutionConfig(task store.TestMapPlanTask, step store.TestPlanPathStep) map[string]any {
+	if e.runtime == nil {
+		return nil
+	}
+	catalog, err := e.runtime.GetProfileCatalog(e.ctx)
+	if err != nil {
+		return nil
+	}
+	caseID := firstNonEmpty(step.CaseID, task.CaseID)
+	for _, item := range catalog.TemplateConfigs {
+		if strings.TrimSpace(item.Status) != "" && item.Status != "active" {
+			continue
+		}
+		config := map[string]any{}
+		if err := json.Unmarshal([]byte(item.ConfigJSON), &config); err != nil {
+			continue
+		}
+		if item.WorkflowID == task.WorkflowID && strings.TrimSpace(step.StepID) != "" && item.ScopeID == step.StepID {
+			return config
+		}
+		if item.ScopeID == caseID || valueString(config["caseId"]) == caseID {
+			return config
+		}
+	}
+	return nil
 }
 
 func runCatalogCaseOnRuntime(ctx context.Context, runtime store.Store, profileID string, payload map[string]any) (map[string]any, error) {

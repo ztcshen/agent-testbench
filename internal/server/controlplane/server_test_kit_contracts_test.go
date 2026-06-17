@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"agent-testbench/internal/domain/profile"
 	"agent-testbench/internal/server/controlplane"
+	"agent-testbench/internal/store"
 )
 
 func TestServerExposesTestKitRunContracts(t *testing.T) {
@@ -66,5 +68,50 @@ func TestServerExposesTestKitBatchContract(t *testing.T) {
 		}`, http.StatusOK, &payload)
 	if payload.OK || len(payload.Results) != 2 || payload.Summary.CaseCount != 2 || payload.Summary.Passed != 0 {
 		t.Fatalf("test kit batch payload = %#v", payload)
+	}
+}
+
+func TestServerTestKitBatchForwardsOverrides(t *testing.T) {
+	ctx := context.Background()
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("item_id") != "item-123" {
+			t.Fatalf("target query = %s", r.URL.RawQuery)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer target.Close()
+
+	s := openTestKitSQLiteStore(t, ctx, "sandbox.sqlite")
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "sample",
+		IndexedAt: time.Now().UTC(),
+		APICases: []store.CatalogAPICase{
+			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha", BaseURL: target.URL, Status: "active"},
+		},
+		TemplateConfigs: []store.CatalogTemplateConfig{{
+			ID:         "cfg.case.alpha",
+			TemplateID: "template.case.alpha",
+			ScopeType:  "api-case",
+			ScopeID:    "case.alpha",
+			Status:     "active",
+			ConfigJSON: `{"caseId":"case.alpha","caseExecution":{"method":"GET","nodeId":"node.alpha","path":"/callback","query":{"item_id":"{{override:item_id}}"},"expectedHttpCodes":[200]},"inputs":[{"name":"item_id","source":"override"}]}`,
+		}},
+	}); err != nil {
+		t.Fatalf("replace profile catalog: %v", err)
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample"}, s))
+	defer server.Close()
+
+	var payload struct {
+		OK      bool             `json:"ok"`
+		Results []map[string]any `json:"results"`
+	}
+	postJSONInto(t, server.URL+"/api/test-kit/run-batch", `{
+		"caseIds":["case.alpha"],
+		"overrides":{"item_id":"item-123"}
+	}`, http.StatusOK, &payload)
+	if !payload.OK || len(payload.Results) != 1 || payload.Results[0]["status"] != store.StatusPassed {
+		t.Fatalf("batch should pass with forwarded overrides = %#v", payload)
 	}
 }

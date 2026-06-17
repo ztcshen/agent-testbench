@@ -98,6 +98,40 @@ func TestExplainScopeAllPlansWorkflowAndCaseTasks(t *testing.T) {
 	}
 }
 
+func TestExplainRejectsUnmatchedWorkflowTarget(t *testing.T) {
+	graph := validationCaseGraph()
+
+	_, err := mapplanner.Explain(graph, mapplanner.Query{
+		MapID:       "map.contract",
+		Scope:       mapplanner.ScopeWorkflows,
+		PathID:      "workflow.missing",
+		PlannerMode: mapplanner.ModeRun,
+	})
+	if err == nil {
+		t.Fatalf("expected unmatched path target to fail")
+	}
+}
+
+func TestExplainCasesScopeHonorsConcreteCaseTarget(t *testing.T) {
+	graph := validationCaseGraph()
+
+	plan, err := mapplanner.Explain(graph, mapplanner.Query{
+		MapID:       "map.contract",
+		Scope:       mapplanner.ScopeCases,
+		CaseID:      "case.submit.missing-days",
+		PlannerMode: mapplanner.ModeRun,
+	})
+	if err != nil {
+		t.Fatalf("explain targeted case under cases scope: %v", err)
+	}
+	if plan.Scope != mapplanner.ScopeCase || plan.TargetCaseID != "case.submit.missing-days" {
+		t.Fatalf("targeted case query should normalize to single case = %#v", plan)
+	}
+	if len(plan.PhysicalTasks) != 2 {
+		t.Fatalf("targeted case should not plan all validation cases = %#v", plan.PhysicalTasks)
+	}
+}
+
 func hasPlannerRule(rules []mapplanner.RuleTrace, name string) bool {
 	for _, rule := range rules {
 		if rule.Rule == name && rule.Status == mapplanner.RuleStatusApplied {

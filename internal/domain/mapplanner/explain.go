@@ -24,10 +24,14 @@ func Explain(graph plangraph.Graph, query Query) (Plan, error) {
 	plan := builder.basePlan()
 	switch query.Scope {
 	case ScopeAll:
-		builder.planWorkflowScope(&plan)
+		if err := builder.planWorkflowScope(&plan); err != nil {
+			return Plan{}, err
+		}
 		builder.planCaseScope(&plan)
 	case ScopeWorkflows:
-		builder.planWorkflowScope(&plan)
+		if err := builder.planWorkflowScope(&plan); err != nil {
+			return Plan{}, err
+		}
 	case ScopeCases:
 		builder.planCaseScope(&plan)
 	case ScopeCase:
@@ -98,7 +102,7 @@ func (b *planBuilder) basePlan() Plan {
 	}
 }
 
-func (b *planBuilder) planWorkflowScope(plan *Plan) {
+func (b *planBuilder) planWorkflowScope(plan *Plan) error {
 	plan.LogicalPlan = append(plan.LogicalPlan, LogicalOp{
 		ID:         "logical.workflow_paths",
 		Op:         "scan_workflow_paths",
@@ -112,10 +116,12 @@ func (b *planBuilder) planWorkflowScope(plan *Plan) {
 		Status: RuleStatusApplied,
 		Reason: "plan each mapped workflow path as an executable physical task",
 	})
+	matched := 0
 	for _, path := range b.graph.Paths {
 		if !b.pathMatchesQuery(path) {
 			continue
 		}
+		matched++
 		steps := b.pathSteps[path.ID]
 		candidate := CandidatePlan{
 			ID:         "candidate.path." + safeID(path.ID),
@@ -147,6 +153,10 @@ func (b *planBuilder) planWorkflowScope(plan *Plan) {
 			ProvidedProperties: jsonObject(path.ProvidedPropertyJSON),
 		})
 	}
+	if b.workflowTargeted() && matched == 0 {
+		return fmt.Errorf("map workflow target not found: %s %s", b.query.TargetKind, b.query.TargetID)
+	}
+	return nil
 }
 
 func (b *planBuilder) planCaseScope(plan *Plan) {
@@ -367,21 +377,21 @@ func normalizeQuery(graph plangraph.Graph, query Query) Query {
 	query.TargetID = strings.TrimSpace(query.TargetID)
 	switch {
 	case strings.TrimSpace(query.CaseID) != "":
-		query.Scope = stringDefault(query.Scope, ScopeCase)
-		query.TargetKind = stringDefault(query.TargetKind, TargetCase)
-		query.TargetID = stringDefault(query.TargetID, strings.TrimSpace(query.CaseID))
+		query.Scope = ScopeCase
+		query.TargetKind = TargetCase
+		query.TargetID = strings.TrimSpace(query.CaseID)
 	case strings.TrimSpace(query.NodeID) != "":
-		query.Scope = stringDefault(query.Scope, ScopeCase)
-		query.TargetKind = stringDefault(query.TargetKind, TargetNode)
-		query.TargetID = stringDefault(query.TargetID, strings.TrimSpace(query.NodeID))
+		query.Scope = ScopeCase
+		query.TargetKind = TargetNode
+		query.TargetID = strings.TrimSpace(query.NodeID)
 	case strings.TrimSpace(query.PathID) != "":
-		query.Scope = stringDefault(query.Scope, ScopeWorkflows)
-		query.TargetKind = stringDefault(query.TargetKind, TargetPath)
-		query.TargetID = stringDefault(query.TargetID, strings.TrimSpace(query.PathID))
+		query.Scope = ScopeWorkflows
+		query.TargetKind = TargetPath
+		query.TargetID = strings.TrimSpace(query.PathID)
 	case strings.TrimSpace(query.WorkflowID) != "":
-		query.Scope = stringDefault(query.Scope, ScopeWorkflows)
-		query.TargetKind = stringDefault(query.TargetKind, TargetWorkflow)
-		query.TargetID = stringDefault(query.TargetID, strings.TrimSpace(query.WorkflowID))
+		query.Scope = ScopeWorkflows
+		query.TargetKind = TargetWorkflow
+		query.TargetID = strings.TrimSpace(query.WorkflowID)
 	default:
 		query.Scope = stringDefault(query.Scope, ScopeAll)
 		query.TargetKind = stringDefault(query.TargetKind, TargetMap)
@@ -391,6 +401,10 @@ func normalizeQuery(graph plangraph.Graph, query Query) Query {
 		query.Scope = ScopeWorkflows
 	}
 	return query
+}
+
+func (b *planBuilder) workflowTargeted() bool {
+	return b.query.TargetKind == TargetPath || b.query.TargetKind == TargetWorkflow
 }
 
 func (b *planBuilder) pathMatchesQuery(path plangraph.Path) bool {

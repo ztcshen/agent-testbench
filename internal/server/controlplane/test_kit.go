@@ -89,6 +89,7 @@ func handleTestKitRunBatch(w http.ResponseWriter, r *http.Request, bundle profil
 			"caseId":         caseID,
 			"baseUrl":        payload["baseUrl"],
 			"timeoutSeconds": payload["timeoutSeconds"],
+			"overrides":      payload["overrides"],
 		}
 		result, _ := testKitCaseResult(r.Context(), bundle, runtime, itemPayload)
 		runID, err := recordTestKitRunWithContext(r.Context(), bundle, runtime, itemPayload, result)
