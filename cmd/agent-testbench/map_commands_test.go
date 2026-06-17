@@ -70,6 +70,71 @@ func TestMapImportWorkflowsAndExplainUsesStoreCatalog(t *testing.T) {
 	}
 }
 
+func TestMapExplainScopeAllCanSavePlannerInstance(t *testing.T) {
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "map-explain-save.sqlite")
+	storeRef := "sqlite://" + storePath
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if err := runtime.ReplaceProfileCatalog(ctx, mapCommandProfileCatalogFixture()); err != nil {
+		t.Fatalf("seed profile catalog: %v", err)
+	}
+	closeCLIStore(runtime)
+
+	runCLI(t, "map", "import-workflows", "--store", storeRef, "--json")
+	out := runCLI(t, "map", "explain", "--store", storeRef, "--map", "map.profile.flow", "--scope", "all", "--environment", "env.local", "--save", "--json")
+	var report struct {
+		OK             bool   `json:"ok"`
+		PlanID         string `json:"planId"`
+		MapID          string `json:"mapId"`
+		Scope          string `json:"scope"`
+		EnvironmentID  string `json:"environmentId"`
+		LogicalPlan    []any  `json:"logicalPlan"`
+		RulesApplied   []any  `json:"rulesApplied"`
+		CandidatePlans []any  `json:"candidatePlans"`
+		PhysicalTasks  []struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+		} `json:"physicalTasks"`
+		TaskEdges []any `json:"taskEdges"`
+		Summary   struct {
+			WorkflowTasks int `json:"workflowTasks"`
+			CaseTasks     int `json:"caseTasks"`
+			ReplayTasks   int `json:"replayTasks"`
+		} `json:"summary"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode saved map explain json: %v\n%s", err, out)
+	}
+	if !report.OK || report.PlanID == "" || report.MapID != "map.profile.flow" || report.Scope != "all" || report.EnvironmentID != "env.local" {
+		t.Fatalf("saved map explain report = %#v", report)
+	}
+	if len(report.LogicalPlan) == 0 || len(report.RulesApplied) == 0 || len(report.CandidatePlans) == 0 || len(report.PhysicalTasks) == 0 {
+		t.Fatalf("planner explain should expose optimizer details: %#v", report)
+	}
+	if report.Summary.WorkflowTasks == 0 || report.Summary.CaseTasks == 0 || report.Summary.ReplayTasks == 0 {
+		t.Fatalf("planner summary should include workflow and case tasks: %#v", report.Summary)
+	}
+
+	runtime, err = openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	defer closeCLIStore(runtime)
+	saved, err := runtime.GetTestMapPlan(ctx, report.PlanID)
+	if err != nil {
+		t.Fatalf("get saved planner instance: %v", err)
+	}
+	if saved.Instance.MapID != "map.profile.flow" || saved.Instance.Scope != "all" || saved.Instance.EnvironmentID != "env.local" {
+		t.Fatalf("saved instance = %#v", saved.Instance)
+	}
+	if len(saved.Tasks) != len(report.PhysicalTasks) {
+		t.Fatalf("saved tasks = %#v, report tasks = %#v", saved.Tasks, report.PhysicalTasks)
+	}
+}
+
 func TestMapImportWorkflowsRejectsPositionalArgsBeforeOpeningStore(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "map.sqlite")
 	out := runCLIFails(t, "map", "import-workflows", "typo", "--store", "sqlite://"+storePath, "--json")
@@ -90,7 +155,7 @@ func TestMapCommandsAreDiscoverable(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode commands json: %v\n%s", err, out)
 	}
-	if report.Count != 4 {
+	if report.Count != 6 {
 		t.Fatalf("map command count = %#v", report)
 	}
 	if report.Commands[0].Command != "map import-workflows" || !report.Commands[0].StoreAware {
@@ -102,7 +167,13 @@ func TestMapCommandsAreDiscoverable(t *testing.T) {
 	if report.Commands[2].Command != "map explain" || !report.Commands[2].StoreAware {
 		t.Fatalf("map explain command = %#v", report.Commands)
 	}
-	if report.Commands[3].Command != "map review-html" || !report.Commands[3].StoreAware {
+	if report.Commands[3].Command != "map run" || !report.Commands[3].StoreAware {
+		t.Fatalf("map run command = %#v", report.Commands)
+	}
+	if report.Commands[4].Command != "map run explain" || !report.Commands[4].StoreAware {
+		t.Fatalf("map run explain command = %#v", report.Commands)
+	}
+	if report.Commands[5].Command != "map review-html" || !report.Commands[5].StoreAware {
 		t.Fatalf("map review-html command = %#v", report.Commands)
 	}
 }
@@ -303,6 +374,35 @@ func TestMapReviewHTMLCanFilterWorkflowPaths(t *testing.T) {
 	}
 	if strings.Contains(html, "workflow.create.success") {
 		t.Fatalf("filtered review html should not include create workflow:\n%s", html)
+	}
+}
+
+func TestMapReviewHTMLHandlesWorkflowPathWithoutSteps(t *testing.T) {
+	document := mapReviewDocument{
+		Version: "1.0",
+		Map: store.TestPlanMap{
+			ID:          "map.contract",
+			ProfileID:   "profile.contract",
+			DisplayName: "Contract Map",
+			Status:      "active",
+		},
+		Counts: mapReviewCountsReport{Paths: 1},
+		Paths: []mapReviewPath{{
+			ID:          "workflow.empty",
+			WorkflowID:  "workflow.empty",
+			DisplayName: "Empty workflow",
+			Status:      "active",
+		}},
+	}
+	html, err := renderMapReviewHTML(document)
+	if err != nil {
+		t.Fatalf("render review html: %v", err)
+	}
+	if strings.Contains(html, `"steps":null`) {
+		t.Fatalf("review html should serialize empty path steps as an empty array:\n%s", html)
+	}
+	if strings.Contains(html, `p.steps.length`) {
+		t.Fatalf("review html should not assume workflow path steps are non-null:\n%s", html)
 	}
 }
 

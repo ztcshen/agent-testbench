@@ -5,9 +5,12 @@ import (
 	"html"
 	"strconv"
 	"strings"
+
+	"agent-testbench/internal/store"
 )
 
 func renderMapReviewHTML(document mapReviewDocument) (string, error) {
+	document = normalizeMapReviewDocument(document)
 	raw, err := json.Marshal(document)
 	if err != nil {
 		return "", err
@@ -38,6 +41,30 @@ func renderMapReviewHTML(document mapReviewDocument) (string, error) {
 	b.WriteString(mapReviewJS())
 	b.WriteString(`</script></body></html>`)
 	return b.String(), nil
+}
+
+func normalizeMapReviewDocument(document mapReviewDocument) mapReviewDocument {
+	if document.Nodes == nil {
+		document.Nodes = []mapReviewNode{}
+	}
+	if document.Edges == nil {
+		document.Edges = []mapReviewEdge{}
+	}
+	if document.Paths == nil {
+		document.Paths = []mapReviewPath{}
+	}
+	for index := range document.Paths {
+		if document.Paths[index].Steps == nil {
+			document.Paths[index].Steps = []store.TestPlanPathStep{}
+		}
+	}
+	if document.Materializations == nil {
+		document.Materializations = []store.TestPlanMaterialization{}
+	}
+	if document.Warnings == nil {
+		document.Warnings = []string{}
+	}
+	return document
 }
 
 func mapReviewCSS() string {
@@ -149,7 +176,7 @@ func mapReviewGraphJS() string {
 	return `function renderWorkflowFilter(){
   const select=document.getElementById("workflow-filter");
   if(select.options.length===1){
-    for(const p of reviewData.paths){const o=document.createElement("option");o.value=p.id;o.textContent=(p.displayName||p.id)+" ("+p.steps.length+")";select.appendChild(o)}
+    for(const p of reviewData.paths){const steps=p.steps||[];const o=document.createElement("option");o.value=p.id;o.textContent=(p.displayName||p.id)+" ("+steps.length+")";select.appendChild(o)}
   }
   select.onchange=function(){navigateToState({path:select.value,interfaceKey:""},true)};
   document.getElementById("case-search").oninput=function(e){navigateToState({search:e.target.value},false)};

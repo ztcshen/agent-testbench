@@ -8,7 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+
+	"agent-testbench/internal/store"
 )
 
 type workflowReportCommandReport struct {
@@ -24,6 +27,8 @@ type workflowReportCommandReport struct {
 		RunID     string `json:"runId"`
 		CaseRunID string `json:"caseRunId"`
 		DetailURL string `json:"detailUrl"`
+		Status    string `json:"status"`
+		Error     string `json:"error"`
 	} `json:"steps"`
 }
 
@@ -37,17 +42,54 @@ func TestWorkflowReportUsesNamedMySQLActiveStoreWhenStepFails(t *testing.T) {
 	runWorkflowReportWritesReportWhenStepFails(t, storeRef, "MySQL")
 }
 
-func runWorkflowReportWritesReportWhenStepFails(t *testing.T, _ string, label string) {
+func runWorkflowReportWritesReportWhenStepFails(t *testing.T, storeRef string, label string) {
 	t.Helper()
 	serverURL := newFailingWorkflowReportServer(t)
 	fixture := writeUniqueWorkflowBatchReportProfile(t)
-	runCLI(t, "config", "publish", "--from", fixture.profileDir)
-	workflowID := discoverWorkflowReportID(t, label, fixture.workflowID)
+	runCLI(t, "config", "publish", "--from", fixture.profileDir, "--store", storeRef)
+	workflowID := discoverWorkflowReportID(t, label, storeRef, fixture.workflowID)
 
 	outputDir := filepath.Join(t.TempDir(), "workflow-report")
-	report := runWorkflowReportJSON(t, label, workflowID, serverURL, outputDir)
+	report := runWorkflowReportJSON(t, label, storeRef, workflowID, serverURL, outputDir)
 	requireFailedWorkflowReport(t, label, report)
 	requireWorkflowReportHTML(t, label, report, fixture, outputDir)
+}
+
+func TestWorkflowReportFailsAdmissionWhenStepInputIsMissing(t *testing.T) {
+	storeRef := configureNamedSQLiteActiveStore(t, "workflow-report-missing-input")
+	fixture := writeUniqueWorkflowBatchReportProfile(t)
+	runCLI(t, "config", "publish", "--from", fixture.profileDir, "--store", storeRef)
+	workflowID := discoverWorkflowReportID(t, "missing input", storeRef, fixture.workflowID)
+
+	var secondCalled int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/first":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{}`)
+		case "/second":
+			atomic.StoreInt32(&secondCalled, 1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"status":"unexpected"}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	outputDir := filepath.Join(t.TempDir(), "workflow-report")
+	report := runWorkflowReportJSON(t, "missing input", storeRef, workflowID, server.URL, outputDir)
+	if report.OK || report.Counts.Passed != 1 || report.Counts.Failed != 1 || len(report.Steps) != 2 {
+		t.Fatalf("missing-input workflow report = %#v", report)
+	}
+	if atomic.LoadInt32(&secondCalled) != 0 {
+		t.Fatalf("workflow report should fail admission before calling the second step")
+	}
+	if report.Steps[1].Status != store.StatusFailed ||
+		!strings.Contains(report.Steps[1].Error, "missing workflow input") ||
+		!strings.Contains(report.Steps[1].Error, "item_id") {
+		t.Fatalf("missing-input step report = %#v", report.Steps[1])
+	}
 }
 
 func newFailingWorkflowReportServer(t *testing.T) string {
@@ -69,10 +111,10 @@ func newFailingWorkflowReportServer(t *testing.T) string {
 	return server.URL
 }
 
-func discoverWorkflowReportID(t *testing.T, label string, workflowID string) string {
+func discoverWorkflowReportID(t *testing.T, label string, storeRef string, workflowID string) string {
 	t.Helper()
 
-	listOut := runCLI(t, "workflow", "discover", "--filter", workflowID, "--json")
+	listOut := runCLI(t, "workflow", "discover", "--store", storeRef, "--filter", workflowID, "--json")
 	var listReport struct {
 		Items []struct {
 			ID          string `json:"id"`
@@ -88,11 +130,12 @@ func discoverWorkflowReportID(t *testing.T, label string, workflowID string) str
 	return listReport.Items[0].ID
 }
 
-func runWorkflowReportJSON(t *testing.T, label string, workflowID string, serverURL string, outputDir string) workflowReportCommandReport {
+func runWorkflowReportJSON(t *testing.T, label string, storeRef string, workflowID string, serverURL string, outputDir string) workflowReportCommandReport {
 	t.Helper()
 
 	out := runCLI(t,
 		"workflow", "report",
+		"--store", storeRef,
 		"--workflow", workflowID,
 		"--base-url", serverURL,
 		"--output-dir", outputDir,

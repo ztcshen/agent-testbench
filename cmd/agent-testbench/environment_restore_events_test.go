@@ -75,7 +75,10 @@ func TestEnvironmentRestoreStreamJSONEmitsPlanProgressAndTimeout(t *testing.T) {
 	if err := json.Unmarshal(rawReport, &report); err != nil {
 		t.Fatalf("decode timeout report: %v\n%s", err, rawReport)
 	}
-	if report.OK || !strings.Contains(report.Error, "environment restore plan timed out") || report.EnvironmentID != "env.restore.plan.timeout" {
+	if report.OK ||
+		!strings.Contains(report.Error, "environment restore plan timed out") ||
+		!strings.Contains(report.Error, "command: docker compose version") ||
+		report.EnvironmentID != "env.restore.plan.timeout" {
 		t.Fatalf("timeout report = %#v", report)
 	}
 }

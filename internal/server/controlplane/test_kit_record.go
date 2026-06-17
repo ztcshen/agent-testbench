@@ -43,18 +43,22 @@ func recordTestKitRunWithContext(ctx context.Context, bundle profile.Bundle, run
 	if err != nil {
 		return "", err
 	}
+	result["evidenceRoot"] = evidenceRoot
 	_, err = runtime.CreateRun(ctx, store.Run{
-		ID:            runID,
-		ProfileID:     bundle.ID,
-		EnvironmentID: valueString(payload["environmentId"]),
-		WorkflowID:    workflowID,
-		Status:        status,
-		EvidenceRoot:  evidenceRoot,
-		SummaryJSON:   string(raw),
-		StartedAt:     startedAt,
-		FinishedAt:    finishedAt,
-		CreatedAt:     startedAt,
-		UpdatedAt:     finishedAt,
+		ID:                 runID,
+		ProfileID:          bundle.ID,
+		EnvironmentID:      valueString(payload["environmentId"]),
+		WorkflowID:         workflowID,
+		Status:             status,
+		EvidenceRoot:       evidenceRoot,
+		SummaryJSON:        string(raw),
+		TestPlanMapID:      valueString(payload["testPlanMapId"]),
+		TestPlanPathID:     valueString(payload["testPlanPathId"]),
+		PlannerSummaryJSON: testKitPlannerSummaryJSON(payload),
+		StartedAt:          startedAt,
+		FinishedAt:         finishedAt,
+		CreatedAt:          startedAt,
+		UpdatedAt:          finishedAt,
 	})
 	if err != nil {
 		return "", err
@@ -70,6 +74,9 @@ func recordTestKitRunWithContext(ctx context.Context, bundle profile.Bundle, run
 		Status:               status,
 		RequestSummaryJSON:   compactJSON(testKitRequestSummary(result, valueString(payload["stepId"]), caseID)),
 		AssertionSummaryJSON: compactJSON(map[string]any{"status": status}),
+		TestPlanNodeID:       valueString(payload["testPlanNodeId"]),
+		TestPlanOperation:    valueString(payload["testPlanOperation"]),
+		PlannerSummaryJSON:   testKitPlannerSummaryJSON(payload),
 		StartedAt:            startedAt,
 		FinishedAt:           finishedAt,
 		CreatedAt:            startedAt,
@@ -81,6 +88,16 @@ func recordTestKitRunWithContext(ctx context.Context, bundle profile.Bundle, run
 		return "", err
 	}
 	return runID, nil
+}
+
+func testKitPlannerSummaryJSON(payload map[string]any) string {
+	if raw := strings.TrimSpace(valueString(payload["plannerSummaryJson"])); raw != "" {
+		return raw
+	}
+	if summary, ok := payload["plannerSummary"]; ok {
+		return compactJSON(summary)
+	}
+	return "{}"
 }
 
 func writeTestKitEvidenceFiles(result map[string]any, status string, evidenceDir string, runID string) (string, error) {

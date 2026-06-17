@@ -144,6 +144,9 @@ Build and inspect a Store-backed workflow map without running target services:
 ./skills/agent-testbench-operator/scripts/atb.sh map import-workflows --store STORE_NAME --json
 ./skills/agent-testbench-operator/scripts/atb.sh map workflows --store STORE_NAME --map MAP_ID --filter TEXT --json
 ./skills/agent-testbench-operator/scripts/atb.sh map explain --store STORE_NAME --map MAP_ID --case CASE_ID --json
+./skills/agent-testbench-operator/scripts/atb.sh map explain --store STORE_NAME --map MAP_ID --scope all --environment ENV_ID --save --json
+./skills/agent-testbench-operator/scripts/atb.sh map run --store STORE_NAME --map MAP_ID --scope all --environment ENV_ID --json
+./skills/agent-testbench-operator/scripts/atb.sh map run explain --store STORE_NAME --plan PLAN_ID --json
 ./skills/agent-testbench-operator/scripts/atb.sh map review-html --store STORE_NAME --map MAP_ID --filter TEXT --output /tmp/map-review.html --json
 ```
 
@@ -159,9 +162,18 @@ Build the map from Store catalog assets first: `Workflow` becomes a named path,
 nodes, and `Fixture`/`CaseDependency` supply materialized preconditions. Re-run
 `map import-workflows --map MAP_ID` after catalog changes to replace that map
 projection. Use `map workflows --map MAP_ID --filter TEXT` to find workflow
-paths by path id, workflow id, or display name, then use `map explain` for the
-target case to inspect selected path prefix, candidate paths, rejected reasons,
-and physical operations. Use `map review-html --map MAP_ID --filter TEXT
+paths by path id, workflow id, or display name. Use `map explain` as the
+SQL-style planner: it emits logical plan, rule trace, candidate plans,
+physical task DAG, task edges, cost, properties, and compatibility `operations`
+for single-case replay. Use `--scope all|workflows|cases` for map-level
+planning, `--case`/`--node` for a single target, and `--save` to persist the
+planner instance into `test_map_plan_instances`, `test_map_plan_tasks`, and
+`test_map_plan_task_edges`. Use `map run --map MAP_ID --scope all` only after
+the explain output is reviewable: it creates a `mode=run` planner instance,
+executes the physical task DAG serially, writes each task status and child
+workflow/API case run id back to Store, and links child runs through
+test-plan metadata. Use `map run explain --plan PLAN_ID` to inspect a run plan
+without re-running it. Use `map review-html --map MAP_ID --filter TEXT
 --output PATH` when a human needs to review the Store-backed map visually: the
 generated HTML embeds the current map facts, can be narrowed to matching
 workflows/cases, supports workflow filtering/search, and shows clickable case

@@ -24,7 +24,13 @@ func findAPICase(items []profile.APICase, id string) (profile.APICase, bool) {
 func findRunnableAPICase(ctx context.Context, bundle profile.Bundle, runtime store.Store, id string, payload map[string]any) (runnableAPICase, bool) {
 	if item, ok := findAPICase(bundle.APICases, id); ok {
 		item.CasePath = resolveBundleAPICasePath(ctx, runtime, bundle, item.CasePath)
-		execution := findCaseExecutionConfig(ctx, runtime, id, payload)
+		template := findCaseExecutionTemplateConfig(ctx, runtime, id, payload)
+		var execution *caseExecutionConfig
+		var inputs []map[string]any
+		if template != nil {
+			execution = &template.CaseExecution
+			inputs = template.Inputs
+		}
 		caseBaseURL := item.BaseURL
 		if runtime != nil {
 			if catalogItem, catalog, ok := findCatalogAPICase(ctx, runtime, id); ok {
@@ -38,7 +44,7 @@ func findRunnableAPICase(ctx context.Context, bundle profile.Bundle, runtime sto
 				}
 			}
 		}
-		return runnableAPICase{Case: item, Execution: execution, CaseBaseURL: caseBaseURL}, true
+		return runnableAPICase{Case: item, Execution: execution, Inputs: inputs, CaseBaseURL: caseBaseURL}, true
 	}
 	if runtime == nil {
 		return runnableAPICase{}, false
@@ -52,11 +58,17 @@ func findRunnableAPICase(ctx context.Context, bundle profile.Bundle, runtime sto
 			apiCase := profileAPICaseFromCatalog(item)
 			apiCase.CasePath = resolveCatalogAPICasePath(ctx, runtime, catalog.ProfileID, item.CasePath)
 			apiCase.PayloadTemplateJSON = apiCasePayloadTemplateJSON(apiCase.PayloadTemplateJSON, catalogRequestTemplateJSON(catalog, item.RequestTemplateID))
-			execution := findCaseExecutionConfigFromCatalog(catalog, id, payload)
+			template := findCaseExecutionTemplateConfigFromCatalog(catalog, id, payload)
+			var execution *caseExecutionConfig
+			var inputs []map[string]any
+			if template != nil {
+				execution = &template.CaseExecution
+				inputs = template.Inputs
+			}
 			if execution == nil {
 				execution = deriveCaseExecutionConfigFromCatalog(catalog, item)
 			}
-			return runnableAPICase{Case: apiCase, Execution: execution, CaseBaseURL: item.BaseURL}, true
+			return runnableAPICase{Case: apiCase, Execution: execution, Inputs: inputs, CaseBaseURL: item.BaseURL}, true
 		}
 	}
 	return runnableAPICase{}, false

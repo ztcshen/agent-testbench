@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
+	"agent-testbench/internal/domain/mapplanner"
 	"agent-testbench/internal/domain/plangraph"
 	"agent-testbench/internal/store"
 )
@@ -28,7 +30,7 @@ type mapCountsReport struct {
 
 type mapExplainReport struct {
 	OK bool `json:"ok"`
-	plangraph.Explanation
+	mapplanner.Plan
 }
 
 type mapWorkflowsReport struct {
@@ -60,6 +62,8 @@ func runMap(ctx context.Context, args []string) error {
 		return runMapWorkflows(ctx, args[1:])
 	case "explain":
 		return runMapExplain(ctx, args[1:])
+	case "run":
+		return runMapRun(ctx, args[1:])
 	case "review-html":
 		return runMapReviewHTML(ctx, args[1:])
 	default:
@@ -153,28 +157,48 @@ func runMapExplain(ctx context.Context, args []string) error {
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
 	mapID := flags.String("map", "", "Plan map id")
+	scope := flags.String("scope", "", "Explain scope: all, workflows, cases")
 	caseID := flags.String("case", "", "Target case id")
 	nodeID := flags.String("node", "", "Target plan node id")
+	pathID := flags.String("path", "", "Target map path id")
+	workflowID := flags.String("workflow", "", "Target workflow id")
+	environmentID := flags.String("environment", "", "Environment id to bind into the planner output")
+	savePlan := flags.Bool("save", false, "Persist the generated planner instance and task DAG")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if strings.TrimSpace(*mapID) == "" {
-		return errors.New("--map is required")
-	}
-	if strings.TrimSpace(*caseID) == "" && strings.TrimSpace(*nodeID) == "" {
-		return errors.New("--case or --node is required")
-	}
-	_, graph, cleanup, err := openMapGraphForCLI(ctx, *storeRef, *storeURL, *mapID)
+	runtime, graph, cleanup, err := openRequiredMapGraphForCLI(ctx, *storeRef, *storeURL, *mapID)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
-	explain, err := plangraph.ExplainCase(graph, plangraph.ExplainOptions{CaseID: *caseID, NodeID: *nodeID})
+	plan, err := mapplanner.Explain(graph, mapplanner.Query{
+		MapID:         *mapID,
+		EnvironmentID: *environmentID,
+		Scope:         *scope,
+		CaseID:        *caseID,
+		NodeID:        *nodeID,
+		PathID:        *pathID,
+		WorkflowID:    *workflowID,
+		PlannerMode:   mapplanner.ModeExplain,
+	})
 	if err != nil {
 		return err
 	}
-	report := mapExplainReport{OK: true, Explanation: explain}
+	if *savePlan {
+		now := time.Now().UTC()
+		plan.ID = "plan." + safeReportID(plan.MapID) + "." + now.Format("20060102T150405.000000000Z")
+		plan.CreatedAt = now
+		record, err := mapplanner.RecordFromPlan(plan, now)
+		if err != nil {
+			return err
+		}
+		if err := runtime.SaveTestMapPlan(ctx, record); err != nil {
+			return err
+		}
+	}
+	report := mapExplainReport{OK: true, Plan: plan}
 	if *jsonOutput {
 		return writeIndentedJSON(report)
 	}
@@ -193,6 +217,13 @@ func openMapGraphForCLI(ctx context.Context, storeRef string, storeURL string, m
 		return nil, store.TestPlanGraph{}, func() {}, err
 	}
 	return runtime, graph, cleanup, nil
+}
+
+func openRequiredMapGraphForCLI(ctx context.Context, storeRef string, storeURL string, mapID string) (store.Store, store.TestPlanGraph, func(), error) {
+	if strings.TrimSpace(mapID) == "" {
+		return nil, store.TestPlanGraph{}, func() {}, errors.New("--map is required")
+	}
+	return openMapGraphForCLI(ctx, storeRef, storeURL, mapID)
 }
 
 func printMapImportReport(report mapImportReport) {

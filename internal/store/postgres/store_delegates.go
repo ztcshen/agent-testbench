@@ -129,6 +129,14 @@ func (s *Store) GetTestPlanGraph(ctx context.Context, mapID string) (store.TestP
 	return s.core.GetTestPlanGraph(ctx, mapID)
 }
 
+func (s *Store) SaveTestMapPlan(ctx context.Context, record store.TestMapPlanRecord) error {
+	return s.core.SaveTestMapPlan(ctx, record)
+}
+
+func (s *Store) GetTestMapPlan(ctx context.Context, planID string) (store.TestMapPlanRecord, error) {
+	return s.core.GetTestMapPlan(ctx, planID)
+}
+
 func (s *Store) UpsertEnvironment(ctx context.Context, e store.Environment) (store.Environment, error) {
 	return s.core.UpsertEnvironment(ctx, e)
 }

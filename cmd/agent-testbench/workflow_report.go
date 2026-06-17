@@ -163,6 +163,12 @@ func runWorkflowCaseReportSteps(serverURL string, bundle profile.Bundle, workflo
 		if caseID == "" {
 			continue
 		}
+		if missing := workflowStepMissingInputs(step, contextValues); len(missing) > 0 {
+			result := workflowMissingInputStepResult(step, caseID, missing)
+			execution.StepResults = append(execution.StepResults, result)
+			execution.StepReports = append(execution.StepReports, workflowReportStepItem(step, result))
+			break
+		}
 		result, err := postReportMap(serverURL+"/api/test-kit/run", workflowStepRunPayload(workflow, workflowID, step, caseID, contextValues, baseURL))
 		if err != nil {
 			return workflowCaseReportExecution{}, err
@@ -180,6 +186,56 @@ func runWorkflowCaseReportSteps(serverURL string, bundle profile.Bundle, workflo
 		}
 	}
 	return execution, nil
+}
+
+func workflowStepMissingInputs(step map[string]any, contextValues map[string]any) []string {
+	missing := []string{}
+	for _, rawInput := range listFromReportAny(step["inputs"]) {
+		item := mapFromReportAny(rawInput)
+		name := valueString(item["name"])
+		if name == "" || !workflowInputRequired(item) {
+			continue
+		}
+		if valueString(contextValues[name]) == "" {
+			missing = append(missing, name)
+		}
+	}
+	return missing
+}
+
+func workflowInputRequired(item map[string]any) bool {
+	raw, ok := item["required"]
+	if !ok {
+		return true
+	}
+	return boolFromReportAny(raw)
+}
+
+func workflowMissingInputStepResult(step map[string]any, caseID string, missing []string) map[string]any {
+	stepID := valueString(step["id"])
+	errText := "missing workflow input"
+	if len(missing) > 0 {
+		errText += ": " + strings.Join(missing, ", ")
+	}
+	return map[string]any{
+		"ok":        false,
+		"caseId":    caseID,
+		"stepId":    stepID,
+		"title":     firstNonEmpty(valueString(step["displayName"]), stepID),
+		"status":    store.StatusFailed,
+		"stepOk":    false,
+		"elapsedMs": int64(0),
+		"error":     errText,
+		"summary": map[string]any{
+			"caseId":        caseID,
+			"stepId":        stepID,
+			"failureReason": errText,
+		},
+		"result": map[string]any{
+			"request":  map[string]any{"caseId": caseID},
+			"response": map[string]any{"body": "{}"},
+		},
+	}
 }
 
 func workflowStepRunPayload(workflow map[string]any, workflowID string, step map[string]any, caseID string, contextValues map[string]any, baseURL string) map[string]any {
@@ -292,11 +348,20 @@ func fetchReportMap(endpoint string) (map[string]any, error) {
 }
 
 func postReportMap(endpoint string, payload map[string]any) (map[string]any, error) {
+	return postReportMapWithContext(context.Background(), endpoint, payload)
+}
+
+func postReportMapWithContext(ctx context.Context, endpoint string, payload map[string]any) (map[string]any, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
-	response, err := http.Post(endpoint, "application/json", strings.NewReader(string(raw)))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(raw)))
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		return nil, err
 	}
@@ -359,6 +424,9 @@ func workflowReportStepItem(step map[string]any, result map[string]any) workflow
 		caseRunID = item[0].CaseRunID
 		viewerURL = item[0].ViewerURL
 		detailURL = item[0].DetailURL
+	}
+	if errText == "" {
+		errText = valueString(result["error"])
 	}
 	return workflowCaseReportStep{
 		StepID:    valueString(step["id"]),

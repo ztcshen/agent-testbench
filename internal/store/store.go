@@ -7,6 +7,7 @@ import (
 
 	"agent-testbench/internal/domain/catalog"
 	"agent-testbench/internal/domain/execution"
+	"agent-testbench/internal/domain/mapplanner"
 	"agent-testbench/internal/domain/plangraph"
 )
 
@@ -27,6 +28,7 @@ type Store interface {
 	BaselineGateStore
 	ProfileCatalogStore
 	PlanGraphStore
+	MapPlannerStore
 	EnvironmentStore
 	AgentTaskStore
 }
@@ -75,6 +77,11 @@ type ProfileCatalogStore interface {
 type PlanGraphStore interface {
 	ReplaceTestPlanGraph(context.Context, TestPlanGraph) error
 	GetTestPlanGraph(context.Context, string) (TestPlanGraph, error)
+}
+
+type MapPlannerStore interface {
+	SaveTestMapPlan(context.Context, TestMapPlanRecord) error
+	GetTestMapPlan(context.Context, string) (TestMapPlanRecord, error)
 }
 
 type EnvironmentStore interface {
@@ -270,3 +277,8 @@ type TestPlanEdge = plangraph.Edge
 type TestPlanPath = plangraph.Path
 type TestPlanPathStep = plangraph.PathStep
 type TestPlanMaterialization = plangraph.Materialization
+
+type TestMapPlanRecord = mapplanner.PlanRecord
+type TestMapPlanInstance = mapplanner.PlanInstance
+type TestMapPlanTask = mapplanner.TaskRecord
+type TestMapPlanTaskEdge = mapplanner.TaskEdgeRecord

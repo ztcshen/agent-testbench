@@ -76,6 +76,7 @@ func exerciseStoreContract(t *testing.T, ctx context.Context, s store.Store) {
 	requireReadModelContract(t, ctx, s, activeVersion, started)
 	requireProfileCatalogContract(t, ctx, s, started)
 	requirePlanGraphContract(t, ctx, s, started)
+	requireMapPlannerContract(t, ctx, s, started)
 	requireMissingRunError(t, ctx, s)
 }
 

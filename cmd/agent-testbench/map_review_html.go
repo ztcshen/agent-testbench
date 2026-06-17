@@ -32,10 +32,7 @@ func runMapReviewHTML(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if strings.TrimSpace(*mapID) == "" {
-		return errors.New("--map is required")
-	}
-	runtime, graph, cleanup, err := openMapGraphForCLI(ctx, *storeRef, *storeURL, *mapID)
+	runtime, graph, cleanup, err := openRequiredMapGraphForCLI(ctx, *storeRef, *storeURL, *mapID)
 	if err != nil {
 		return err
 	}
