@@ -63,10 +63,13 @@ let activeInterfaceKey="";
 let searchText="";
 let focusNodeId="";
 let nodeHistory=[];
-const nodeById=new Map(reviewData.nodes.map(function(n){return [n.id,n]}));
-const pathById=new Map(reviewData.paths.map(function(p){return [p.id,p]}));
-const esc=function(v){return String(v??"").replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]})};
-function pretty(v){if(!v||v==="{}"||v==="[]")return "";try{return JSON.stringify(JSON.parse(v),null,2)}catch{return String(v)}}
+	const nodeById=new Map(reviewData.nodes.map(function(n){return [n.id,n]}));
+	const pathById=new Map(reviewData.paths.map(function(p){return [p.id,p]}));
+	const esc=function(v){return String(v??"").replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]})};
+	const jsArg=function(v){return JSON.stringify(String(v??""))};
+	const jsCall=function(name){return name+"("+Array.prototype.slice.call(arguments,1).map(jsArg).join(",")+")"};
+	const jsHandler=function(){return esc(Array.prototype.slice.call(arguments).join(";"))};
+	function pretty(v){if(!v||v==="{}"||v==="[]")return "";try{return JSON.stringify(JSON.parse(v),null,2)}catch{return String(v)}}
 function hashState(){
   const params=new URLSearchParams(window.location.hash.replace(/^#/,""));
   return {node:params.get("node")||"",path:params.get("path")||"",interfaceKey:params.get("interface")||"",search:params.get("search")||"",focus:params.get("focus")||""};
@@ -218,17 +221,17 @@ function renderDetails(){
   let html='<div class="detail"><h2>'+esc(n.displayName)+'</h2><div class="sub">'+esc(n.id)+'</div>';
   html+='<div class="detail-actions"><button onclick="toggleFocusNode()">Focus</button><button onclick="fitSelectedNode()">Fit</button><button onclick="copyCurrentLink()">Copy link</button><button onclick="openPathFinder()">Path Finder</button></div>';
   html+=reviewData.warnings.filter(function(w){return w.includes(n.id)}).map(function(w){return '<div class="warning">'+esc(w)+'</div>'}).join("");
-  html+='<div class="section"><h3>Case</h3><div class="kv"><div>case id</div><div>'+esc(n.caseId)+'</div><div>type</div><div>'+esc(n.caseType||n.role)+'</div><div>state effect</div><div>'+esc(n.stateEffect)+'</div><div>interface</div><div>'+(key?'<button class="mini-link" onclick="showInterfaceCases(\''+esc(n.id)+'\')">'+esc(key)+'</button>':"")+'</div><div>template</div><div>'+esc(n.requestTemplateId)+'</div><div>base case</div><div>'+esc(n.baseCaseId)+'</div><div>anchor</div><div>'+esc(n.anchorNodeId)+'</div></div></div>';
+  html+='<div class="section"><h3>Case</h3><div class="kv"><div>case id</div><div>'+esc(n.caseId)+'</div><div>type</div><div>'+esc(n.caseType||n.role)+'</div><div>state effect</div><div>'+esc(n.stateEffect)+'</div><div>interface</div><div>'+(key?'<button class="mini-link" onclick="'+jsHandler(jsCall("showInterfaceCases",n.id))+'">'+esc(key)+'</button>':"")+'</div><div>template</div><div>'+esc(n.requestTemplateId)+'</div><div>base case</div><div>'+esc(n.baseCaseId)+'</div><div>anchor</div><div>'+esc(n.anchorNodeId)+'</div></div></div>';
   if(template){html+='<div class="section"><h3>Request</h3><div class="kv"><div>method</div><div>'+esc(template.method)+'</div><div>path</div><div>'+esc(template.path)+'</div><div>template</div><div>'+esc(template.id)+'</div></div></div>'}
   html+='<div class="section"><h3>Interface reverse cases</h3><div class="sub">'+esc(key||"No interface key")+' - '+reverseCases.length+' reverse / '+sameInterface.length+' total</div><div class="list">'+(reverseCases.map(interfaceCaseRow).join("")||"<span class='sub'>No reverse cases in this review data.</span>")+'</div></div>';
-  html+='<div class="section"><h3>Workflow usage</h3><div class="list">'+((n.paths||[]).map(function(p){return '<button class="link-row" onclick="highlightPath(\''+esc(p.pathId)+'\')"><strong>'+esc(p.displayName||p.pathId)+'</strong><span>'+esc(p.workflowId)+' - step '+p.stepIndex+' - '+esc(p.stepId)+'</span></button>'}).join("")||"<span class='sub'>No workflow path usage.</span>")+'</div></div>';
+  html+='<div class="section"><h3>Workflow usage</h3><div class="list">'+((n.paths||[]).map(function(p){return '<button class="link-row" onclick="'+jsHandler(jsCall("highlightPath",p.pathId))+'"><strong>'+esc(p.displayName||p.pathId)+'</strong><span>'+esc(p.workflowId)+' - step '+p.stepIndex+' - '+esc(p.stepId)+'</span></button>'}).join("")||"<span class='sub'>No workflow path usage.</span>")+'</div></div>';
   html+='<div class="section"><h3>Planner operations</h3><div class="list">'+(ops.map(function(o){return '<div class="link-row"><strong>'+esc(o.kind)+'</strong><span>'+esc(o.reason||"")+" "+esc(o.pathId||"")+" "+esc(o.untilNodeId||"")+" "+esc(o.caseId||"")+'</span></div>'}).join("")||"<span class='sub'>No operations.</span>")+'</div></div>';
   html+='<div class="section"><h3>Connections</h3><div class="list">'+incoming.map(function(e){return edgeRow(e,true)}).join("")+outgoing.map(function(e){return edgeRow(e,false)}).join("")+'</div></div>';
   html+=jsonBlocks.map(function(x){return '<div class="section"><h3>'+esc(x[0])+'</h3><pre>'+esc(pretty(x[1]))+'</pre></div>'}).join("")+'</div>';
   box.innerHTML=html;
 }
-function interfaceCaseRow(item){return '<button class="link-row" onclick="selectNode(\''+esc(item.id)+'\')"><strong>'+esc(item.displayName)+'</strong><span>'+esc(item.caseId||item.id)+' - '+esc(item.caseType||item.role||"case")+' - '+esc(item.stateEffect||"")+'</span></button>'}
-function edgeRow(e,incoming){const other=nodeById.get(incoming?e.fromNodeId:e.toNodeId);return '<button class="link-row" onclick="selectNode(\''+esc(other.id)+'\')"><strong>'+(incoming?"in":"out")+' '+esc(e.kind)+'</strong><span>'+esc(other.displayName)+' - '+esc(e.pathId||e.materializationId||"")+'</span></button>'}`
+function interfaceCaseRow(item){return '<button class="link-row" onclick="'+jsHandler(jsCall("selectNode",item.id))+'"><strong>'+esc(item.displayName)+'</strong><span>'+esc(item.caseId||item.id)+' - '+esc(item.caseType||item.role||"case")+' - '+esc(item.stateEffect||"")+'</span></button>'}
+function edgeRow(e,incoming){const other=nodeById.get(incoming?e.fromNodeId:e.toNodeId);return '<button class="link-row" onclick="'+jsHandler(jsCall("selectNode",other.id))+'"><strong>'+(incoming?"in":"out")+' '+esc(e.kind)+'</strong><span>'+esc(other.displayName)+' - '+esc(e.pathId||e.materializationId||"")+'</span></button>'}`
 }
 
 func mapReviewNavigationJS() string {
@@ -257,7 +260,7 @@ function findPath(){
   const q=[{id:from,path:[from]}],seen=new Set([from]);let found=null;
   while(q.length){const cur=q.shift();if(cur.id===to){found=cur.path;break}for(const next of adj.get(cur.id)||[]){if(!seen.has(next)){seen.add(next);q.push({id:next,path:cur.path.concat(next)})}}}
   if(!found){result.innerHTML='<div class="warning">No path found.</div>';return}
-  result.innerHTML='<div class="list">'+found.map(function(id,idx){const n=nodeById.get(id);return '<button class="link-row" onclick="selectNode(\''+esc(id)+'\');closePathFinder()"><strong>'+String(idx+1)+'. '+esc(n?.displayName||id)+'</strong><span>'+esc(n?.caseId||id)+'</span></button>'}).join("")+'</div>';
+  result.innerHTML='<div class="list">'+found.map(function(id,idx){const n=nodeById.get(id);return '<button class="link-row" onclick="'+jsHandler(jsCall("selectNode",id),"closePathFinder()")+'"><strong>'+String(idx+1)+'. '+esc(n?.displayName||id)+'</strong><span>'+esc(n?.caseId||id)+'</span></button>'}).join("")+'</div>';
 }`
 }
 

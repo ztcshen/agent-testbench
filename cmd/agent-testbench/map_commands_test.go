@@ -223,6 +223,15 @@ func TestMapReviewHTMLWritesInteractiveArtifact(t *testing.T) {
 	if strings.Contains(html, `adj.get(e.toNodeId).push(e.fromNodeId)`) {
 		t.Fatalf("path finder should not traverse directed edges backwards:\n%s", html)
 	}
+	for _, unsafeHandler := range []string{
+		`showInterfaceCases(\''+esc`,
+		`highlightPath(\''+esc`,
+		`selectNode(\''+esc`,
+	} {
+		if strings.Contains(html, unsafeHandler) {
+			t.Fatalf("review html should use JavaScript-string escaping for handler arguments %q:\n%s", unsafeHandler, html)
+		}
+	}
 }
 
 func TestMapReviewHTMLCanFilterWorkflowPaths(t *testing.T) {
