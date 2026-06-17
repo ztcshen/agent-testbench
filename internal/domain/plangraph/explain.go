@@ -55,6 +55,7 @@ func explainValidationNode(graph Graph, node Node, explain Explanation) (Explana
 			Kind:                 OperationRunPathPrefix,
 			PathID:               materialization.SourcePathID,
 			UntilNodeID:          materialization.SourceUntilNodeID,
+			MaterializationID:    materialization.ID,
 			Reason:               "replay workflow prefix required by validation case fixture",
 			RequiredPropertyJSON: node.RequiredPropertyJSON,
 		})

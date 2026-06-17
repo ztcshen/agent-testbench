@@ -124,10 +124,18 @@ The JSON output includes:
 - `logicalPlan`: deterministic logical map operators.
 - `rulesApplied`: optimizer/planner rule trace.
 - `candidatePlans` and `rejectedPlans`: selected and rejected path/case plans.
-- `physicalTasks`: executable tasks such as `run_path`, `run_path_prefix`, and
-  `run_case`.
+- `physicalTasks`: executable tasks such as `run_path`, `run_path_prefix`,
+  `reuse_materialization`, and `run_case`.
 - `taskEdges`: task DAG dependencies; do not infer order only from task index.
 - `operations`: compatibility view for single-case replay operations.
+
+When a validation case depends on a Store-backed fixture/materialization, the
+planner applies `prefer_materialized_replay`: the replay prefix is lowered to a
+`reuse_materialization` task with the source path, source workflow, and
+materialization id preserved for the executor. Evidence validation is exposed as
+the `plan_evidence_gate` rule and enforced by `map gate` after execution, so
+the request execution plan stays focused on precondition reuse plus the target
+HTTP/MQ case call.
 
 For patch-based validation cases, the target node should carry
 `baseCaseId`, `patchJson`, and `stateEffect=unchanged` so the planner can reuse

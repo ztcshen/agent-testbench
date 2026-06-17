@@ -30,8 +30,8 @@ func TestExplainBuildsPhysicalTaskDAGForValidationCase(t *testing.T) {
 	if len(plan.PhysicalTasks) != 2 {
 		t.Fatalf("physical tasks = %#v", plan.PhysicalTasks)
 	}
-	if plan.PhysicalTasks[0].Kind != mapplanner.TaskRunPathPrefix || plan.PhysicalTasks[0].PathID != "workflow.submit.success" || plan.PhysicalTasks[0].UntilNodeID != "case.prepare" {
-		t.Fatalf("prefix task = %#v", plan.PhysicalTasks[0])
+	if plan.PhysicalTasks[0].Kind != mapplanner.TaskReuseMaterialized || plan.PhysicalTasks[0].PathID != "workflow.submit.success" || plan.PhysicalTasks[0].UntilNodeID != "case.prepare" || plan.PhysicalTasks[0].MaterializationID != "fixture.prepare" {
+		t.Fatalf("materialized prefix task = %#v", plan.PhysicalTasks[0])
 	}
 	if plan.PhysicalTasks[1].Kind != mapplanner.TaskRunCase || plan.PhysicalTasks[1].CaseID != "case.submit.missing-days" {
 		t.Fatalf("case task = %#v", plan.PhysicalTasks[1])
@@ -39,8 +39,33 @@ func TestExplainBuildsPhysicalTaskDAGForValidationCase(t *testing.T) {
 	if len(plan.TaskEdges) != 1 || plan.TaskEdges[0].FromTaskID != plan.PhysicalTasks[0].ID || plan.TaskEdges[0].ToTaskID != plan.PhysicalTasks[1].ID {
 		t.Fatalf("task edges = %#v", plan.TaskEdges)
 	}
-	if plan.Cost.EstimatedTasks != 2 || plan.Cost.ReplayTasks != 1 || plan.Cost.CaseTasks != 1 {
+	if plan.Cost.EstimatedTasks != 2 || plan.Cost.ReplayTasks != 0 || plan.Cost.CaseTasks != 1 {
 		t.Fatalf("cost = %#v", plan.Cost)
+	}
+}
+
+func TestExplainPrefersMaterializedReplayAndAddsEvidenceGateTrace(t *testing.T) {
+	graph := validationCaseGraph()
+
+	plan, err := mapplanner.Explain(graph, mapplanner.Query{
+		MapID:       "map.contract",
+		Scope:       mapplanner.ScopeCase,
+		TargetKind:  mapplanner.TargetCase,
+		TargetID:    "case.submit.missing-days",
+		PlannerMode: mapplanner.ModeExplain,
+	})
+	if err != nil {
+		t.Fatalf("explain validation case: %v", err)
+	}
+
+	if plan.PhysicalTasks[0].Kind != mapplanner.TaskReuseMaterialized || plan.PhysicalTasks[0].MaterializationID != "fixture.prepare" {
+		t.Fatalf("materialized replay task = %#v", plan.PhysicalTasks[0])
+	}
+	if plan.PhysicalTasks[0].Cost.ReplayTasks != 0 || plan.PhysicalTasks[0].Cost.EstimatedTasks != 1 {
+		t.Fatalf("materialized replay should avoid replay cost = %#v", plan.PhysicalTasks[0].Cost)
+	}
+	if !hasPlannerRule(plan.RulesApplied, "prefer_materialized_replay") || !hasPlannerRule(plan.RulesApplied, "plan_evidence_gate") {
+		t.Fatalf("planner rules = %#v", plan.RulesApplied)
 	}
 }
 
@@ -62,15 +87,24 @@ func TestExplainScopeAllPlansWorkflowAndCaseTasks(t *testing.T) {
 	if plan.PhysicalTasks[0].Kind != mapplanner.TaskRunPath || plan.PhysicalTasks[0].PathID != "workflow.submit.success" {
 		t.Fatalf("workflow task = %#v", plan.PhysicalTasks[0])
 	}
-	if plan.PhysicalTasks[1].Kind != mapplanner.TaskRunPathPrefix || plan.PhysicalTasks[2].Kind != mapplanner.TaskRunCase {
-		t.Fatalf("validation replay tasks = %#v", plan.PhysicalTasks)
+	if plan.PhysicalTasks[1].Kind != mapplanner.TaskReuseMaterialized || plan.PhysicalTasks[2].Kind != mapplanner.TaskRunCase {
+		t.Fatalf("validation optimized tasks = %#v", plan.PhysicalTasks)
 	}
 	if len(plan.TaskEdges) != 1 {
 		t.Fatalf("all-scope task edges = %#v", plan.TaskEdges)
 	}
-	if plan.Summary.WorkflowTasks != 1 || plan.Summary.CaseTasks != 1 || plan.Summary.ReplayTasks != 1 {
+	if plan.Summary.WorkflowTasks != 1 || plan.Summary.CaseTasks != 1 || plan.Summary.ReplayTasks != 0 {
 		t.Fatalf("summary = %#v", plan.Summary)
 	}
+}
+
+func hasPlannerRule(rules []mapplanner.RuleTrace, name string) bool {
+	for _, rule := range rules {
+		if rule.Rule == name && rule.Status == mapplanner.RuleStatusApplied {
+			return true
+		}
+	}
+	return false
 }
 
 func validationCaseGraph() plangraph.Graph {

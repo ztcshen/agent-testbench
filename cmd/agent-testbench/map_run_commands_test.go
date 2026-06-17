@@ -246,7 +246,7 @@ func assertMapRunCommandReport(t *testing.T, report mapRunCommandReport) {
 	if !report.OK || report.PlanID == "" || report.MapID != "map.profile.flow" || report.Scope != "all" || report.EnvironmentID != "env.local" || report.Status != "passed" {
 		t.Fatalf("map run report = %#v", report)
 	}
-	if report.Summary.TotalTasks != 3 || report.Summary.PassedTasks != 3 || report.Summary.SkippedTasks != 0 || report.Summary.FailedTasks != 0 {
+	if report.Summary.TotalTasks != 3 || report.Summary.PassedTasks != 2 || report.Summary.SkippedTasks != 1 || report.Summary.FailedTasks != 0 {
 		t.Fatalf("map run summary = %#v", report.Summary)
 	}
 	if len(report.Tasks) != 3 {
@@ -255,8 +255,8 @@ func assertMapRunCommandReport(t *testing.T, report mapRunCommandReport) {
 	if report.Tasks[0].Kind != "run_path" || report.Tasks[0].Status != "passed" || report.Tasks[0].WorkflowRunID == "" {
 		t.Fatalf("workflow task = %#v", report.Tasks[0])
 	}
-	if report.Tasks[1].Kind != "run_path_prefix" || report.Tasks[1].Status != "passed" || report.Tasks[1].WorkflowRunID == "" {
-		t.Fatalf("replay task = %#v", report.Tasks[1])
+	if report.Tasks[1].Kind != "reuse_materialization" || report.Tasks[1].Status != "skipped" {
+		t.Fatalf("materialized replay task = %#v", report.Tasks[1])
 	}
 	if report.Tasks[2].Kind != "run_case" || report.Tasks[2].Status != "passed" || report.Tasks[2].APICaseRunID == "" {
 		t.Fatalf("case task = %#v", report.Tasks[2])
@@ -296,7 +296,7 @@ func assertMapRunExplainCommandReport(t *testing.T, out string, planID string) {
 	if err := json.Unmarshal([]byte(out), &explain); err != nil {
 		t.Fatalf("decode map run explain json: %v\n%s", err, out)
 	}
-	if !explain.OK || explain.PlanID != planID || explain.Status != "passed" || explain.Summary.TotalTasks != 3 || explain.Summary.PassedTasks != 3 || explain.Summary.SkippedTasks != 0 {
+	if !explain.OK || explain.PlanID != planID || explain.Status != "passed" || explain.Summary.TotalTasks != 3 || explain.Summary.PassedTasks != 2 || explain.Summary.SkippedTasks != 1 {
 		t.Fatalf("map run explain = %#v", explain)
 	}
 	if len(explain.NextActions) == 0 || !strings.Contains(strings.Join(explain.NextActions, "\n"), "map run explain --plan "+planID) {

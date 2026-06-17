@@ -114,8 +114,11 @@ func TestMapExplainScopeAllCanSavePlannerInstance(t *testing.T) {
 	if len(report.LogicalPlan) == 0 || len(report.RulesApplied) == 0 || len(report.CandidatePlans) == 0 || len(report.PhysicalTasks) == 0 {
 		t.Fatalf("planner explain should expose optimizer details: %#v", report)
 	}
-	if report.Summary.WorkflowTasks == 0 || report.Summary.CaseTasks == 0 || report.Summary.ReplayTasks == 0 {
+	if report.Summary.WorkflowTasks == 0 || report.Summary.CaseTasks == 0 || report.Summary.ReplayTasks != 0 {
 		t.Fatalf("planner summary should include workflow and case tasks: %#v", report.Summary)
+	}
+	if !mapExplainHasTaskKind(report.PhysicalTasks, "reuse_materialization") {
+		t.Fatalf("planner should include materialized replay task: %#v", report.PhysicalTasks)
 	}
 
 	runtime, err = openStore(ctx, storeRef)
@@ -133,6 +136,18 @@ func TestMapExplainScopeAllCanSavePlannerInstance(t *testing.T) {
 	if len(saved.Tasks) != len(report.PhysicalTasks) {
 		t.Fatalf("saved tasks = %#v, report tasks = %#v", saved.Tasks, report.PhysicalTasks)
 	}
+}
+
+func mapExplainHasTaskKind(tasks []struct {
+	ID   string `json:"id"`
+	Kind string `json:"kind"`
+}, kind string) bool {
+	for _, task := range tasks {
+		if task.Kind == kind {
+			return true
+		}
+	}
+	return false
 }
 
 func TestMapImportWorkflowsRejectsPositionalArgsBeforeOpeningStore(t *testing.T) {

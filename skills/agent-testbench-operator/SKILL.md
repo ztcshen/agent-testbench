@@ -169,7 +169,10 @@ projection. Use `map workflows --map MAP_ID --filter TEXT` to find workflow
 paths by path id, workflow id, or display name. Use `map explain` as the
 SQL-style planner: it emits logical plan, rule trace, candidate plans,
 physical task DAG, task edges, cost, properties, and compatibility `operations`
-for single-case replay. Use `--scope all|workflows|cases` for map-level
+for single-case replay. A validation case with Store-backed materialization can
+produce a `reuse_materialization` physical task and a `prefer_materialized_replay`
+rule instead of a raw replay-prefix task; validate its resulting Evidence with
+`map gate` after execution. Use `--scope all|workflows|cases` for map-level
 planning, `--case`/`--node` for a single target, and `--save` to persist the
 planner instance into `test_map_plan_instances`, `test_map_plan_tasks`, and
 `test_map_plan_task_edges`. Use `map run --map MAP_ID --scope all` only after

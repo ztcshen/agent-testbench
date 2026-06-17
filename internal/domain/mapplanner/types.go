@@ -151,6 +151,7 @@ type PhysicalOperation struct {
 	UntilNodeID          string `json:"untilNodeId,omitempty"`
 	NodeID               string `json:"nodeId,omitempty"`
 	CaseID               string `json:"caseId,omitempty"`
+	MaterializationID    string `json:"materializationId,omitempty"`
 	Reason               string `json:"reason,omitempty"`
 	PatchJSON            string `json:"patchJson,omitempty"`
 	RequiredPropertyJSON string `json:"requiredPropertyJson,omitempty"`

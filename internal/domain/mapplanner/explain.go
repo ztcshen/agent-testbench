@@ -212,9 +212,13 @@ func (b *planBuilder) planCaseNode(plan *Plan, node plangraph.Node) error {
 	}
 	startIndex := len(plan.PhysicalTasks)
 	var previousTaskID string
+	materializedReplayTasks := 0
 	for _, operation := range explain.Operations {
 		task := b.taskFromOperation(operation)
 		b.appendTask(plan, task)
+		if task.Kind == TaskReuseMaterialized {
+			materializedReplayTasks++
+		}
 		currentTaskID := plan.PhysicalTasks[len(plan.PhysicalTasks)-1].ID
 		if previousTaskID != "" {
 			plan.TaskEdges = append(plan.TaskEdges, TaskEdge{
@@ -228,6 +232,20 @@ func (b *planBuilder) planCaseNode(plan *Plan, node plangraph.Node) error {
 		previousTaskID = currentTaskID
 	}
 	if len(plan.PhysicalTasks) > startIndex {
+		if materializedReplayTasks > 0 {
+			plan.RulesApplied = append(plan.RulesApplied, RuleTrace{
+				Rule:   "prefer_materialized_replay",
+				Status: RuleStatusApplied,
+				Before: "run_path_prefix",
+				After:  TaskReuseMaterialized,
+				Reason: "reuse Store-backed materialized precondition instead of replaying the full prefix",
+				Details: map[string]any{
+					"nodeId": node.ID,
+					"caseId": node.CaseID,
+					"tasks":  materializedReplayTasks,
+				},
+			})
+		}
 		plan.RulesApplied = append(plan.RulesApplied, RuleTrace{
 			Rule:   "choose_replay_prefix",
 			Status: RuleStatusApplied,
@@ -238,6 +256,17 @@ func (b *planBuilder) planCaseNode(plan *Plan, node plangraph.Node) error {
 				"tasks":  len(plan.PhysicalTasks) - startIndex,
 			},
 		})
+		if caseOperationCount(explain.Operations) > 0 {
+			plan.RulesApplied = append(plan.RulesApplied, RuleTrace{
+				Rule:   "plan_evidence_gate",
+				Status: RuleStatusApplied,
+				Reason: "map gate can validate task Evidence after execution without changing the physical request plan",
+				Details: map[string]any{
+					"nodeId": node.ID,
+					"caseId": node.CaseID,
+				},
+			})
+		}
 	}
 	plan.Operations = append(plan.Operations, convertOperations(explain.Operations, b.pathByID)...)
 	return nil
@@ -248,6 +277,9 @@ func (b *planBuilder) taskFromOperation(operation plangraph.PhysicalOperation) P
 	if kind == "" {
 		kind = TaskRunCase
 	}
+	if kind == TaskRunPathPrefix && strings.TrimSpace(operation.MaterializationID) != "" {
+		kind = TaskReuseMaterialized
+	}
 	path := b.pathByID[operation.PathID]
 	task := PhysicalTask{
 		Kind:               kind,
@@ -257,6 +289,7 @@ func (b *planBuilder) taskFromOperation(operation plangraph.PhysicalOperation) P
 		UntilNodeID:        operation.UntilNodeID,
 		NodeID:             operation.NodeID,
 		CaseID:             operation.CaseID,
+		MaterializationID:  operation.MaterializationID,
 		Status:             TaskStatusPlanned,
 		Reason:             operation.Reason,
 		RequiredProperties: jsonObject(operation.RequiredPropertyJSON),
@@ -265,6 +298,13 @@ func (b *planBuilder) taskFromOperation(operation plangraph.PhysicalOperation) P
 	switch kind {
 	case TaskRunPathPrefix:
 		task.Cost = PlanCost{EstimatedTasks: 1, ReplayTasks: 1, TotalSteps: len(prefixSteps(b.pathSteps[operation.PathID], operation.UntilNodeID))}
+	case TaskReuseMaterialized:
+		task.Cost = PlanCost{EstimatedTasks: 1}
+		task.Summary = map[string]any{
+			"sourcePathId":      operation.PathID,
+			"sourceWorkflowId":  path.WorkflowID,
+			"sourceUntilNodeId": operation.UntilNodeID,
+		}
 	case TaskRunCase:
 		task.Cost = PlanCost{EstimatedTasks: 1, CaseTasks: 1}
 	default:
@@ -383,7 +423,7 @@ func isValidationNode(node plangraph.Node) bool {
 func replayOperationCount(operations []plangraph.PhysicalOperation) int {
 	count := 0
 	for _, operation := range operations {
-		if operation.Kind == TaskRunPathPrefix {
+		if operation.Kind == TaskRunPathPrefix && strings.TrimSpace(operation.MaterializationID) == "" {
 			count++
 		}
 	}
@@ -423,6 +463,7 @@ func convertOperations(operations []plangraph.PhysicalOperation, pathByID map[st
 			UntilNodeID:          operation.UntilNodeID,
 			NodeID:               operation.NodeID,
 			CaseID:               operation.CaseID,
+			MaterializationID:    operation.MaterializationID,
 			Reason:               operation.Reason,
 			PatchJSON:            operation.PatchJSON,
 			RequiredPropertyJSON: operation.RequiredPropertyJSON,
