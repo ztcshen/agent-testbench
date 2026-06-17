@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -68,6 +69,15 @@ func TestCaseConfigUpsertMaintainsStoreBackedExecutionConfig(t *testing.T) {
 func TestCaseConfigUpsertUpdatesSelectedConfigAndRequestAuthFields(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	seedCaseConfigUpsertCatalogWithBaseConfig(t, storePath)
+	keyPath := writeCaseConfigSigningKey(t)
+	authJSON, err := json.Marshal(map[string]string{
+		"appId":   "app-001",
+		"secret":  "secret-001",
+		"keyPath": keyPath,
+	})
+	if err != nil {
+		t.Fatalf("encode auth json: %v", err)
+	}
 
 	out := runCLI(t, "case", "config", "upsert",
 		"--store", "sqlite://"+storePath,
@@ -77,7 +87,7 @@ func TestCaseConfigUpsertUpdatesSelectedConfigAndRequestAuthFields(t *testing.T)
 		"--body-json", `{"amount":"100.00"}`,
 		"--header", "Content-Type=application/json",
 		"--header", "X-Trace={{ override:trace_id }}",
-		"--auth-json", `{"appId":"app-001","secret":"secret-001"}`,
+		"--auth-json", string(authJSON),
 		"--signed",
 		"--trace-endpoint", "gateway.generic.submit",
 		"--expected-status", "200",
@@ -125,6 +135,16 @@ func TestCaseConfigUpsertUpdatesSelectedConfigAndRequestAuthFields(t *testing.T)
 	if !strings.Contains(runOut, `"status": "passed"`) {
 		t.Fatalf("store-backed auth/header config should pass run:\n%s", runOut)
 	}
+}
+
+func writeCaseConfigSigningKey(t *testing.T) string {
+	t.Helper()
+	keyPath := filepath.Join(t.TempDir(), "request-signing-key.pem")
+	cmd := exec.Command("openssl", "genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:2048", "-out", keyPath)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("generate signing key: %v\n%s", err, out)
+	}
+	return keyPath
 }
 
 func seedCaseConfigUpsertCatalog(t *testing.T, storePath string) {
