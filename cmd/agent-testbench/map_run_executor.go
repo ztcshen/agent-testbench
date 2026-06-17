@@ -26,6 +26,7 @@ type mapRunExecutor struct {
 	nodeByID      map[string]store.TestPlanNode
 	pathStepsByID map[string][]store.TestPlanPathStep
 	statusByTask  map[string]string
+	exportsByTask map[string]map[string]any
 }
 
 type mapRunStepResult struct {
@@ -49,6 +50,7 @@ func newMapRunExecutor(ctx context.Context, runtime store.Store, graph store.Tes
 		nodeByID:      map[string]store.TestPlanNode{},
 		pathStepsByID: map[string][]store.TestPlanPathStep{},
 		statusByTask:  map[string]string{},
+		exportsByTask: map[string]map[string]any{},
 	}
 	for _, path := range graph.Paths {
 		executor.pathByID[path.ID] = path
@@ -92,7 +94,7 @@ func (e mapRunExecutor) execute(record store.TestMapPlanRecord) store.TestMapPla
 		case mapplanner.TaskRunPathPrefix:
 			e.executePathTask(record.Instance, task, taskUntilNodeID(*task))
 		case mapplanner.TaskRunCase:
-			e.executeCaseTask(record.Instance, task)
+			e.executeCaseTask(record.Instance, task, record.TaskEdges)
 		default:
 			e.finishTask(task, mapplanner.TaskStatusSkipped, map[string]any{"reason": "unsupported task kind skipped"}, task.StartedAt)
 		}
@@ -193,6 +195,9 @@ func (e mapRunExecutor) executePathTask(instance store.TestMapPlanInstance, task
 			overrides[key] = value
 		}
 	}
+	if status == store.StatusPassed && len(overrides) > 0 {
+		e.exportsByTask[task.ID] = mapRunCopyStringAnyMap(overrides)
+	}
 	finishedAt := time.Now().UTC()
 	if len(steps) == 0 {
 		e.finishTask(task, mapplanner.TaskStatusSkipped, map[string]any{"steps": results, "reason": "path has no executable steps"}, finishedAt)
@@ -224,9 +229,9 @@ func (e mapRunExecutor) executePathTask(instance store.TestMapPlanInstance, task
 	e.finishTask(task, status, summary, finishedAt)
 }
 
-func (e mapRunExecutor) executeCaseTask(instance store.TestMapPlanInstance, task *store.TestMapPlanTask) {
+func (e mapRunExecutor) executeCaseTask(instance store.TestMapPlanInstance, task *store.TestMapPlanTask, edges []store.TestMapPlanTaskEdge) {
 	runID := e.taskRunID(instance, *task)
-	result, err := e.runCatalogCase(instance, *task, mapRunCaseStep(*task), runID, nil)
+	result, err := e.runCatalogCase(instance, *task, mapRunCaseStep(*task), runID, e.dependencyOverrides(edges, task.ID))
 	summary := map[string]any{"result": result}
 	status := valueString(result["status"])
 	if status == "" {
@@ -239,6 +244,27 @@ func (e mapRunExecutor) executeCaseTask(instance store.TestMapPlanInstance, task
 	task.APICaseRunID = valueString(result["caseRunId"])
 	task.EvidenceRoot = mapRunEvidenceRoot(result)
 	e.finishTask(task, status, summary, time.Now().UTC())
+}
+
+func (e mapRunExecutor) dependencyOverrides(edges []store.TestMapPlanTaskEdge, taskID string) map[string]any {
+	out := map[string]any{}
+	for _, edge := range edges {
+		if edge.ToTaskID != taskID || !edge.Required {
+			continue
+		}
+		for key, value := range e.exportsByTask[edge.FromTaskID] {
+			out[key] = value
+		}
+	}
+	return out
+}
+
+func mapRunCopyStringAnyMap(in map[string]any) map[string]any {
+	out := map[string]any{}
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 func (e mapRunExecutor) executeStepCase(instance store.TestMapPlanInstance, task store.TestMapPlanTask, step store.TestPlanPathStep, workflowRunID string, overrides map[string]any) mapRunStepResult {

@@ -60,6 +60,82 @@ func TestMapRunRerunTaskUsesFreshChildRunID(t *testing.T) {
 	}
 }
 
+func TestMapRunRejectsUnknownRerunTask(t *testing.T) {
+	ctx := context.Background()
+	storeRef := seedExecutableMapCommandStore(t, ctx)
+
+	runCLI(t, "map", "import-workflows", "--store", storeRef, "--json")
+	first := decodeMapRunCommandReport(t, runCLI(t, "map", "run", "--store", storeRef, "--map", "map.profile.flow", "--scope", "workflows", "--json"))
+	out := runCLIFails(t, "map", "run", "--store", storeRef, "--plan", first.PlanID, "--rerun-task", "task.missing", "--json")
+	if !strings.Contains(out, "rerun task not found: task.missing") {
+		t.Fatalf("unknown rerun task error = %s", out)
+	}
+}
+
+func TestMapRunPropagatesReplayPrefixExportsToCaseTask(t *testing.T) {
+	ctx := context.Background()
+	storeRef := seedExecutableMapCommandStoreWithExports(t, ctx)
+	runCLI(t, "map", "import-workflows", "--store", storeRef, "--json")
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	now := time.Now().UTC()
+	record := store.TestMapPlanRecord{
+		Instance: store.TestMapPlanInstance{
+			ID:         "plan.replay.exports",
+			MapID:      "map.profile.flow",
+			ProfileID:  "profile.flow",
+			Mode:       mapplanner.ModeExplain,
+			Status:     mapplanner.TaskStatusPlanned,
+			Scope:      mapplanner.ScopeCase,
+			TargetKind: mapplanner.TargetCase,
+			TargetID:   "case.submit.success",
+			StartedAt:  now,
+		},
+		Tasks: []store.TestMapPlanTask{
+			{
+				ID:          "task.prefix",
+				PlanID:      "plan.replay.exports",
+				Index:       1,
+				Kind:        mapplanner.TaskRunPathPrefix,
+				Operation:   mapplanner.TaskRunPathPrefix,
+				Status:      mapplanner.TaskStatusPlanned,
+				PathID:      "workflow.flow.create",
+				WorkflowID:  "workflow.flow.create",
+				SummaryJSON: `{"untilNodeId":"case.prepare"}`,
+			},
+			{
+				ID:        "task.case",
+				PlanID:    "plan.replay.exports",
+				Index:     2,
+				Kind:      mapplanner.TaskRunCase,
+				Operation: mapplanner.TaskRunCase,
+				Status:    mapplanner.TaskStatusPlanned,
+				NodeID:    "case.submit.success",
+				CaseID:    "case.submit.success",
+			},
+		},
+		TaskEdges: []store.TestMapPlanTaskEdge{{
+			PlanID:     "plan.replay.exports",
+			FromTaskID: "task.prefix",
+			ToTaskID:   "task.case",
+			Kind:       "control",
+			Required:   true,
+			SortOrder:  1,
+		}},
+	}
+	if err := runtime.SaveTestMapPlan(ctx, record); err != nil {
+		t.Fatalf("save map plan: %v", err)
+	}
+	closeCLIStore(runtime)
+
+	report := decodeMapRunCommandReport(t, runCLI(t, "map", "run", "--store", storeRef, "--plan", "plan.replay.exports", "--json"))
+	if !report.OK || report.Status != store.StatusPassed || len(report.Tasks) != 2 {
+		t.Fatalf("replay exports should feed case task = %#v", report)
+	}
+}
+
 func TestMapRunRejectsMismatchedPlanAndMap(t *testing.T) {
 	ctx := context.Background()
 	storeRef := seedExecutableMapCommandStore(t, ctx)
@@ -69,6 +145,46 @@ func TestMapRunRejectsMismatchedPlanAndMap(t *testing.T) {
 	out := runCLIFails(t, "map", "run", "--store", storeRef, "--plan", report.PlanID, "--map", "map.other", "--json")
 	if !strings.Contains(out, "--map map.other does not match plan map map.profile.flow") {
 		t.Fatalf("mismatched plan/map error = %s", out)
+	}
+}
+
+func TestMapRunRejectsSavedPlanWhenGraphChanged(t *testing.T) {
+	ctx := context.Background()
+	storeRef := seedExecutableMapCommandStore(t, ctx)
+	runCLI(t, "map", "import-workflows", "--store", storeRef, "--json")
+	out := runCLI(t, "map", "explain", "--store", storeRef, "--map", "map.profile.flow", "--scope", "workflows", "--save", "--json")
+	var saved struct {
+		PlanID string `json:"planId"`
+	}
+	if err := json.Unmarshal([]byte(out), &saved); err != nil {
+		t.Fatalf("decode saved explain: %v\n%s", err, out)
+	}
+
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	graph, err := runtime.GetTestPlanGraph(ctx, "map.profile.flow")
+	if err != nil {
+		t.Fatalf("get graph: %v", err)
+	}
+	graph.PathSteps = append(graph.PathSteps, store.TestPlanPathStep{
+		MapID:     "map.profile.flow",
+		PathID:    "workflow.flow.create",
+		StepIndex: 3,
+		StepID:    "step.extra",
+		NodeID:    "case.prepare",
+		CaseID:    "case.prepare",
+		Required:  true,
+	})
+	if err := runtime.ReplaceTestPlanGraph(ctx, graph); err != nil {
+		t.Fatalf("replace changed graph: %v", err)
+	}
+	closeCLIStore(runtime)
+
+	failed := runCLIFails(t, "map", "run", "--store", storeRef, "--plan", saved.PlanID, "--json")
+	if !strings.Contains(failed, "saved plan graph fingerprint does not match current map graph") {
+		t.Fatalf("changed graph error = %s", failed)
 	}
 }
 
@@ -112,6 +228,13 @@ func TestMapRunExplainPreservesFailedStatus(t *testing.T) {
 	}
 	if report.OK || report.Status != store.StatusFailed {
 		t.Fatalf("explain should preserve failed OK/status = %#v", report)
+	}
+}
+
+func TestMapRunNextActionsQuotePlanID(t *testing.T) {
+	actions := mapRunNextActions("plan with space")
+	if len(actions) != 1 || !strings.Contains(actions[0], "--plan 'plan with space'") {
+		t.Fatalf("next actions should quote plan id = %#v", actions)
 	}
 }
 
@@ -487,7 +610,7 @@ func assertMapRunExplainCommandReport(t *testing.T, out string, planID string) {
 	if !explain.OK || explain.PlanID != planID || explain.Status != "passed" || explain.Summary.TotalTasks != 3 || explain.Summary.PassedTasks != 2 || explain.Summary.SkippedTasks != 1 {
 		t.Fatalf("map run explain = %#v", explain)
 	}
-	if len(explain.NextActions) == 0 || !strings.Contains(strings.Join(explain.NextActions, "\n"), "map run explain --plan "+planID) {
+	if len(explain.NextActions) == 0 || !strings.Contains(strings.Join(explain.NextActions, "\n"), "map run explain --plan '"+planID+"'") {
 		t.Fatalf("map run explain next actions = %#v", explain.NextActions)
 	}
 }

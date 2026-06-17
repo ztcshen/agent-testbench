@@ -77,10 +77,11 @@ func (b *planBuilder) basePlan() Plan {
 		Status:         TaskStatusPlanned,
 		PlannerVersion: PlannerVersion,
 		PlannerOptions: map[string]any{
-			"scope":         b.query.Scope,
-			"targetKind":    b.query.TargetKind,
-			"targetId":      b.query.TargetID,
-			"environmentId": b.query.EnvironmentID,
+			"scope":            b.query.Scope,
+			"targetKind":       b.query.TargetKind,
+			"targetId":         b.query.TargetID,
+			"environmentId":    b.query.EnvironmentID,
+			"graphFingerprint": GraphFingerprint(b.graph),
 		},
 		LogicalPlan: []LogicalOp{{
 			ID:         "logical.scan_map",

@@ -132,12 +132,16 @@ func openMapRunRuntime(ctx context.Context, options mapRunOptions) (store.Store,
 		return nil, store.TestPlanGraph{}, func() {}, err
 	}
 	mapID := options.mapID
+	var planRecord store.TestMapPlanRecord
+	hasPlanRecord := false
 	if options.planID != "" {
 		record, err := runtime.GetTestMapPlan(ctx, options.planID)
 		if err != nil {
 			cleanup()
 			return nil, store.TestPlanGraph{}, func() {}, err
 		}
+		planRecord = record
+		hasPlanRecord = true
 		if mapID != "" && mapID != record.Instance.MapID {
 			cleanup()
 			return nil, store.TestPlanGraph{}, func() {}, errors.New("--map " + mapID + " does not match plan map " + record.Instance.MapID)
@@ -153,13 +157,35 @@ func openMapRunRuntime(ctx context.Context, options mapRunOptions) (store.Store,
 		cleanup()
 		return nil, store.TestPlanGraph{}, func() {}, err
 	}
+	if hasPlanRecord {
+		if err := validateMapRunPlanGraph(planRecord, graph); err != nil {
+			cleanup()
+			return nil, store.TestPlanGraph{}, func() {}, err
+		}
+	}
 	return runtime, graph, cleanup, nil
+}
+
+func validateMapRunPlanGraph(record store.TestMapPlanRecord, graph store.TestPlanGraph) error {
+	options := jsonObjectString(record.Instance.PlannerOptionsJSON)
+	expected := valueString(options["graphFingerprint"])
+	if expected == "" {
+		return nil
+	}
+	actual := mapplanner.GraphFingerprint(graph)
+	if actual != expected {
+		return errors.New("saved plan graph fingerprint does not match current map graph")
+	}
+	return nil
 }
 
 func mapRunPlanRecord(ctx context.Context, runtime store.Store, graph store.TestPlanGraph, options mapRunOptions) (store.TestMapPlanRecord, error) {
 	if options.planID != "" {
 		record, err := runtime.GetTestMapPlan(ctx, options.planID)
 		if err != nil {
+			return store.TestMapPlanRecord{}, err
+		}
+		if err := validateMapRunRerunTasks(record, options); err != nil {
 			return store.TestMapPlanRecord{}, err
 		}
 		return prepareExistingMapRunRecord(record, options), nil
@@ -266,6 +292,20 @@ func mapRunSelectedTaskIDs(ids []string) map[string]bool {
 		out[id] = true
 	}
 	return out
+}
+
+func validateMapRunRerunTasks(record store.TestMapPlanRecord, options mapRunOptions) error {
+	selected := mapRunSelectedTaskIDs(options.rerunTaskIDs)
+	if len(selected) == 0 {
+		return nil
+	}
+	for _, task := range record.Tasks {
+		delete(selected, task.ID)
+	}
+	for id := range selected {
+		return errors.New("rerun task not found: " + id)
+	}
+	return nil
 }
 
 func mapRunTaskAlreadyComplete(status string) bool {

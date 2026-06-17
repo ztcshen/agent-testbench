@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"agent-testbench/internal/domain/commandline"
 	"agent-testbench/internal/domain/mapplanner"
 	"agent-testbench/internal/store"
 )
@@ -140,7 +141,7 @@ func mapRunNextActions(planID string) []string {
 	if strings.TrimSpace(planID) == "" {
 		return nil
 	}
-	return []string{"agent-testbench map run explain --plan " + planID + " --json"}
+	return []string{"agent-testbench map run explain --plan " + commandline.ShellQuote(planID) + " --json"}
 }
 
 func printMapRunReport(report mapRunReport) {
