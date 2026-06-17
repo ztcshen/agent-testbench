@@ -25,6 +25,7 @@ type mapRunExecutor struct {
 	pathByID      map[string]store.TestPlanPath
 	nodeByID      map[string]store.TestPlanNode
 	pathStepsByID map[string][]store.TestPlanPathStep
+	matByID       map[string]store.TestPlanMaterialization
 	statusByTask  map[string]string
 	exportsByTask map[string]map[string]any
 }
@@ -49,6 +50,7 @@ func newMapRunExecutor(ctx context.Context, runtime store.Store, graph store.Tes
 		pathByID:      map[string]store.TestPlanPath{},
 		nodeByID:      map[string]store.TestPlanNode{},
 		pathStepsByID: map[string][]store.TestPlanPathStep{},
+		matByID:       map[string]store.TestPlanMaterialization{},
 		statusByTask:  map[string]string{},
 		exportsByTask: map[string]map[string]any{},
 	}
@@ -60,6 +62,9 @@ func newMapRunExecutor(ctx context.Context, runtime store.Store, graph store.Tes
 	}
 	for _, step := range graph.PathSteps {
 		executor.pathStepsByID[step.PathID] = append(executor.pathStepsByID[step.PathID], step)
+	}
+	for _, materialization := range graph.Materializations {
+		executor.matByID[materialization.ID] = materialization
 	}
 	for pathID := range executor.pathStepsByID {
 		sort.SliceStable(executor.pathStepsByID[pathID], func(i, j int) bool {
@@ -95,6 +100,8 @@ func (e mapRunExecutor) execute(record store.TestMapPlanRecord) store.TestMapPla
 			e.executePathTask(record.Instance, task, taskUntilNodeID(*task))
 		case mapplanner.TaskRunCase:
 			e.executeCaseTask(record.Instance, task, record.TaskEdges)
+		case mapplanner.TaskReuseMaterialized:
+			e.executeMaterializedTask(task)
 		default:
 			e.finishTask(task, mapplanner.TaskStatusSkipped, map[string]any{"reason": "unsupported task kind skipped"}, task.StartedAt)
 		}
@@ -246,6 +253,73 @@ func (e mapRunExecutor) executeCaseTask(instance store.TestMapPlanInstance, task
 	e.finishTask(task, status, summary, time.Now().UTC())
 }
 
+func (e mapRunExecutor) executeMaterializedTask(task *store.TestMapPlanTask) {
+	materialization, ok := e.matByID[task.MaterializationID]
+	if !ok {
+		e.finishTask(task, store.StatusFailed, map[string]any{"error": "materialization not found: " + task.MaterializationID}, time.Now().UTC())
+		return
+	}
+	fixture, ok, err := e.catalogFixture(materialization.FixtureID)
+	if err != nil {
+		e.finishTask(task, store.StatusFailed, map[string]any{"error": err.Error()}, time.Now().UTC())
+		return
+	}
+	if !ok {
+		e.finishTask(task, store.StatusFailed, map[string]any{"error": "fixture not found: " + materialization.FixtureID}, time.Now().UTC())
+		return
+	}
+	overrides, err := mapRunMaterializedOverrides(fixture.DataJSON, e.materializationMappings(materialization.ID, fixture.ID))
+	if err != nil {
+		e.finishTask(task, store.StatusFailed, map[string]any{"error": err.Error()}, time.Now().UTC())
+		return
+	}
+	e.exportsByTask[task.ID] = overrides
+	e.finishTask(task, store.StatusPassed, map[string]any{
+		"materializationId": materialization.ID,
+		"fixtureId":         fixture.ID,
+		"sourcePathId":      materialization.SourcePathID,
+		"sourceWorkflowId":  materialization.SourceWorkflowID,
+		"sourceUntilNodeId": materialization.SourceUntilNodeID,
+		"overrides":         mapRunSortedKeys(overrides),
+	}, time.Now().UTC())
+}
+
+func (e mapRunExecutor) catalogFixture(fixtureID string) (store.CatalogFixture, bool, error) {
+	catalog, err := e.runtime.GetProfileCatalog(e.ctx)
+	if err != nil {
+		return store.CatalogFixture{}, false, err
+	}
+	for _, fixture := range catalog.Fixtures {
+		if fixture.ID != fixtureID {
+			continue
+		}
+		if strings.TrimSpace(fixture.Status) != "" && fixture.Status != "active" {
+			return store.CatalogFixture{}, false, fmt.Errorf("fixture is not active: %s", fixture.ID)
+		}
+		return fixture, true, nil
+	}
+	return store.CatalogFixture{}, false, nil
+}
+
+func (e mapRunExecutor) materializationMappings(materializationID string, fixtureID string) []map[string]any {
+	mappings := []map[string]any{}
+	for _, edge := range e.graph.Edges {
+		if edge.MaterializationID == materializationID {
+			mappings = append(mappings, listOfMaps(edge.MappingsJSON)...)
+		}
+	}
+	catalog, err := e.runtime.GetProfileCatalog(e.ctx)
+	if err != nil {
+		return mappings
+	}
+	for _, dependency := range catalog.CaseDependencies {
+		if dependency.FixtureID == fixtureID {
+			mappings = append(mappings, listOfMaps(dependency.MappingsJSON)...)
+		}
+	}
+	return mappings
+}
+
 func (e mapRunExecutor) dependencyOverrides(edges []store.TestMapPlanTaskEdge, taskID string) map[string]any {
 	out := map[string]any{}
 	for _, edge := range edges {
@@ -257,6 +331,72 @@ func (e mapRunExecutor) dependencyOverrides(edges []store.TestMapPlanTaskEdge, t
 		}
 	}
 	return out
+}
+
+func mapRunMaterializedOverrides(rawData string, mappings []map[string]any) (map[string]any, error) {
+	data := map[string]any{}
+	if strings.TrimSpace(rawData) != "" {
+		if err := json.Unmarshal([]byte(rawData), &data); err != nil {
+			return nil, fmt.Errorf("decode materialized fixture data: %w", err)
+		}
+	}
+	out := mapRunCopyStringAnyMap(data)
+	for _, mapping := range mappings {
+		value := mapRunJSONPathValue(data, valueString(mapping["from"]))
+		if value == nil {
+			continue
+		}
+		for _, key := range mapRunOverrideKeys(valueString(mapping["to"])) {
+			out[key] = value
+		}
+	}
+	return out, nil
+}
+
+func mapRunJSONPathValue(root map[string]any, path string) any {
+	path = strings.TrimSpace(path)
+	path = strings.TrimPrefix(path, "$.")
+	path = strings.TrimPrefix(path, "$")
+	if path == "" {
+		return root
+	}
+	return workflowValueAtPath(root, path)
+}
+
+func mapRunOverrideKeys(path string) []string {
+	trimmed := strings.TrimSpace(path)
+	trimmed = strings.TrimPrefix(trimmed, "$.")
+	trimmed = strings.TrimPrefix(trimmed, "$")
+	if trimmed == "" {
+		return nil
+	}
+	keys := []string{trimmed}
+	parts := strings.Split(trimmed, ".")
+	leaf := parts[len(parts)-1]
+	if leaf != "" && leaf != trimmed {
+		keys = append(keys, leaf)
+	}
+	return keys
+}
+
+func listOfMaps(raw string) []map[string]any {
+	var items []map[string]any
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		return nil
+	}
+	return items
+}
+
+func mapRunSortedKeys(values map[string]any) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func mapRunCopyStringAnyMap(in map[string]any) map[string]any {

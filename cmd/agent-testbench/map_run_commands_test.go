@@ -136,6 +136,24 @@ func TestMapRunPropagatesReplayPrefixExportsToCaseTask(t *testing.T) {
 	}
 }
 
+func TestMapRunReusesMaterializationFixtureDataForCaseTask(t *testing.T) {
+	ctx := context.Background()
+	storeRef := seedExecutableMapCommandStoreWithMaterializedFixture(t, ctx)
+
+	runCLI(t, "map", "import-workflows", "--store", storeRef, "--json")
+	report := decodeMapRunCommandReport(t, runCLI(t, "map", "run", "--store", storeRef, "--map", "map.profile.flow", "--scope", "cases", "--json"))
+
+	if !report.OK || report.Status != store.StatusPassed || report.Summary.TotalTasks != 2 || report.Summary.PassedTasks != 2 {
+		t.Fatalf("materialized fixture data should feed case task = %#v", report)
+	}
+	if report.Tasks[0].Kind != mapplanner.TaskReuseMaterialized || report.Tasks[0].Status != store.StatusPassed {
+		t.Fatalf("materialized replay task should pass = %#v", report.Tasks[0])
+	}
+	if report.Tasks[1].Kind != mapplanner.TaskRunCase || report.Tasks[1].Status != store.StatusPassed || report.Tasks[1].APICaseRunID == "" {
+		t.Fatalf("case task should run with materialized overrides = %#v", report.Tasks[1])
+	}
+}
+
 func TestMapRunRejectsMismatchedPlanAndMap(t *testing.T) {
 	ctx := context.Background()
 	storeRef := seedExecutableMapCommandStore(t, ctx)
@@ -557,7 +575,7 @@ func assertMapRunCommandReport(t *testing.T, report mapRunCommandReport) {
 	if !report.OK || report.PlanID == "" || report.MapID != "map.profile.flow" || report.Scope != "all" || report.EnvironmentID != "env.local" || report.Status != "passed" {
 		t.Fatalf("map run report = %#v", report)
 	}
-	if report.Summary.TotalTasks != 3 || report.Summary.PassedTasks != 2 || report.Summary.SkippedTasks != 1 || report.Summary.FailedTasks != 0 {
+	if report.Summary.TotalTasks != 3 || report.Summary.PassedTasks != 3 || report.Summary.SkippedTasks != 0 || report.Summary.FailedTasks != 0 {
 		t.Fatalf("map run summary = %#v", report.Summary)
 	}
 	if len(report.Tasks) != 3 {
@@ -566,7 +584,7 @@ func assertMapRunCommandReport(t *testing.T, report mapRunCommandReport) {
 	if report.Tasks[0].Kind != "run_path" || report.Tasks[0].Status != "passed" || report.Tasks[0].WorkflowRunID == "" {
 		t.Fatalf("workflow task = %#v", report.Tasks[0])
 	}
-	if report.Tasks[1].Kind != "reuse_materialization" || report.Tasks[1].Status != "skipped" {
+	if report.Tasks[1].Kind != "reuse_materialization" || report.Tasks[1].Status != "passed" {
 		t.Fatalf("materialized replay task = %#v", report.Tasks[1])
 	}
 	if report.Tasks[2].Kind != "run_case" || report.Tasks[2].Status != "passed" || report.Tasks[2].APICaseRunID == "" {
@@ -607,7 +625,7 @@ func assertMapRunExplainCommandReport(t *testing.T, out string, planID string) {
 	if err := json.Unmarshal([]byte(out), &explain); err != nil {
 		t.Fatalf("decode map run explain json: %v\n%s", err, out)
 	}
-	if !explain.OK || explain.PlanID != planID || explain.Status != "passed" || explain.Summary.TotalTasks != 3 || explain.Summary.PassedTasks != 2 || explain.Summary.SkippedTasks != 1 {
+	if !explain.OK || explain.PlanID != planID || explain.Status != "passed" || explain.Summary.TotalTasks != 3 || explain.Summary.PassedTasks != 3 || explain.Summary.SkippedTasks != 0 {
 		t.Fatalf("map run explain = %#v", explain)
 	}
 	if len(explain.NextActions) == 0 || !strings.Contains(strings.Join(explain.NextActions, "\n"), "map run explain --plan '"+planID+"'") {
@@ -647,4 +665,56 @@ func mapCommandExecutableProfileCatalogFixture(baseURL string) store.ProfileCata
 		},
 	}
 	return catalog
+}
+
+func seedExecutableMapCommandStoreWithMaterializedFixture(t *testing.T, ctx context.Context) string {
+	t.Helper()
+	validateSeen := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/validate":
+			if r.URL.Query().Get("item_id") != "item-123" {
+				t.Fatalf("validate should receive materialized item_id, query=%s", r.URL.RawQuery)
+			}
+			validateSeen = true
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprint(w, `{"error":"field required"}`)
+		default:
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+	}))
+	t.Cleanup(func() {
+		server.Close()
+		if !validateSeen {
+			t.Fatalf("validate endpoint was not called")
+		}
+	})
+
+	storePath := filepath.Join(t.TempDir(), "map-run-materialized.sqlite")
+	storeRef := "sqlite://" + storePath
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	catalog := mapCommandExecutableProfileCatalogFixture(server.URL)
+	for i := range catalog.Fixtures {
+		if catalog.Fixtures[i].ID == "fixture.before.submit" {
+			catalog.Fixtures[i].DataJSON = `{"item_id":"item-123"}`
+		}
+	}
+	for i := range catalog.CaseDependencies {
+		if catalog.CaseDependencies[i].CaseID == "case.submit.field.required" {
+			catalog.CaseDependencies[i].MappingsJSON = `[{"from":"$.item_id","to":"$.request.item_id"}]`
+		}
+	}
+	for i := range catalog.TemplateConfigs {
+		if catalog.TemplateConfigs[i].ScopeID == "case.submit.field.required" {
+			catalog.TemplateConfigs[i].ConfigJSON = `{"caseId":"case.submit.field.required","caseExecution":{"method":"POST","nodeId":"node.submit","path":"/validate","query":{"item_id":"{{override:item_id}}"},"body":{"field":"ok"},"expectedHttpCodes":[400],"expectedResponseContains":["field required"]},"inputs":[{"name":"item_id","source":"fixture"}]}`
+		}
+	}
+	if err := runtime.ReplaceProfileCatalog(ctx, catalog); err != nil {
+		t.Fatalf("seed executable profile catalog: %v", err)
+	}
+	closeCLIStore(runtime)
+	return storeRef
 }
