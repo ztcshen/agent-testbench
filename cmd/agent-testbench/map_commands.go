@@ -31,6 +31,24 @@ type mapExplainReport struct {
 	plangraph.Explanation
 }
 
+type mapWorkflowsReport struct {
+	OK        bool                `json:"ok"`
+	MapID     string              `json:"mapId"`
+	Filter    string              `json:"filter,omitempty"`
+	Count     int                 `json:"count"`
+	Workflows []mapWorkflowReport `json:"workflows"`
+}
+
+type mapWorkflowReport struct {
+	PathID      string `json:"pathId"`
+	WorkflowID  string `json:"workflowId"`
+	DisplayName string `json:"displayName,omitempty"`
+	Status      string `json:"status,omitempty"`
+	StepCount   int    `json:"stepCount"`
+	FirstNodeID string `json:"firstNodeId,omitempty"`
+	LastNodeID  string `json:"lastNodeId,omitempty"`
+}
+
 func runMap(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("missing map command")
@@ -38,6 +56,8 @@ func runMap(ctx context.Context, args []string) error {
 	switch args[0] {
 	case "import-workflows":
 		return runMapImportWorkflows(ctx, args[1:])
+	case "workflows":
+		return runMapWorkflows(ctx, args[1:])
 	case "explain":
 		return runMapExplain(ctx, args[1:])
 	default:
@@ -95,6 +115,37 @@ func runMapImportWorkflows(ctx context.Context, args []string) error {
 	return nil
 }
 
+func runMapWorkflows(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("map workflows", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
+	mapID := flags.String("map", "", "Plan map id")
+	filter := flags.String("filter", "", "Filter path id, workflow id, or display name")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*mapID) == "" {
+		return errors.New("--map is required")
+	}
+	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	graph, err := runtime.GetTestPlanGraph(ctx, *mapID)
+	if err != nil {
+		return err
+	}
+	report := buildMapWorkflowsReport(graph, *filter)
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printMapWorkflowsReport(report)
+	return nil
+}
+
 func runMapExplain(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("map explain", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
@@ -141,6 +192,59 @@ func printMapImportReport(report mapImportReport) {
 	fmt.Printf("Nodes: %d\n", report.Counts.Nodes)
 	fmt.Printf("Paths: %d\n", report.Counts.Paths)
 	fmt.Printf("Materializations: %d\n", report.Counts.Materializations)
+}
+
+func buildMapWorkflowsReport(graph store.TestPlanGraph, filter string) mapWorkflowsReport {
+	displayFilter := strings.TrimSpace(filter)
+	filter = strings.ToLower(displayFilter)
+	stepCounts := map[string]int{}
+	firstNodeByPath := map[string]string{}
+	lastNodeByPath := map[string]string{}
+	for _, step := range graph.PathSteps {
+		stepCounts[step.PathID]++
+		if _, ok := firstNodeByPath[step.PathID]; !ok {
+			firstNodeByPath[step.PathID] = step.NodeID
+		}
+		lastNodeByPath[step.PathID] = step.NodeID
+	}
+	workflows := make([]mapWorkflowReport, 0, len(graph.Paths))
+	for _, path := range graph.Paths {
+		if filter != "" && !mapWorkflowMatchesFilter(path, filter) {
+			continue
+		}
+		workflows = append(workflows, mapWorkflowReport{
+			PathID:      path.ID,
+			WorkflowID:  path.WorkflowID,
+			DisplayName: path.DisplayName,
+			Status:      path.Status,
+			StepCount:   stepCounts[path.ID],
+			FirstNodeID: firstNodeByPath[path.ID],
+			LastNodeID:  lastNodeByPath[path.ID],
+		})
+	}
+	return mapWorkflowsReport{
+		OK:        true,
+		MapID:     graph.Map.ID,
+		Filter:    displayFilter,
+		Count:     len(workflows),
+		Workflows: workflows,
+	}
+}
+
+func mapWorkflowMatchesFilter(path store.TestPlanPath, filter string) bool {
+	return strings.Contains(strings.ToLower(path.ID), filter) ||
+		strings.Contains(strings.ToLower(path.WorkflowID), filter) ||
+		strings.Contains(strings.ToLower(path.DisplayName), filter)
+}
+
+func printMapWorkflowsReport(report mapWorkflowsReport) {
+	fmt.Println("Map Workflows")
+	fmt.Printf("Map: %s\n", report.MapID)
+	fmt.Printf("Workflows: %d\n", report.Count)
+	for _, workflow := range report.Workflows {
+		fmt.Printf("- %s workflow=%s steps=%d first=%s last=%s\n",
+			workflow.PathID, workflow.WorkflowID, workflow.StepCount, workflow.FirstNodeID, workflow.LastNodeID)
+	}
 }
 
 func printMapExplainReport(report mapExplainReport) {

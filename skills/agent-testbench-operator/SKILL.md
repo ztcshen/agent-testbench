@@ -142,8 +142,25 @@ Build and inspect a Store-backed workflow map without running target services:
 
 ```bash
 ./skills/agent-testbench-operator/scripts/atb.sh map import-workflows --store STORE_NAME --json
+./skills/agent-testbench-operator/scripts/atb.sh map workflows --store STORE_NAME --map MAP_ID --filter TEXT --json
 ./skills/agent-testbench-operator/scripts/atb.sh map explain --store STORE_NAME --map MAP_ID --case CASE_ID --json
 ```
+
+Create a new map for one coherent capability or acceptance surface when related
+workflows share setup, fixtures, state transitions, or interface cases. Do not
+create one map per workflow or one map per negative case. Use a separate map
+only when the workflows belong to a different profile, runtime boundary,
+environment contract, or independent capability whose preconditions should not
+be planned together.
+
+Build the map from Store catalog assets first: `Workflow` becomes a named path,
+`WorkflowBinding` supplies ordered path steps, `APICase` supplies request
+nodes, and `Fixture`/`CaseDependency` supply materialized preconditions. Re-run
+`map import-workflows --map MAP_ID` after catalog changes to replace that map
+projection. Use `map workflows --map MAP_ID --filter TEXT` to find workflow
+paths by path id, workflow id, or display name, then use `map explain` for the
+target case to inspect selected path prefix, candidate paths, rejected reasons,
+and physical operations.
 
 For compose-backed sandbox services, `sandbox start --json` reports
 `recoveryCommand`, `readiness`, and `warning` on each service result when
