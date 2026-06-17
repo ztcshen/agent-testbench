@@ -1,6 +1,7 @@
 package plangraph
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -128,20 +129,22 @@ func (b *graphBuilder) importPaths() {
 			Status:               "active",
 			RequiredPropertyJSON: jsonText(map[string]any{"pathId": pathID}),
 			ProvidedPropertyJSON: jsonText(map[string]any{"pathId": pathID, "stateEffect": StateEffectAdvance}),
-			SummaryJSON:          jsonText(map[string]any{"stepCount": len(bindings)}),
+			SummaryJSON:          jsonText(map[string]any{"stepCount": 0}),
 			SortOrder:            index + 1,
 		}
 		var previousNodeID string
-		for stepIndex, binding := range bindings {
+		pathStepIndex := 0
+		for _, binding := range bindings {
 			apiCase, ok := b.caseByID[binding.CaseID]
 			if !ok {
-				apiCase = catalog.APICase{ID: binding.CaseID, NodeID: binding.NodeID, Status: "active"}
+				continue
 			}
 			node := b.upsertCaseNode(apiCase, true)
+			pathStepIndex++
 			b.graph.PathSteps = append(b.graph.PathSteps, PathStep{
 				MapID:       b.mapID,
 				PathID:      pathID,
-				StepIndex:   stepIndex + 1,
+				StepIndex:   pathStepIndex,
 				StepID:      binding.StepID,
 				NodeID:      node.ID,
 				CaseID:      node.CaseID,
@@ -149,7 +152,7 @@ func (b *graphBuilder) importPaths() {
 				SummaryJSON: "{}",
 			})
 			if previousNodeID != "" {
-				edgeID := fmt.Sprintf("%s.%03d.%s.%s", pathID, stepIndex, previousNodeID, node.ID)
+				edgeID := controlEdgeID(pathID, pathStepIndex-1, previousNodeID, node.ID)
 				b.edgeByID[edgeID] = Edge{
 					MapID:        b.mapID,
 					ID:           edgeID,
@@ -165,6 +168,9 @@ func (b *graphBuilder) importPaths() {
 			}
 			previousNodeID = node.ID
 		}
+		path := b.pathByID[pathID]
+		path.SummaryJSON = jsonText(map[string]any{"stepCount": pathStepIndex})
+		b.pathByID[pathID] = path
 	}
 }
 
@@ -172,7 +178,7 @@ func (b *graphBuilder) importValidationCases() {
 	caseIDs := sortedCaseIDs(b.caseByID)
 	for _, caseID := range caseIDs {
 		apiCase := b.caseByID[caseID]
-		if b.boundCaseIDs[caseID] || !isDiffCase(apiCase) {
+		if b.boundCaseIDs[caseID] || !isValidationCase(apiCase) {
 			continue
 		}
 		b.upsertCaseNode(apiCase, false)
@@ -194,6 +200,9 @@ func (b *graphBuilder) importMaterializations() {
 		sourcePathID := strings.TrimSpace(fixture.SourceWorkflowID)
 		untilStep := strings.TrimSpace(fixture.SourceUntilStep)
 		untilNodeID := b.nodeIDForWorkflowStep(sourcePathID, untilStep)
+		if sourcePathID == "" || untilStep == "" || untilNodeID == "" {
+			continue
+		}
 		materializationID := stringDefault(fixture.ID, sourcePathID+"."+untilStep)
 		b.matByID[materializationID] = Materialization{
 			MapID:             b.mapID,
@@ -404,6 +413,36 @@ func sortWorkflowBindings(bindings []catalog.WorkflowBinding) {
 		}
 		return bindings[i].StepID < bindings[j].StepID
 	})
+}
+
+func controlEdgeID(pathID string, stepIndex int, fromNodeID string, toNodeID string) string {
+	raw := fmt.Sprintf("%s.%03d.%s.%s", pathID, stepIndex, fromNodeID, toNodeID)
+	if len(raw) <= 128 {
+		return raw
+	}
+	hash := shortIDHash(pathID, fmt.Sprintf("%03d", stepIndex), fromNodeID, toNodeID)
+	prefix := truncateIDPart(pathID, 80)
+	if prefix == "" {
+		return fmt.Sprintf("edge.%03d.%s", stepIndex, hash)
+	}
+	return fmt.Sprintf("edge.%s.%03d.%s", prefix, stepIndex, hash)
+}
+
+func shortIDHash(parts ...string) string {
+	hash := sha256.New()
+	for _, part := range parts {
+		_, _ = hash.Write([]byte(part))
+		_, _ = hash.Write([]byte{0})
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil))[:16]
+}
+
+func truncateIDPart(value string, max int) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= max {
+		return value
+	}
+	return strings.TrimRight(value[:max], ".-_")
 }
 
 func sortedCaseIDs(items map[string]catalog.APICase) []string {

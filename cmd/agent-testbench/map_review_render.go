@@ -253,7 +253,7 @@ function findPath(){
   const from=document.getElementById("path-from").value,to=document.getElementById("path-to").value,result=document.getElementById("path-finder-result");
   if(!from||!to||from===to){result.innerHTML='<div class="warning">Select two different nodes.</div>';return}
   const adj=new Map();
-  for(const e of reviewData.edges){if(!adj.has(e.fromNodeId))adj.set(e.fromNodeId,[]);if(!adj.has(e.toNodeId))adj.set(e.toNodeId,[]);adj.get(e.fromNodeId).push(e.toNodeId);adj.get(e.toNodeId).push(e.fromNodeId)}
+  for(const e of reviewData.edges){if(!adj.has(e.fromNodeId))adj.set(e.fromNodeId,[]);if(!adj.has(e.toNodeId))adj.set(e.toNodeId,[]);adj.get(e.fromNodeId).push(e.toNodeId)}
   const q=[{id:from,path:[from]}],seen=new Set([from]);let found=null;
   while(q.length){const cur=q.shift();if(cur.id===to){found=cur.path;break}for(const next of adj.get(cur.id)||[]){if(!seen.has(next)){seen.add(next);q.push({id:next,path:cur.path.concat(next)})}}}
   if(!found){result.innerHTML='<div class="warning">No path found.</div>';return}

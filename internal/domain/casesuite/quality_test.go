@@ -106,6 +106,44 @@ func TestInspectBlocksCaseWhenDependencyServiceCannotBeStartedOrChecked(t *testi
 	}
 }
 
+func TestInspectAcceptsComposeManagedDependencyService(t *testing.T) {
+	bundle := profile.Bundle{
+		ID: "sample",
+		Services: []profile.Service{
+			{
+				ID:            "service.compose",
+				DisplayName:   "Compose Service",
+				Status:        "active",
+				DockerService: "compose-api",
+				ContainerName: "sample-compose-api",
+				Image:         "example/compose-api:1",
+			},
+		},
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.compose", DisplayName: "Compose Node", ServiceID: "service.compose"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.compose", DisplayName: "Compose Case", Description: "Uses a compose service.", NodeID: "node.compose", CasePath: "cases/compose.json", Tags: []string{"regression"}, Priority: "p0", Owner: "team-a", Status: "active"},
+		},
+		TemplateConfigs: []profile.TemplateConfig{
+			{ID: "cfg.case.compose", ScopeType: "case", ScopeID: "case.compose", Status: "active", ConfigJSON: `{"caseId":"case.compose","caseExecution":{"method":"GET","path":"/compose"}}`},
+		},
+	}
+	cases := SelectCases(bundle, Filter{Status: "active"})
+
+	report, err := Inspect(context.Background(), bundle, recordStore{}, Filter{Status: "active"}, cases)
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+	if !report.OK || report.Counts.Ready != 1 || report.Counts.Blocked != 0 || len(report.Items) != 1 {
+		t.Fatalf("inspection counts = %#v items=%#v", report.Counts, report.Items)
+	}
+	item := report.Items[0]
+	if !item.Ready || !item.ServiceReady || containsString(item.ServiceIssues, "missing-service-startup-command") {
+		t.Fatalf("compose-managed service should be ready: %#v", item)
+	}
+}
+
 func TestQualityAuditsCaseLifecycleStatus(t *testing.T) {
 	bundle := profile.Bundle{
 		ID: "sample",

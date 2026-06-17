@@ -133,7 +133,9 @@ func apiCaseBatchWorkflowPlans(ctx context.Context, bundle profile.Bundle, runti
 	for _, binding := range bindings {
 		item, ok := casesByID[binding.CaseID]
 		if !ok {
-			missing = append(missing, fmt.Sprintf("step %s references missing case %s", binding.StepID, binding.CaseID))
+			if binding.Required {
+				missing = append(missing, fmt.Sprintf("step %s references missing case %s", binding.StepID, binding.CaseID))
+			}
 			continue
 		}
 		nodeID := firstNonEmpty(binding.NodeID, item.NodeID)
@@ -144,7 +146,9 @@ func apiCaseBatchWorkflowPlans(ctx context.Context, bundle profile.Bundle, runti
 			out = append(out, plan)
 			continue
 		}
-		missing = append(missing, fmt.Sprintf("step %s case %s missing runnable case execution", binding.StepID, binding.CaseID))
+		if binding.Required {
+			missing = append(missing, fmt.Sprintf("step %s case %s missing runnable case execution", binding.StepID, binding.CaseID))
+		}
 	}
 	if len(missing) > 0 {
 		return nil, apiCaseBatchPlanError{

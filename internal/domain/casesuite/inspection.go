@@ -108,10 +108,16 @@ func inspectCaseServiceReadiness(serviceID string, services map[string]profile.S
 	if status != "" && status != CaseLifecycleActive {
 		return false, []string{"service-status-" + status}
 	}
-	if strings.TrimSpace(service.StartupCommand) == "" && strings.TrimSpace(service.HealthURL) == "" {
+	if strings.TrimSpace(service.StartupCommand) == "" && strings.TrimSpace(service.HealthURL) == "" && !hasDockerServiceFacts(service) {
 		return false, []string{"missing-service-startup-command"}
 	}
 	return true, nil
+}
+
+func hasDockerServiceFacts(service profile.Service) bool {
+	return strings.TrimSpace(service.DockerService) != "" ||
+		strings.TrimSpace(service.ContainerName) != "" ||
+		strings.TrimSpace(service.Image) != ""
 }
 
 func addInspectionRow(report *InspectionReport, row InspectionItem) {

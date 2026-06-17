@@ -10,44 +10,44 @@ import (
 
 func TestImportCatalogBuildsSharedMapAndAnchoredValidationCase(t *testing.T) {
 	catalogSnapshot := catalog.ProfileCatalog{
-		ProfileID: "profile.withdraw",
+		ProfileID: "profile.flow",
 		IndexedAt: time.Date(2026, 6, 16, 8, 0, 0, 0, time.UTC),
 		Workflows: []catalog.Workflow{
-			{ID: "workflow.withdraw.success", DisplayName: "Withdraw Success"},
-			{ID: "workflow.withdraw.query", DisplayName: "Withdraw Query"},
+			{ID: "workflow.flow.create", DisplayName: "Create Flow"},
+			{ID: "workflow.flow.audit", DisplayName: "Audit Flow"},
 		},
 		InterfaceNodes: []catalog.InterfaceNode{
-			{ID: "node.quote", DisplayName: "Quote"},
-			{ID: "node.apply", DisplayName: "Apply"},
-			{ID: "node.result", DisplayName: "Result"},
+			{ID: "node.prepare", DisplayName: "Prepare"},
+			{ID: "node.submit", DisplayName: "Submit"},
+			{ID: "node.verify", DisplayName: "Verify"},
 		},
 		APICases: []catalog.APICase{
-			{ID: "case.quote", DisplayName: "Quote", NodeID: "node.quote", RequestTemplateID: "template.quote", Status: "active", SortOrder: 1},
-			{ID: "case.apply.success", DisplayName: "Apply success", NodeID: "node.apply", RequestTemplateID: "template.apply", Status: "active", SortOrder: 2},
+			{ID: "case.prepare", DisplayName: "Prepare", NodeID: "node.prepare", RequestTemplateID: "template.prepare", Status: "active", SortOrder: 1},
+			{ID: "case.submit.success", DisplayName: "Submit success", NodeID: "node.submit", RequestTemplateID: "template.submit", Status: "active", SortOrder: 2},
 			{
-				ID: "case.apply.days.required", DisplayName: "Apply days required", NodeID: "node.apply",
-				CaseType: "negative", RequestTemplateID: "template.apply", RenderMode: "template_patch",
-				PatchJSON: `[{"op":"remove","path":"$.body.days"}]`, ExpectedJSON: `{"status":400}`,
+				ID: "case.submit.field.required", DisplayName: "Submit field required", NodeID: "node.submit",
+				CaseType: "negative", RequestTemplateID: "template.submit", RenderMode: "template_patch",
+				PatchJSON: `[{"op":"remove","path":"$.body.field"}]`, ExpectedJSON: `{"status":400}`,
 				Status: "active", SortOrder: 3,
 			},
-			{ID: "case.result.success", DisplayName: "Result success", NodeID: "node.result", RequestTemplateID: "template.result", Status: "active", SortOrder: 4},
-			{ID: "case.result.query", DisplayName: "Result query", NodeID: "node.result", RequestTemplateID: "template.result", Status: "active", SortOrder: 5},
+			{ID: "case.verify.success", DisplayName: "Verify success", NodeID: "node.verify", RequestTemplateID: "template.verify", Status: "active", SortOrder: 4},
+			{ID: "case.verify.query", DisplayName: "Verify query", NodeID: "node.verify", RequestTemplateID: "template.verify", Status: "active", SortOrder: 5},
 		},
 		WorkflowBindings: []catalog.WorkflowBinding{
-			{WorkflowID: "workflow.withdraw.success", StepID: "step.quote", NodeID: "node.quote", CaseID: "case.quote", Required: true, SortOrder: 1},
-			{WorkflowID: "workflow.withdraw.success", StepID: "step.apply", NodeID: "node.apply", CaseID: "case.apply.success", Required: true, SortOrder: 2},
-			{WorkflowID: "workflow.withdraw.success", StepID: "step.result", NodeID: "node.result", CaseID: "case.result.success", Required: true, SortOrder: 3},
-			{WorkflowID: "workflow.withdraw.query", StepID: "step.quote", NodeID: "node.quote", CaseID: "case.quote", Required: true, SortOrder: 1},
-			{WorkflowID: "workflow.withdraw.query", StepID: "step.apply", NodeID: "node.apply", CaseID: "case.apply.success", Required: true, SortOrder: 2},
-			{WorkflowID: "workflow.withdraw.query", StepID: "step.query", NodeID: "node.result", CaseID: "case.result.query", Required: true, SortOrder: 3},
+			{WorkflowID: "workflow.flow.create", StepID: "step.prepare", NodeID: "node.prepare", CaseID: "case.prepare", Required: true, SortOrder: 1},
+			{WorkflowID: "workflow.flow.create", StepID: "step.submit", NodeID: "node.submit", CaseID: "case.submit.success", Required: true, SortOrder: 2},
+			{WorkflowID: "workflow.flow.create", StepID: "step.verify", NodeID: "node.verify", CaseID: "case.verify.success", Required: true, SortOrder: 3},
+			{WorkflowID: "workflow.flow.audit", StepID: "step.prepare", NodeID: "node.prepare", CaseID: "case.prepare", Required: true, SortOrder: 1},
+			{WorkflowID: "workflow.flow.audit", StepID: "step.submit", NodeID: "node.submit", CaseID: "case.submit.success", Required: true, SortOrder: 2},
+			{WorkflowID: "workflow.flow.audit", StepID: "step.audit", NodeID: "node.verify", CaseID: "case.verify.query", Required: true, SortOrder: 3},
 		},
 		Fixtures: []catalog.Fixture{{
-			ID: "fixture.before.apply", DisplayName: "Before apply", Kind: "workflow_prefix",
-			SourceWorkflowID: "workflow.withdraw.success", SourceUntilStep: "step.quote", Status: "active",
+			ID: "fixture.before.submit", DisplayName: "Before submit", Kind: "workflow_prefix",
+			SourceWorkflowID: "workflow.flow.create", SourceUntilStep: "step.prepare", Status: "active",
 		}},
 		CaseDependencies: []catalog.CaseDependency{{
-			ID: "dependency.days.required", CaseID: "case.apply.days.required", FixtureID: "fixture.before.apply",
-			MappingsJSON: `[{"from":"$.quote.orderId","to":"$.body.orderId"}]`, Required: true,
+			ID: "dependency.field.required", CaseID: "case.submit.field.required", FixtureID: "fixture.before.submit",
+			MappingsJSON: `[{"from":"$.prepare.entityId","to":"$.body.entityId"}]`, Required: true,
 		}},
 	}
 
@@ -55,7 +55,7 @@ func TestImportCatalogBuildsSharedMapAndAnchoredValidationCase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("import catalog: %v", err)
 	}
-	if graph.Map.ID != "map.profile.withdraw" || graph.Map.ProfileID != "profile.withdraw" {
+	if graph.Map.ID != "map.profile.flow" || graph.Map.ProfileID != "profile.flow" {
 		t.Fatalf("map identity = %#v", graph.Map)
 	}
 	if len(graph.Paths) != 2 {
@@ -64,27 +64,27 @@ func TestImportCatalogBuildsSharedMapAndAnchoredValidationCase(t *testing.T) {
 	if len(graph.Nodes) != 5 {
 		t.Fatalf("nodes = %#v", graph.Nodes)
 	}
-	if countPathSteps(graph, "case.quote") != 2 {
-		t.Fatalf("shared quote node should be reused by both paths: %#v", graph.PathSteps)
+	if countPathSteps(graph, "case.prepare") != 2 {
+		t.Fatalf("shared prepare node should be reused by both paths: %#v", graph.PathSteps)
 	}
 
-	validation := requireNode(t, graph, "case.apply.days.required")
+	validation := requireNode(t, graph, "case.submit.field.required")
 	if validation.Role != NodeRoleValidation || validation.StateEffect != StateEffectUnchanged {
 		t.Fatalf("validation node role/effect = %#v", validation)
 	}
-	if validation.BaseCaseID != "case.apply.success" || validation.AnchorNodeID != "case.apply.success" {
+	if validation.BaseCaseID != "case.submit.success" || validation.AnchorNodeID != "case.submit.success" {
 		t.Fatalf("validation anchor = %#v", validation)
 	}
-	if !strings.Contains(validation.RequiredPropertyJSON, `"samePreconditionAsCase":"case.apply.success"`) {
+	if !strings.Contains(validation.RequiredPropertyJSON, `"samePreconditionAsCase":"case.submit.success"`) {
 		t.Fatalf("validation required property = %s", validation.RequiredPropertyJSON)
 	}
 
-	materialization := requireMaterialization(t, graph, "fixture.before.apply")
-	if materialization.SourcePathID != "workflow.withdraw.success" || materialization.SourceUntilNodeID != "case.quote" {
+	materialization := requireMaterialization(t, graph, "fixture.before.submit")
+	if materialization.SourcePathID != "workflow.flow.create" || materialization.SourceUntilNodeID != "case.prepare" {
 		t.Fatalf("materialization source = %#v", materialization)
 	}
-	edge := requireEdgeTo(t, graph, "case.apply.days.required", EdgeKindFixture)
-	if edge.FromNodeID != "case.quote" || edge.MappingsJSON == "" {
+	edge := requireEdgeTo(t, graph, "case.submit.field.required", EdgeKindFixture)
+	if edge.FromNodeID != "case.prepare" || edge.MappingsJSON == "" {
 		t.Fatalf("fixture edge = %#v", edge)
 	}
 }
@@ -95,30 +95,144 @@ func TestExplainCaseSelectsReplayPrefixForValidationDiff(t *testing.T) {
 		t.Fatalf("import catalog: %v", err)
 	}
 
-	explain, err := ExplainCase(graph, ExplainOptions{CaseID: "case.apply.days.required"})
+	explain, err := ExplainCase(graph, ExplainOptions{CaseID: "case.submit.field.required"})
 	if err != nil {
 		t.Fatalf("explain case: %v", err)
 	}
-	if explain.TargetCaseID != "case.apply.days.required" || explain.TargetNodeID != "case.apply.days.required" {
+	if explain.TargetCaseID != "case.submit.field.required" || explain.TargetNodeID != "case.submit.field.required" {
 		t.Fatalf("explain target = %#v", explain)
 	}
 	if len(explain.Operations) != 2 {
 		t.Fatalf("operations = %#v", explain.Operations)
 	}
-	if explain.Operations[0].Kind != OperationRunPathPrefix || explain.Operations[0].PathID != "workflow.withdraw.success" || explain.Operations[0].UntilNodeID != "case.quote" {
+	if explain.Operations[0].Kind != OperationRunPathPrefix || explain.Operations[0].PathID != "workflow.flow.create" || explain.Operations[0].UntilNodeID != "case.prepare" {
 		t.Fatalf("prefix operation = %#v", explain.Operations[0])
 	}
-	if explain.Operations[1].Kind != OperationRunCase || explain.Operations[1].CaseID != "case.apply.days.required" || explain.Operations[1].PatchJSON == "" {
+	if explain.Operations[1].Kind != OperationRunCase || explain.Operations[1].CaseID != "case.submit.field.required" || explain.Operations[1].PatchJSON == "" {
 		t.Fatalf("run-case operation = %#v", explain.Operations[1])
 	}
 	if len(explain.CandidatePaths) != 2 {
 		t.Fatalf("candidate paths = %#v", explain.CandidatePaths)
 	}
-	if explain.CandidatePaths[0].PathID != "workflow.withdraw.success" || !explain.CandidatePaths[0].Selected {
+	if explain.CandidatePaths[0].PathID != "workflow.flow.create" || !explain.CandidatePaths[0].Selected {
 		t.Fatalf("selected candidate = %#v", explain.CandidatePaths)
 	}
-	if len(explain.RejectedReasons) != 1 || explain.RejectedReasons[0].PathID != "workflow.withdraw.query" {
+	if len(explain.RejectedReasons) != 1 || explain.RejectedReasons[0].PathID != "workflow.flow.audit" {
 		t.Fatalf("rejected reasons = %#v", explain.RejectedReasons)
+	}
+}
+
+func TestExplainCaseDoesNotRejectAlternatePathsThatContainPrimaryTarget(t *testing.T) {
+	graph, err := ImportCatalog(plannerFixtureCatalog(), ImportOptions{})
+	if err != nil {
+		t.Fatalf("import catalog: %v", err)
+	}
+
+	explain, err := ExplainCase(graph, ExplainOptions{CaseID: "case.submit.success"})
+	if err != nil {
+		t.Fatalf("explain case: %v", err)
+	}
+	for _, rejected := range explain.RejectedReasons {
+		if rejected.PathID == "workflow.flow.audit" {
+			t.Fatalf("alternate path containing target should not be rejected: %#v", explain.RejectedReasons)
+		}
+	}
+	selectedCount := 0
+	for _, candidate := range explain.CandidatePaths {
+		if candidate.Selected {
+			selectedCount++
+		}
+	}
+	if len(explain.CandidatePaths) != 2 || selectedCount != 1 {
+		t.Fatalf("candidate paths = %#v", explain.CandidatePaths)
+	}
+}
+
+func TestImportCatalogUsesBoundedControlEdgeIDs(t *testing.T) {
+	longPathID := "workflow." + strings.Repeat("very-long-segment.", 5)
+	longFirstCaseID := "case.first." + strings.Repeat("stateful-", 7)
+	longSecondCaseID := "case.second." + strings.Repeat("stateful-", 7)
+	graph, err := ImportCatalog(catalog.ProfileCatalog{
+		ProfileID: "profile.longids",
+		Workflows: []catalog.Workflow{
+			{ID: longPathID},
+		},
+		APICases: []catalog.APICase{
+			{ID: longFirstCaseID, NodeID: "node.first", Status: "active"},
+			{ID: longSecondCaseID, NodeID: "node.second", Status: "active"},
+		},
+		WorkflowBindings: []catalog.WorkflowBinding{
+			{WorkflowID: longPathID, StepID: "step.first", CaseID: longFirstCaseID, Required: true, SortOrder: 1},
+			{WorkflowID: longPathID, StepID: "step.second", CaseID: longSecondCaseID, Required: true, SortOrder: 2},
+		},
+	}, ImportOptions{})
+	if err != nil {
+		t.Fatalf("import catalog: %v", err)
+	}
+
+	edge := requireEdgeTo(t, graph, longSecondCaseID, EdgeKindControl)
+	if len(edge.ID) > 128 {
+		t.Fatalf("control edge id should fit store key width, got %d chars: %s", len(edge.ID), edge.ID)
+	}
+}
+
+func TestImportCatalogImportsStandaloneValidationCase(t *testing.T) {
+	graph, err := ImportCatalog(catalog.ProfileCatalog{
+		ProfileID: "profile.validation",
+		APICases: []catalog.APICase{
+			{ID: "case.create.success", NodeID: "node.create", Status: "active", SortOrder: 1},
+			{ID: "case.create.invalid-name", NodeID: "node.create", CaseType: "negative", Status: "active", SortOrder: 2},
+		},
+	}, ImportOptions{})
+	if err != nil {
+		t.Fatalf("import catalog: %v", err)
+	}
+
+	node := requireNode(t, graph, "case.create.invalid-name")
+	if node.Role != NodeRoleValidation || node.BaseCaseID != "case.create.success" {
+		t.Fatalf("standalone validation node = %#v", node)
+	}
+}
+
+func TestImportCatalogSkipsInactiveWorkflowBindingCase(t *testing.T) {
+	graph, err := ImportCatalog(catalog.ProfileCatalog{
+		ProfileID: "profile.inactive",
+		Workflows: []catalog.Workflow{
+			{ID: "workflow.checkout"},
+		},
+		APICases: []catalog.APICase{
+			{ID: "case.cart", NodeID: "node.cart", Status: "active", SortOrder: 1},
+			{ID: "case.retired", NodeID: "node.retired", Status: "inactive", SortOrder: 2},
+		},
+		WorkflowBindings: []catalog.WorkflowBinding{
+			{WorkflowID: "workflow.checkout", StepID: "cart", CaseID: "case.cart", Required: true, SortOrder: 1},
+			{WorkflowID: "workflow.checkout", StepID: "retired", CaseID: "case.retired", Required: true, SortOrder: 2},
+		},
+	}, ImportOptions{})
+	if err != nil {
+		t.Fatalf("import catalog: %v", err)
+	}
+
+	if hasNode(graph, "case.retired") || countPathSteps(graph, "case.retired") != 0 {
+		t.Fatalf("inactive binding case should not become an active map node: nodes=%#v steps=%#v", graph.Nodes, graph.PathSteps)
+	}
+}
+
+func TestImportCatalogSkipsWorkflowPrefixFixtureWithUnknownStep(t *testing.T) {
+	source := plannerFixtureCatalog()
+	source.Fixtures[0].SourceUntilStep = "step.missing"
+
+	graph, err := ImportCatalog(source, ImportOptions{})
+	if err != nil {
+		t.Fatalf("import catalog: %v", err)
+	}
+	if len(graph.Materializations) != 0 {
+		t.Fatalf("fixture with unknown source step should be skipped: %#v", graph.Materializations)
+	}
+	for _, edge := range graph.Edges {
+		if edge.Kind == EdgeKindFixture {
+			t.Fatalf("dependency edge should not be imported without a valid materialization: %#v", edge)
+		}
 	}
 }
 
@@ -143,28 +257,29 @@ func TestValidateDAGRejectsControlCycles(t *testing.T) {
 
 func plannerFixtureCatalog() catalog.ProfileCatalog {
 	return catalog.ProfileCatalog{
-		ProfileID: "profile.withdraw",
+		ProfileID: "profile.flow",
 		Workflows: []catalog.Workflow{
-			{ID: "workflow.withdraw.success"},
-			{ID: "workflow.withdraw.query"},
+			{ID: "workflow.flow.create"},
+			{ID: "workflow.flow.audit"},
 		},
 		APICases: []catalog.APICase{
-			{ID: "case.quote", NodeID: "node.quote", RequestTemplateID: "template.quote", Status: "active", SortOrder: 1},
-			{ID: "case.apply.success", NodeID: "node.apply", RequestTemplateID: "template.apply", Status: "active", SortOrder: 2},
-			{ID: "case.apply.days.required", NodeID: "node.apply", CaseType: "negative", RequestTemplateID: "template.apply", RenderMode: "template_patch", PatchJSON: `[{"op":"remove","path":"$.body.days"}]`, ExpectedJSON: `{"status":400}`, Status: "active", SortOrder: 3},
-			{ID: "case.query", NodeID: "node.query", RequestTemplateID: "template.query", Status: "active", SortOrder: 4},
+			{ID: "case.prepare", NodeID: "node.prepare", RequestTemplateID: "template.prepare", Status: "active", SortOrder: 1},
+			{ID: "case.submit.success", NodeID: "node.submit", RequestTemplateID: "template.submit", Status: "active", SortOrder: 2},
+			{ID: "case.submit.field.required", NodeID: "node.submit", CaseType: "negative", RequestTemplateID: "template.submit", RenderMode: "template_patch", PatchJSON: `[{"op":"remove","path":"$.body.field"}]`, ExpectedJSON: `{"status":400}`, Status: "active", SortOrder: 3},
+			{ID: "case.audit", NodeID: "node.query", RequestTemplateID: "template.query", Status: "active", SortOrder: 4},
 		},
 		WorkflowBindings: []catalog.WorkflowBinding{
-			{WorkflowID: "workflow.withdraw.success", StepID: "step.quote", NodeID: "node.quote", CaseID: "case.quote", Required: true, SortOrder: 1},
-			{WorkflowID: "workflow.withdraw.success", StepID: "step.apply", NodeID: "node.apply", CaseID: "case.apply.success", Required: true, SortOrder: 2},
-			{WorkflowID: "workflow.withdraw.query", StepID: "step.quote", NodeID: "node.quote", CaseID: "case.quote", Required: true, SortOrder: 1},
-			{WorkflowID: "workflow.withdraw.query", StepID: "step.query", NodeID: "node.query", CaseID: "case.query", Required: true, SortOrder: 2},
+			{WorkflowID: "workflow.flow.create", StepID: "step.prepare", NodeID: "node.prepare", CaseID: "case.prepare", Required: true, SortOrder: 1},
+			{WorkflowID: "workflow.flow.create", StepID: "step.submit", NodeID: "node.submit", CaseID: "case.submit.success", Required: true, SortOrder: 2},
+			{WorkflowID: "workflow.flow.audit", StepID: "step.prepare", NodeID: "node.prepare", CaseID: "case.prepare", Required: true, SortOrder: 1},
+			{WorkflowID: "workflow.flow.audit", StepID: "step.submit", NodeID: "node.submit", CaseID: "case.submit.success", Required: true, SortOrder: 2},
+			{WorkflowID: "workflow.flow.audit", StepID: "step.audit", NodeID: "node.query", CaseID: "case.audit", Required: true, SortOrder: 3},
 		},
 		Fixtures: []catalog.Fixture{{
-			ID: "fixture.before.apply", Kind: "workflow_prefix", SourceWorkflowID: "workflow.withdraw.success", SourceUntilStep: "step.quote", Status: "active",
+			ID: "fixture.before.submit", Kind: "workflow_prefix", SourceWorkflowID: "workflow.flow.create", SourceUntilStep: "step.prepare", Status: "active",
 		}},
 		CaseDependencies: []catalog.CaseDependency{{
-			ID: "dependency.days.required", CaseID: "case.apply.days.required", FixtureID: "fixture.before.apply", Required: true,
+			ID: "dependency.field.required", CaseID: "case.submit.field.required", FixtureID: "fixture.before.submit", Required: true,
 		}},
 	}
 }
@@ -210,4 +325,13 @@ func countPathSteps(graph Graph, nodeID string) int {
 		}
 	}
 	return count
+}
+
+func hasNode(graph Graph, nodeID string) bool {
+	for _, node := range graph.Nodes {
+		if node.ID == nodeID {
+			return true
+		}
+	}
+	return false
 }

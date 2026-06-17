@@ -40,11 +40,11 @@ func TestMapImportWorkflowsAndExplainUsesStoreCatalog(t *testing.T) {
 	if err := json.Unmarshal([]byte(importOut), &importReport); err != nil {
 		t.Fatalf("decode map import json: %v\n%s", err, importOut)
 	}
-	if !importReport.OK || importReport.Map.ID != "map.profile.withdraw" || importReport.Counts.Nodes != 3 || importReport.Counts.Paths != 1 || importReport.Counts.Materializations != 1 {
+	if !importReport.OK || importReport.Map.ID != "map.profile.flow" || importReport.Counts.Nodes != 3 || importReport.Counts.Paths != 1 || importReport.Counts.Materializations != 1 {
 		t.Fatalf("map import report = %#v", importReport)
 	}
 
-	explainOut := runCLI(t, "map", "explain", "--store", storeRef, "--map", "map.profile.withdraw", "--case", "case.apply.days.required", "--json")
+	explainOut := runCLI(t, "map", "explain", "--store", storeRef, "--map", "map.profile.flow", "--case", "case.submit.field.required", "--json")
 	var explainReport struct {
 		OK           bool   `json:"ok"`
 		TargetCaseID string `json:"targetCaseId"`
@@ -59,13 +59,13 @@ func TestMapImportWorkflowsAndExplainUsesStoreCatalog(t *testing.T) {
 	if err := json.Unmarshal([]byte(explainOut), &explainReport); err != nil {
 		t.Fatalf("decode map explain json: %v\n%s", err, explainOut)
 	}
-	if !explainReport.OK || explainReport.TargetCaseID != "case.apply.days.required" || len(explainReport.Operations) != 2 {
+	if !explainReport.OK || explainReport.TargetCaseID != "case.submit.field.required" || len(explainReport.Operations) != 2 {
 		t.Fatalf("map explain report = %#v", explainReport)
 	}
-	if explainReport.Operations[0].Kind != "run_path_prefix" || explainReport.Operations[0].PathID != "workflow.withdraw.success" || explainReport.Operations[0].UntilNodeID != "case.quote" {
+	if explainReport.Operations[0].Kind != "run_path_prefix" || explainReport.Operations[0].PathID != "workflow.flow.create" || explainReport.Operations[0].UntilNodeID != "case.prepare" {
 		t.Fatalf("prefix operation = %#v", explainReport.Operations[0])
 	}
-	if explainReport.Operations[1].Kind != "run_case" || explainReport.Operations[1].CaseID != "case.apply.days.required" {
+	if explainReport.Operations[1].Kind != "run_case" || explainReport.Operations[1].CaseID != "case.submit.field.required" {
 		t.Fatalf("run case operation = %#v", explainReport.Operations[1])
 	}
 }
@@ -110,19 +110,23 @@ func TestMapWorkflowsSearchesNamedPaths(t *testing.T) {
 	graph := store.TestPlanGraph{
 		Map: store.TestPlanMap{ID: "map.contract", ProfileID: "profile.contract", DisplayName: "Contract Map", Status: "active"},
 		Nodes: []store.TestPlanNode{
-			{MapID: "map.contract", ID: "case.quote", CaseID: "case.quote", Role: "primary", StateEffect: "advance", SummaryJSON: `{}`, SortOrder: 1},
-			{MapID: "map.contract", ID: "case.apply", CaseID: "case.apply", Role: "primary", StateEffect: "advance", SummaryJSON: `{}`, SortOrder: 2},
+			{MapID: "map.contract", ID: "case.prepare", CaseID: "case.prepare", Role: "primary", StateEffect: "advance", SummaryJSON: `{}`, SortOrder: 1},
+			{MapID: "map.contract", ID: "case.submit", CaseID: "case.submit", Role: "primary", StateEffect: "advance", SummaryJSON: `{}`, SortOrder: 2},
 			{MapID: "map.contract", ID: "case.cancel", CaseID: "case.cancel", Role: "primary", StateEffect: "advance", SummaryJSON: `{}`, SortOrder: 3},
 		},
 		Paths: []store.TestPlanPath{
-			{MapID: "map.contract", ID: "workflow.apply.success", WorkflowID: "workflow.apply.success", DisplayName: "Apply Success", Status: "active", SummaryJSON: `{}`, SortOrder: 1},
+			{MapID: "map.contract", ID: "workflow.create.success", WorkflowID: "workflow.create.success", DisplayName: "Create Success", Status: "active", SummaryJSON: `{}`, SortOrder: 1},
 			{MapID: "map.contract", ID: "workflow.cancel.success", WorkflowID: "workflow.cancel.success", DisplayName: "Cancel Success", Status: "active", SummaryJSON: `{}`, SortOrder: 2},
 		},
 		PathSteps: []store.TestPlanPathStep{
-			{MapID: "map.contract", PathID: "workflow.apply.success", StepIndex: 1, StepID: "quote", NodeID: "case.quote", CaseID: "case.quote", Required: true, SummaryJSON: `{}`},
-			{MapID: "map.contract", PathID: "workflow.apply.success", StepIndex: 2, StepID: "apply", NodeID: "case.apply", CaseID: "case.apply", Required: true, SummaryJSON: `{}`},
-			{MapID: "map.contract", PathID: "workflow.cancel.success", StepIndex: 1, StepID: "apply", NodeID: "case.apply", CaseID: "case.apply", Required: true, SummaryJSON: `{}`},
+			{MapID: "map.contract", PathID: "workflow.create.success", StepIndex: 1, StepID: "prepare", NodeID: "case.prepare", CaseID: "case.prepare", Required: true, SummaryJSON: `{}`},
+			{MapID: "map.contract", PathID: "workflow.create.success", StepIndex: 2, StepID: "submit", NodeID: "case.submit", CaseID: "case.submit", Required: true, SummaryJSON: `{}`},
+			{MapID: "map.contract", PathID: "workflow.cancel.success", StepIndex: 1, StepID: "submit", NodeID: "case.submit", CaseID: "case.submit", Required: true, SummaryJSON: `{}`},
 			{MapID: "map.contract", PathID: "workflow.cancel.success", StepIndex: 2, StepID: "cancel", NodeID: "case.cancel", CaseID: "case.cancel", Required: true, SummaryJSON: `{}`},
+		},
+		Edges: []store.TestPlanEdge{
+			{MapID: "map.contract", ID: "edge.create.prepare.submit", FromNodeID: "case.prepare", ToNodeID: "case.submit", Kind: "control", PathID: "workflow.create.success", Required: true, SummaryJSON: `{}`},
+			{MapID: "map.contract", ID: "edge.cancel.submit.cancel", FromNodeID: "case.submit", ToNodeID: "case.cancel", Kind: "control", PathID: "workflow.cancel.success", Required: true, SummaryJSON: `{}`},
 		},
 	}
 	if err := runtime.ReplaceTestPlanGraph(ctx, graph); err != nil {
@@ -152,7 +156,7 @@ func TestMapWorkflowsSearchesNamedPaths(t *testing.T) {
 		t.Fatalf("map workflows report = %#v", report)
 	}
 	workflow := report.Workflows[0]
-	if workflow.WorkflowID != "workflow.cancel.success" || workflow.StepCount != 2 || workflow.FirstNodeID != "case.apply" || workflow.LastNodeID != "case.cancel" {
+	if workflow.WorkflowID != "workflow.cancel.success" || workflow.StepCount != 2 || workflow.FirstNodeID != "case.submit" || workflow.LastNodeID != "case.cancel" {
 		t.Fatalf("workflow row = %#v", workflow)
 	}
 }
@@ -171,8 +175,8 @@ func TestMapReviewHTMLWritesInteractiveArtifact(t *testing.T) {
 	closeCLIStore(runtime)
 
 	runCLI(t, "map", "import-workflows", "--store", storeRef, "--json")
-	outputPath := filepath.Join(t.TempDir(), "withdraw-map-review.html")
-	out := runCLI(t, "map", "review-html", "--store", storeRef, "--map", "map.profile.withdraw", "--output", outputPath, "--json")
+	outputPath := filepath.Join(t.TempDir(), "flow-map-review.html")
+	out := runCLI(t, "map", "review-html", "--store", storeRef, "--map", "map.profile.flow", "--output", outputPath, "--json")
 	var report struct {
 		OK     bool   `json:"ok"`
 		MapID  string `json:"mapId"`
@@ -185,7 +189,7 @@ func TestMapReviewHTMLWritesInteractiveArtifact(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode map review-html json: %v\n%s", err, out)
 	}
-	if !report.OK || report.MapID != "map.profile.withdraw" || report.Output != outputPath || report.Counts.Nodes != 3 || report.Counts.Paths != 1 {
+	if !report.OK || report.MapID != "map.profile.flow" || report.Output != outputPath || report.Counts.Nodes != 3 || report.Counts.Paths != 1 {
 		t.Fatalf("map review-html report = %#v", report)
 	}
 	raw, err := os.ReadFile(outputPath)
@@ -197,9 +201,9 @@ func TestMapReviewHTMLWritesInteractiveArtifact(t *testing.T) {
 		`id="map-review-data"`,
 		`function selectNode`,
 		`id="workflow-filter"`,
-		`case.apply.days.required`,
-		`Days required`,
-		`template.apply`,
+		`case.submit.field.required`,
+		`Field required`,
+		`template.submit`,
 		`Interface reverse cases`,
 		`function interfaceReverseCases`,
 		`id="map-review-minimap"`,
@@ -216,6 +220,9 @@ func TestMapReviewHTMLWritesInteractiveArtifact(t *testing.T) {
 			t.Fatalf("review html missing %q\n%s", want, html)
 		}
 	}
+	if strings.Contains(html, `adj.get(e.toNodeId).push(e.fromNodeId)`) {
+		t.Fatalf("path finder should not traverse directed edges backwards:\n%s", html)
+	}
 }
 
 func TestMapReviewHTMLCanFilterWorkflowPaths(t *testing.T) {
@@ -229,19 +236,23 @@ func TestMapReviewHTMLCanFilterWorkflowPaths(t *testing.T) {
 	graph := store.TestPlanGraph{
 		Map: store.TestPlanMap{ID: "map.contract", ProfileID: "profile.contract", DisplayName: "Contract Map", Status: "active"},
 		Nodes: []store.TestPlanNode{
-			{MapID: "map.contract", ID: "case.quote", CaseID: "case.quote", Role: "primary", StateEffect: "advance", SummaryJSON: `{}`, SortOrder: 1},
-			{MapID: "map.contract", ID: "case.apply", CaseID: "case.apply", Role: "primary", StateEffect: "advance", SummaryJSON: `{}`, SortOrder: 2},
+			{MapID: "map.contract", ID: "case.prepare", CaseID: "case.prepare", Role: "primary", StateEffect: "advance", SummaryJSON: `{}`, SortOrder: 1},
+			{MapID: "map.contract", ID: "case.submit", CaseID: "case.submit", Role: "primary", StateEffect: "advance", SummaryJSON: `{}`, SortOrder: 2},
 			{MapID: "map.contract", ID: "case.cancel", CaseID: "case.cancel", Role: "primary", StateEffect: "advance", SummaryJSON: `{}`, SortOrder: 3},
 		},
 		Paths: []store.TestPlanPath{
-			{MapID: "map.contract", ID: "workflow.apply.success", WorkflowID: "workflow.apply.success", DisplayName: "Apply Success", Status: "active", SummaryJSON: `{}`, SortOrder: 1},
+			{MapID: "map.contract", ID: "workflow.create.success", WorkflowID: "workflow.create.success", DisplayName: "Create Success", Status: "active", SummaryJSON: `{}`, SortOrder: 1},
 			{MapID: "map.contract", ID: "workflow.cancel.success", WorkflowID: "workflow.cancel.success", DisplayName: "Cancel Success", Status: "active", SummaryJSON: `{}`, SortOrder: 2},
 		},
 		PathSteps: []store.TestPlanPathStep{
-			{MapID: "map.contract", PathID: "workflow.apply.success", StepIndex: 1, StepID: "quote", NodeID: "case.quote", CaseID: "case.quote", Required: true, SummaryJSON: `{}`},
-			{MapID: "map.contract", PathID: "workflow.apply.success", StepIndex: 2, StepID: "apply", NodeID: "case.apply", CaseID: "case.apply", Required: true, SummaryJSON: `{}`},
-			{MapID: "map.contract", PathID: "workflow.cancel.success", StepIndex: 1, StepID: "apply", NodeID: "case.apply", CaseID: "case.apply", Required: true, SummaryJSON: `{}`},
+			{MapID: "map.contract", PathID: "workflow.create.success", StepIndex: 1, StepID: "prepare", NodeID: "case.prepare", CaseID: "case.prepare", Required: true, SummaryJSON: `{}`},
+			{MapID: "map.contract", PathID: "workflow.create.success", StepIndex: 2, StepID: "submit", NodeID: "case.submit", CaseID: "case.submit", Required: true, SummaryJSON: `{}`},
+			{MapID: "map.contract", PathID: "workflow.cancel.success", StepIndex: 1, StepID: "submit", NodeID: "case.submit", CaseID: "case.submit", Required: true, SummaryJSON: `{}`},
 			{MapID: "map.contract", PathID: "workflow.cancel.success", StepIndex: 2, StepID: "cancel", NodeID: "case.cancel", CaseID: "case.cancel", Required: true, SummaryJSON: `{}`},
+		},
+		Edges: []store.TestPlanEdge{
+			{MapID: "map.contract", ID: "edge.create.prepare.submit", FromNodeID: "case.prepare", ToNodeID: "case.submit", Kind: "control", PathID: "workflow.create.success", Required: true, SummaryJSON: `{}`},
+			{MapID: "map.contract", ID: "edge.cancel.submit.cancel", FromNodeID: "case.submit", ToNodeID: "case.cancel", Kind: "control", PathID: "workflow.cancel.success", Required: true, SummaryJSON: `{}`},
 		},
 	}
 	if err := runtime.ReplaceTestPlanGraph(ctx, graph); err != nil {
@@ -273,29 +284,29 @@ func TestMapReviewHTMLCanFilterWorkflowPaths(t *testing.T) {
 	if !strings.Contains(html, "workflow.cancel.success") {
 		t.Fatalf("filtered review html missing cancel workflow:\n%s", html)
 	}
-	if strings.Contains(html, "workflow.apply.success") {
-		t.Fatalf("filtered review html should not include apply workflow:\n%s", html)
+	if strings.Contains(html, "workflow.create.success") {
+		t.Fatalf("filtered review html should not include create workflow:\n%s", html)
 	}
 }
 
 func mapCommandProfileCatalogFixture() store.ProfileCatalog {
 	return store.ProfileCatalog{
-		ProfileID: "profile.withdraw",
-		Workflows: []store.CatalogWorkflow{{ID: "workflow.withdraw.success", DisplayName: "Withdraw Success"}},
+		ProfileID: "profile.flow",
+		Workflows: []store.CatalogWorkflow{{ID: "workflow.flow.create", DisplayName: "Create Flow"}},
 		APICases: []store.CatalogAPICase{
-			{ID: "case.quote", DisplayName: "Quote", NodeID: "node.quote", RequestTemplateID: "template.quote", Status: "active", SortOrder: 1},
-			{ID: "case.apply.success", DisplayName: "Apply success", NodeID: "node.apply", RequestTemplateID: "template.apply", Status: "active", SortOrder: 2},
-			{ID: "case.apply.days.required", DisplayName: "Days required", NodeID: "node.apply", CaseType: "negative", RequestTemplateID: "template.apply", RenderMode: "template_patch", PatchJSON: `[{"op":"remove","path":"$.body.days"}]`, ExpectedJSON: `{"status":400}`, Status: "active", SortOrder: 3},
+			{ID: "case.prepare", DisplayName: "Prepare", NodeID: "node.prepare", RequestTemplateID: "template.prepare", Status: "active", SortOrder: 1},
+			{ID: "case.submit.success", DisplayName: "Submit success", NodeID: "node.submit", RequestTemplateID: "template.submit", Status: "active", SortOrder: 2},
+			{ID: "case.submit.field.required", DisplayName: "Field required", NodeID: "node.submit", CaseType: "negative", RequestTemplateID: "template.submit", RenderMode: "template_patch", PatchJSON: `[{"op":"remove","path":"$.body.field"}]`, ExpectedJSON: `{"status":400}`, Status: "active", SortOrder: 3},
 		},
 		WorkflowBindings: []store.CatalogWorkflowBinding{
-			{WorkflowID: "workflow.withdraw.success", StepID: "step.quote", NodeID: "node.quote", CaseID: "case.quote", Required: true, SortOrder: 1},
-			{WorkflowID: "workflow.withdraw.success", StepID: "step.apply", NodeID: "node.apply", CaseID: "case.apply.success", Required: true, SortOrder: 2},
+			{WorkflowID: "workflow.flow.create", StepID: "step.prepare", NodeID: "node.prepare", CaseID: "case.prepare", Required: true, SortOrder: 1},
+			{WorkflowID: "workflow.flow.create", StepID: "step.submit", NodeID: "node.submit", CaseID: "case.submit.success", Required: true, SortOrder: 2},
 		},
 		Fixtures: []store.CatalogFixture{{
-			ID: "fixture.before.apply", DisplayName: "Before apply", Kind: "workflow_prefix", SourceWorkflowID: "workflow.withdraw.success", SourceUntilStep: "step.quote", Status: "active",
+			ID: "fixture.before.submit", DisplayName: "Before submit", Kind: "workflow_prefix", SourceWorkflowID: "workflow.flow.create", SourceUntilStep: "step.prepare", Status: "active",
 		}},
 		CaseDependencies: []store.CatalogCaseDependency{{
-			ID: "dependency.days.required", CaseID: "case.apply.days.required", FixtureID: "fixture.before.apply", Required: true, MappingsJSON: `[]`,
+			ID: "dependency.field.required", CaseID: "case.submit.field.required", FixtureID: "fixture.before.submit", Required: true, MappingsJSON: `[]`,
 		}},
 	}
 }

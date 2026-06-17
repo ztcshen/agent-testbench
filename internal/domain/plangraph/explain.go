@@ -33,7 +33,7 @@ func ExplainCase(graph Graph, options ExplainOptions) (Explanation, error) {
 	explain.PathID = pathID
 	explain.PathSteps = steps
 	explain.LogicalPath = steps
-	explain = explainPathSelection(graph, explain, pathID, "target node is reachable on this mapped path")
+	explain = explainPathSelection(graph, explain, pathID, node.ID, "target node is reachable on this mapped path")
 	explain.Operations = append(explain.Operations, PhysicalOperation{
 		Kind:                 OperationRunPathPrefix,
 		PathID:               pathID,
@@ -86,12 +86,13 @@ func explainValidationNode(graph Graph, node Node, explain Explanation) (Explana
 		RequiredPropertyJSON: node.RequiredPropertyJSON,
 		ProvidedPropertyJSON: node.ProvidedPropertyJSON,
 	})
-	explain = explainPathSelection(graph, explain, explain.PathID, "selected replay path for target case precondition")
+	explain = explainPathSelection(graph, explain, explain.PathID, node.ID, "selected replay path for target case precondition")
 	return explain, nil
 }
 
-func explainPathSelection(graph Graph, explain Explanation, selectedPathID string, selectedReason string) Explanation {
+func explainPathSelection(graph Graph, explain Explanation, selectedPathID string, targetNodeID string, selectedReason string) Explanation {
 	var selected []CandidatePath
+	var alternatives []CandidatePath
 	var rejected []CandidatePath
 	for _, path := range graph.Paths {
 		candidate := CandidatePath{
@@ -102,6 +103,9 @@ func explainPathSelection(graph Graph, explain Explanation, selectedPathID strin
 			candidate.Selected = true
 			candidate.Reason = selectedReason
 			selected = append(selected, candidate)
+		} else if targetNodeID != "" && pathContainsNode(graph, path.ID, targetNodeID) {
+			candidate.Reason = "target node is also reachable on this mapped path"
+			alternatives = append(alternatives, candidate)
 		} else {
 			candidate.Reason = "path does not satisfy selected target precondition"
 			rejected = append(rejected, candidate)
@@ -111,8 +115,17 @@ func explainPathSelection(graph Graph, explain Explanation, selectedPathID strin
 			})
 		}
 	}
-	explain.CandidatePaths = append(selected, rejected...)
+	explain.CandidatePaths = append(append(selected, alternatives...), rejected...)
 	return explain
+}
+
+func pathContainsNode(graph Graph, pathID string, nodeID string) bool {
+	for _, step := range pathSteps(graph, pathID) {
+		if step.NodeID == nodeID {
+			return true
+		}
+	}
+	return false
 }
 
 func findExplainTarget(graph Graph, options ExplainOptions) (Node, bool) {

@@ -26,7 +26,7 @@ func filterMapReviewGraph(graph store.TestPlanGraph, filter string) store.TestPl
 			keptNodes[step.NodeID] = true
 		}
 	}
-	keptEdges := mapReviewExpandEdges(graph.Edges, pathIDs, keptNodes)
+	keptEdges := mapReviewExpandEdges(graph.Edges, pathIDs, keptNodes, hasDirectPathMatch)
 	keptMaterializations := mapReviewMaterializationIDs(keptEdges)
 
 	next := graph
@@ -63,8 +63,17 @@ func mapReviewMatchingNodeIDs(nodes []store.TestPlanNode, steps []store.TestPlan
 	return out
 }
 
-func mapReviewExpandEdges(edges []store.TestPlanEdge, pathIDs map[string]bool, keptNodes map[string]bool) []store.TestPlanEdge {
+func mapReviewExpandEdges(edges []store.TestPlanEdge, pathIDs map[string]bool, keptNodes map[string]bool, directPathMatch bool) []store.TestPlanEdge {
 	keptEdges := []store.TestPlanEdge{}
+	if directPathMatch {
+		for _, edge := range edges {
+			if pathIDs[edge.PathID] || (edge.PathID == "" && keptNodes[edge.FromNodeID] && keptNodes[edge.ToNodeID]) {
+				keptEdges = append(keptEdges, edge)
+				mapReviewKeepEdgeNodes(edge, keptNodes)
+			}
+		}
+		return keptEdges
+	}
 	changed := true
 	for changed {
 		changed = false
