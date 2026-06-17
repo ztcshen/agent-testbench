@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"agent-testbench/internal/domain/mapplanner"
 	"agent-testbench/internal/store"
 )
 
@@ -22,6 +24,97 @@ func TestMapRunExecutesPlanTasksAndExplainReadsResult(t *testing.T) {
 	assertMapRunCommandReport(t, report)
 	assertStoredMapRunPlan(t, ctx, storeRef, report.PlanID)
 	assertMapRunExplainCommandReport(t, runCLI(t, "map", "run", "explain", "--store", storeRef, "--plan", report.PlanID, "--json"), report.PlanID)
+}
+
+func TestPrepareExistingMapRunRecordResumeKeepsPassedTasks(t *testing.T) {
+	record := mapRunResumeFixture()
+
+	prepared := prepareExistingMapRunRecord(record, mapRunOptions{resumeRun: true})
+
+	if prepared.Tasks[0].Status != store.StatusPassed || prepared.Tasks[0].WorkflowRunID != "run.already.passed" || prepared.Tasks[0].EvidenceRoot != "evidence/already" {
+		t.Fatalf("resume should keep passed task execution metadata = %#v", prepared.Tasks[0])
+	}
+	if prepared.Tasks[1].Status != mapplanner.TaskStatusPlanned || prepared.Tasks[1].APICaseRunID != "" || prepared.Tasks[1].Reason != "" || !prepared.Tasks[1].FinishedAt.IsZero() {
+		t.Fatalf("resume should reset failed task for execution = %#v", prepared.Tasks[1])
+	}
+	if prepared.Tasks[2].Status != mapplanner.TaskStatusPlanned || !prepared.Tasks[2].StartedAt.IsZero() || !prepared.Tasks[2].FinishedAt.IsZero() {
+		t.Fatalf("resume should leave planned task runnable without erasing started time = %#v", prepared.Tasks[2])
+	}
+}
+
+func TestPrepareExistingMapRunRecordRetryFailedOnlyResetsFailedTasks(t *testing.T) {
+	record := mapRunResumeFixture()
+
+	prepared := prepareExistingMapRunRecord(record, mapRunOptions{retryFailed: true})
+
+	if prepared.Tasks[0].Status != store.StatusPassed || prepared.Tasks[0].WorkflowRunID != "run.already.passed" {
+		t.Fatalf("retry failed should keep passed task = %#v", prepared.Tasks[0])
+	}
+	if prepared.Tasks[1].Status != store.StatusFailed || prepared.Tasks[1].APICaseRunID != "" || prepared.Tasks[1].Reason != "" {
+		t.Fatalf("retry failed should reset failed task = %#v", prepared.Tasks[1])
+	}
+	if prepared.Tasks[2].Status != mapplanner.TaskStatusPlanned || prepared.Tasks[2].APICaseRunID != "" || !prepared.Tasks[2].StartedAt.IsZero() {
+		t.Fatalf("retry failed should park unrelated planned task without executing it = %#v", prepared.Tasks[2])
+	}
+}
+
+func TestPrepareExistingMapRunRecordRerunTaskOnlyResetsSelectedTasks(t *testing.T) {
+	record := mapRunResumeFixture()
+
+	prepared := prepareExistingMapRunRecord(record, mapRunOptions{rerunTaskIDs: []string{"task.path"}})
+
+	if prepared.Tasks[0].Status != mapplanner.TaskStatusPlanned || prepared.Tasks[0].WorkflowRunID != "" || prepared.Tasks[0].EvidenceRoot != "" {
+		t.Fatalf("rerun task should reset selected task = %#v", prepared.Tasks[0])
+	}
+	if prepared.Tasks[1].Status != store.StatusFailed || prepared.Tasks[1].APICaseRunID != "run.failed.case" || prepared.Tasks[1].Reason == "" {
+		t.Fatalf("rerun task should keep unselected failed task metadata = %#v", prepared.Tasks[1])
+	}
+}
+
+func TestMapRunExecutorSkipsAlreadyTerminalTasks(t *testing.T) {
+	started := time.Now().UTC().Add(-time.Minute)
+	record := mapRunResumeFixture()
+	record.Tasks = []store.TestMapPlanTask{record.Tasks[0], record.Tasks[2]}
+	record.Tasks[1].Status = mapplanner.TaskStatusPlanned
+	record.Tasks[1].Kind = mapplanner.TaskRunPath
+	record.Tasks[1].PathID = "path.empty"
+	record.Tasks[1].CaseID = ""
+	record.TaskEdges = []store.TestMapPlanTaskEdge{{
+		PlanID:     record.Instance.ID,
+		FromTaskID: record.Tasks[0].ID,
+		ToTaskID:   record.Tasks[1].ID,
+		Kind:       "control",
+		Required:   true,
+	}}
+	graph := store.TestPlanGraph{Paths: []store.TestPlanPath{{ID: "path.empty"}}, PathSteps: nil}
+	executed := newMapRunExecutor(context.Background(), nil, graph, mapRunOptions{}).execute(record)
+
+	if executed.Tasks[0].Status != store.StatusPassed || executed.Tasks[0].WorkflowRunID != "run.already.passed" {
+		t.Fatalf("executor should not rerun already passed task = %#v", executed.Tasks[0])
+	}
+	if executed.Tasks[1].Status != mapplanner.TaskStatusSkipped || !executed.Tasks[1].FinishedAt.After(started) {
+		t.Fatalf("executor should execute only planned task = %#v", executed.Tasks[1])
+	}
+}
+
+func TestMapRunExecutorRetryFailedRunsOnlyFailedTasks(t *testing.T) {
+	record := mapRunResumeFixture()
+	record.Tasks[1].Kind = mapplanner.TaskRunPath
+	record.Tasks[1].PathID = "path.empty"
+	record.Tasks[1].CaseID = ""
+	record.Tasks[2].Kind = mapplanner.TaskRunPath
+	record.Tasks[2].PathID = "path.empty"
+	prepared := prepareExistingMapRunRecord(record, mapRunOptions{retryFailed: true})
+
+	graph := store.TestPlanGraph{Paths: []store.TestPlanPath{{ID: "path.empty"}}, PathSteps: nil}
+	executed := newMapRunExecutor(context.Background(), nil, graph, mapRunOptions{retryFailed: true}).execute(prepared)
+
+	if executed.Tasks[1].Status != mapplanner.TaskStatusSkipped || executed.Tasks[1].APICaseRunID != "" || executed.Tasks[1].Reason != "" {
+		t.Fatalf("retry failed should execute and rewrite selected failed task = %#v", executed.Tasks[1])
+	}
+	if executed.Tasks[2].Status != mapplanner.TaskStatusPlanned || !executed.Tasks[2].StartedAt.IsZero() {
+		t.Fatalf("retry failed should not execute unrelated planned task = %#v", executed.Tasks[2])
+	}
 }
 
 type mapRunCommandReport struct {
@@ -46,6 +139,56 @@ type mapRunCommandTask struct {
 	Status        string `json:"status"`
 	WorkflowRunID string `json:"workflowRunId"`
 	APICaseRunID  string `json:"apiCaseRunId"`
+}
+
+func mapRunResumeFixture() store.TestMapPlanRecord {
+	started := time.Now().UTC().Add(-2 * time.Minute)
+	finished := started.Add(time.Minute)
+	return store.TestMapPlanRecord{
+		Instance: store.TestMapPlanInstance{
+			ID:        "plan.resume",
+			MapID:     "map.resume",
+			ProfileID: "profile.resume",
+			Mode:      mapplanner.ModeRun,
+			Status:    store.StatusFailed,
+			StartedAt: started,
+		},
+		Tasks: []store.TestMapPlanTask{
+			{
+				ID:            "task.path",
+				PlanID:        "plan.resume",
+				Index:         0,
+				Kind:          mapplanner.TaskRunPath,
+				Status:        store.StatusPassed,
+				PathID:        "path.empty",
+				WorkflowRunID: "run.already.passed",
+				EvidenceRoot:  "evidence/already",
+				StartedAt:     started,
+				FinishedAt:    finished,
+			},
+			{
+				ID:           "task.case.failed",
+				PlanID:       "plan.resume",
+				Index:        1,
+				Kind:         mapplanner.TaskRunCase,
+				Status:       store.StatusFailed,
+				CaseID:       "case.failed",
+				APICaseRunID: "run.failed.case",
+				EvidenceRoot: "evidence/failed",
+				Reason:       "assertion failed",
+				StartedAt:    started,
+				FinishedAt:   finished,
+			},
+			{
+				ID:     "task.case.planned",
+				PlanID: "plan.resume",
+				Index:  2,
+				Kind:   mapplanner.TaskRunCase,
+				Status: mapplanner.TaskStatusPlanned,
+				CaseID: "case.planned",
+			},
+		},
+	}
 }
 
 type mapRunExplainCommandReport struct {

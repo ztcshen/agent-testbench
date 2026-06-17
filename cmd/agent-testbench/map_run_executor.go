@@ -72,6 +72,10 @@ func (e mapRunExecutor) execute(record store.TestMapPlanRecord) store.TestMapPla
 			e.statusByTask[task.ID] = mapplanner.TaskStatusSkipped
 			continue
 		}
+		if !mapRunTaskSelectedForExecution(*task, e.options) || !mapRunTaskRunnable(*task, e.options) {
+			e.statusByTask[task.ID] = task.Status
+			continue
+		}
 		if blockedReason := e.blockedByDependency(record.TaskEdges, task.ID); blockedReason != "" {
 			e.finishTask(task, mapplanner.TaskStatusBlocked, map[string]any{"error": blockedReason}, now)
 			e.statusByTask[task.ID] = task.Status
@@ -95,6 +99,13 @@ func (e mapRunExecutor) execute(record store.TestMapPlanRecord) store.TestMapPla
 	record.Instance.Status = mapRunStatus(record.Tasks)
 	record.Instance.SummaryJSON = mustCompactJSON(mapRunSummaryFromTasks(record.Tasks))
 	return record
+}
+
+func mapRunTaskRunnable(task store.TestMapPlanTask, options mapRunOptions) bool {
+	if task.Status == "" || task.Status == mapplanner.TaskStatusPlanned || task.Status == mapplanner.TaskStatusRunning {
+		return true
+	}
+	return options.retryFailed && mapRunTaskFailedOrBlocked(task.Status)
 }
 
 func (e mapRunExecutor) blockedByDependency(edges []store.TestMapPlanTaskEdge, taskID string) string {

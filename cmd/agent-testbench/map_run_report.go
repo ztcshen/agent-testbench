@@ -58,6 +58,10 @@ func mapRunStatus(tasks []store.TestMapPlanTask) string {
 			return store.StatusFailed
 		case mapplanner.TaskStatusBlocked:
 			status = mapplanner.TaskStatusBlocked
+		case mapplanner.TaskStatusPlanned, mapplanner.TaskStatusRunning:
+			if status != mapplanner.TaskStatusBlocked {
+				status = mapplanner.TaskStatusRunning
+			}
 		}
 	}
 	return status

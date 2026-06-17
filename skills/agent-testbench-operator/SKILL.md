@@ -146,6 +146,9 @@ Build and inspect a Store-backed workflow map without running target services:
 ./skills/agent-testbench-operator/scripts/atb.sh map explain --store STORE_NAME --map MAP_ID --case CASE_ID --json
 ./skills/agent-testbench-operator/scripts/atb.sh map explain --store STORE_NAME --map MAP_ID --scope all --environment ENV_ID --save --json
 ./skills/agent-testbench-operator/scripts/atb.sh map run --store STORE_NAME --map MAP_ID --scope all --environment ENV_ID --json
+./skills/agent-testbench-operator/scripts/atb.sh map run --store STORE_NAME --plan PLAN_ID --resume --json
+./skills/agent-testbench-operator/scripts/atb.sh map run --store STORE_NAME --plan PLAN_ID --retry-failed --json
+./skills/agent-testbench-operator/scripts/atb.sh map run --store STORE_NAME --plan PLAN_ID --rerun-task TASK_ID --json
 ./skills/agent-testbench-operator/scripts/atb.sh map run explain --store STORE_NAME --plan PLAN_ID --json
 ./skills/agent-testbench-operator/scripts/atb.sh map review-html --store STORE_NAME --map MAP_ID --filter TEXT --output /tmp/map-review.html --json
 ```
@@ -172,8 +175,12 @@ planner instance into `test_map_plan_instances`, `test_map_plan_tasks`, and
 the explain output is reviewable: it creates a `mode=run` planner instance,
 executes the physical task DAG serially, writes each task status and child
 workflow/API case run id back to Store, and links child runs through
-test-plan metadata. Use `map run explain --plan PLAN_ID` to inspect a run plan
-without re-running it. Use `map review-html --map MAP_ID --filter TEXT
+test-plan metadata. When a persisted plan has useful partial evidence, prefer
+`map run --plan PLAN_ID --resume` to keep passed/skipped tasks and run the
+remaining incomplete tasks, `--retry-failed` to reset only failed/blocked
+tasks, or repeated `--rerun-task TASK_ID` to surgically rerun one task without
+discarding unrelated child run ids. Use `map run explain --plan PLAN_ID` to
+inspect a run plan without re-running it. Use `map review-html --map MAP_ID --filter TEXT
 --output PATH` when a human needs to review the Store-backed map visually: the
 generated HTML embeds the current map facts, can be narrowed to matching
 workflows/cases, supports workflow filtering/search, and shows clickable case

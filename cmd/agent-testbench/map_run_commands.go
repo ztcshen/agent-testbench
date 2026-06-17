@@ -27,6 +27,10 @@ type mapRunOptions struct {
 	baseURL        string
 	evidenceDir    string
 	timeoutSeconds int
+	resumeRun      bool
+	retryFailed    bool
+	skipPassed     bool
+	rerunTaskIDs   []string
 	jsonOutput     bool
 }
 
@@ -86,6 +90,11 @@ func parseMapRunOptions(args []string) (mapRunOptions, error) {
 	baseURL := flags.String("base-url", "", "Base URL override for API case execution")
 	evidenceDir := flags.String("evidence-dir", filepath.Join(".runtime", "map-runs"), "Evidence output directory")
 	timeoutSeconds := flags.Int("timeout-seconds", 0, "Request timeout in seconds for Store catalog case execution")
+	resumeRun := flags.Bool("resume", false, "Resume an existing plan by keeping passed/skipped tasks and running incomplete tasks")
+	retryFailed := flags.Bool("retry-failed", false, "Retry failed or blocked tasks in an existing plan")
+	skipPassed := flags.Bool("skip-passed", false, "Keep passed/skipped tasks when executing an existing plan")
+	var rerunTasks stringListFlag
+	flags.Var(&rerunTasks, "rerun-task", "Task id to rerun from an existing plan; repeat for multiple tasks")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return mapRunOptions{}, err
@@ -103,7 +112,14 @@ func parseMapRunOptions(args []string) (mapRunOptions, error) {
 	options.baseURL = strings.TrimSpace(*baseURL)
 	options.evidenceDir = strings.TrimSpace(*evidenceDir)
 	options.timeoutSeconds = *timeoutSeconds
+	options.resumeRun = *resumeRun
+	options.retryFailed = *retryFailed
+	options.skipPassed = *skipPassed
+	options.rerunTaskIDs = rerunTasks.Values()
 	options.jsonOutput = *jsonOutput
+	if mapRunHasResumeControls(options) && options.planID == "" {
+		return mapRunOptions{}, errors.New("--resume, --retry-failed, --skip-passed, and --rerun-task require --plan")
+	}
 	return options, nil
 }
 
@@ -192,14 +208,64 @@ func prepareExistingMapRunRecord(record store.TestMapPlanRecord, options mapRunO
 			task.Status = mapplanner.TaskStatusSkipped
 			continue
 		}
-		task.Status = mapplanner.TaskStatusPlanned
+		if mapRunHasResumeControls(options) && !mapRunTaskSelectedForExecution(*task, options) {
+			continue
+		}
+		if !mapRunKeepRetryStatusUntilExecution(*task, options) {
+			task.Status = mapplanner.TaskStatusPlanned
+		}
 		task.WorkflowRunID = ""
 		task.APICaseRunID = ""
 		task.EvidenceRoot = ""
+		task.Reason = ""
 		task.StartedAt = time.Time{}
 		task.FinishedAt = time.Time{}
 	}
 	return record
+}
+
+func mapRunHasResumeControls(options mapRunOptions) bool {
+	return options.resumeRun || options.retryFailed || options.skipPassed || len(options.rerunTaskIDs) > 0
+}
+
+func mapRunTaskSelectedForExecution(task store.TestMapPlanTask, options mapRunOptions) bool {
+	if task.Kind == mapplanner.TaskSkip || task.Status == mapplanner.TaskStatusSkipped {
+		return false
+	}
+	selectedTasks := mapRunSelectedTaskIDs(options.rerunTaskIDs)
+	if len(selectedTasks) > 0 && selectedTasks[task.ID] {
+		return true
+	}
+	if options.retryFailed && mapRunTaskFailedOrBlocked(task.Status) {
+		return true
+	}
+	if options.resumeRun || options.skipPassed {
+		return !mapRunTaskAlreadyComplete(task.Status)
+	}
+	if len(selectedTasks) > 0 || options.retryFailed {
+		return false
+	}
+	return true
+}
+
+func mapRunSelectedTaskIDs(ids []string) map[string]bool {
+	out := map[string]bool{}
+	for _, id := range normalizeStringList(ids) {
+		out[id] = true
+	}
+	return out
+}
+
+func mapRunTaskAlreadyComplete(status string) bool {
+	return status == store.StatusPassed || status == mapplanner.TaskStatusSkipped
+}
+
+func mapRunTaskFailedOrBlocked(status string) bool {
+	return status == store.StatusFailed || status == mapplanner.TaskStatusBlocked
+}
+
+func mapRunKeepRetryStatusUntilExecution(task store.TestMapPlanTask, options mapRunOptions) bool {
+	return options.retryFailed && !options.resumeRun && !options.skipPassed && len(options.rerunTaskIDs) == 0 && mapRunTaskFailedOrBlocked(task.Status)
 }
 
 func runMapRunExplain(ctx context.Context, args []string) error {
