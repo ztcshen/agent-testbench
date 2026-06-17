@@ -70,6 +70,14 @@ func TestMapImportWorkflowsAndExplainUsesStoreCatalog(t *testing.T) {
 	}
 }
 
+func TestMapImportWorkflowsRejectsPositionalArgsBeforeOpeningStore(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "map.sqlite")
+	out := runCLIFails(t, "map", "import-workflows", "typo", "--store", "sqlite://"+storePath, "--json")
+	if !strings.Contains(out, "does not accept positional arguments") {
+		t.Fatalf("unexpected import-workflows positional arg error:\n%s", out)
+	}
+}
+
 func TestMapCommandsAreDiscoverable(t *testing.T) {
 	out := runCLI(t, "commands", "--filter", "map", "--json")
 	var report struct {

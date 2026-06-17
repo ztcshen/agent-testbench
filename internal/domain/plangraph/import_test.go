@@ -122,6 +122,33 @@ func TestExplainCaseSelectsReplayPrefixForValidationDiff(t *testing.T) {
 	}
 }
 
+func TestExplainCaseIgnoresOptionalFixtureEdge(t *testing.T) {
+	source := plannerFixtureCatalog()
+	source.Fixtures[0].SourceWorkflowID = "workflow.flow.audit"
+	source.Fixtures[0].SourceUntilStep = "step.audit"
+	source.CaseDependencies[0].Required = false
+	graph, err := ImportCatalog(source, ImportOptions{})
+	if err != nil {
+		t.Fatalf("import catalog: %v", err)
+	}
+	edge := requireEdgeTo(t, graph, "case.submit.field.required", EdgeKindFixture)
+	if edge.Required {
+		t.Fatalf("fixture edge should be optional: %#v", edge)
+	}
+
+	explain, err := ExplainCase(graph, ExplainOptions{CaseID: "case.submit.field.required"})
+	if err != nil {
+		t.Fatalf("explain case: %v", err)
+	}
+	if len(explain.Operations) != 2 {
+		t.Fatalf("operations = %#v", explain.Operations)
+	}
+	prefix := explain.Operations[0]
+	if prefix.Kind != OperationRunPathPrefix || prefix.UntilNodeID == "case.audit" || strings.Contains(prefix.Reason, "fixture") {
+		t.Fatalf("optional fixture should not drive mandatory replay prefix: %#v", prefix)
+	}
+}
+
 func TestExplainCaseDoesNotRejectAlternatePathsThatContainPrimaryTarget(t *testing.T) {
 	graph, err := ImportCatalog(plannerFixtureCatalog(), ImportOptions{})
 	if err != nil {
@@ -227,8 +254,8 @@ func TestImportCatalogImportsStandaloneValidationCase(t *testing.T) {
 	}
 }
 
-func TestImportCatalogSkipsInactiveWorkflowBindingCase(t *testing.T) {
-	graph, err := ImportCatalog(catalog.ProfileCatalog{
+func TestImportCatalogRejectsRequiredInactiveWorkflowBindingCase(t *testing.T) {
+	_, err := ImportCatalog(catalog.ProfileCatalog{
 		ProfileID: "profile.inactive",
 		Workflows: []catalog.Workflow{
 			{ID: "workflow.flow.retired"},
@@ -242,12 +269,8 @@ func TestImportCatalogSkipsInactiveWorkflowBindingCase(t *testing.T) {
 			{WorkflowID: "workflow.flow.retired", StepID: "retired", CaseID: "case.retired", Required: true, SortOrder: 2},
 		},
 	}, ImportOptions{})
-	if err != nil {
-		t.Fatalf("import catalog: %v", err)
-	}
-
-	if hasNode(graph, "case.retired") || countPathSteps(graph, "case.retired") != 0 {
-		t.Fatalf("inactive binding case should not become an active map node: nodes=%#v steps=%#v", graph.Nodes, graph.PathSteps)
+	if err == nil || !strings.Contains(err.Error(), "required workflow binding") || !strings.Contains(err.Error(), "case.retired") {
+		t.Fatalf("expected required inactive binding error, got %v", err)
 	}
 }
 

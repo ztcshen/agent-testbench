@@ -148,7 +148,7 @@ func materializationForTarget(graph Graph, nodeID string) (Materialization, bool
 		materializationByID[item.ID] = item
 	}
 	for _, edge := range graph.Edges {
-		if edge.ToNodeID != nodeID || edge.Kind != EdgeKindFixture {
+		if edge.ToNodeID != nodeID || edge.Kind != EdgeKindFixture || !edge.Required {
 			continue
 		}
 		if item, ok := materializationByID[edge.MaterializationID]; ok {

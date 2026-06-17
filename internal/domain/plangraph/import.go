@@ -46,7 +46,9 @@ func ImportCatalog(snapshot catalog.ProfileCatalog, options ImportOptions) (Grap
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	builder.importPaths()
+	if err := builder.importPaths(); err != nil {
+		return Graph{}, err
+	}
 	builder.importValidationCases()
 	builder.importMaterializations()
 	builder.finalize()
@@ -111,7 +113,7 @@ func newGraphBuilder(snapshot catalog.ProfileCatalog, mapID string, now time.Tim
 	return b
 }
 
-func (b *graphBuilder) importPaths() {
+func (b *graphBuilder) importPaths() error {
 	pathIDs := make([]string, 0, len(b.bindingsByPath))
 	for id := range b.bindingsByPath {
 		pathIDs = append(pathIDs, id)
@@ -137,6 +139,9 @@ func (b *graphBuilder) importPaths() {
 		for _, binding := range bindings {
 			apiCase, ok := b.caseByID[binding.CaseID]
 			if !ok {
+				if binding.Required {
+					return fmt.Errorf("required workflow binding %s/%s references missing or inactive case %s", pathID, strings.TrimSpace(binding.StepID), binding.CaseID)
+				}
 				continue
 			}
 			node := b.upsertCaseNode(apiCase, true)
@@ -172,6 +177,7 @@ func (b *graphBuilder) importPaths() {
 		path.SummaryJSON = jsonText(map[string]any{"stepCount": pathStepIndex})
 		b.pathByID[pathID] = path
 	}
+	return nil
 }
 
 func (b *graphBuilder) importValidationCases() {

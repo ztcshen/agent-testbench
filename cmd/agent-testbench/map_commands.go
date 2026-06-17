@@ -79,6 +79,9 @@ func runMapImportWorkflows(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	if flags.NArg() > 0 {
+		return fmt.Errorf("map import-workflows does not accept positional arguments: %s", strings.Join(flags.Args(), " "))
+	}
 	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
 	if err != nil {
 		return err
