@@ -382,12 +382,3 @@ func countPathSteps(graph Graph, nodeID string) int {
 	}
 	return count
 }
-
-func hasNode(graph Graph, nodeID string) bool {
-	for _, node := range graph.Nodes {
-		if node.ID == nodeID {
-			return true
-		}
-	}
-	return false
-}
