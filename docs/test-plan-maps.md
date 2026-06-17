@@ -192,3 +192,14 @@ re-running it:
 ```bash
 agent-testbench map run explain --store STORE_NAME --plan PLAN_ID --json
 ```
+
+Gate a persisted map run before accepting it as map-level evidence:
+
+```bash
+agent-testbench map gate --store STORE_NAME --plan PLAN_ID --require-passed --require-tasks --require-evidence --json
+```
+
+`map gate` does not execute target services. It reads the saved planner
+instance, checks aggregate plan status, task status, child workflow/API case run
+links, and Store Evidence indexes, then reports failed tasks, missing Evidence,
+and next actions such as `--retry-failed` or `--rerun-task`.

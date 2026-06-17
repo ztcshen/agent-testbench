@@ -155,7 +155,7 @@ func TestMapCommandsAreDiscoverable(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode commands json: %v\n%s", err, out)
 	}
-	if report.Count != 6 {
+	if report.Count != 7 {
 		t.Fatalf("map command count = %#v", report)
 	}
 	if report.Commands[0].Command != "map import-workflows" || !report.Commands[0].StoreAware {
@@ -167,13 +167,16 @@ func TestMapCommandsAreDiscoverable(t *testing.T) {
 	if report.Commands[2].Command != "map explain" || !report.Commands[2].StoreAware {
 		t.Fatalf("map explain command = %#v", report.Commands)
 	}
-	if report.Commands[3].Command != "map run" || !report.Commands[3].StoreAware {
+	if report.Commands[3].Command != "map gate" || !report.Commands[3].StoreAware {
+		t.Fatalf("map gate command = %#v", report.Commands)
+	}
+	if report.Commands[4].Command != "map run" || !report.Commands[4].StoreAware {
 		t.Fatalf("map run command = %#v", report.Commands)
 	}
-	if report.Commands[4].Command != "map run explain" || !report.Commands[4].StoreAware {
+	if report.Commands[5].Command != "map run explain" || !report.Commands[5].StoreAware {
 		t.Fatalf("map run explain command = %#v", report.Commands)
 	}
-	if report.Commands[5].Command != "map review-html" || !report.Commands[5].StoreAware {
+	if report.Commands[6].Command != "map review-html" || !report.Commands[6].StoreAware {
 		t.Fatalf("map review-html command = %#v", report.Commands)
 	}
 }

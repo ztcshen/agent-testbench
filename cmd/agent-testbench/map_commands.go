@@ -62,6 +62,8 @@ func runMap(ctx context.Context, args []string) error {
 		return runMapWorkflows(ctx, args[1:])
 	case "explain":
 		return runMapExplain(ctx, args[1:])
+	case "gate":
+		return runMapGate(ctx, args[1:])
 	case "run":
 		return runMapRun(ctx, args[1:])
 	case "review-html":

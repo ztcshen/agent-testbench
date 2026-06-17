@@ -109,6 +109,7 @@ Usage:
   agent-testbench map import-workflows [--store NAME_OR_DSN] [--map ID] [--display-name NAME] [--description TEXT] [--json]
   agent-testbench map workflows --map ID [--store NAME_OR_DSN] [--filter TEXT] [--json]
   agent-testbench map explain --map ID [--scope all|workflows|cases] [--case CASE_ID | --node NODE_ID | --path PATH_ID | --workflow WORKFLOW_ID] [--environment ENV_ID] [--save] [--store NAME_OR_DSN] [--json]
+  agent-testbench map gate --plan PLAN_ID [--store NAME_OR_DSN] [--require-passed] [--require-tasks] [--require-evidence] [--json]
   agent-testbench map run [--map ID | --plan PLAN_ID] [--scope all|workflows|cases] [--case CASE_ID | --node NODE_ID | --path PATH_ID | --workflow WORKFLOW_ID] [--resume | --retry-failed | --skip-passed | --rerun-task TASK_ID] [--environment ENV_ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--store NAME_OR_DSN] [--json]
   agent-testbench map run explain --plan PLAN_ID [--store NAME_OR_DSN] [--json]
   agent-testbench map review-html --map ID [--store NAME_OR_DSN] [--filter TEXT] [--output PATH] [--json]

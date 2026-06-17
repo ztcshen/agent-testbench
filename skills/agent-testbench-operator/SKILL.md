@@ -150,6 +150,7 @@ Build and inspect a Store-backed workflow map without running target services:
 ./skills/agent-testbench-operator/scripts/atb.sh map run --store STORE_NAME --plan PLAN_ID --retry-failed --json
 ./skills/agent-testbench-operator/scripts/atb.sh map run --store STORE_NAME --plan PLAN_ID --rerun-task TASK_ID --json
 ./skills/agent-testbench-operator/scripts/atb.sh map run explain --store STORE_NAME --plan PLAN_ID --json
+./skills/agent-testbench-operator/scripts/atb.sh map gate --store STORE_NAME --plan PLAN_ID --require-passed --require-tasks --require-evidence --json
 ./skills/agent-testbench-operator/scripts/atb.sh map review-html --store STORE_NAME --map MAP_ID --filter TEXT --output /tmp/map-review.html --json
 ```
 
@@ -180,7 +181,11 @@ test-plan metadata. When a persisted plan has useful partial evidence, prefer
 remaining incomplete tasks, `--retry-failed` to reset only failed/blocked
 tasks, or repeated `--rerun-task TASK_ID` to surgically rerun one task without
 discarding unrelated child run ids. Use `map run explain --plan PLAN_ID` to
-inspect a run plan without re-running it. Use `map review-html --map MAP_ID --filter TEXT
+inspect a run plan without re-running it. Use `map gate --plan PLAN_ID
+--require-passed --require-tasks --require-evidence` as the map-level
+acceptance gate: it reads the persisted plan, task statuses, child run ids, and
+Store Evidence indexes, then reports failed tasks, missing Evidence, and
+recovery commands. Use `map review-html --map MAP_ID --filter TEXT
 --output PATH` when a human needs to review the Store-backed map visually: the
 generated HTML embeds the current map facts, can be narrowed to matching
 workflows/cases, supports workflow filtering/search, and shows clickable case
