@@ -238,6 +238,10 @@ func TestPlanSelectsReadyCasesAndBuildsBatchRequest(t *testing.T) {
 func TestImpactPlansCasesFromChangedSignals(t *testing.T) {
 	bundle := profile.Bundle{
 		ID: "sample",
+		Services: []profile.Service{
+			{ID: "service.alpha", DisplayName: "Service Alpha", Status: "active", HealthURL: "http://127.0.0.1/alpha/health"},
+			{ID: "service.beta", DisplayName: "Service Beta", Status: "active", HealthURL: "http://127.0.0.1/beta/health"},
+		},
 		InterfaceNodes: []profile.InterfaceNode{
 			{ID: "node.create", DisplayName: "Create Item", ServiceID: "service.alpha", Operation: "Create", Method: "POST", Path: "/v1/items", Tags: []string{"items"}, SortOrder: 1},
 			{ID: "node.search", DisplayName: "Search Item", ServiceID: "service.alpha", Operation: "Search", Method: "GET", Path: "/v1/items/search", Tags: []string{"items"}, SortOrder: 2},

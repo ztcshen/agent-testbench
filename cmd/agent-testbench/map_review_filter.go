@@ -28,6 +28,11 @@ func filterMapReviewGraph(graph store.TestPlanGraph, filter string) store.TestPl
 	}
 	keptEdges := mapReviewExpandEdges(graph.Edges, pathIDs, keptNodes, hasDirectPathMatch)
 	keptMaterializations := mapReviewMaterializationIDs(keptEdges)
+	if mapReviewKeepMaterializationSourcePaths(graph.Materializations, keptMaterializations, pathIDs) {
+		mapReviewKeepPathStepNodes(graph.PathSteps, pathIDs, keptNodes)
+		keptEdges = mapReviewExpandEdges(graph.Edges, pathIDs, keptNodes, hasDirectPathMatch)
+		keptMaterializations = mapReviewMaterializationIDs(keptEdges)
+	}
 
 	next := graph
 	next.Nodes = filterMapReviewNodes(graph.Nodes, keptNodes)
@@ -111,6 +116,26 @@ func mapReviewMaterializationIDs(edges []store.TestPlanEdge) map[string]bool {
 		}
 	}
 	return out
+}
+
+func mapReviewKeepMaterializationSourcePaths(materializations []store.TestPlanMaterialization, keptMaterializations map[string]bool, pathIDs map[string]bool) bool {
+	changed := false
+	for _, item := range materializations {
+		if !keptMaterializations[item.ID] || item.SourcePathID == "" || pathIDs[item.SourcePathID] {
+			continue
+		}
+		pathIDs[item.SourcePathID] = true
+		changed = true
+	}
+	return changed
+}
+
+func mapReviewKeepPathStepNodes(steps []store.TestPlanPathStep, pathIDs map[string]bool, keptNodes map[string]bool) {
+	for _, step := range steps {
+		if pathIDs[step.PathID] {
+			keptNodes[step.NodeID] = true
+		}
+	}
 }
 
 func mapReviewTextMatches(needle string, values ...string) bool {

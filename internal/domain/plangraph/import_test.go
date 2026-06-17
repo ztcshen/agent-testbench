@@ -176,6 +176,39 @@ func TestImportCatalogUsesBoundedControlEdgeIDs(t *testing.T) {
 	}
 }
 
+func TestImportCatalogUsesBoundedFixtureEdgeIDs(t *testing.T) {
+	longWorkflowID := "workflow." + strings.Repeat("very-long-segment.", 5)
+	longFixtureID := "fixture." + strings.Repeat("before-submit-", 8)
+	longValidationCaseID := "case.validation." + strings.Repeat("field-required-", 8)
+	graph, err := ImportCatalog(catalog.ProfileCatalog{
+		ProfileID: "profile.longfixtures",
+		Workflows: []catalog.Workflow{
+			{ID: longWorkflowID},
+		},
+		APICases: []catalog.APICase{
+			{ID: "case.prepare", NodeID: "node.prepare", Status: "active"},
+			{ID: longValidationCaseID, NodeID: "node.submit", CaseType: "negative", Status: "active"},
+		},
+		WorkflowBindings: []catalog.WorkflowBinding{
+			{WorkflowID: longWorkflowID, StepID: "step.prepare", CaseID: "case.prepare", Required: true, SortOrder: 1},
+		},
+		Fixtures: []catalog.Fixture{{
+			ID: longFixtureID, Kind: "workflow_prefix", SourceWorkflowID: longWorkflowID, SourceUntilStep: "step.prepare", Status: "active",
+		}},
+		CaseDependencies: []catalog.CaseDependency{{
+			CaseID: longValidationCaseID, FixtureID: longFixtureID, Required: true,
+		}},
+	}, ImportOptions{})
+	if err != nil {
+		t.Fatalf("import catalog: %v", err)
+	}
+
+	edge := requireEdgeTo(t, graph, longValidationCaseID, EdgeKindFixture)
+	if len(edge.ID) > 128 {
+		t.Fatalf("fixture edge id should fit store key width, got %d chars: %s", len(edge.ID), edge.ID)
+	}
+}
+
 func TestImportCatalogImportsStandaloneValidationCase(t *testing.T) {
 	graph, err := ImportCatalog(catalog.ProfileCatalog{
 		ProfileID: "profile.validation",
@@ -198,15 +231,15 @@ func TestImportCatalogSkipsInactiveWorkflowBindingCase(t *testing.T) {
 	graph, err := ImportCatalog(catalog.ProfileCatalog{
 		ProfileID: "profile.inactive",
 		Workflows: []catalog.Workflow{
-			{ID: "workflow.checkout"},
+			{ID: "workflow.flow.retired"},
 		},
 		APICases: []catalog.APICase{
 			{ID: "case.cart", NodeID: "node.cart", Status: "active", SortOrder: 1},
 			{ID: "case.retired", NodeID: "node.retired", Status: "inactive", SortOrder: 2},
 		},
 		WorkflowBindings: []catalog.WorkflowBinding{
-			{WorkflowID: "workflow.checkout", StepID: "cart", CaseID: "case.cart", Required: true, SortOrder: 1},
-			{WorkflowID: "workflow.checkout", StepID: "retired", CaseID: "case.retired", Required: true, SortOrder: 2},
+			{WorkflowID: "workflow.flow.retired", StepID: "cart", CaseID: "case.cart", Required: true, SortOrder: 1},
+			{WorkflowID: "workflow.flow.retired", StepID: "retired", CaseID: "case.retired", Required: true, SortOrder: 2},
 		},
 	}, ImportOptions{})
 	if err != nil {

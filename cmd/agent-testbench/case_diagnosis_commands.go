@@ -151,7 +151,7 @@ func diagnoseMissingCaseEvidence(ctx context.Context, runtime store.Store, caseR
 			{Name: "evidence.case_runs", Value: "0"},
 		},
 		NextActions: []string{
-			"agent-testbench case batch report --run " + firstNonEmpty(runID, "<RUN_ID>") + " --json",
+			"agent-testbench case runs --run " + firstNonEmpty(runID, "<RUN_ID>") + " --json",
 			"rerun the failed case with evidence capture enabled before diagnosing request/response details",
 		},
 		Warnings: []string{"no persisted case evidence matched the selected run/case/step"},

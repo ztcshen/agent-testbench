@@ -97,7 +97,7 @@ func inspectionIssues(row InspectionItem) []string {
 }
 
 func inspectCaseServiceReadiness(serviceID string, services map[string]profile.Service) (bool, []string) {
-	if strings.TrimSpace(serviceID) == "" || len(services) == 0 {
+	if strings.TrimSpace(serviceID) == "" {
 		return true, nil
 	}
 	service, ok := services[serviceID]

@@ -106,6 +106,34 @@ func TestInspectBlocksCaseWhenDependencyServiceCannotBeStartedOrChecked(t *testi
 	}
 }
 
+func TestInspectBlocksCaseWhenDependencyServiceCatalogIsMissing(t *testing.T) {
+	bundle := profile.Bundle{
+		ID: "sample",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.bridge", DisplayName: "Bridge Node", ServiceID: "service.bridge"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.bridge", DisplayName: "Bridge Case", Description: "Requires a registered service.", NodeID: "node.bridge", CasePath: "cases/bridge.json", Tags: []string{"regression"}, Priority: "p0", Owner: "team-a", Status: "active"},
+		},
+		TemplateConfigs: []profile.TemplateConfig{
+			{ID: "cfg.case.bridge", ScopeType: "case", ScopeID: "case.bridge", Status: "active", ConfigJSON: `{"caseId":"case.bridge","caseExecution":{"method":"POST","path":"/bridge"}}`},
+		},
+	}
+	cases := SelectCases(bundle, Filter{Status: "active"})
+
+	report, err := Inspect(context.Background(), bundle, recordStore{}, Filter{Status: "active"}, cases)
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+	if report.OK || report.Counts.Ready != 0 || report.Counts.Blocked != 1 || len(report.Items) != 1 {
+		t.Fatalf("inspection counts = %#v items=%#v", report.Counts, report.Items)
+	}
+	item := report.Items[0]
+	if item.Ready || item.ServiceID != "service.bridge" || item.ServiceReady || !containsString(item.ServiceIssues, "missing-service") {
+		t.Fatalf("inspection should expose missing service catalog blocker: %#v", item)
+	}
+}
+
 func TestInspectAcceptsComposeManagedDependencyService(t *testing.T) {
 	bundle := profile.Bundle{
 		ID: "sample",

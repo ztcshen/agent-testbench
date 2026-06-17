@@ -47,7 +47,7 @@ agent-testbench map import-workflows --store STORE_NAME --json
 Use `--map ID` only when intentionally naming a separate map:
 
 ```bash
-agent-testbench map import-workflows --store STORE_NAME --map map.checkout --display-name "Checkout Map" --json
+agent-testbench map import-workflows --store STORE_NAME --map map.capability --display-name "Capability Map" --json
 ```
 
 The import replaces the same map id with the current catalog projection. It

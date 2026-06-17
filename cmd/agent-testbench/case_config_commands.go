@@ -165,7 +165,9 @@ func upsertCaseExecutionConfig(ctx context.Context, runtime store.Store, options
 	}
 	config, exists := findCatalogTemplateConfig(catalog.TemplateConfigs, configID)
 	config.ID = configID
-	config.ScopeType = "case"
+	if !exists || !isCaseExecutionConfigScope(config.ScopeType) {
+		config.ScopeType = "case"
+	}
 	config.ScopeID = caseID
 	config.Status = "active"
 	configJSON, err := mergeCaseExecutionConfigJSON(config.ConfigJSON, caseID, apiCase, catalog, caseConfigExecutionPatch{
@@ -352,7 +354,7 @@ func selectedCaseExecutionTemplateConfigID(catalog store.ProfileCatalog, caseID 
 		if config.Status != "" && config.Status != "active" {
 			continue
 		}
-		if config.ScopeType != "" && config.ScopeType != "case" {
+		if !isCaseExecutionConfigScope(config.ScopeType) {
 			continue
 		}
 		if config.ScopeID != "" && config.ScopeID != caseID {
@@ -374,6 +376,11 @@ func selectedCaseExecutionTemplateConfigID(catalog store.ProfileCatalog, caseID 
 		return config.ID
 	}
 	return ""
+}
+
+func isCaseExecutionConfigScope(scopeType string) bool {
+	scopeType = strings.TrimSpace(scopeType)
+	return scopeType == "" || scopeType == "case" || scopeType == "api-case"
 }
 
 func upsertCatalogTemplateConfig(items []store.CatalogTemplateConfig, next store.CatalogTemplateConfig) []store.CatalogTemplateConfig {

@@ -298,6 +298,45 @@ func TestMapReviewHTMLCanFilterWorkflowPaths(t *testing.T) {
 	}
 }
 
+func TestMapReviewFilterIncludesReplayPathForFixtureTarget(t *testing.T) {
+	graph := store.TestPlanGraph{
+		Map: store.TestPlanMap{ID: "map.contract", ProfileID: "profile.contract", DisplayName: "Contract Map", Status: "active"},
+		Nodes: []store.TestPlanNode{
+			{MapID: "map.contract", ID: "case.prepare", CaseID: "case.prepare", Role: "primary", StateEffect: "advance", SummaryJSON: `{}`, SortOrder: 1},
+			{MapID: "map.contract", ID: "case.submit", CaseID: "case.submit", Role: "primary", StateEffect: "advance", SummaryJSON: `{}`, SortOrder: 2},
+			{MapID: "map.contract", ID: "case.submit.field.required", CaseID: "case.submit.field.required", Role: "validation", StateEffect: "unchanged", SummaryJSON: `{}`, SortOrder: 3},
+		},
+		Paths: []store.TestPlanPath{
+			{MapID: "map.contract", ID: "workflow.create.success", WorkflowID: "workflow.create.success", DisplayName: "Create Success", Status: "active", SummaryJSON: `{}`, SortOrder: 1},
+		},
+		PathSteps: []store.TestPlanPathStep{
+			{MapID: "map.contract", PathID: "workflow.create.success", StepIndex: 1, StepID: "prepare", NodeID: "case.prepare", CaseID: "case.prepare", Required: true, SummaryJSON: `{}`},
+			{MapID: "map.contract", PathID: "workflow.create.success", StepIndex: 2, StepID: "submit", NodeID: "case.submit", CaseID: "case.submit", Required: true, SummaryJSON: `{}`},
+		},
+		Materializations: []store.TestPlanMaterialization{
+			{MapID: "map.contract", ID: "fixture.before.submit", SourcePathID: "workflow.create.success", SourceUntilNodeID: "case.prepare", Status: "active", SummaryJSON: `{}`},
+		},
+		Edges: []store.TestPlanEdge{
+			{MapID: "map.contract", ID: "edge.create.prepare.submit", FromNodeID: "case.prepare", ToNodeID: "case.submit", Kind: "control", PathID: "workflow.create.success", Required: true, SummaryJSON: `{}`},
+			{MapID: "map.contract", ID: "edge.fixture.field.required", FromNodeID: "case.prepare", ToNodeID: "case.submit.field.required", Kind: "fixture", MaterializationID: "fixture.before.submit", Required: true, SummaryJSON: `{}`},
+		},
+	}
+
+	filtered := filterMapReviewGraph(graph, "field.required")
+	if len(filtered.Paths) != 1 || filtered.Paths[0].ID != "workflow.create.success" {
+		t.Fatalf("filtered fixture target should retain replay path: %#v", filtered.Paths)
+	}
+	if len(filtered.PathSteps) != 2 {
+		t.Fatalf("filtered fixture target should retain source path steps: %#v", filtered.PathSteps)
+	}
+	if !mapCommandHasNode(filtered.Nodes, "case.prepare") || !mapCommandHasNode(filtered.Nodes, "case.submit.field.required") {
+		t.Fatalf("filtered fixture target should keep replay and target nodes: %#v", filtered.Nodes)
+	}
+	if !mapCommandHasEdge(filtered.Edges, "edge.create.prepare.submit") || !mapCommandHasEdge(filtered.Edges, "edge.fixture.field.required") {
+		t.Fatalf("filtered fixture target should keep replay and fixture edges: %#v", filtered.Edges)
+	}
+}
+
 func mapCommandProfileCatalogFixture() store.ProfileCatalog {
 	return store.ProfileCatalog{
 		ProfileID: "profile.flow",
@@ -318,4 +357,22 @@ func mapCommandProfileCatalogFixture() store.ProfileCatalog {
 			ID: "dependency.field.required", CaseID: "case.submit.field.required", FixtureID: "fixture.before.submit", Required: true, MappingsJSON: `[]`,
 		}},
 	}
+}
+
+func mapCommandHasNode(nodes []store.TestPlanNode, id string) bool {
+	for _, node := range nodes {
+		if node.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func mapCommandHasEdge(edges []store.TestPlanEdge, id string) bool {
+	for _, edge := range edges {
+		if edge.ID == id {
+			return true
+		}
+	}
+	return false
 }

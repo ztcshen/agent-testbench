@@ -137,6 +137,36 @@ func TestCaseConfigUpsertUpdatesSelectedConfigAndRequestAuthFields(t *testing.T)
 	}
 }
 
+func TestCaseConfigUpsertReusesAPICaseScopedExecutionConfig(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	seedCaseConfigUpsertCatalogWithAPICaseScopedConfig(t, storePath)
+
+	out := runCLI(t, "case", "config", "upsert",
+		"--store", "sqlite://"+storePath,
+		"--case", "case.generic.submit",
+		"--method", "POST",
+		"--path", "/generic/submit",
+		"--header", "X-Trace={{ override:trace_id }}",
+		"--expected-status", "200",
+		"--json",
+	)
+	var report struct {
+		OK      bool `json:"ok"`
+		Created bool `json:"created"`
+		Updated bool `json:"updated"`
+		Config  struct {
+			ID string `json:"id"`
+		} `json:"config"`
+		SelectedByRunner bool `json:"selectedByRunner"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode case config upsert report: %v\n%s", err, out)
+	}
+	if !report.OK || report.Created || !report.Updated || report.Config.ID != "config.api-case.generic.submit" || !report.SelectedByRunner {
+		t.Fatalf("api-case scoped config should be updated in place: %#v", report)
+	}
+}
+
 func writeCaseConfigSigningKey(t *testing.T) string {
 	t.Helper()
 	keyPath := filepath.Join(t.TempDir(), "request-signing-key.pem")
@@ -170,6 +200,42 @@ func seedCaseConfigUpsertCatalog(t *testing.T, storePath string) {
 			DisplayName: "Generic Submit",
 			NodeID:      "node.generic",
 			Status:      "active",
+		}},
+	}); err != nil {
+		t.Fatalf("replace profile catalog: %v", err)
+	}
+}
+
+func seedCaseConfigUpsertCatalogWithAPICaseScopedConfig(t *testing.T, storePath string) {
+	t.Helper()
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "default",
+		IndexedAt: time.Now().UTC(),
+		InterfaceNodes: []store.CatalogInterfaceNode{{
+			ID:        "node.generic",
+			ServiceID: "service.generic",
+			Method:    "POST",
+			Path:      "/generic/submit",
+			Status:    "active",
+		}},
+		APICases: []store.CatalogAPICase{{
+			ID:          "case.generic.submit",
+			DisplayName: "Generic Submit",
+			NodeID:      "node.generic",
+			Status:      "active",
+		}},
+		TemplateConfigs: []store.CatalogTemplateConfig{{
+			ID:         "config.api-case.generic.submit",
+			ScopeType:  "api-case",
+			ScopeID:    "case.generic.submit",
+			Status:     "active",
+			ConfigJSON: `{"caseId":"case.generic.submit","caseExecution":{"method":"POST","nodeId":"node.generic","path":"/generic/submit"}}`,
 		}},
 	}); err != nil {
 		t.Fatalf("replace profile catalog: %v", err)

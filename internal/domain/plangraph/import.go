@@ -244,7 +244,10 @@ func (b *graphBuilder) importMaterializations() {
 		if !ok {
 			continue
 		}
-		edgeID := stringDefault(dependency.ID, "edge."+materializationID+"."+target.ID)
+		edgeID := strings.TrimSpace(dependency.ID)
+		if edgeID == "" {
+			edgeID = fixtureEdgeID(materializationID, target.ID)
+		}
 		b.edgeByID[edgeID] = Edge{
 			MapID:             b.mapID,
 			ID:                edgeID,
@@ -426,6 +429,19 @@ func controlEdgeID(pathID string, stepIndex int, fromNodeID string, toNodeID str
 		return fmt.Sprintf("edge.%03d.%s", stepIndex, hash)
 	}
 	return fmt.Sprintf("edge.%s.%03d.%s", prefix, stepIndex, hash)
+}
+
+func fixtureEdgeID(materializationID string, targetNodeID string) string {
+	raw := "edge." + materializationID + "." + targetNodeID
+	if len(raw) <= 128 {
+		return raw
+	}
+	hash := shortIDHash("fixture", materializationID, targetNodeID)
+	prefix := truncateIDPart(materializationID, 80)
+	if prefix == "" {
+		return "edge.fixture." + hash
+	}
+	return "edge." + prefix + "." + hash
 }
 
 func shortIDHash(parts ...string) string {
