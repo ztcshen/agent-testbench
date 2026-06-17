@@ -205,9 +205,7 @@ func prepareExistingMapRunRecord(record store.TestMapPlanRecord, options mapRunO
 	if strings.TrimSpace(options.environmentID) != "" {
 		record.Instance.EnvironmentID = options.environmentID
 	}
-	if record.Instance.StartedAt.IsZero() {
-		record.Instance.StartedAt = now
-	}
+	record.Instance.StartedAt = now
 	record.Instance.FinishedAt = time.Time{}
 	for i := range record.Tasks {
 		task := &record.Tasks[i]

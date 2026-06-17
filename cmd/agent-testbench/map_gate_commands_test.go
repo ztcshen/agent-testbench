@@ -30,6 +30,29 @@ func TestMapGatePassesCompletedPlanWithEvidence(t *testing.T) {
 	}
 }
 
+func TestMapGateCountsEvidenceStoredUnderCaseRunID(t *testing.T) {
+	ctx := context.Background()
+	record := mapGatePlanFixture(store.StatusPassed)
+	storeRef := "sqlite://" + filepath.Join(t.TempDir(), "map-gate-case-run-evidence.sqlite")
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { closeCLIStore(runtime) })
+	if err := runtime.SaveTestMapPlan(ctx, record); err != nil {
+		t.Fatalf("save map plan: %v", err)
+	}
+	recordMapGateEvidence(t, ctx, runtime, "run.workflow.step.case", "run.workflow.step.case")
+	recordMapGateEvidence(t, ctx, runtime, "run.case.case", "run.case.case")
+
+	out := runCLI(t, "map", "gate", "--store", storeRef, "--plan", "plan.gate", "--require-passed", "--require-tasks", "--require-evidence", "--json")
+	report := decodeMapGateReport(t, out)
+
+	if !report.OK || report.Counts.EvidenceComplete != 2 || !report.Gates.EvidenceComplete {
+		t.Fatalf("map gate should count case-run-scoped evidence = %#v", report)
+	}
+}
+
 func TestMapGateFailsForFailedTaskAndMissingEvidence(t *testing.T) {
 	ctx := context.Background()
 	storeRef := seedMapGateStore(t, ctx, mapGatePlanFixture(store.StatusFailed), false)

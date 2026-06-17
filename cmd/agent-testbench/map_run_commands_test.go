@@ -131,6 +131,18 @@ func TestPrepareExistingMapRunRecordResumeKeepsPassedTasks(t *testing.T) {
 	}
 }
 
+func TestPrepareExistingMapRunRecordResetsInstanceStartedAt(t *testing.T) {
+	record := mapRunResumeFixture()
+	record.Instance.Mode = mapplanner.ModeExplain
+	record.Instance.StartedAt = time.Now().UTC().Add(-2 * time.Hour)
+
+	prepared := prepareExistingMapRunRecord(record, mapRunOptions{})
+
+	if !prepared.Instance.StartedAt.After(record.Instance.StartedAt) || prepared.Instance.Mode != mapplanner.ModeRun {
+		t.Fatalf("existing plan execution should reset instance start time = %#v", prepared.Instance)
+	}
+}
+
 func TestPrepareExistingMapRunRecordRetryFailedOnlyResetsFailedTasks(t *testing.T) {
 	record := mapRunResumeFixture()
 

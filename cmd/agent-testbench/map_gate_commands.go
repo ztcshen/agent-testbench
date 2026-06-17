@@ -204,6 +204,7 @@ func mapGateTaskEvidenceRunIDs(task store.TestMapPlanTask) []string {
 		ids = append(ids, task.WorkflowRunID)
 	}
 	if task.APICaseRunID != "" {
+		ids = append(ids, task.APICaseRunID)
 		ids = append(ids, mapGateCaseParentRunID(task.APICaseRunID))
 	}
 	summary := jsonObjectString(task.SummaryJSON)
@@ -211,12 +212,14 @@ func mapGateTaskEvidenceRunIDs(task store.TestMapPlanTask) []string {
 		step := mapFromReportAny(raw)
 		ids = append(ids, valueString(step["runId"]))
 		if caseRunID := valueString(step["apiCaseRunId"]); caseRunID != "" {
+			ids = append(ids, caseRunID)
 			ids = append(ids, mapGateCaseParentRunID(caseRunID))
 		}
 	}
 	if result := mapFromReportAny(summary["result"]); len(result) > 0 {
 		ids = append(ids, valueString(result["runId"]))
 		if caseRunID := valueString(result["caseRunId"]); caseRunID != "" {
+			ids = append(ids, caseRunID)
 			ids = append(ids, mapGateCaseParentRunID(caseRunID))
 		}
 	}

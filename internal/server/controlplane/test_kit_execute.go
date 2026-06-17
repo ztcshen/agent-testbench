@@ -127,7 +127,8 @@ func missingRequiredCaseInputs(inputs []map[string]any, overrides map[string]any
 		if name == "" || !caseInputRequired(input) {
 			continue
 		}
-		if valueString(overrides[name]) == "" {
+		value, ok := overrides[name]
+		if !ok || value == nil {
 			missing = append(missing, name)
 		}
 	}
