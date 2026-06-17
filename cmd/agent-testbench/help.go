@@ -109,6 +109,7 @@ Usage:
   agent-testbench map import-workflows [--store NAME_OR_DSN] [--map ID] [--display-name NAME] [--description TEXT] [--json]
   agent-testbench map workflows --map ID [--store NAME_OR_DSN] [--filter TEXT] [--json]
   agent-testbench map explain --map ID (--case CASE_ID | --node NODE_ID) [--store NAME_OR_DSN] [--json]
+  agent-testbench map review-html --map ID [--store NAME_OR_DSN] [--filter TEXT] [--output PATH] [--json]
   agent-testbench baseline get --profile ID --subject ID [--store NAME_OR_DSN]
   agent-testbench baseline set --profile ID --subject ID --status STATUS [--required] [--store NAME_OR_DSN]
   agent-testbench template render [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] --template ID [--fixture ID]

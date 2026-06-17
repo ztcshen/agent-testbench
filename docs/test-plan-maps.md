@@ -76,6 +76,26 @@ and last node. Use the path id when discussing the workflow as part of the map.
 每条记录会返回 path id、workflow id、名称、step 数、首尾节点。讨论 map 中的
 workflow 时优先使用 path id。
 
+## Review A Map / 评审 Map
+
+Generate a self-contained HTML review page from the Store-backed map:
+
+```bash
+agent-testbench map review-html --store STORE_NAME --map MAP_ID --filter TEXT --output /tmp/map-review.html --json
+```
+
+The review page is built from Store facts, not model inference. It embeds the
+map nodes, edges, workflow paths, materializations, catalog case metadata, and
+planner explanations. `--filter` narrows the generated review to matching path
+ids, workflow ids, display names, node ids, or case ids. Reviewers can search
+cases, filter by workflow path, click case nodes, inspect request templates,
+patch/expected JSON, workflow reuse, and the replay operations selected by
+`map explain`.
+
+这个页面用于人工评审 agent 产出的 map：图上的每个节点是一个 case，颜色来自
+workflow path，右侧详情展示 case、请求模板、patch、expected、复用路径以及 planner
+选择的前置回放操作。
+
 ## Explain A Target Case / 解释目标 Case
 
 Use `map explain` to see which path prefix should be replayed and which single

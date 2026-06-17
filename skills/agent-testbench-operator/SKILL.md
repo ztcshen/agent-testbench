@@ -144,6 +144,7 @@ Build and inspect a Store-backed workflow map without running target services:
 ./skills/agent-testbench-operator/scripts/atb.sh map import-workflows --store STORE_NAME --json
 ./skills/agent-testbench-operator/scripts/atb.sh map workflows --store STORE_NAME --map MAP_ID --filter TEXT --json
 ./skills/agent-testbench-operator/scripts/atb.sh map explain --store STORE_NAME --map MAP_ID --case CASE_ID --json
+./skills/agent-testbench-operator/scripts/atb.sh map review-html --store STORE_NAME --map MAP_ID --filter TEXT --output /tmp/map-review.html --json
 ```
 
 Create a new map for one coherent capability or acceptance surface when related
@@ -160,7 +161,12 @@ nodes, and `Fixture`/`CaseDependency` supply materialized preconditions. Re-run
 projection. Use `map workflows --map MAP_ID --filter TEXT` to find workflow
 paths by path id, workflow id, or display name, then use `map explain` for the
 target case to inspect selected path prefix, candidate paths, rejected reasons,
-and physical operations.
+and physical operations. Use `map review-html --map MAP_ID --filter TEXT
+--output PATH` when a human needs to review the Store-backed map visually: the
+generated HTML embeds the current map facts, can be narrowed to matching
+workflows/cases, supports workflow filtering/search, and shows clickable case
+details including request template, patch/expected JSON, reuse paths, and
+planner replay operations.
 
 For compose-backed sandbox services, `sandbox start --json` reports
 `recoveryCommand`, `readiness`, and `warning` on each service result when

@@ -60,6 +60,8 @@ func runMap(ctx context.Context, args []string) error {
 		return runMapWorkflows(ctx, args[1:])
 	case "explain":
 		return runMapExplain(ctx, args[1:])
+	case "review-html":
+		return runMapReviewHTML(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown map command: %s", args[0])
 	}
@@ -129,15 +131,11 @@ func runMapWorkflows(ctx context.Context, args []string) error {
 	if strings.TrimSpace(*mapID) == "" {
 		return errors.New("--map is required")
 	}
-	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	_, graph, cleanup, err := openMapGraphForCLI(ctx, *storeRef, *storeURL, *mapID)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
-	graph, err := runtime.GetTestPlanGraph(ctx, *mapID)
-	if err != nil {
-		return err
-	}
 	report := buildMapWorkflowsReport(graph, *filter)
 	if *jsonOutput {
 		return writeIndentedJSON(report)
@@ -164,15 +162,11 @@ func runMapExplain(ctx context.Context, args []string) error {
 	if strings.TrimSpace(*caseID) == "" && strings.TrimSpace(*nodeID) == "" {
 		return errors.New("--case or --node is required")
 	}
-	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	_, graph, cleanup, err := openMapGraphForCLI(ctx, *storeRef, *storeURL, *mapID)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
-	graph, err := runtime.GetTestPlanGraph(ctx, *mapID)
-	if err != nil {
-		return err
-	}
 	explain, err := plangraph.ExplainCase(graph, plangraph.ExplainOptions{CaseID: *caseID, NodeID: *nodeID})
 	if err != nil {
 		return err
@@ -183,6 +177,19 @@ func runMapExplain(ctx context.Context, args []string) error {
 	}
 	printMapExplainReport(report)
 	return nil
+}
+
+func openMapGraphForCLI(ctx context.Context, storeRef string, storeURL string, mapID string) (store.Store, store.TestPlanGraph, func(), error) {
+	runtime, cleanup, err := openRequiredCLIStore(ctx, storeRef, storeURL)
+	if err != nil {
+		return nil, store.TestPlanGraph{}, func() {}, err
+	}
+	graph, err := runtime.GetTestPlanGraph(ctx, mapID)
+	if err != nil {
+		cleanup()
+		return nil, store.TestPlanGraph{}, func() {}, err
+	}
+	return runtime, graph, cleanup, nil
 }
 
 func printMapImportReport(report mapImportReport) {

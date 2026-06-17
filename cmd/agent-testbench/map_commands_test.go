@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"agent-testbench/internal/store"
@@ -80,7 +82,7 @@ func TestMapCommandsAreDiscoverable(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode commands json: %v\n%s", err, out)
 	}
-	if report.Count != 3 {
+	if report.Count != 4 {
 		t.Fatalf("map command count = %#v", report)
 	}
 	if report.Commands[0].Command != "map import-workflows" || !report.Commands[0].StoreAware {
@@ -91,6 +93,9 @@ func TestMapCommandsAreDiscoverable(t *testing.T) {
 	}
 	if report.Commands[2].Command != "map explain" || !report.Commands[2].StoreAware {
 		t.Fatalf("map explain command = %#v", report.Commands)
+	}
+	if report.Commands[3].Command != "map review-html" || !report.Commands[3].StoreAware {
+		t.Fatalf("map review-html command = %#v", report.Commands)
 	}
 }
 
@@ -149,6 +154,127 @@ func TestMapWorkflowsSearchesNamedPaths(t *testing.T) {
 	workflow := report.Workflows[0]
 	if workflow.WorkflowID != "workflow.cancel.success" || workflow.StepCount != 2 || workflow.FirstNodeID != "case.apply" || workflow.LastNodeID != "case.cancel" {
 		t.Fatalf("workflow row = %#v", workflow)
+	}
+}
+
+func TestMapReviewHTMLWritesInteractiveArtifact(t *testing.T) {
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "map-review.sqlite")
+	storeRef := "sqlite://" + storePath
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if err := runtime.ReplaceProfileCatalog(ctx, mapCommandProfileCatalogFixture()); err != nil {
+		t.Fatalf("seed profile catalog: %v", err)
+	}
+	closeCLIStore(runtime)
+
+	runCLI(t, "map", "import-workflows", "--store", storeRef, "--json")
+	outputPath := filepath.Join(t.TempDir(), "withdraw-map-review.html")
+	out := runCLI(t, "map", "review-html", "--store", storeRef, "--map", "map.profile.withdraw", "--output", outputPath, "--json")
+	var report struct {
+		OK     bool   `json:"ok"`
+		MapID  string `json:"mapId"`
+		Output string `json:"output"`
+		Counts struct {
+			Nodes int `json:"nodes"`
+			Paths int `json:"paths"`
+		} `json:"counts"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode map review-html json: %v\n%s", err, out)
+	}
+	if !report.OK || report.MapID != "map.profile.withdraw" || report.Output != outputPath || report.Counts.Nodes != 3 || report.Counts.Paths != 1 {
+		t.Fatalf("map review-html report = %#v", report)
+	}
+	raw, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read review html: %v", err)
+	}
+	html := string(raw)
+	for _, want := range []string{
+		`id="map-review-data"`,
+		`function selectNode`,
+		`id="workflow-filter"`,
+		`case.apply.days.required`,
+		`Days required`,
+		`template.apply`,
+		`Interface reverse cases`,
+		`function interfaceReverseCases`,
+		`id="map-review-minimap"`,
+		`id="node-history"`,
+		`Path Finder`,
+		`function navigateToState`,
+		`function openPathFinder`,
+		`function findPath`,
+		`function toggleFocusNode`,
+		`run_path_prefix`,
+		`run validation case as a patched single request`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("review html missing %q\n%s", want, html)
+		}
+	}
+}
+
+func TestMapReviewHTMLCanFilterWorkflowPaths(t *testing.T) {
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "map-review-filter.sqlite")
+	storeRef := "sqlite://" + storePath
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	graph := store.TestPlanGraph{
+		Map: store.TestPlanMap{ID: "map.contract", ProfileID: "profile.contract", DisplayName: "Contract Map", Status: "active"},
+		Nodes: []store.TestPlanNode{
+			{MapID: "map.contract", ID: "case.quote", CaseID: "case.quote", Role: "primary", StateEffect: "advance", SummaryJSON: `{}`, SortOrder: 1},
+			{MapID: "map.contract", ID: "case.apply", CaseID: "case.apply", Role: "primary", StateEffect: "advance", SummaryJSON: `{}`, SortOrder: 2},
+			{MapID: "map.contract", ID: "case.cancel", CaseID: "case.cancel", Role: "primary", StateEffect: "advance", SummaryJSON: `{}`, SortOrder: 3},
+		},
+		Paths: []store.TestPlanPath{
+			{MapID: "map.contract", ID: "workflow.apply.success", WorkflowID: "workflow.apply.success", DisplayName: "Apply Success", Status: "active", SummaryJSON: `{}`, SortOrder: 1},
+			{MapID: "map.contract", ID: "workflow.cancel.success", WorkflowID: "workflow.cancel.success", DisplayName: "Cancel Success", Status: "active", SummaryJSON: `{}`, SortOrder: 2},
+		},
+		PathSteps: []store.TestPlanPathStep{
+			{MapID: "map.contract", PathID: "workflow.apply.success", StepIndex: 1, StepID: "quote", NodeID: "case.quote", CaseID: "case.quote", Required: true, SummaryJSON: `{}`},
+			{MapID: "map.contract", PathID: "workflow.apply.success", StepIndex: 2, StepID: "apply", NodeID: "case.apply", CaseID: "case.apply", Required: true, SummaryJSON: `{}`},
+			{MapID: "map.contract", PathID: "workflow.cancel.success", StepIndex: 1, StepID: "apply", NodeID: "case.apply", CaseID: "case.apply", Required: true, SummaryJSON: `{}`},
+			{MapID: "map.contract", PathID: "workflow.cancel.success", StepIndex: 2, StepID: "cancel", NodeID: "case.cancel", CaseID: "case.cancel", Required: true, SummaryJSON: `{}`},
+		},
+	}
+	if err := runtime.ReplaceTestPlanGraph(ctx, graph); err != nil {
+		t.Fatalf("seed test plan graph: %v", err)
+	}
+	closeCLIStore(runtime)
+
+	outputPath := filepath.Join(t.TempDir(), "cancel-map-review.html")
+	out := runCLI(t, "map", "review-html", "--store", storeRef, "--map", "map.contract", "--filter", "cancel", "--output", outputPath, "--json")
+	var report struct {
+		OK     bool   `json:"ok"`
+		Filter string `json:"filter"`
+		Counts struct {
+			Paths int `json:"paths"`
+			Nodes int `json:"nodes"`
+		} `json:"counts"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode filtered map review-html json: %v\n%s", err, out)
+	}
+	if !report.OK || report.Filter != "cancel" || report.Counts.Paths != 1 || report.Counts.Nodes != 2 {
+		t.Fatalf("filtered review report = %#v", report)
+	}
+	raw, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read filtered review html: %v", err)
+	}
+	html := string(raw)
+	if !strings.Contains(html, "workflow.cancel.success") {
+		t.Fatalf("filtered review html missing cancel workflow:\n%s", html)
+	}
+	if strings.Contains(html, "workflow.apply.success") {
+		t.Fatalf("filtered review html should not include apply workflow:\n%s", html)
 	}
 }
 
