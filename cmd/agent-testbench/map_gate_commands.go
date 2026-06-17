@@ -67,37 +67,28 @@ type mapGateOptions struct {
 	RequireEvidence bool
 }
 
+type mapGateCLIOptions struct {
+	storeRef   string
+	storeURL   string
+	jsonOutput bool
+	gate       mapGateOptions
+}
+
 func runMapGate(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("map gate", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	planID := flags.String("plan", "", "Planner run instance id")
-	requirePassed := flags.Bool("require-passed", false, "Fail unless the map plan status is passed")
-	requireTasks := flags.Bool("require-tasks", false, "Fail unless map plan tasks exist and all executable tasks passed")
-	requireEvidence := flags.Bool("require-evidence", false, "Fail unless every executed task has indexed Evidence")
-	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := flags.Parse(args); err != nil {
+	options, err := parseMapGateOptions(args)
+	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(*planID) == "" {
-		return errors.New("--plan is required")
-	}
-	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	runtime, cleanup, err := openRequiredCLIStore(ctx, options.storeRef, options.storeURL)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
-	report, err := buildMapGateReport(ctx, runtime, mapGateOptions{
-		PlanID:          *planID,
-		RequirePassed:   *requirePassed,
-		RequireTasks:    *requireTasks,
-		RequireEvidence: *requireEvidence,
-	})
+	report, err := buildMapGateReport(ctx, runtime, options.gate)
 	if err != nil {
 		return err
 	}
-	if *jsonOutput {
+	if options.jsonOutput {
 		if err := writeIndentedJSON(report); err != nil {
 			return err
 		}
@@ -108,6 +99,35 @@ func runMapGate(ctx context.Context, args []string) error {
 		return errors.New("map gate failed")
 	}
 	return nil
+}
+
+func parseMapGateOptions(args []string) (mapGateCLIOptions, error) {
+	flags := flag.NewFlagSet("map gate", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
+	planID := flags.String("plan", "", "Planner run instance id")
+	requirePassed := flags.Bool("require-passed", false, "Fail unless the map plan status is passed")
+	requireTasks := flags.Bool("require-tasks", false, "Fail unless map plan tasks exist and all executable tasks passed")
+	requireEvidence := flags.Bool("require-evidence", false, "Fail unless every executed task has indexed Evidence")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return mapGateCLIOptions{}, err
+	}
+	if strings.TrimSpace(*planID) == "" {
+		return mapGateCLIOptions{}, errors.New("--plan is required")
+	}
+	return mapGateCLIOptions{
+		storeRef:   *storeRef,
+		storeURL:   *storeURL,
+		jsonOutput: *jsonOutput,
+		gate: mapGateOptions{
+			PlanID:          *planID,
+			RequirePassed:   *requirePassed,
+			RequireTasks:    *requireTasks,
+			RequireEvidence: *requireEvidence,
+		},
+	}, nil
 }
 
 func buildMapGateReport(ctx context.Context, runtime store.Store, options mapGateOptions) (mapGateReport, error) {
