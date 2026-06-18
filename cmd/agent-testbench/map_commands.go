@@ -160,7 +160,7 @@ func runMap(ctx context.Context, args []string) error {
 	switch args[0] {
 	case "import-workflows":
 		return runMapImportWorkflows(ctx, args[1:])
-	case "list":
+	case cliCommandList:
 		return runMapList(ctx, args[1:])
 	case "plans":
 		return runMapPlans(ctx, args[1:])
