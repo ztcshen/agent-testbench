@@ -129,12 +129,28 @@ func (s *Store) GetTestPlanGraph(ctx context.Context, mapID string) (store.TestP
 	return s.core.GetTestPlanGraph(ctx, mapID)
 }
 
+func (s *Store) ListTestPlanMaps(ctx context.Context) ([]store.TestPlanMapSummary, error) {
+	return s.core.ListTestPlanMaps(ctx)
+}
+
+func (s *Store) SaveTestPlanMapVersion(ctx context.Context, item store.TestPlanMapVersion) (store.TestPlanMapVersion, error) {
+	return s.core.SaveTestPlanMapVersion(ctx, item)
+}
+
+func (s *Store) ListTestPlanMapVersions(ctx context.Context, mapID string) ([]store.TestPlanMapVersion, error) {
+	return s.core.ListTestPlanMapVersions(ctx, mapID)
+}
+
 func (s *Store) SaveTestMapPlan(ctx context.Context, record store.TestMapPlanRecord) error {
 	return s.core.SaveTestMapPlan(ctx, record)
 }
 
 func (s *Store) GetTestMapPlan(ctx context.Context, planID string) (store.TestMapPlanRecord, error) {
 	return s.core.GetTestMapPlan(ctx, planID)
+}
+
+func (s *Store) ListTestMapPlans(ctx context.Context, mapID string, limit int) ([]store.TestMapPlanInstance, error) {
+	return s.core.ListTestMapPlans(ctx, mapID, limit)
 }
 
 func (s *Store) UpsertEnvironment(ctx context.Context, e store.Environment) (store.Environment, error) {

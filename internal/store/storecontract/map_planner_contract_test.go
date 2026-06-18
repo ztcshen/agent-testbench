@@ -80,4 +80,11 @@ func requireMapPlannerContract(t *testing.T, ctx context.Context, s store.Store,
 	if len(loaded.TaskEdges) != 1 || loaded.TaskEdges[0].FromTaskID != "task.workflow" || !loaded.TaskEdges[0].Required {
 		t.Fatalf("loaded task edges = %#v", loaded.TaskEdges)
 	}
+	plans, err := s.ListTestMapPlans(ctx, "map.contract", 10)
+	if err != nil {
+		t.Fatalf("list test map plans: %v", err)
+	}
+	if len(plans) != 1 || plans[0].ID != "plan.contract" || plans[0].MapID != "map.contract" || plans[0].EnvironmentID != "env.contract" {
+		t.Fatalf("listed plans = %#v", plans)
+	}
 }

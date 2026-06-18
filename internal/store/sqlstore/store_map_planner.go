@@ -66,6 +66,25 @@ order by sort_order, from_task_id, to_task_id, edge_kind;`, s.dialect.BindVar(1)
 	return store.TestMapPlanRecord{Instance: instance, Tasks: tasks, TaskEdges: edges}, nil
 }
 
+func (s *Store) ListTestMapPlans(ctx context.Context, mapID string, limit int) ([]store.TestMapPlanInstance, error) {
+	mapID = strings.TrimSpace(mapID)
+	if mapID == "" {
+		return nil, store.ErrNotFound
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	query := fmt.Sprintf(`
+select plan_id, map_id, profile_id, environment_id, scope, target_kind, target_id, mode, status,
+  planner_version, planner_options_json, logical_plan_json, optimized_plan_json, physical_plan_json,
+  rule_trace_json, candidate_plan_json, cost_json, property_json, summary_json, created_at, started_at, finished_at
+from test_map_plan_instances
+where map_id = %s
+order by created_at desc, plan_id desc
+limit %s;`, s.dialect.BindVar(1), s.dialect.BindVar(2))
+	return queryStoreRows(ctx, s.db, query, scanTestMapPlanInstance, mapID, limit)
+}
+
 func prepareTestMapPlanRecord(record store.TestMapPlanRecord, now time.Time) store.TestMapPlanRecord {
 	instance := &record.Instance
 	if instance.Status == "" {

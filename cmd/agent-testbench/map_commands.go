@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"agent-testbench/internal/domain/commandline"
 	"agent-testbench/internal/domain/mapplanner"
 	"agent-testbench/internal/domain/plangraph"
 	"agent-testbench/internal/store"
@@ -18,6 +20,35 @@ type mapImportReport struct {
 	OK     bool              `json:"ok"`
 	Map    store.TestPlanMap `json:"map"`
 	Counts mapCountsReport   `json:"counts"`
+}
+
+type mapUpdateReport struct {
+	OK     bool              `json:"ok"`
+	Map    store.TestPlanMap `json:"map"`
+	Counts mapCountsReport   `json:"counts"`
+}
+
+type mapVersionReport struct {
+	OK      bool              `json:"ok"`
+	Map     store.TestPlanMap `json:"map,omitempty"`
+	Version mapVersionItem    `json:"version"`
+	Counts  mapCountsReport   `json:"counts"`
+}
+
+type mapVersionsReport struct {
+	OK       bool             `json:"ok"`
+	MapID    string           `json:"mapId"`
+	Count    int              `json:"count"`
+	Versions []mapVersionItem `json:"versions"`
+}
+
+type mapVersionItem struct {
+	ID        string `json:"id"`
+	MapID     string `json:"mapId"`
+	Version   string `json:"version"`
+	Status    string `json:"status"`
+	Summary   string `json:"summary,omitempty"`
+	CreatedAt string `json:"createdAt,omitempty"`
 }
 
 type mapCountsReport struct {
@@ -31,6 +62,47 @@ type mapCountsReport struct {
 type mapExplainReport struct {
 	OK bool `json:"ok"`
 	mapplanner.Plan
+}
+
+type mapListReport struct {
+	OK    bool          `json:"ok"`
+	Count int           `json:"count"`
+	Maps  []mapListItem `json:"maps"`
+}
+
+type mapListItem struct {
+	ID               string `json:"id"`
+	ProfileID        string `json:"profileId"`
+	DisplayName      string `json:"displayName,omitempty"`
+	Description      string `json:"description,omitempty"`
+	Status           string `json:"status,omitempty"`
+	NodeCount        int    `json:"nodeCount"`
+	EdgeCount        int    `json:"edgeCount"`
+	PathCount        int    `json:"pathCount"`
+	Materializations int    `json:"materializations"`
+	UpdatedAt        string `json:"updatedAt,omitempty"`
+}
+
+type mapPlansReport struct {
+	OK    bool          `json:"ok"`
+	MapID string        `json:"mapId"`
+	Count int           `json:"count"`
+	Plans []mapPlanItem `json:"plans"`
+}
+
+type mapPlanItem struct {
+	ID            string `json:"id"`
+	Status        string `json:"status,omitempty"`
+	Mode          string `json:"mode,omitempty"`
+	Scope         string `json:"scope,omitempty"`
+	TargetKind    string `json:"targetKind,omitempty"`
+	TargetID      string `json:"targetId,omitempty"`
+	EnvironmentID string `json:"environmentId,omitempty"`
+	CreatedAt     string `json:"createdAt,omitempty"`
+	StartedAt     string `json:"startedAt,omitempty"`
+	FinishedAt    string `json:"finishedAt,omitempty"`
+	AtlasCommand  string `json:"atlasCommand,omitempty"`
+	GateCommand   string `json:"gateCommand,omitempty"`
 }
 
 type mapWorkflowsReport struct {
@@ -51,6 +123,36 @@ type mapWorkflowReport struct {
 	LastNodeID  string `json:"lastNodeId,omitempty"`
 }
 
+type mapGraphCommandFlags struct {
+	flags      *flag.FlagSet
+	storeRef   *string
+	storeURL   *string
+	mapID      *string
+	jsonOutput *bool
+}
+
+func newMapGraphCommandFlags(commandName string) mapGraphCommandFlags {
+	flags := flag.NewFlagSet(commandName, flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	return mapGraphCommandFlags{
+		flags:      flags,
+		storeRef:   flags.String("store", "", "Named Store config or Store DSN"),
+		storeURL:   flags.String("store-url", "", legacyStoreURLFlagHelp),
+		mapID:      flags.String("map", "", "Plan map id"),
+		jsonOutput: flags.Bool("json", false, "Emit a machine-readable JSON report"),
+	}
+}
+
+func (input mapGraphCommandFlags) parse(args []string) error {
+	if err := input.flags.Parse(args); err != nil {
+		return err
+	}
+	if input.flags.NArg() > 0 {
+		return fmt.Errorf("%s does not accept positional arguments: %s", input.flags.Name(), strings.Join(input.flags.Args(), " "))
+	}
+	return nil
+}
+
 func runMap(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("missing map command")
@@ -58,6 +160,20 @@ func runMap(ctx context.Context, args []string) error {
 	switch args[0] {
 	case "import-workflows":
 		return runMapImportWorkflows(ctx, args[1:])
+	case "list":
+		return runMapList(ctx, args[1:])
+	case "plans":
+		return runMapPlans(ctx, args[1:])
+	case "update":
+		return runMapUpdate(ctx, args[1:])
+	case "snapshot":
+		return runMapSnapshot(ctx, args[1:])
+	case "publish":
+		return runMapPublish(ctx, args[1:])
+	case "versions":
+		return runMapVersions(ctx, args[1:])
+	case "coverage":
+		return runMapCoverage(ctx, args[1:])
 	case "workflows":
 		return runMapWorkflows(ctx, args[1:])
 	case "explain":
@@ -66,11 +182,211 @@ func runMap(ctx context.Context, args []string) error {
 		return runMapGate(ctx, args[1:])
 	case "run":
 		return runMapRun(ctx, args[1:])
-	case "review-html":
-		return runMapReviewHTML(ctx, args[1:])
+	case "atlas":
+		return runMapAtlas(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown map command: %s", args[0])
 	}
+}
+
+func runMapUpdate(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("map update", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
+	mapID := flags.String("map", "", "Plan map id")
+	displayName := flags.String("display-name", "", "New map display name")
+	description := flags.String("description", "", "New map description")
+	status := flags.String("status", "", "New map lifecycle status")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() > 0 {
+		return fmt.Errorf("map update does not accept positional arguments: %s", strings.Join(flags.Args(), " "))
+	}
+	runtime, graph, cleanup, err := openRequiredMapGraphForCLI(ctx, *storeRef, *storeURL, *mapID)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	if strings.TrimSpace(*displayName) != "" {
+		graph.Map.DisplayName = strings.TrimSpace(*displayName)
+	}
+	if strings.TrimSpace(*description) != "" {
+		graph.Map.Description = strings.TrimSpace(*description)
+	}
+	if strings.TrimSpace(*status) != "" {
+		graph.Map.Status = strings.TrimSpace(*status)
+	}
+	graph.Map.UpdatedAt = time.Now().UTC()
+	if err := runtime.ReplaceTestPlanGraph(ctx, graph); err != nil {
+		return err
+	}
+	report := mapUpdateReport{OK: true, Map: graph.Map, Counts: mapCountsFromGraph(graph)}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printMapUpdateReport(report)
+	return nil
+}
+
+func runMapSnapshot(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("map snapshot", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
+	mapID := flags.String("map", "", "Plan map id")
+	version := flags.String("version", "", "Version label")
+	status := flags.String("status", "snapshot", "Version status")
+	summary := flags.String("summary", "", "Version summary")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() > 0 {
+		return fmt.Errorf("map snapshot does not accept positional arguments: %s", strings.Join(flags.Args(), " "))
+	}
+	runtime, graph, cleanup, err := openRequiredMapGraphForCLI(ctx, *storeRef, *storeURL, *mapID)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	item, err := saveMapVersion(ctx, runtime, graph, *version, *status, *summary)
+	if err != nil {
+		return err
+	}
+	report := mapVersionReport{OK: true, Map: graph.Map, Version: mapVersionItemFromStore(item), Counts: mapCountsFromGraph(graph)}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printMapVersionReport("Test Scenario Atlas Snapshot", report)
+	return nil
+}
+
+func runMapPublish(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("map publish", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
+	mapID := flags.String("map", "", "Plan map id")
+	version := flags.String("version", "", "Published version label")
+	summary := flags.String("summary", "", "Published version summary")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() > 0 {
+		return fmt.Errorf("map publish does not accept positional arguments: %s", strings.Join(flags.Args(), " "))
+	}
+	runtime, graph, cleanup, err := openRequiredMapGraphForCLI(ctx, *storeRef, *storeURL, *mapID)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	graph.Map.Status = "active"
+	graph.Map.UpdatedAt = time.Now().UTC()
+	if err := runtime.ReplaceTestPlanGraph(ctx, graph); err != nil {
+		return err
+	}
+	item, err := saveMapVersion(ctx, runtime, graph, *version, "published", *summary)
+	if err != nil {
+		return err
+	}
+	report := mapVersionReport{OK: true, Map: graph.Map, Version: mapVersionItemFromStore(item), Counts: mapCountsFromGraph(graph)}
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printMapVersionReport("Test Scenario Atlas Published", report)
+	return nil
+}
+
+func runMapVersions(ctx context.Context, args []string) error {
+	input := newMapGraphCommandFlags("map versions")
+	if err := input.parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*input.mapID) == "" {
+		return errors.New("--map is required")
+	}
+	runtime, cleanup, err := openRequiredCLIStore(ctx, *input.storeRef, *input.storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	versions, err := runtime.ListTestPlanMapVersions(ctx, *input.mapID)
+	if err != nil {
+		return err
+	}
+	report := buildMapVersionsReport(*input.mapID, versions)
+	if *input.jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printMapVersionsReport(report)
+	return nil
+}
+
+func runMapList(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("map list", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() > 0 {
+		return fmt.Errorf("map list does not accept positional arguments: %s", strings.Join(flags.Args(), " "))
+	}
+	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	maps, err := runtime.ListTestPlanMaps(ctx)
+	if err != nil {
+		return err
+	}
+	report := buildMapListReport(maps)
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printMapListReport(report)
+	return nil
+}
+
+func runMapPlans(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("map plans", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
+	mapID := flags.String("map", "", "Plan map id")
+	limit := flags.Int("limit", 20, "Maximum number of plan history rows")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() > 0 {
+		return fmt.Errorf("map plans does not accept positional arguments: %s", strings.Join(flags.Args(), " "))
+	}
+	if strings.TrimSpace(*mapID) == "" {
+		return errors.New("--map is required")
+	}
+	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	plans, err := runtime.ListTestMapPlans(ctx, *mapID, *limit)
+	if err != nil {
+		return err
+	}
+	report := buildMapPlansReport(*mapID, plans)
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printMapPlansReport(report)
+	return nil
 }
 
 func runMapImportWorkflows(ctx context.Context, args []string) error {
@@ -109,15 +425,9 @@ func runMapImportWorkflows(ctx context.Context, args []string) error {
 		return err
 	}
 	report := mapImportReport{
-		OK:  true,
-		Map: graph.Map,
-		Counts: mapCountsReport{
-			Nodes:            len(graph.Nodes),
-			Edges:            len(graph.Edges),
-			Paths:            len(graph.Paths),
-			PathSteps:        len(graph.PathSteps),
-			Materializations: len(graph.Materializations),
-		},
+		OK:     true,
+		Map:    graph.Map,
+		Counts: mapCountsFromGraph(graph),
 	}
 	if *jsonOutput {
 		return writeIndentedJSON(report)
@@ -235,6 +545,144 @@ func printMapImportReport(report mapImportReport) {
 	fmt.Printf("Nodes: %d\n", report.Counts.Nodes)
 	fmt.Printf("Paths: %d\n", report.Counts.Paths)
 	fmt.Printf("Materializations: %d\n", report.Counts.Materializations)
+}
+
+func printMapUpdateReport(report mapUpdateReport) {
+	fmt.Println("Workflow Map Updated")
+	fmt.Printf("Map: %s\n", report.Map.ID)
+	fmt.Printf("Status: %s\n", report.Map.Status)
+	fmt.Printf("Nodes: %d\n", report.Counts.Nodes)
+	fmt.Printf("Paths: %d\n", report.Counts.Paths)
+}
+
+func saveMapVersion(ctx context.Context, runtime store.Store, graph store.TestPlanGraph, version string, status string, summary string) (store.TestPlanMapVersion, error) {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return store.TestPlanMapVersion{}, errors.New("--version is required")
+	}
+	raw, err := json.Marshal(graph)
+	if err != nil {
+		return store.TestPlanMapVersion{}, err
+	}
+	return runtime.SaveTestPlanMapVersion(ctx, store.TestPlanMapVersion{
+		MapID:     graph.Map.ID,
+		Version:   version,
+		Status:    strings.TrimSpace(status),
+		Summary:   strings.TrimSpace(summary),
+		GraphJSON: string(raw),
+		CreatedAt: time.Now().UTC(),
+	})
+}
+
+func buildMapVersionsReport(mapID string, versions []store.TestPlanMapVersion) mapVersionsReport {
+	items := make([]mapVersionItem, 0, len(versions))
+	for _, item := range versions {
+		items = append(items, mapVersionItemFromStore(item))
+	}
+	return mapVersionsReport{OK: true, MapID: strings.TrimSpace(mapID), Count: len(items), Versions: items}
+}
+
+func mapVersionItemFromStore(item store.TestPlanMapVersion) mapVersionItem {
+	return mapVersionItem{
+		ID:        item.ID,
+		MapID:     item.MapID,
+		Version:   item.Version,
+		Status:    item.Status,
+		Summary:   item.Summary,
+		CreatedAt: formatMapTime(item.CreatedAt),
+	}
+}
+
+func printMapVersionReport(title string, report mapVersionReport) {
+	fmt.Println(title)
+	fmt.Printf("Map: %s\n", report.Version.MapID)
+	fmt.Printf("Version: %s\n", report.Version.Version)
+	fmt.Printf("Status: %s\n", report.Version.Status)
+}
+
+func printMapVersionsReport(report mapVersionsReport) {
+	fmt.Println("Test Scenario Atlas Versions")
+	fmt.Printf("Map: %s\n", report.MapID)
+	fmt.Printf("Versions: %d\n", report.Count)
+	for _, item := range report.Versions {
+		fmt.Printf("- %s status=%s summary=%s\n", item.Version, item.Status, item.Summary)
+	}
+}
+
+func mapCountsFromGraph(graph store.TestPlanGraph) mapCountsReport {
+	return mapCountsReport{
+		Nodes:            len(graph.Nodes),
+		Edges:            len(graph.Edges),
+		Paths:            len(graph.Paths),
+		PathSteps:        len(graph.PathSteps),
+		Materializations: len(graph.Materializations),
+	}
+}
+
+func buildMapListReport(maps []store.TestPlanMapSummary) mapListReport {
+	items := make([]mapListItem, 0, len(maps))
+	for _, item := range maps {
+		items = append(items, mapListItem{
+			ID:               item.ID,
+			ProfileID:        item.ProfileID,
+			DisplayName:      item.DisplayName,
+			Description:      item.Description,
+			Status:           item.Status,
+			NodeCount:        item.NodeCount,
+			EdgeCount:        item.EdgeCount,
+			PathCount:        item.PathCount,
+			Materializations: item.MaterializationCount,
+			UpdatedAt:        formatMapTime(item.UpdatedAt),
+		})
+	}
+	return mapListReport{OK: true, Count: len(items), Maps: items}
+}
+
+func buildMapPlansReport(mapID string, plans []store.TestMapPlanInstance) mapPlansReport {
+	items := make([]mapPlanItem, 0, len(plans))
+	for _, item := range plans {
+		items = append(items, mapPlanItem{
+			ID:            item.ID,
+			Status:        item.Status,
+			Mode:          item.Mode,
+			Scope:         item.Scope,
+			TargetKind:    item.TargetKind,
+			TargetID:      item.TargetID,
+			EnvironmentID: item.EnvironmentID,
+			CreatedAt:     formatMapTime(item.CreatedAt),
+			StartedAt:     formatMapTime(item.StartedAt),
+			FinishedAt:    formatMapTime(item.FinishedAt),
+			AtlasCommand:  "agent-testbench map atlas --map " + commandline.ShellQuote(item.MapID) + " --plan " + commandline.ShellQuote(item.ID) + " --json",
+			GateCommand:   "agent-testbench map gate --plan " + commandline.ShellQuote(item.ID) + " --require-passed --require-tasks --require-evidence --json",
+		})
+	}
+	return mapPlansReport{OK: true, MapID: mapID, Count: len(items), Plans: items}
+}
+
+func formatMapTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339)
+}
+
+func printMapListReport(report mapListReport) {
+	fmt.Println("Workflow Maps")
+	fmt.Printf("Maps: %d\n", report.Count)
+	for _, item := range report.Maps {
+		fmt.Printf("- %s profile=%s status=%s nodes=%d paths=%d materializations=%d\n",
+			item.ID, item.ProfileID, item.Status, item.NodeCount, item.PathCount, item.Materializations)
+	}
+}
+
+func printMapPlansReport(report mapPlansReport) {
+	fmt.Println("Map Plans")
+	fmt.Printf("Map: %s\n", report.MapID)
+	fmt.Printf("Plans: %d\n", report.Count)
+	for _, item := range report.Plans {
+		fmt.Printf("- %s status=%s mode=%s scope=%s env=%s\n",
+			item.ID, item.Status, item.Mode, item.Scope, item.EnvironmentID)
+	}
 }
 
 func buildMapWorkflowsReport(graph store.TestPlanGraph, filter string) mapWorkflowsReport {

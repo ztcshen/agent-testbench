@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	CurrentSchemaVersion = 17
+	CurrentSchemaVersion = 18
 	CoreSchemaName       = "create shared sql store schema"
 	mysqlVarchar255Type  = "varchar(255)"
 	sha256ColumnName     = "sha256"
@@ -447,6 +447,14 @@ create table if not exists environment_files (
 			timeType:      d.TimeType(),
 			jsonType:      d.JSONType(),
 			boolType:      d.BoolType(),
+		})...)
+	}
+	if current < 18 {
+		statements = append(statements, corePlanGraphVersionSchemaSQL(d, coreSchemaTypes{
+			text:     d.TextType(),
+			keyText:  d.KeyTextType(),
+			timeType: d.TimeType(),
+			jsonType: d.JSONType(),
 		})...)
 	}
 	return statements

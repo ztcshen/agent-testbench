@@ -6,14 +6,14 @@ import (
 	"agent-testbench/internal/store"
 )
 
-func filterMapReviewGraph(graph store.TestPlanGraph, filter string) store.TestPlanGraph {
+func filterMapAtlasGraph(graph store.TestPlanGraph, filter string) store.TestPlanGraph {
 	needle := strings.ToLower(strings.TrimSpace(filter))
 	if needle == "" {
 		return graph
 	}
-	pathIDs := mapReviewMatchingPathIDs(graph.Paths, needle)
+	pathIDs := mapAtlasMatchingPathIDs(graph.Paths, needle)
 	hasDirectPathMatch := len(pathIDs) > 0
-	keptNodes := mapReviewMatchingNodeIDs(graph.Nodes, graph.PathSteps, pathIDs, needle)
+	keptNodes := mapAtlasMatchingNodeIDs(graph.Nodes, graph.PathSteps, pathIDs, needle)
 	if !hasDirectPathMatch {
 		for _, step := range graph.PathSteps {
 			if keptNodes[step.NodeID] {
@@ -26,34 +26,34 @@ func filterMapReviewGraph(graph store.TestPlanGraph, filter string) store.TestPl
 			keptNodes[step.NodeID] = true
 		}
 	}
-	keptEdges := mapReviewExpandEdges(graph.Edges, pathIDs, keptNodes, hasDirectPathMatch)
-	keptMaterializations := mapReviewMaterializationIDs(keptEdges)
-	if mapReviewKeepMaterializationSourcePaths(graph.Materializations, keptMaterializations, pathIDs) {
-		mapReviewKeepPathStepNodes(graph.PathSteps, pathIDs, keptNodes)
-		keptEdges = mapReviewExpandEdges(graph.Edges, pathIDs, keptNodes, hasDirectPathMatch)
-		keptMaterializations = mapReviewMaterializationIDs(keptEdges)
+	keptEdges := mapAtlasExpandEdges(graph.Edges, pathIDs, keptNodes, hasDirectPathMatch)
+	keptMaterializations := mapAtlasMaterializationIDs(keptEdges)
+	if mapAtlasKeepMaterializationSourcePaths(graph.Materializations, keptMaterializations, pathIDs) {
+		mapAtlasKeepPathStepNodes(graph.PathSteps, pathIDs, keptNodes)
+		keptEdges = mapAtlasExpandEdges(graph.Edges, pathIDs, keptNodes, hasDirectPathMatch)
+		keptMaterializations = mapAtlasMaterializationIDs(keptEdges)
 	}
 
 	next := graph
-	next.Nodes = filterMapReviewNodes(graph.Nodes, keptNodes)
-	next.Paths = filterMapReviewPaths(graph.Paths, pathIDs)
-	next.PathSteps = filterMapReviewPathSteps(graph.PathSteps, pathIDs, keptNodes)
+	next.Nodes = filterMapAtlasNodes(graph.Nodes, keptNodes)
+	next.Paths = filterMapAtlasPaths(graph.Paths, pathIDs)
+	next.PathSteps = filterMapAtlasPathSteps(graph.PathSteps, pathIDs, keptNodes)
 	next.Edges = keptEdges
-	next.Materializations = filterMapReviewMaterializations(graph.Materializations, pathIDs, keptMaterializations)
+	next.Materializations = filterMapAtlasMaterializations(graph.Materializations, pathIDs, keptMaterializations)
 	return next
 }
 
-func mapReviewMatchingPathIDs(paths []store.TestPlanPath, needle string) map[string]bool {
+func mapAtlasMatchingPathIDs(paths []store.TestPlanPath, needle string) map[string]bool {
 	out := map[string]bool{}
 	for _, path := range paths {
-		if mapReviewTextMatches(needle, path.ID, path.WorkflowID, path.DisplayName) {
+		if mapAtlasTextMatches(needle, path.ID, path.WorkflowID, path.DisplayName) {
 			out[path.ID] = true
 		}
 	}
 	return out
 }
 
-func mapReviewMatchingNodeIDs(nodes []store.TestPlanNode, steps []store.TestPlanPathStep, pathIDs map[string]bool, needle string) map[string]bool {
+func mapAtlasMatchingNodeIDs(nodes []store.TestPlanNode, steps []store.TestPlanPathStep, pathIDs map[string]bool, needle string) map[string]bool {
 	out := map[string]bool{}
 	for _, step := range steps {
 		if pathIDs[step.PathID] {
@@ -61,20 +61,20 @@ func mapReviewMatchingNodeIDs(nodes []store.TestPlanNode, steps []store.TestPlan
 		}
 	}
 	for _, node := range nodes {
-		if mapReviewTextMatches(needle, node.ID, node.CaseID, node.InterfaceNodeID, node.RequestTemplateID) {
+		if mapAtlasTextMatches(needle, node.ID, node.CaseID, node.InterfaceNodeID, node.RequestTemplateID) {
 			out[node.ID] = true
 		}
 	}
 	return out
 }
 
-func mapReviewExpandEdges(edges []store.TestPlanEdge, pathIDs map[string]bool, keptNodes map[string]bool, directPathMatch bool) []store.TestPlanEdge {
+func mapAtlasExpandEdges(edges []store.TestPlanEdge, pathIDs map[string]bool, keptNodes map[string]bool, directPathMatch bool) []store.TestPlanEdge {
 	keptEdges := []store.TestPlanEdge{}
 	if directPathMatch {
 		for _, edge := range edges {
 			if pathIDs[edge.PathID] || (edge.PathID == "" && keptNodes[edge.FromNodeID] && keptNodes[edge.ToNodeID]) {
 				keptEdges = append(keptEdges, edge)
-				mapReviewKeepEdgeNodes(edge, keptNodes)
+				mapAtlasKeepEdgeNodes(edge, keptNodes)
 			}
 		}
 		return keptEdges
@@ -83,19 +83,19 @@ func mapReviewExpandEdges(edges []store.TestPlanEdge, pathIDs map[string]bool, k
 	for changed {
 		changed = false
 		for _, edge := range edges {
-			if mapReviewEdgeKept(keptEdges, edge.ID) {
+			if mapAtlasEdgeKept(keptEdges, edge.ID) {
 				continue
 			}
 			if pathIDs[edge.PathID] || keptNodes[edge.FromNodeID] || keptNodes[edge.ToNodeID] {
 				keptEdges = append(keptEdges, edge)
-				changed = mapReviewKeepEdgeNodes(edge, keptNodes) || changed
+				changed = mapAtlasKeepEdgeNodes(edge, keptNodes) || changed
 			}
 		}
 	}
 	return keptEdges
 }
 
-func mapReviewKeepEdgeNodes(edge store.TestPlanEdge, keptNodes map[string]bool) bool {
+func mapAtlasKeepEdgeNodes(edge store.TestPlanEdge, keptNodes map[string]bool) bool {
 	changed := false
 	if edge.FromNodeID != "" && !keptNodes[edge.FromNodeID] {
 		keptNodes[edge.FromNodeID] = true
@@ -108,7 +108,7 @@ func mapReviewKeepEdgeNodes(edge store.TestPlanEdge, keptNodes map[string]bool) 
 	return changed
 }
 
-func mapReviewMaterializationIDs(edges []store.TestPlanEdge) map[string]bool {
+func mapAtlasMaterializationIDs(edges []store.TestPlanEdge) map[string]bool {
 	out := map[string]bool{}
 	for _, edge := range edges {
 		if edge.MaterializationID != "" {
@@ -118,7 +118,7 @@ func mapReviewMaterializationIDs(edges []store.TestPlanEdge) map[string]bool {
 	return out
 }
 
-func mapReviewKeepMaterializationSourcePaths(materializations []store.TestPlanMaterialization, keptMaterializations map[string]bool, pathIDs map[string]bool) bool {
+func mapAtlasKeepMaterializationSourcePaths(materializations []store.TestPlanMaterialization, keptMaterializations map[string]bool, pathIDs map[string]bool) bool {
 	changed := false
 	for _, item := range materializations {
 		if !keptMaterializations[item.ID] || item.SourcePathID == "" || pathIDs[item.SourcePathID] {
@@ -130,7 +130,7 @@ func mapReviewKeepMaterializationSourcePaths(materializations []store.TestPlanMa
 	return changed
 }
 
-func mapReviewKeepPathStepNodes(steps []store.TestPlanPathStep, pathIDs map[string]bool, keptNodes map[string]bool) {
+func mapAtlasKeepPathStepNodes(steps []store.TestPlanPathStep, pathIDs map[string]bool, keptNodes map[string]bool) {
 	for _, step := range steps {
 		if pathIDs[step.PathID] {
 			keptNodes[step.NodeID] = true
@@ -138,7 +138,7 @@ func mapReviewKeepPathStepNodes(steps []store.TestPlanPathStep, pathIDs map[stri
 	}
 }
 
-func mapReviewTextMatches(needle string, values ...string) bool {
+func mapAtlasTextMatches(needle string, values ...string) bool {
 	for _, value := range values {
 		if strings.Contains(strings.ToLower(value), needle) {
 			return true
@@ -147,7 +147,7 @@ func mapReviewTextMatches(needle string, values ...string) bool {
 	return false
 }
 
-func mapReviewEdgeKept(edges []store.TestPlanEdge, edgeID string) bool {
+func mapAtlasEdgeKept(edges []store.TestPlanEdge, edgeID string) bool {
 	for _, edge := range edges {
 		if edge.ID == edgeID {
 			return true
@@ -156,7 +156,7 @@ func mapReviewEdgeKept(edges []store.TestPlanEdge, edgeID string) bool {
 	return false
 }
 
-func filterMapReviewNodes(nodes []store.TestPlanNode, kept map[string]bool) []store.TestPlanNode {
+func filterMapAtlasNodes(nodes []store.TestPlanNode, kept map[string]bool) []store.TestPlanNode {
 	out := []store.TestPlanNode{}
 	for _, node := range nodes {
 		if kept[node.ID] {
@@ -166,7 +166,7 @@ func filterMapReviewNodes(nodes []store.TestPlanNode, kept map[string]bool) []st
 	return out
 }
 
-func filterMapReviewPaths(paths []store.TestPlanPath, kept map[string]bool) []store.TestPlanPath {
+func filterMapAtlasPaths(paths []store.TestPlanPath, kept map[string]bool) []store.TestPlanPath {
 	out := []store.TestPlanPath{}
 	for _, path := range paths {
 		if kept[path.ID] {
@@ -176,7 +176,7 @@ func filterMapReviewPaths(paths []store.TestPlanPath, kept map[string]bool) []st
 	return out
 }
 
-func filterMapReviewPathSteps(steps []store.TestPlanPathStep, keptPaths map[string]bool, keptNodes map[string]bool) []store.TestPlanPathStep {
+func filterMapAtlasPathSteps(steps []store.TestPlanPathStep, keptPaths map[string]bool, keptNodes map[string]bool) []store.TestPlanPathStep {
 	out := []store.TestPlanPathStep{}
 	for _, step := range steps {
 		if keptPaths[step.PathID] && keptNodes[step.NodeID] {
@@ -186,7 +186,7 @@ func filterMapReviewPathSteps(steps []store.TestPlanPathStep, keptPaths map[stri
 	return out
 }
 
-func filterMapReviewMaterializations(materializations []store.TestPlanMaterialization, keptPaths map[string]bool, keptMaterializations map[string]bool) []store.TestPlanMaterialization {
+func filterMapAtlasMaterializations(materializations []store.TestPlanMaterialization, keptPaths map[string]bool, keptMaterializations map[string]bool) []store.TestPlanMaterialization {
 	out := []store.TestPlanMaterialization{}
 	for _, item := range materializations {
 		if keptPaths[item.SourcePathID] || keptMaterializations[item.ID] {

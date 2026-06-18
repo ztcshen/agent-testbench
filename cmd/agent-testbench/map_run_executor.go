@@ -230,6 +230,14 @@ func (e mapRunExecutor) executePathTask(instance store.TestMapPlanInstance, task
 		status = store.StatusFailed
 	}
 	summary := map[string]any{"steps": results}
+	if status == store.StatusFailed {
+		for _, result := range results {
+			if result.Error != "" {
+				summary["error"] = result.Error
+				break
+			}
+		}
+	}
 	if err != nil {
 		summary["error"] = err.Error()
 	}
@@ -439,29 +447,86 @@ func (e mapRunExecutor) executeStepCase(instance store.TestMapPlanInstance, task
 
 func (e mapRunExecutor) runCatalogCase(instance store.TestMapPlanInstance, task store.TestMapPlanTask, step store.TestPlanPathStep, runID string, overrides map[string]any) (map[string]any, error) {
 	caseID := firstNonEmpty(step.CaseID, task.CaseID)
+	runner := e.mapCaseRunnerForCase(caseID)
+	request := mapCaseRunRequest{
+		Instance:  instance,
+		Task:      task,
+		Step:      step,
+		CaseID:    caseID,
+		RunID:     runID,
+		Overrides: overrides,
+	}
+	return runner.Run(e.ctx, request)
+}
+
+func (e mapRunExecutor) catalogCasePayload(request mapCaseRunRequest) map[string]any {
 	payload := map[string]any{
-		"caseId":             caseID,
-		"runId":              runID,
-		"workflowId":         firstNonEmpty(task.WorkflowID, caseID),
-		"stepId":             firstNonEmpty(step.StepID, task.NodeID, task.CaseID),
+		"caseId":             request.CaseID,
+		"runId":              request.RunID,
+		"workflowId":         firstNonEmpty(request.Task.WorkflowID, request.CaseID),
+		"stepId":             firstNonEmpty(request.Step.StepID, request.Task.NodeID, request.Task.CaseID),
 		"baseUrl":            e.options.baseURL,
 		"evidenceDir":        e.options.evidenceDir,
-		"environmentId":      instance.EnvironmentID,
-		"testPlanMapId":      instance.MapID,
-		"testPlanPathId":     task.PathID,
-		"testPlanNodeId":     firstNonEmpty(step.NodeID, task.NodeID),
-		"testPlanOperation":  task.Operation,
-		"plannerSummary":     map[string]any{"planId": instance.ID, "taskId": task.ID, "taskKind": task.Kind, "pathId": task.PathID},
+		"environmentId":      request.Instance.EnvironmentID,
+		"testPlanMapId":      request.Instance.MapID,
+		"testPlanPathId":     request.Task.PathID,
+		"testPlanNodeId":     firstNonEmpty(request.Step.NodeID, request.Task.NodeID),
+		"testPlanOperation":  request.Task.Operation,
+		"plannerSummary":     map[string]any{"planId": request.Instance.ID, "taskId": request.Task.ID, "taskKind": request.Task.Kind, "pathId": request.Task.PathID},
 		"timeoutSeconds":     e.options.timeoutSeconds,
 		"inlineTraceCollect": false,
 	}
 	if e.options.timeoutSeconds <= 0 {
 		delete(payload, "timeoutSeconds")
 	}
-	if len(overrides) > 0 {
-		payload["overrides"] = overrides
+	if len(request.Overrides) > 0 {
+		payload["overrides"] = request.Overrides
 	}
-	return runCatalogCaseOnRuntime(e.ctx, e.runtime, instance.ProfileID, payload)
+	return payload
+}
+
+func (e mapRunExecutor) mapCaseRunnerForCase(caseID string) mapCaseRunner {
+	apiCase, ok := e.catalogAPICase(caseID)
+	if !ok {
+		return mapHTTPCaseRunner{executor: e}
+	}
+	runnerID := mapCaseRunnerID(apiCase)
+	if mapCaseRunnerSupportedByHTTP(runnerID) {
+		return mapHTTPCaseRunner{executor: e}
+	}
+	return unsupportedMapCaseRunner{runnerID: runnerID, sourceKind: apiCase.SourceKind}
+}
+
+func (e mapRunExecutor) catalogAPICase(caseID string) (store.CatalogAPICase, bool) {
+	catalog, err := e.runtime.GetProfileCatalog(e.ctx)
+	if err != nil {
+		return store.CatalogAPICase{}, false
+	}
+	for _, apiCase := range catalog.APICases {
+		if apiCase.ID == caseID {
+			return apiCase, true
+		}
+	}
+	return store.CatalogAPICase{}, false
+}
+
+func mapCaseRunnerID(apiCase store.CatalogAPICase) string {
+	if strings.TrimSpace(apiCase.ExecutorID) != "" {
+		return strings.TrimSpace(apiCase.ExecutorID)
+	}
+	if strings.TrimSpace(apiCase.SourceKind) != "" {
+		return strings.TrimSpace(apiCase.SourceKind)
+	}
+	return mapCaseRunnerHTTP
+}
+
+func mapCaseRunnerSupportedByHTTP(runnerID string) bool {
+	switch strings.ToLower(strings.TrimSpace(runnerID)) {
+	case "", mapCaseRunnerHTTP, mapCaseRunnerHTTPS, mapCaseRunnerOpenAPI, mapCaseRunnerKarate, mapCaseRunnerExecutorHTTP, mapCaseRunnerExecutorOpenAPI, mapCaseRunnerExecutorKarate:
+		return true
+	default:
+		return false
+	}
 }
 
 func (e mapRunExecutor) taskRunID(instance store.TestMapPlanInstance, task store.TestMapPlanTask) string {

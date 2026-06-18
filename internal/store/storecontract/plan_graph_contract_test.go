@@ -58,4 +58,39 @@ func requirePlanGraphContract(t *testing.T, ctx context.Context, s store.Store, 
 	if len(loaded.Paths) != 1 || len(loaded.PathSteps) != 1 || len(loaded.Materializations) != 1 {
 		t.Fatalf("loaded graph counts: paths=%#v steps=%#v materializations=%#v", loaded.Paths, loaded.PathSteps, loaded.Materializations)
 	}
+	maps, err := s.ListTestPlanMaps(ctx)
+	if err != nil {
+		t.Fatalf("list test plan maps: %v", err)
+	}
+	var summary store.TestPlanMapSummary
+	for _, item := range maps {
+		if item.ID == "map.contract" {
+			summary = item
+			break
+		}
+	}
+	if summary.ID != "map.contract" || summary.ProfileID != contractProfileID || summary.NodeCount != 2 || summary.EdgeCount != 1 || summary.PathCount != 1 || summary.MaterializationCount != 1 {
+		t.Fatalf("map summary = %#v", summary)
+	}
+	version, err := s.SaveTestPlanMapVersion(ctx, store.TestPlanMapVersion{
+		MapID:     "map.contract",
+		Version:   "v1",
+		Status:    "published",
+		Summary:   "contract snapshot",
+		GraphJSON: `{"map":{"id":"map.contract"}}`,
+		CreatedAt: started,
+	})
+	if err != nil {
+		t.Fatalf("save test plan map version: %v", err)
+	}
+	if version.ID == "" || version.CreatedAt.IsZero() {
+		t.Fatalf("saved map version defaults = %#v", version)
+	}
+	versions, err := s.ListTestPlanMapVersions(ctx, "map.contract")
+	if err != nil {
+		t.Fatalf("list test plan map versions: %v", err)
+	}
+	if len(versions) != 1 || versions[0].Version != "v1" || versions[0].Status != "published" || versions[0].Summary != "contract snapshot" || versions[0].GraphJSON == "" {
+		t.Fatalf("listed map versions = %#v", versions)
+	}
 }

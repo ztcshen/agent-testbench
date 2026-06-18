@@ -296,8 +296,11 @@ func TestCoreSchemaSQLIncludesTestPlanGraph(t *testing.T) {
 		"step_index integer not null",
 		"create table if not exists test_plan_materializations",
 		"source_until_node_id text not null",
+		"create table if not exists test_map_versions",
+		"graph_json jsonb not null",
 		"idx_test_map_nodes_case",
 		"idx_test_map_edges_to",
+		"idx_test_map_versions_map_created",
 	)
 }
 

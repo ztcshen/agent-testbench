@@ -6,7 +6,7 @@ import (
 	"agent-testbench/internal/store"
 )
 
-func mapReviewCasesByID(cases []store.CatalogAPICase) map[string]store.CatalogAPICase {
+func mapAtlasCasesByID(cases []store.CatalogAPICase) map[string]store.CatalogAPICase {
 	out := map[string]store.CatalogAPICase{}
 	for _, item := range cases {
 		out[item.ID] = item
@@ -14,10 +14,10 @@ func mapReviewCasesByID(cases []store.CatalogAPICase) map[string]store.CatalogAP
 	return out
 }
 
-func mapReviewTemplatesByID(templates []store.CatalogRequestTemplate) map[string]mapReviewRequestTemplate {
-	out := map[string]mapReviewRequestTemplate{}
+func mapAtlasTemplatesByID(templates []store.CatalogRequestTemplate) map[string]mapAtlasRequestTemplate {
+	out := map[string]mapAtlasRequestTemplate{}
 	for _, item := range templates {
-		out[item.ID] = mapReviewRequestTemplate{
+		out[item.ID] = mapAtlasRequestTemplate{
 			ID:           item.ID,
 			DisplayName:  item.DisplayName,
 			NodeID:       item.NodeID,
@@ -31,7 +31,7 @@ func mapReviewTemplatesByID(templates []store.CatalogRequestTemplate) map[string
 	return out
 }
 
-func mapReviewPathsByID(paths []store.TestPlanPath) map[string]store.TestPlanPath {
+func mapAtlasPathsByID(paths []store.TestPlanPath) map[string]store.TestPlanPath {
 	out := map[string]store.TestPlanPath{}
 	for _, item := range paths {
 		out[item.ID] = item
@@ -39,7 +39,7 @@ func mapReviewPathsByID(paths []store.TestPlanPath) map[string]store.TestPlanPat
 	return out
 }
 
-func mapReviewStepsByPath(steps []store.TestPlanPathStep) map[string][]store.TestPlanPathStep {
+func mapAtlasStepsByPath(steps []store.TestPlanPathStep) map[string][]store.TestPlanPathStep {
 	out := map[string][]store.TestPlanPathStep{}
 	for _, step := range steps {
 		out[step.PathID] = append(out[step.PathID], step)
@@ -52,11 +52,11 @@ func mapReviewStepsByPath(steps []store.TestPlanPathStep) map[string][]store.Tes
 	return out
 }
 
-func mapReviewUsageByNode(steps []store.TestPlanPathStep, pathByID map[string]store.TestPlanPath) map[string][]mapReviewNodePath {
-	out := map[string][]mapReviewNodePath{}
+func mapAtlasUsageByNode(steps []store.TestPlanPathStep, pathByID map[string]store.TestPlanPath) map[string][]mapAtlasNodePath {
+	out := map[string][]mapAtlasNodePath{}
 	for _, step := range steps {
 		path := pathByID[step.PathID]
-		out[step.NodeID] = append(out[step.NodeID], mapReviewNodePath{
+		out[step.NodeID] = append(out[step.NodeID], mapAtlasNodePath{
 			PathID:      step.PathID,
 			WorkflowID:  path.WorkflowID,
 			DisplayName: path.DisplayName,

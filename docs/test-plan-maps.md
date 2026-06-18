@@ -56,6 +56,61 @@ writes `test_maps`, `test_map_nodes`, `test_map_edges`, `test_map_paths`,
 
 导入同一个 map id 时会用当前 catalog 投影替换旧图，写入上述 Store 表。
 
+## Discover Maps And Runs / 发现 Map 和运行历史
+
+List Store-backed maps before choosing a review or execution target:
+
+```bash
+agent-testbench map list --store STORE_NAME --json
+```
+
+Each row reports the map id, profile id, display name, status, and graph counts
+for nodes, edges, workflow paths, and materializations.
+
+Update map metadata without rebuilding the graph:
+
+```bash
+agent-testbench map update --store STORE_NAME --map MAP_ID --display-name "Payment Atlas" --status review --json
+```
+
+Use `draft`, `review`, `active`, or `archived` as lightweight lifecycle labels
+for local teams. The command preserves nodes, edges, paths, path steps, and
+materializations.
+
+Create immutable Store snapshots as the map moves through review and publish:
+
+```bash
+agent-testbench map snapshot --store STORE_NAME --map MAP_ID --version v1-review --status review --summary "ready for review" --json
+agent-testbench map publish --store STORE_NAME --map MAP_ID --version v1 --summary "accepted atlas" --json
+agent-testbench map versions --store STORE_NAME --map MAP_ID --json
+```
+
+`map snapshot` records the current graph into `test_map_versions` without
+changing the working map. `map publish` sets the working map status to `active`
+and records a `published` version. `map versions` lists the saved atlas
+snapshots for audit, review, and future diff work.
+
+Validate workflow convergence after migrating existing workflow assets:
+
+```bash
+agent-testbench map coverage --store STORE_NAME --map MAP_ID --json
+```
+
+The coverage report compares catalog workflows with mapped paths, counts unique
+case nodes versus path-step references, lists reused cases, and reports
+materialized preconditions. Use it as the local smoke before running the real
+environment map.
+
+Inspect recent planner/run history for one map:
+
+```bash
+agent-testbench map plans --store STORE_NAME --map MAP_ID --limit 20 --json
+```
+
+Each plan row includes status, mode, scope, environment, timestamps, and
+copyable `atlasCommand`/`gateCommand` values. Use this before opening
+`map atlas --plan PLAN_ID` or running `map gate --plan PLAN_ID`.
+
 ## Find Workflows In A Map / 通过 Map 搜 Workflow
 
 List all workflow paths in a map:
@@ -76,21 +131,24 @@ and last node. Use the path id when discussing the workflow as part of the map.
 每条记录会返回 path id、workflow id、名称、step 数、首尾节点。讨论 map 中的
 workflow 时优先使用 path id。
 
-## Review A Map / 评审 Map
+## Test Scenario Atlas / 测试场景图谱
 
-Generate a self-contained HTML review page from the Store-backed map:
+Generate a self-contained Test Scenario Atlas from the Store-backed map:
 
 ```bash
-agent-testbench map review-html --store STORE_NAME --map MAP_ID --filter TEXT --output /tmp/map-review.html --json
+agent-testbench map atlas --store STORE_NAME --map MAP_ID --filter TEXT --output /tmp/test-scenario-atlas.html --json
+agent-testbench map atlas --store STORE_NAME --map MAP_ID --plan PLAN_ID --output /tmp/test-scenario-atlas-run.html --json
 ```
 
-The review page is built from Store facts, not model inference. It embeds the
+The atlas is built from Store facts, not model inference. It embeds the
 map nodes, edges, workflow paths, materializations, catalog case metadata, and
 planner explanations. `--filter` narrows the generated review to matching path
-ids, workflow ids, display names, node ids, or case ids. Reviewers can search
-cases, filter by workflow path, click case nodes, inspect request templates,
-patch/expected JSON, workflow reuse, and the replay operations selected by
-`map explain`.
+ids, workflow ids, display names, node ids, or case ids. `--plan` overlays a
+saved planner/run instance so reviewers can inspect task status, child
+workflow/API case run ids, Evidence roots, and failure reasons from the same
+graph. Reviewers can search cases, filter by workflow path, click case nodes,
+inspect request templates, patch/expected JSON, workflow reuse, and the replay
+operations selected by `map explain`.
 
 这个页面用于人工评审 agent 产出的 map：图上的每个节点是一个 case，颜色来自
 workflow path，右侧详情展示 case、请求模板、patch、expected、复用路径以及 planner
@@ -193,6 +251,11 @@ target case as a single Store catalog API case. Every child run is linked back
 through the test-plan metadata fields, while `test_map_plan_tasks` stores the
 task status, `workflow_run_id`, `api_case_run_id`, evidence root, timestamps,
 and summary.
+
+The executor has an explicit case-runner boundary. HTTP-compatible Store catalog
+cases continue through the built-in catalog runner. Cases marked with non-HTTP
+executors such as MQ are not silently treated as HTTP; they fail with an
+unsupported runner reason until a matching pluggable runner is registered.
 
 Use `map run explain` to inspect a completed or failed run plan without
 re-running it:

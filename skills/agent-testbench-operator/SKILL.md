@@ -142,6 +142,13 @@ Build and inspect a Store-backed workflow map without running target services:
 
 ```bash
 ./skills/agent-testbench-operator/scripts/atb.sh map import-workflows --store STORE_NAME --json
+./skills/agent-testbench-operator/scripts/atb.sh map list --store STORE_NAME --json
+./skills/agent-testbench-operator/scripts/atb.sh map plans --store STORE_NAME --map MAP_ID --limit 20 --json
+./skills/agent-testbench-operator/scripts/atb.sh map update --store STORE_NAME --map MAP_ID --display-name NAME --status review --json
+./skills/agent-testbench-operator/scripts/atb.sh map snapshot --store STORE_NAME --map MAP_ID --version v1-review --status review --summary "ready for review" --json
+./skills/agent-testbench-operator/scripts/atb.sh map publish --store STORE_NAME --map MAP_ID --version v1 --summary "accepted atlas" --json
+./skills/agent-testbench-operator/scripts/atb.sh map versions --store STORE_NAME --map MAP_ID --json
+./skills/agent-testbench-operator/scripts/atb.sh map coverage --store STORE_NAME --map MAP_ID --json
 ./skills/agent-testbench-operator/scripts/atb.sh map workflows --store STORE_NAME --map MAP_ID --filter TEXT --json
 ./skills/agent-testbench-operator/scripts/atb.sh map explain --store STORE_NAME --map MAP_ID --case CASE_ID --json
 ./skills/agent-testbench-operator/scripts/atb.sh map explain --store STORE_NAME --map MAP_ID --scope all --environment ENV_ID --save --json
@@ -151,7 +158,8 @@ Build and inspect a Store-backed workflow map without running target services:
 ./skills/agent-testbench-operator/scripts/atb.sh map run --store STORE_NAME --plan PLAN_ID --rerun-task TASK_ID --json
 ./skills/agent-testbench-operator/scripts/atb.sh map run explain --store STORE_NAME --plan PLAN_ID --json
 ./skills/agent-testbench-operator/scripts/atb.sh map gate --store STORE_NAME --plan PLAN_ID --require-passed --require-tasks --require-evidence --json
-./skills/agent-testbench-operator/scripts/atb.sh map review-html --store STORE_NAME --map MAP_ID --filter TEXT --output /tmp/map-review.html --json
+./skills/agent-testbench-operator/scripts/atb.sh map atlas --store STORE_NAME --map MAP_ID --filter TEXT --output /tmp/test-scenario-atlas.html --json
+./skills/agent-testbench-operator/scripts/atb.sh map atlas --store STORE_NAME --map MAP_ID --plan PLAN_ID --output /tmp/test-scenario-atlas-run.html --json
 ```
 
 Create a new map for one coherent capability or acceptance surface when related
@@ -165,35 +173,51 @@ Build the map from Store catalog assets first: `Workflow` becomes a named path,
 `WorkflowBinding` supplies ordered path steps, `APICase` supplies request
 nodes, and `Fixture`/`CaseDependency` supply materialized preconditions. Re-run
 `map import-workflows --map MAP_ID` after catalog changes to replace that map
-projection. Use `map workflows --map MAP_ID --filter TEXT` to find workflow
-paths by path id, workflow id, or display name. Use `map explain` as the
-SQL-style planner: it emits logical plan, rule trace, candidate plans,
-physical task DAG, task edges, cost, properties, and compatibility `operations`
-for single-case replay. A validation case with Store-backed materialization can
-produce a `reuse_materialization` physical task and a `prefer_materialized_replay`
-rule instead of a raw replay-prefix task; validate its resulting Evidence with
+projection. Use `map list --store STORE_NAME --json` to discover available
+Store-backed maps and graph counts before choosing a target. Use `map plans
+--map MAP_ID --limit 20 --json` to inspect recent planner/run history and copy
+the atlas/gate commands for a saved plan. Use `map update --map MAP_ID` to
+maintain display name, description, and lightweight lifecycle status without
+rebuilding graph nodes/edges/paths. Use `map snapshot` to freeze an immutable
+Store-backed atlas version for review, `map publish` to mark the working map
+active and write a published version, and `map versions` to list saved
+snapshots. Use `map coverage --map MAP_ID --json` to verify convergence after
+migrating existing workflow assets: it compares catalog workflows with mapped
+paths, counts case-node reuse, and reports materialized preconditions. Use
+`map workflows --map MAP_ID --filter TEXT` to find workflow paths by path id,
+workflow id, or display name. Use `map explain` as the SQL-style planner: it
+emits logical plan, rule trace, candidate plans, physical task DAG, task edges,
+cost, properties, and compatibility `operations` for single-case replay. A
+validation case with Store-backed materialization can produce a
+`reuse_materialization` physical task and a `prefer_materialized_replay` rule
+instead of a raw replay-prefix task; validate its resulting Evidence with
 `map gate` after execution. Use `--scope all|workflows|cases` for map-level
 planning, `--case`/`--node` for a single target, and `--save` to persist the
 planner instance into `test_map_plan_instances`, `test_map_plan_tasks`, and
 `test_map_plan_task_edges`. Use `map run --map MAP_ID --scope all` only after
 the explain output is reviewable: it creates a `mode=run` planner instance,
 executes the physical task DAG serially, writes each task status and child
-workflow/API case run id back to Store, and links child runs through
-test-plan metadata. When a persisted plan has useful partial evidence, prefer
-`map run --plan PLAN_ID --resume` to keep passed/skipped tasks and run the
-remaining incomplete tasks, `--retry-failed` to reset only failed/blocked
-tasks, or repeated `--rerun-task TASK_ID` to surgically rerun one task without
-discarding unrelated child run ids. Use `map run explain --plan PLAN_ID` to
-inspect a run plan without re-running it. Use `map gate --plan PLAN_ID
---require-passed --require-tasks --require-evidence` as the map-level
-acceptance gate: it reads the persisted plan, task statuses, child run ids, and
-Store Evidence indexes, then reports failed tasks, missing Evidence, and
-recovery commands. Use `map review-html --map MAP_ID --filter TEXT
---output PATH` when a human needs to review the Store-backed map visually: the
-generated HTML embeds the current map facts, can be narrowed to matching
-workflows/cases, supports workflow filtering/search, and shows clickable case
-details including request template, patch/expected JSON, reuse paths, and
-planner replay operations.
+workflow/API case run id back to Store, and links child runs through test-plan
+metadata. Non-HTTP catalog cases such as MQ must use a registered case runner;
+until then `map run` fails them with an unsupported runner reason instead of
+silently treating them as HTTP. When a persisted plan has useful partial
+evidence, prefer `map run --plan PLAN_ID --resume` to keep passed/skipped tasks
+and run the remaining incomplete tasks, `--retry-failed` to reset only
+failed/blocked tasks, or repeated `--rerun-task TASK_ID` to surgically rerun
+one task without discarding unrelated child run ids. Use
+`map run explain --plan PLAN_ID` to inspect a run plan without re-running it.
+Use `map gate --plan PLAN_ID --require-passed --require-tasks
+--require-evidence` as the map-level acceptance gate: it reads the persisted
+plan, task statuses, child run ids, and Store Evidence indexes, then reports
+failed tasks, missing Evidence, and recovery commands. Use
+`map atlas --map MAP_ID --filter TEXT --output PATH` when a human needs to
+review the Store-backed Test Scenario Atlas visually: the generated page embeds
+the current map facts, can be narrowed to matching workflows/cases, supports
+workflow filtering/search, and shows clickable case details including request
+template, patch/expected JSON, reuse paths, and planner replay operations. Add
+`--plan PLAN_ID` to overlay a saved planner/run instance with task status,
+child workflow/API case run ids, Evidence roots, and failure reasons for review
+without re-running the map.
 
 For compose-backed sandbox services, `sandbox start --json` reports
 `recoveryCommand`, `readiness`, and `warning` on each service result when

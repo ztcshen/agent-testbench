@@ -12,20 +12,26 @@ import (
 	"agent-testbench/internal/store"
 )
 
-type mapReviewHTMLReport struct {
-	OK     bool                  `json:"ok"`
-	MapID  string                `json:"mapId"`
-	Filter string                `json:"filter,omitempty"`
-	Output string                `json:"output"`
-	Counts mapReviewCountsReport `json:"counts"`
+type mapAtlasReport struct {
+	OK     bool                 `json:"ok"`
+	MapID  string               `json:"mapId"`
+	PlanID string               `json:"planId,omitempty"`
+	Filter string               `json:"filter,omitempty"`
+	Output string               `json:"output"`
+	Counts mapAtlasCountsReport `json:"counts"`
 }
 
-func runMapReviewHTML(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("map review-html", flag.ContinueOnError)
+func runMapAtlas(ctx context.Context, args []string) error {
+	return runMapAtlasCommand(ctx, args)
+}
+
+func runMapAtlasCommand(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("map atlas", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
 	mapID := flags.String("map", "", "Plan map id")
+	planID := flags.String("plan", "", "Saved planner instance id to overlay task status")
 	filter := flags.String("filter", "", "Filter path id, workflow id, display name, node id, or case id")
 	output := flags.String("output", "", "HTML output path")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
@@ -38,7 +44,7 @@ func runMapReviewHTML(ctx context.Context, args []string) error {
 	}
 	defer cleanup()
 
-	graph = filterMapReviewGraph(graph, *filter)
+	graph = filterMapAtlasGraph(graph, *filter)
 	catalog, err := runtime.GetProfileCatalog(ctx)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return err
@@ -46,17 +52,29 @@ func runMapReviewHTML(ctx context.Context, args []string) error {
 	if errors.Is(err, store.ErrNotFound) {
 		catalog = store.ProfileCatalog{}
 	}
-	document := buildMapReviewDocument(graph, catalog)
+	document := buildMapAtlasDocument(graph, catalog)
+	planIDValue := strings.TrimSpace(*planID)
+	if planIDValue != "" {
+		record, err := runtime.GetTestMapPlan(ctx, planIDValue)
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(record.Instance.MapID) != graph.Map.ID {
+			return fmt.Errorf("--plan %s belongs to map %s, not %s", planIDValue, record.Instance.MapID, graph.Map.ID)
+		}
+		document.Plan = mapAtlasPlanFromRecord(record)
+	}
 	outputPath := strings.TrimSpace(*output)
 	if outputPath == "" {
-		outputPath = defaultMapReviewHTMLOutputPath(graph.Map.ID)
+		outputPath = defaultMapAtlasOutputPath(graph.Map.ID)
 	}
-	if err := writeMapReviewHTML(outputPath, document); err != nil {
+	if err := writeMapAtlasHTML(outputPath, document); err != nil {
 		return err
 	}
-	report := mapReviewHTMLReport{
+	report := mapAtlasReport{
 		OK:     true,
 		MapID:  graph.Map.ID,
+		PlanID: planIDValue,
 		Filter: strings.TrimSpace(*filter),
 		Output: outputPath,
 		Counts: document.Counts,
@@ -64,33 +82,33 @@ func runMapReviewHTML(ctx context.Context, args []string) error {
 	if *jsonOutput {
 		return writeIndentedJSON(report)
 	}
-	printMapReviewHTMLReport(report)
+	printMapAtlasReport(report)
 	return nil
 }
 
-func defaultMapReviewHTMLOutputPath(mapID string) string {
+func defaultMapAtlasOutputPath(mapID string) string {
 	name := strings.NewReplacer("/", "-", "\\", "-", ":", "-", " ", "-").Replace(strings.TrimSpace(mapID))
 	if name == "" {
 		name = "map"
 	}
-	return filepath.Join(".runtime", "map-review", name+".html")
+	return filepath.Join(".runtime", "test-scenario-atlas", name+".html")
 }
 
-func writeMapReviewHTML(path string, document mapReviewDocument) error {
+func writeMapAtlasHTML(path string, document mapAtlasDocument) error {
 	if dir := filepath.Dir(path); dir != "." && dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
 	}
-	content, err := renderMapReviewHTML(document)
+	content, err := renderMapAtlasHTML(document)
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(path, []byte(content), 0o644)
 }
 
-func printMapReviewHTMLReport(report mapReviewHTMLReport) {
-	fmt.Println("Map Review HTML")
+func printMapAtlasReport(report mapAtlasReport) {
+	fmt.Println("Test Scenario Atlas")
 	fmt.Printf("Map: %s\n", report.MapID)
 	fmt.Printf("Output: %s\n", report.Output)
 	fmt.Printf("Nodes: %d\n", report.Counts.Nodes)
