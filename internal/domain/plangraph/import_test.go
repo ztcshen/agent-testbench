@@ -89,6 +89,29 @@ func TestImportCatalogBuildsSharedMapAndAnchoredValidationCase(t *testing.T) {
 	}
 }
 
+func TestImportCatalogCanLimitImportedWorkflowPaths(t *testing.T) {
+	graph, err := ImportCatalog(plannerFixtureCatalog(), ImportOptions{
+		WorkflowIDs: []string{"workflow.flow.audit"},
+	})
+	if err != nil {
+		t.Fatalf("import catalog: %v", err)
+	}
+	if len(graph.Paths) != 1 || graph.Paths[0].ID != "workflow.flow.audit" {
+		t.Fatalf("paths = %#v", graph.Paths)
+	}
+	if len(graph.PathSteps) != 3 {
+		t.Fatalf("path steps = %#v", graph.PathSteps)
+	}
+	for _, step := range graph.PathSteps {
+		if step.PathID != "workflow.flow.audit" {
+			t.Fatalf("unexpected path step = %#v", step)
+		}
+	}
+	if len(graph.Materializations) != 0 {
+		t.Fatalf("materialization for skipped workflow should not be imported: %#v", graph.Materializations)
+	}
+}
+
 func TestExplainCaseSelectsReplayPrefixForValidationDiff(t *testing.T) {
 	graph, err := ImportCatalog(plannerFixtureCatalog(), ImportOptions{})
 	if err != nil {

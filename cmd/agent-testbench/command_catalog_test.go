@@ -113,7 +113,7 @@ func TestCommandsCommandEmitsSearchableCommandCatalog(t *testing.T) {
 		t.Fatalf("command catalog missing gates: %#v", report.Commands)
 	}
 	if !foundWorkflowRegister {
-		registerOut := runCLI(t, "commands", "--filter", "workflow register", "--json")
+		registerOut := runCLI(t, "commands", "--all", "--filter", "workflow register", "--json")
 		if !strings.Contains(registerOut, `"command": "workflow register"`) {
 			t.Fatalf("command catalog missing workflow register: %s", registerOut)
 		}
@@ -124,7 +124,7 @@ func TestCommandsCommandEmitsSearchableCommandCatalog(t *testing.T) {
 		t.Fatalf("commands text output = %q", textOut)
 	}
 
-	taskOut := runCLI(t, "commands", "--filter", "workflow task run", "--json")
+	taskOut := runCLI(t, "commands", "--all", "--filter", "workflow task run", "--json")
 	if !strings.Contains(taskOut, `"command": "workflow task run"`) || !strings.Contains(taskOut, `STEP=TASK_NAME_OR_ID`) {
 		t.Fatalf("command catalog missing workflow task run: %s", taskOut)
 	}
@@ -185,6 +185,116 @@ func TestCommandsCanFilterByArea(t *testing.T) {
 	for _, item := range report.Commands {
 		if item.Area != "workflow" {
 			t.Fatalf("area filter returned non-workflow command: %#v", item)
+		}
+	}
+}
+
+func TestCommandsDefaultSurfaceShowsDailyCommandsOnly(t *testing.T) {
+	out := runCLI(t, "commands", "--json")
+
+	var report struct {
+		OK       bool   `json:"ok"`
+		Tier     string `json:"tier"`
+		All      bool   `json:"all"`
+		Count    int    `json:"count"`
+		Commands []struct {
+			Command     string `json:"command"`
+			Area        string `json:"area"`
+			Tier        string `json:"tier"`
+			Audience    string `json:"audience"`
+			Stability   string `json:"stability"`
+			Replacement string `json:"replacement,omitempty"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode default commands json: %v\n%s", err, out)
+	}
+	if !report.OK || report.All || report.Tier != "daily" || report.Count == 0 || report.Count > 40 {
+		t.Fatalf("default command catalog should be a focused daily surface: %#v", report)
+	}
+	commands := map[string]struct {
+		Tier        string
+		Audience    string
+		Stability   string
+		Replacement string
+	}{}
+	for _, item := range report.Commands {
+		commands[item.Command] = struct {
+			Tier        string
+			Audience    string
+			Stability   string
+			Replacement string
+		}{Tier: item.Tier, Audience: item.Audience, Stability: item.Stability, Replacement: item.Replacement}
+		if item.Tier != "daily" || item.Audience == "" || item.Stability == "" {
+			t.Fatalf("default catalog returned non-daily or unclassified command: %#v", item)
+		}
+	}
+	for _, want := range []string{"status", "doctor", "store current", "environment restore", "map explain", "map run", "case run", "case suite report"} {
+		if _, ok := commands[want]; !ok {
+			t.Fatalf("default catalog missing daily command %q in %#v", want, commands)
+		}
+	}
+	for _, hidden := range []string{"profile import", "template-package import", "runtime mysql endpoints", "executor plan", "case suite coverage", "workflow acceptance start", "baseline get"} {
+		if _, ok := commands[hidden]; ok {
+			t.Fatalf("default catalog should hide %q: %#v", hidden, commands[hidden])
+		}
+	}
+}
+
+func TestCommandsAllExposesAdvancedAndCompatibilityMetadata(t *testing.T) {
+	out := runCLI(t, "commands", "--all", "--filter", "case suite coverage", "--json")
+
+	var report struct {
+		OK       bool `json:"ok"`
+		All      bool `json:"all"`
+		Commands []struct {
+			Command     string `json:"command"`
+			Tier        string `json:"tier"`
+			Audience    string `json:"audience"`
+			Stability   string `json:"stability"`
+			Replacement string `json:"replacement,omitempty"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode all commands json: %v\n%s", err, out)
+	}
+	if !report.OK || !report.All || len(report.Commands) == 0 {
+		t.Fatalf("all command catalog = %#v", report)
+	}
+	item := report.Commands[0]
+	if item.Command != "case suite coverage" || item.Tier != "compat" || item.Audience != "agent" || item.Stability != "legacy" || !strings.Contains(item.Replacement, "case suite report --view coverage") {
+		t.Fatalf("case suite coverage metadata = %#v", item)
+	}
+
+	textOut := runCLI(t, "commands", "--all", "--filter", "executor plan")
+	if !strings.Contains(textOut, "Tier: advanced") || !strings.Contains(textOut, "Replacement: agent-testbench map explain") {
+		t.Fatalf("text command catalog should show tier and replacement:\n%s", textOut)
+	}
+}
+
+func TestCommandsCanFilterByTierAndAudience(t *testing.T) {
+	out := runCLI(t, "commands", "--tier", "compat", "--audience", "agent", "--filter", "workflow acceptance", "--json")
+
+	var report struct {
+		OK       bool   `json:"ok"`
+		Tier     string `json:"tier"`
+		Audience string `json:"audience"`
+		Commands []struct {
+			Command     string `json:"command"`
+			Tier        string `json:"tier"`
+			Audience    string `json:"audience"`
+			Replacement string `json:"replacement,omitempty"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode tier/audience commands json: %v\n%s", err, out)
+	}
+	if !report.OK || report.Tier != "compat" || report.Audience != "agent" || len(report.Commands) == 0 {
+		t.Fatalf("tier/audience command catalog = %#v", report)
+	}
+	for _, item := range report.Commands {
+		if item.Tier != "compat" || item.Audience != "agent" || !strings.Contains(item.Replacement, "environment acceptance") {
+			t.Fatalf("workflow acceptance metadata = %#v", item)
 		}
 	}
 }

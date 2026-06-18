@@ -101,6 +101,10 @@ func (s *Store) GetActiveConfigVersion(ctx context.Context) (store.ConfigVersion
 	return s.core.GetActiveConfigVersion(ctx)
 }
 
+func (s *Store) ActivateLatestConfigVersion(ctx context.Context, profileID string) (store.ConfigVersion, error) {
+	return s.core.ActivateLatestConfigVersion(ctx, profileID)
+}
+
 func (s *Store) UpsertReadModel(ctx context.Context, r store.ReadModel) (store.ReadModel, error) {
 	return s.core.UpsertReadModel(ctx, r)
 }
@@ -117,8 +121,16 @@ func (s *Store) GetProfileCatalog(ctx context.Context) (store.ProfileCatalog, er
 	return s.core.GetProfileCatalog(ctx)
 }
 
+func (s *Store) GetProfileCatalogByID(ctx context.Context, profileID string) (store.ProfileCatalog, error) {
+	return s.core.GetProfileCatalogByID(ctx, profileID)
+}
+
 func (s *Store) GetProfileCatalogIndex(ctx context.Context) (store.ProfileCatalogIndex, error) {
 	return s.core.GetProfileCatalogIndex(ctx)
+}
+
+func (s *Store) ListProfileCatalogIndexes(ctx context.Context) ([]store.ProfileCatalogIndex, error) {
+	return s.core.ListProfileCatalogIndexes(ctx)
 }
 
 func (s *Store) ReplaceTestPlanGraph(ctx context.Context, graph store.TestPlanGraph) error {

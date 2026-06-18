@@ -136,7 +136,9 @@ func rawJSONObject(value string) map[string]any {
 	if strings.TrimSpace(value) == "" {
 		return out
 	}
-	if err := json.Unmarshal([]byte(value), &out); err != nil {
+	decoder := json.NewDecoder(strings.NewReader(value))
+	decoder.UseNumber()
+	if err := decoder.Decode(&out); err != nil {
 		return map[string]any{}
 	}
 	return out

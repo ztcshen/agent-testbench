@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"agent-testbench/internal/store"
 	"agent-testbench/internal/store/sqlite"
 )
 
@@ -109,6 +111,95 @@ func TestTemplatePackageCatalogIndexCommandReadsStoreCatalog(t *testing.T) {
 	}
 	if report.ConfigVersion == nil || report.ConfigVersion.ProfileID != "sample" || !report.ConfigVersion.Active {
 		t.Fatalf("catalog-index config version = %#v", report.ConfigVersion)
+	}
+}
+
+func TestProfileCatalogListShowsHistoricalCatalogs(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
+	storeRef := "sqlite://" + dbPath
+	seedProfileCatalogRestoreFixture(t, dbPath)
+
+	out := runCLI(t, "profile", "catalog", "list", "--store", storeRef, "--json")
+
+	var report struct {
+		OK    bool `json:"ok"`
+		Count int  `json:"count"`
+		Items []struct {
+			ProfileID string `json:"profileId"`
+			Counts    struct {
+				Workflows int `json:"workflows"`
+				APICases  int `json:"apiCases"`
+			} `json:"counts"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode catalog list json: %v\n%s", err, out)
+	}
+	if !report.OK || report.Count != 2 || len(report.Items) != 2 {
+		t.Fatalf("catalog list report = %#v", report)
+	}
+	if report.Items[0].ProfileID != "profile.workflow-batch-report.testfixture" || report.Items[1].ProfileID != "profile.integration-catalog" {
+		t.Fatalf("catalog list order = %#v", report.Items)
+	}
+	if report.Items[1].Counts.Workflows != 1 || report.Items[1].Counts.APICases != 1 {
+		t.Fatalf("catalog list integration catalog counts = %#v", report.Items[1].Counts)
+	}
+}
+
+func TestProfileCatalogRestorePromotesHistoricalCatalogAndActiveConfig(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
+	storeRef := "sqlite://" + dbPath
+	seedProfileCatalogRestoreFixture(t, dbPath)
+
+	beforeWorkflow := runCLI(t, "workflow", "discover", "--store", storeRef, "--filter", "primary", "--json")
+	var beforeWorkflowReport workflowListReport
+	if err := json.Unmarshal([]byte(beforeWorkflow), &beforeWorkflowReport); err != nil {
+		t.Fatalf("decode workflow discover before restore: %v\n%s", err, beforeWorkflow)
+	}
+	if beforeWorkflowReport.Count != 0 {
+		t.Fatalf("workflow discover should not see primary flow before restore: %#v", beforeWorkflowReport)
+	}
+
+	restoreOut := runCLI(t, "profile", "catalog", "restore", "--store", storeRef, "--profile", "profile.integration-catalog", "--json")
+	var restoreReport struct {
+		OK     bool `json:"ok"`
+		Before struct {
+			ProfileID string `json:"profileId"`
+		} `json:"before"`
+		After struct {
+			ProfileID string `json:"profileId"`
+		} `json:"after"`
+		ConfigVersion *struct {
+			ProfileID string `json:"profileId"`
+			Active    bool   `json:"active"`
+		} `json:"configVersion"`
+	}
+	if err := json.Unmarshal([]byte(restoreOut), &restoreReport); err != nil {
+		t.Fatalf("decode catalog restore json: %v\n%s", err, restoreOut)
+	}
+	if !restoreReport.OK || restoreReport.Before.ProfileID != "profile.workflow-batch-report.testfixture" || restoreReport.After.ProfileID != "profile.integration-catalog" {
+		t.Fatalf("catalog restore report = %#v", restoreReport)
+	}
+	if restoreReport.ConfigVersion == nil || restoreReport.ConfigVersion.ProfileID != "profile.integration-catalog" || !restoreReport.ConfigVersion.Active {
+		t.Fatalf("catalog restore config version = %#v", restoreReport.ConfigVersion)
+	}
+
+	afterWorkflow := runCLI(t, "workflow", "discover", "--store", storeRef, "--filter", "primary", "--json")
+	var afterWorkflowReport workflowListReport
+	if err := json.Unmarshal([]byte(afterWorkflow), &afterWorkflowReport); err != nil {
+		t.Fatalf("decode workflow discover after restore: %v\n%s", err, afterWorkflow)
+	}
+	if afterWorkflowReport.ProfileID != "profile.integration-catalog" || afterWorkflowReport.Count != 1 || afterWorkflowReport.Items[0].ID != "workflow.integration_primary_flow" {
+		t.Fatalf("workflow discover after restore = %#v", afterWorkflowReport)
+	}
+
+	afterCase := runCLI(t, "case", "discover", "--store", storeRef, "--filter", "primary", "--json")
+	var afterCaseReport caseListReport
+	if err := json.Unmarshal([]byte(afterCase), &afterCaseReport); err != nil {
+		t.Fatalf("decode case discover after restore: %v\n%s", err, afterCase)
+	}
+	if afterCaseReport.ProfileID != "profile.integration-catalog" || afterCaseReport.Count != 1 || afterCaseReport.Items[0].ID != "integration.primary.default" {
+		t.Fatalf("case discover after restore = %#v", afterCaseReport)
 	}
 }
 
@@ -340,5 +431,72 @@ func TestProfileImportCommandCanEmitJSONReport(t *testing.T) {
 	}
 	if strings.Join(report.ReadModels, ",") != "interface-nodes,catalog,dashboard" {
 		t.Fatalf("profile import read models = %#v", report.ReadModels)
+	}
+}
+
+func seedProfileCatalogRestoreFixture(t *testing.T, dbPath string) {
+	t.Helper()
+
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: dbPath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	integrationIndexedAt := time.Date(2026, 6, 17, 7, 29, 15, 0, time.UTC)
+	fixtureIndexedAt := integrationIndexedAt.Add(3 * time.Hour)
+	integrationCatalog := store.ProfileCatalog{
+		ProfileID: "profile.integration-catalog",
+		IndexedAt: integrationIndexedAt,
+		Services:  []store.CatalogService{{ID: "service.alpha", DisplayName: "Alpha Service", Kind: "http"}},
+		Workflows: []store.CatalogWorkflow{{ID: "workflow.integration_primary_flow", DisplayName: "Integration Primary Flow"}},
+		APICases:  []store.CatalogAPICase{{ID: "integration.primary.default", DisplayName: "Primary Default", NodeID: "node.primary_operation", CasePath: "cases/primary.json"}},
+		Fixtures:  []store.CatalogFixture{{ID: "fixture.primary", DisplayName: "Primary Fixture", Kind: "store_snapshot", DataJSON: `{}`}},
+		InterfaceNodes: []store.CatalogInterfaceNode{
+			{ID: "node.primary_operation", DisplayName: "Primary Operation", ServiceID: "service.alpha"},
+		},
+		WorkflowBindings: []store.CatalogWorkflowBinding{
+			{WorkflowID: "workflow.integration_primary_flow", StepID: "primary_operation", NodeID: "node.primary_operation", CaseID: "integration.primary.default", Required: true, SortOrder: 1},
+		},
+	}
+	testCatalog := store.ProfileCatalog{
+		ProfileID:      "profile.workflow-batch-report.testfixture",
+		IndexedAt:      fixtureIndexedAt,
+		Services:       []store.CatalogService{{ID: "service.test", DisplayName: "Test Service", Kind: "http"}},
+		Workflows:      []store.CatalogWorkflow{{ID: "workflow.unit.fixture", DisplayName: "Unit Fixture"}},
+		InterfaceNodes: []store.CatalogInterfaceNode{{ID: "node.test", DisplayName: "Test API", ServiceID: "service.test"}},
+		APICases:       []store.CatalogAPICase{{ID: "case.unit.fixture", DisplayName: "Unit Fixture Case", NodeID: "node.test", CasePath: "cases/unit.json"}},
+		WorkflowBindings: []store.CatalogWorkflowBinding{
+			{WorkflowID: "workflow.unit.fixture", StepID: "unit", NodeID: "node.test", CaseID: "case.unit.fixture", Required: true, SortOrder: 1},
+		},
+	}
+	if err := s.ReplaceProfileCatalog(ctx, integrationCatalog); err != nil {
+		t.Fatalf("seed integration catalog: %v", err)
+	}
+	if _, err := s.UpsertConfigVersion(ctx, store.ConfigVersion{
+		ID:           "config.profile.integration-catalog.20260617T072915Z",
+		ProfileID:    "profile.integration-catalog",
+		SourcePath:   "/profiles/integration-catalog",
+		BundleDigest: "sha256:integration",
+		Active:       true,
+		PublishedAt:  integrationIndexedAt,
+		CreatedAt:    integrationIndexedAt,
+	}); err != nil {
+		t.Fatalf("seed integration config version: %v", err)
+	}
+	if err := s.ReplaceProfileCatalog(ctx, testCatalog); err != nil {
+		t.Fatalf("seed fixture catalog: %v", err)
+	}
+	if _, err := s.UpsertConfigVersion(ctx, store.ConfigVersion{
+		ID:           "config.profile.workflow-batch-report.testfixture.20260617T105011Z",
+		ProfileID:    "profile.workflow-batch-report.testfixture",
+		SourcePath:   "/tmp/TestWorkflowReportFailsAdmissionWhenStepInputIsMissing/001",
+		BundleDigest: "sha256:test",
+		Active:       true,
+		PublishedAt:  fixtureIndexedAt,
+		CreatedAt:    fixtureIndexedAt,
+	}); err != nil {
+		t.Fatalf("seed fixture config version: %v", err)
 	}
 }

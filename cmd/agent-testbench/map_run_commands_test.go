@@ -24,6 +24,7 @@ func TestMapRunExecutesPlanTasksAndExplainReadsResult(t *testing.T) {
 	assertMapRunCommandReport(t, report)
 	assertStoredMapRunPlan(t, ctx, storeRef, report.PlanID)
 	assertMapRunExplainCommandReport(t, runCLI(t, "map", "run", "explain", "--store", storeRef, "--plan", report.PlanID, "--json"), report.PlanID)
+	assertMapRunExplainCommandReport(t, runCLI(t, "map", "plan", "inspect", "--store", storeRef, "--plan", report.PlanID, "--json"), report.PlanID)
 }
 
 func TestMapRunPropagatesWorkflowStepExports(t *testing.T) {
@@ -219,6 +220,28 @@ func TestMapRunRejectsSavedPlanWhenGraphChanged(t *testing.T) {
 	failed := runCLIFails(t, "map", "run", "--store", storeRef, "--plan", saved.PlanID, "--json")
 	if !strings.Contains(failed, "saved plan graph fingerprint does not match current map graph") {
 		t.Fatalf("changed graph error = %s", failed)
+	}
+}
+
+func TestMapRunPreflightRejectsMapWhenActiveCatalogLostCases(t *testing.T) {
+	ctx := context.Background()
+	storeRef := seedExecutableMapCommandStore(t, ctx)
+	runCLI(t, "map", "import-workflows", "--store", storeRef, "--json")
+
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if err := runtime.ReplaceProfileCatalog(ctx, store.ProfileCatalog{ProfileID: "profile.fixture"}); err != nil {
+		t.Fatalf("replace active catalog: %v", err)
+	}
+	closeCLIStore(runtime)
+
+	out := runCLIFails(t, "map", "run", "--store", storeRef, "--map", "map.profile.flow", "--scope", "all", "--json")
+	for _, want := range []string{"map run preflight failed", "missing catalog cases", "case.prepare", "case.submit.success", "missing catalog workflows", "workflow.flow.create"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("preflight error missing %q:\n%s", want, out)
+		}
 	}
 }
 

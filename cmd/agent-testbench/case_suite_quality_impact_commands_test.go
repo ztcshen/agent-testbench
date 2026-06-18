@@ -27,6 +27,13 @@ func runCaseSuiteQualityAuditsMaintainedCaseMetadata(t *testing.T, _ string, lab
 		"--status", "active",
 		"--json",
 	)
+	viewOut := runCLI(t,
+		"case", "suite", "report",
+		"--view", "quality",
+		"--profile", fixture.profileDir,
+		"--status", "active",
+		"--json",
+	)
 	var report struct {
 		OK     bool `json:"ok"`
 		Counts struct {
@@ -52,8 +59,24 @@ func runCaseSuiteQualityAuditsMaintainedCaseMetadata(t *testing.T, _ string, lab
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode %s suite quality json: %v\n%s", label, err, out)
 	}
+	var viewReport struct {
+		OK     bool `json:"ok"`
+		Counts struct {
+			Nodes             int `json:"nodes"`
+			NodesWithoutCases int `json:"nodesWithoutCases"`
+			Cases             int `json:"cases"`
+			CompleteCases     int `json:"completeCases"`
+			IncompleteCases   int `json:"incompleteCases"`
+		} `json:"counts"`
+	}
+	if err := json.Unmarshal([]byte(viewOut), &viewReport); err != nil {
+		t.Fatalf("decode %s suite report --view quality json: %v\n%s", label, err, viewOut)
+	}
 	if report.OK || report.Counts.Nodes != 2 || report.Counts.NodesWithoutCases != 1 || report.Counts.Cases != 2 || report.Counts.CompleteCases != 1 || report.Counts.IncompleteCases != 1 {
 		t.Fatalf("%s suite quality report = %#v", label, report)
+	}
+	if viewReport.OK != report.OK || viewReport.Counts.Nodes != report.Counts.Nodes || viewReport.Counts.IncompleteCases != report.Counts.IncompleteCases {
+		t.Fatalf("%s suite report --view quality = %#v want quality counts %#v", label, viewReport, report.Counts)
 	}
 	if report.Counts.MissingOwner != 1 || report.Counts.MissingRunnable != 1 || report.Counts.MissingExecution != 1 {
 		t.Fatalf("%s suite quality gaps = %#v", label, report.Counts)

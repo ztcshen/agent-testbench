@@ -72,6 +72,51 @@ func TestMapImportWorkflowsAndExplainUsesStoreCatalog(t *testing.T) {
 	}
 }
 
+func TestMapImportWorkflowsCanLimitImportedWorkflowPaths(t *testing.T) {
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "map-filtered.sqlite")
+	storeRef := "sqlite://" + storePath
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if err := runtime.ReplaceProfileCatalog(ctx, mapCommandProfileCatalogFixture()); err != nil {
+		t.Fatalf("seed profile catalog: %v", err)
+	}
+	closeCLIStore(runtime)
+
+	importOut := runCLI(t, "map", "import-workflows", "--store", storeRef, "--map", "map.filtered", "--workflow", "workflow.flow.create", "--json")
+	var importReport struct {
+		OK     bool `json:"ok"`
+		Counts struct {
+			Paths     int `json:"paths"`
+			PathSteps int `json:"pathSteps"`
+		} `json:"counts"`
+	}
+	if err := json.Unmarshal([]byte(importOut), &importReport); err != nil {
+		t.Fatalf("decode map import json: %v\n%s", err, importOut)
+	}
+	if !importReport.OK || importReport.Counts.Paths != 1 || importReport.Counts.PathSteps != 2 {
+		t.Fatalf("filtered map import report = %#v", importReport)
+	}
+
+	workflowsOut := runCLI(t, "map", "workflows", "--store", storeRef, "--map", "map.filtered", "--json")
+	var workflowsReport struct {
+		OK        bool `json:"ok"`
+		Count     int  `json:"count"`
+		Workflows []struct {
+			WorkflowID string `json:"workflowId"`
+			StepCount  int    `json:"stepCount"`
+		} `json:"workflows"`
+	}
+	if err := json.Unmarshal([]byte(workflowsOut), &workflowsReport); err != nil {
+		t.Fatalf("decode map workflows json: %v\n%s", err, workflowsOut)
+	}
+	if !workflowsReport.OK || workflowsReport.Count != 1 || workflowsReport.Workflows[0].WorkflowID != "workflow.flow.create" || workflowsReport.Workflows[0].StepCount != 2 {
+		t.Fatalf("filtered map workflows report = %#v", workflowsReport)
+	}
+}
+
 func TestMapExplainScopeAllCanSavePlannerInstance(t *testing.T) {
 	ctx := context.Background()
 	storePath := filepath.Join(t.TempDir(), "map-explain-save.sqlite")
@@ -161,7 +206,7 @@ func TestMapImportWorkflowsRejectsPositionalArgsBeforeOpeningStore(t *testing.T)
 }
 
 func TestMapCommandsAreDiscoverable(t *testing.T) {
-	out := runCLI(t, "commands", "--filter", "map", "--json")
+	out := runCLI(t, "commands", "--all", "--area", "map", "--filter", "map", "--json")
 	var report struct {
 		Count    int `json:"count"`
 		Commands []struct {
@@ -181,10 +226,15 @@ func TestMapCommandsAreDiscoverable(t *testing.T) {
 		"map publish",
 		"map versions",
 		"map coverage",
+		"map doctor",
+		"map diff",
+		"map validation list",
+		"map validation attach",
 		"map workflows",
 		"map explain",
 		"map gate",
 		"map run",
+		"map plan inspect",
 		"map run explain",
 		"map atlas",
 	}
@@ -461,6 +511,217 @@ func TestMapSnapshotAndPublishCreateVersionedAtlas(t *testing.T) {
 	}
 }
 
+func TestMapDoctorReportsBrokenGraphReferences(t *testing.T) {
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "map-doctor.sqlite")
+	storeRef := "sqlite://" + storePath
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	graph := store.TestPlanGraph{
+		Map: store.TestPlanMap{ID: "map.broken", ProfileID: "profile.broken", DisplayName: "Broken Map", Status: "draft", SummaryJSON: `{}`},
+		Nodes: []store.TestPlanNode{
+			{MapID: "map.broken", ID: "case.submit", CaseID: "case.submit", Role: "primary", StateEffect: "advance", SummaryJSON: `{}`},
+			{MapID: "map.broken", ID: "case.submit.blank.invalid", CaseID: "case.submit.blank.invalid", Role: "validation", StateEffect: "unchanged", AnchorNodeID: "case.missing", BaseCaseID: "case.missing", SummaryJSON: `{}`},
+		},
+		Paths: []store.TestPlanPath{
+			{MapID: "map.broken", ID: "workflow.submit", WorkflowID: "workflow.submit", DisplayName: "Submit", Status: "active", SummaryJSON: `{}`},
+		},
+		PathSteps: []store.TestPlanPathStep{
+			{MapID: "map.broken", PathID: "workflow.submit", StepIndex: 1, StepID: "submit", NodeID: "case.submit", CaseID: "case.submit", Required: true, SummaryJSON: `{}`},
+			{MapID: "map.broken", PathID: "workflow.submit", StepIndex: 2, StepID: "missing", NodeID: "case.missing", CaseID: "case.missing", Required: true, SummaryJSON: `{}`},
+		},
+		Edges: []store.TestPlanEdge{
+			{MapID: "map.broken", ID: "edge.submit.missing", FromNodeID: "case.submit", ToNodeID: "case.missing", Kind: "control", PathID: "workflow.submit", Required: true, SummaryJSON: `{}`},
+			{MapID: "map.broken", ID: "edge.fixture.invalid", FromNodeID: "case.submit", ToNodeID: "case.submit.blank.invalid", Kind: "fixture", MaterializationID: "fixture.missing", Required: true, SummaryJSON: `{}`},
+		},
+		Materializations: []store.TestPlanMaterialization{
+			{MapID: "map.broken", ID: "fixture.replay", SourcePathID: "workflow.missing", SourceUntilNodeID: "case.submit", Status: "active", SummaryJSON: `{}`},
+		},
+	}
+	if err := runtime.ReplaceTestPlanGraph(ctx, graph); err != nil {
+		t.Fatalf("seed broken graph: %v", err)
+	}
+	closeCLIStore(runtime)
+
+	out := runCLIFails(t, "map", "doctor", "--store", storeRef, "--map", "map.broken", "--json")
+	var report struct {
+		OK         bool `json:"ok"`
+		IssueCount int  `json:"issueCount"`
+		Checks     []struct {
+			Code     string `json:"code"`
+			OK       bool   `json:"ok"`
+			Severity string `json:"severity"`
+			Detail   string `json:"detail"`
+			Fix      string `json:"fix"`
+		} `json:"checks"`
+	}
+	if err := json.Unmarshal([]byte(jsonPrefix(out)), &report); err != nil {
+		t.Fatalf("decode map doctor json: %v\n%s", err, out)
+	}
+	if report.OK || report.IssueCount < 4 {
+		t.Fatalf("doctor should fail with structural issues: %#v", report)
+	}
+	for _, code := range []string{"path-step.node", "edge.to-node", "edge.materialization", "validation.anchor", "materialization.source-path"} {
+		if !mapDoctorReportHasCode(report.Checks, code) {
+			t.Fatalf("doctor report missing %s: %#v", code, report.Checks)
+		}
+	}
+}
+
+func TestMapValidationAttachAndListGroupsByInterface(t *testing.T) {
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "map-validation.sqlite")
+	storeRef := "sqlite://" + storePath
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	catalog := store.ProfileCatalog{
+		ProfileID: "profile.validation",
+		APICases: []store.CatalogAPICase{
+			{ID: "case.submit.success", DisplayName: "Submit success", NodeID: "node.submit", RequestTemplateID: "template.submit", Status: "active", SortOrder: 1},
+			{ID: "case.submit.length.invalid", DisplayName: "Submit length invalid", NodeID: "node.submit", RequestTemplateID: "template.submit", CaseType: "negative", RenderMode: "template_patch", PatchJSON: `[{"op":"replace","path":"$.body.name","value":"too-long"}]`, ExpectedJSON: `{"status":400}`, Status: "active", SortOrder: 2},
+		},
+	}
+	if err := runtime.ReplaceProfileCatalog(ctx, catalog); err != nil {
+		t.Fatalf("seed catalog: %v", err)
+	}
+	graph := store.TestPlanGraph{
+		Map: store.TestPlanMap{ID: "map.validation", ProfileID: "profile.validation", DisplayName: "Validation Map", Status: "draft", SummaryJSON: `{}`},
+		Nodes: []store.TestPlanNode{
+			{MapID: "map.validation", ID: "case.submit.success", CaseID: "case.submit.success", InterfaceNodeID: "node.submit", RequestTemplateID: "template.submit", Role: "primary", StateEffect: "advance", SummaryJSON: `{}`},
+		},
+		Paths: []store.TestPlanPath{
+			{MapID: "map.validation", ID: "workflow.submit", WorkflowID: "workflow.submit", DisplayName: "Submit", Status: "active", SummaryJSON: `{}`},
+		},
+		PathSteps: []store.TestPlanPathStep{
+			{MapID: "map.validation", PathID: "workflow.submit", StepIndex: 1, StepID: "submit", NodeID: "case.submit.success", CaseID: "case.submit.success", Required: true, SummaryJSON: `{}`},
+		},
+	}
+	if err := runtime.ReplaceTestPlanGraph(ctx, graph); err != nil {
+		t.Fatalf("seed validation graph: %v", err)
+	}
+	closeCLIStore(runtime)
+
+	attachOut := runCLI(t, "map", "validation", "attach", "--store", storeRef, "--map", "map.validation", "--anchor", "case.submit.success", "--case", "case.submit.length.invalid", "--json")
+	var attach struct {
+		OK   bool `json:"ok"`
+		Node struct {
+			ID           string `json:"id"`
+			CaseID       string `json:"caseId"`
+			AnchorNodeID string `json:"anchorNodeId"`
+			BaseCaseID   string `json:"baseCaseId"`
+			Role         string `json:"role"`
+			StateEffect  string `json:"stateEffect"`
+		} `json:"node"`
+		Counts struct {
+			Validation int `json:"validation"`
+		} `json:"counts"`
+	}
+	if err := json.Unmarshal([]byte(attachOut), &attach); err != nil {
+		t.Fatalf("decode validation attach json: %v\n%s", err, attachOut)
+	}
+	if !attach.OK || attach.Node.ID != "case.submit.length.invalid" || attach.Node.AnchorNodeID != "case.submit.success" || attach.Node.BaseCaseID != "case.submit.success" || attach.Node.Role != "validation" || attach.Node.StateEffect != "unchanged" || attach.Counts.Validation != 1 {
+		t.Fatalf("validation attach report = %#v", attach)
+	}
+
+	listOut := runCLI(t, "map", "validation", "list", "--store", storeRef, "--map", "map.validation", "--interface", "node.submit", "--json")
+	var list struct {
+		OK     bool `json:"ok"`
+		Groups []struct {
+			InterfaceNodeID string `json:"interfaceNodeId"`
+			AnchorNodeID    string `json:"anchorNodeId"`
+			Count           int    `json:"count"`
+			Families        []struct {
+				Family string `json:"family"`
+				Count  int    `json:"count"`
+			} `json:"families"`
+			Cases []struct {
+				CaseID       string `json:"caseId"`
+				AnchorNodeID string `json:"anchorNodeId"`
+				Family       string `json:"family"`
+			} `json:"cases"`
+		} `json:"groups"`
+	}
+	if err := json.Unmarshal([]byte(listOut), &list); err != nil {
+		t.Fatalf("decode validation list json: %v\n%s", err, listOut)
+	}
+	if !list.OK || len(list.Groups) != 1 || list.Groups[0].InterfaceNodeID != "node.submit" || list.Groups[0].AnchorNodeID != "case.submit.success" || list.Groups[0].Count != 1 {
+		t.Fatalf("validation list groups = %#v", list.Groups)
+	}
+	if len(list.Groups[0].Cases) != 1 || list.Groups[0].Cases[0].CaseID != "case.submit.length.invalid" || list.Groups[0].Cases[0].Family != "length" {
+		t.Fatalf("validation list cases = %#v", list.Groups[0].Cases)
+	}
+}
+
+func TestMapDiffComparesVersionAgainstWorkingGraph(t *testing.T) {
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "map-diff.sqlite")
+	storeRef := "sqlite://" + storePath
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	graph := store.TestPlanGraph{
+		Map: store.TestPlanMap{ID: "map.diff", ProfileID: "profile.diff", DisplayName: "Diff Map", Status: "review", SummaryJSON: `{}`},
+		Nodes: []store.TestPlanNode{
+			{MapID: "map.diff", ID: "case.submit.success", CaseID: "case.submit.success", InterfaceNodeID: "node.submit", Role: "primary", StateEffect: "advance", SummaryJSON: `{}`},
+		},
+	}
+	if err := runtime.ReplaceTestPlanGraph(ctx, graph); err != nil {
+		t.Fatalf("seed diff graph: %v", err)
+	}
+	closeCLIStore(runtime)
+
+	runCLI(t, "map", "snapshot", "--store", storeRef, "--map", "map.diff", "--version", "v1", "--status", "review", "--json")
+	runtime, err = openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	graph.Nodes = append(graph.Nodes, store.TestPlanNode{MapID: "map.diff", ID: "case.submit.blank.invalid", CaseID: "case.submit.blank.invalid", InterfaceNodeID: "node.submit", Role: "validation", StateEffect: "unchanged", BaseCaseID: "case.submit.success", AnchorNodeID: "case.submit.success", SummaryJSON: `{}`})
+	if err := runtime.ReplaceTestPlanGraph(ctx, graph); err != nil {
+		t.Fatalf("update working graph: %v", err)
+	}
+	closeCLIStore(runtime)
+
+	out := runCLI(t, "map", "diff", "--store", storeRef, "--map", "map.diff", "--from", "v1", "--to", "working", "--json")
+	var report struct {
+		OK      bool   `json:"ok"`
+		MapID   string `json:"mapId"`
+		From    string `json:"from"`
+		To      string `json:"to"`
+		Changed bool   `json:"changed"`
+		Nodes   struct {
+			Before int      `json:"before"`
+			After  int      `json:"after"`
+			Added  []string `json:"added"`
+		} `json:"nodes"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode map diff json: %v\n%s", err, out)
+	}
+	if !report.OK || !report.Changed || report.MapID != "map.diff" || report.From != "v1" || report.To != "working" || report.Nodes.Before != 1 || report.Nodes.After != 2 || strings.Join(report.Nodes.Added, ",") != "case.submit.blank.invalid" {
+		t.Fatalf("map diff report = %#v", report)
+	}
+}
+
+func mapDoctorReportHasCode(checks []struct {
+	Code     string `json:"code"`
+	OK       bool   `json:"ok"`
+	Severity string `json:"severity"`
+	Detail   string `json:"detail"`
+	Fix      string `json:"fix"`
+}, code string) bool {
+	for _, check := range checks {
+		if check.Code == code && !check.OK {
+			return true
+		}
+	}
+	return false
+}
+
 func TestMapCoverageReportsWorkflowConvergence(t *testing.T) {
 	ctx := context.Background()
 	storePath := filepath.Join(t.TempDir(), "map-coverage.sqlite")
@@ -646,8 +907,10 @@ func TestMapAtlasWritesInteractiveArtifact(t *testing.T) {
 		`case.submit.field.required`,
 		`Field required`,
 		`template.submit`,
-		`Interface reverse cases`,
+		`Test families`,
 		`function interfaceReverseCases`,
+		`function caseFamilySummaries`,
+		`id="toggle-validation"`,
 		`id="map-atlas-minimap"`,
 		`id="node-history"`,
 		`Path Finder`,

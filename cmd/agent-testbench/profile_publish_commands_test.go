@@ -53,6 +53,40 @@ func TestConfigPublishCommandIndexesBundleInStore(t *testing.T) {
 	}
 }
 
+func TestConfigPublishRejectsGoTestFixtureProfileForSharedMySQLStore(t *testing.T) {
+	fixture := writeUniqueWorkflowBatchReportProfile(t)
+
+	out := runCLIFails(t,
+		"config", "publish",
+		"--from", fixture.profileDir,
+		"--store", "mysql://agent:secret@127.0.0.1:1/business_catalog?tls=false",
+	)
+
+	for _, want := range []string{
+		"refusing to publish Go test fixture profile",
+		fixture.profileID,
+		"business_catalog",
+		"dedicated sandbox/smoke/test/ci database",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("config publish safety error missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestProfilePublishSafetyRecognizesOnlyAgentTestBenchFixtureDatabases(t *testing.T) {
+	for _, name := range []string{"agent_testbench_smoke", "agent-testbench-ci", "local_agent_testbench"} {
+		if !isDedicatedAgentTestBenchStoreDatabaseName(name) {
+			t.Fatalf("expected %q to be accepted as an AgentTestBench fixture database", name)
+		}
+	}
+	for _, name := range []string{"shared_mysql", "business_catalog", "shared_ci_catalog", "workflow_test"} {
+		if isDedicatedAgentTestBenchStoreDatabaseName(name) {
+			t.Fatalf("expected %q to be rejected as a shared/non-product fixture database", name)
+		}
+	}
+}
+
 func TestConfigPublishCommandMaterializesInterfaceNodeDetailReadModels(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
 	profileDir := writeInterfaceNodeCaseProfile(t)

@@ -46,6 +46,8 @@ func runProfile(args []string) error {
 		return runProfileGenerationPlan(args[1:])
 	case "import-plan":
 		return runProfileImportPlan(args[1:])
+	case "catalog":
+		return runProfileCatalog(context.Background(), args[1:])
 	case "catalog-index":
 		return runProfileCatalogIndex(context.Background(), args[1:])
 	case "import":

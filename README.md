@@ -116,8 +116,10 @@ command to configure a named Store, optionally build the local runtime, install
 a shell entrypoint, and run a smoke check. Use `status` for read-only setup
 state, `doctor` for diagnostics, `update --channel release` or `update
 --release latest` when you want the newest tagged runtime, and `commands --area
-AREA --filter TEXT` to find exact Store, case, workflow, and Evidence commands
-without scrolling the full help text. `task run`, `task schedule`, `task watch`,
+AREA --filter TEXT` to find daily Store, case, workflow, map, and Evidence
+commands without scrolling the full help text. Use `commands --all` when you
+need advanced, compatibility, developer, or operator entries. `task run`,
+`task schedule`, `task watch`,
 top-level `watch`, and `notify test` turn repeatable CLI operations into
 Store-backed task definitions, run history, logs, and file/webhook completion
 notifications. `config show`, `config path`, `logs`, and `completion bash|zsh`

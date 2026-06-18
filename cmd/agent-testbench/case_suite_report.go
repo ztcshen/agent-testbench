@@ -60,7 +60,17 @@ type caseSuiteReportItem struct {
 	BodyPreview string   `json:"bodyPreview,omitempty"`
 }
 
+const caseSuiteReportViewPriority = "priority"
+
 func runCaseSuiteReport(ctx context.Context, args []string) error {
+	view, routedArgs, err := extractCaseSuiteReportView(args)
+	if err != nil {
+		return err
+	}
+	if view != "" && view != "run" {
+		return runCaseSuiteReportView(ctx, view, routedArgs)
+	}
+	args = routedArgs
 	selection := newCaseSelectionCLIFlags("case suite report", "active")
 	baseURL := selection.flags.String("base-url", "", "Base URL for live request execution")
 	outputDir := selection.flags.String("output-dir", "", "Report output directory")
@@ -104,6 +114,60 @@ func runCaseSuiteReport(ctx context.Context, args []string) error {
 	}
 	printCaseSuiteReport(report)
 	return nil
+}
+
+func extractCaseSuiteReportView(args []string) (string, []string, error) {
+	out := make([]string, 0, len(args))
+	view := "run"
+	for index := 0; index < len(args); index++ {
+		item := args[index]
+		if item == "--view" {
+			if index+1 >= len(args) {
+				return "", nil, errors.New("--view requires a value")
+			}
+			view = strings.TrimSpace(args[index+1])
+			index++
+			continue
+		}
+		if strings.HasPrefix(item, "--view=") {
+			view = strings.TrimSpace(strings.TrimPrefix(item, "--view="))
+			continue
+		}
+		out = append(out, item)
+	}
+	if view == "" {
+		view = "run"
+	}
+	return view, out, nil
+}
+
+func runCaseSuiteReportView(ctx context.Context, view string, args []string) error {
+	switch view {
+	case "coverage":
+		return runCaseSuiteCoverage(ctx, args)
+	case "stability":
+		return runCaseSuiteStability(ctx, args)
+	case caseSuiteReportViewPriority:
+		return runCaseSuitePriority(ctx, args)
+	case "brief":
+		return runCaseSuiteBrief(ctx, args)
+	case "quality":
+		return runCaseSuiteQuality(ctx, args)
+	case "quality-plan":
+		return runCaseSuiteQualityPlan(ctx, args)
+	case "quality-report":
+		return runCaseSuiteQualityReport(ctx, args)
+	case "inspect":
+		return runCaseSuiteInspect(ctx, args)
+	case "plan":
+		return runCaseSuitePlan(ctx, args)
+	case "impact":
+		return runCaseSuiteImpact(ctx, args)
+	case "impact-report":
+		return runCaseSuiteImpactReport(ctx, args)
+	default:
+		return fmt.Errorf("unsupported case suite report view %q", view)
+	}
 }
 
 func selectedCaseSuiteCases(bundle profile.Bundle, filters caseListFilter) []profile.APICase {

@@ -75,10 +75,12 @@ searchable command catalog instead of scrolling the full help page.
 ./bin/agent-testbench.sh doctor --deep --json
 ./bin/agent-testbench.sh doctor --json
 
-# Find commands by area, flag, or tag.
+# Find daily commands by area, flag, or tag. Use --all for advanced and
+# compatibility commands.
 ./bin/agent-testbench.sh commands --filter "store"
 ./bin/agent-testbench.sh commands --area workflow --filter "gate"
 ./bin/agent-testbench.sh commands --filter "case gate" --json
+./bin/agent-testbench.sh commands --all --filter "profile import"
 ```
 
 On a clean workstation, `onboard` wraps the common first-run sequence:

@@ -22,8 +22,25 @@ func joinCaseURL(baseURL string, path string, query map[string]any) (string, err
 	parsed = parsed.ResolveReference(pathURL)
 	values := parsed.Query()
 	for key, raw := range query {
-		if value := strings.TrimSpace(valueString(raw)); value != "" {
-			values.Set(key, value)
+		switch typed := raw.(type) {
+		case []any:
+			values.Del(key)
+			for _, item := range typed {
+				if value := strings.TrimSpace(valueString(item)); value != "" {
+					values.Add(key, value)
+				}
+			}
+		case []string:
+			values.Del(key)
+			for _, item := range typed {
+				if value := strings.TrimSpace(item); value != "" {
+					values.Add(key, value)
+				}
+			}
+		default:
+			if value := strings.TrimSpace(valueString(raw)); value != "" {
+				values.Set(key, value)
+			}
 		}
 	}
 	parsed.RawQuery = values.Encode()

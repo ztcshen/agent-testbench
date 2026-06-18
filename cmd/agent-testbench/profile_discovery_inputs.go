@@ -13,19 +13,22 @@ import (
 func loadInterfaceNodeReportBundle(ctx context.Context, profileRef string, profileHomeRef string, storeURL string) (profile.Bundle, store.Store, func(), error) {
 	cleanup := func() {}
 	var sourceStore store.Store
-	if strings.TrimSpace(storeURL) != "" {
-		opened, err := openStore(ctx, storeURL)
-		if err != nil {
-			return profile.Bundle{}, nil, cleanup, err
-		}
-		sourceStore = opened
-		cleanup = cleanupCLIStore(opened)
-	}
 	if strings.TrimSpace(profileRef) != "" {
 		resolvedProfilePath, err := resolveProfileReference(profileRef, profileHomeRef)
 		if err != nil {
 			cleanup()
 			return profile.Bundle{}, nil, func() {}, err
+		}
+		if strings.TrimSpace(storeURL) != "" {
+			if err := guardProfilePublishTarget(resolvedProfilePath, storeURL); err != nil {
+				return profile.Bundle{}, nil, cleanup, err
+			}
+			opened, err := openStore(ctx, storeURL)
+			if err != nil {
+				return profile.Bundle{}, nil, cleanup, err
+			}
+			sourceStore = opened
+			cleanup = cleanupCLIStore(opened)
 		}
 		bundle, err := profile.Load(resolvedProfilePath)
 		if err != nil {
@@ -33,6 +36,14 @@ func loadInterfaceNodeReportBundle(ctx context.Context, profileRef string, profi
 			return profile.Bundle{}, nil, func() {}, err
 		}
 		return bundle, sourceStore, cleanup, nil
+	}
+	if strings.TrimSpace(storeURL) != "" {
+		opened, err := openStore(ctx, storeURL)
+		if err != nil {
+			return profile.Bundle{}, nil, cleanup, err
+		}
+		sourceStore = opened
+		cleanup = cleanupCLIStore(opened)
 	}
 	if sourceStore == nil {
 		return profile.Bundle{}, nil, cleanup, errors.New("--profile, --store, --store-url, or an active Store is required")

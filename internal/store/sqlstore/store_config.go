@@ -101,6 +101,37 @@ limit 1;`, s.dialect.BindVar(1))
 	return r, nil
 }
 
+func (s *Store) ActivateLatestConfigVersion(ctx context.Context, profileID string) (r store.ConfigVersion, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return store.ConfigVersion{}, err
+	}
+	defer rollbackTxOnError(tx, &err)
+	selectQuery := fmt.Sprintf(`
+select id, profile_id, source_path, bundle_digest, summary_json, active, published_at, created_at
+from config_versions
+where profile_id = %s
+order by published_at desc, id desc
+limit 1;`, s.dialect.BindVar(1))
+	r, err = scanConfigVersion(tx.QueryRowContext(ctx, selectQuery, profileID))
+	if err != nil {
+		return store.ConfigVersion{}, err
+	}
+	resetQuery := fmt.Sprintf(`update config_versions set active = %s;`, s.dialect.BindVar(1))
+	if _, err = tx.ExecContext(ctx, resetQuery, false); err != nil {
+		return store.ConfigVersion{}, fmt.Errorf("reset active config versions: %w", err)
+	}
+	activateQuery := fmt.Sprintf(`update config_versions set active = %s where id = %s;`, s.dialect.BindVar(1), s.dialect.BindVar(2))
+	if _, err = tx.ExecContext(ctx, activateQuery, true, r.ID); err != nil {
+		return store.ConfigVersion{}, fmt.Errorf("activate config version %q: %w", r.ID, err)
+	}
+	if err = tx.Commit(); err != nil {
+		return store.ConfigVersion{}, err
+	}
+	r.Active = true
+	return r, nil
+}
+
 func (s *Store) UpsertReadModel(ctx context.Context, r store.ReadModel) (store.ReadModel, error) {
 	if r.UpdatedAt.IsZero() {
 		r.UpdatedAt = utcNow()
