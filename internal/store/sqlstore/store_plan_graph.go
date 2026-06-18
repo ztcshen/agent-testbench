@@ -119,6 +119,19 @@ order by sort_order, materialization_id;`, mapIDBind), scanTestPlanMaterializati
 	}, nil
 }
 
+func (s *Store) ListTestPlanMaps(ctx context.Context) ([]store.TestPlanMapSummary, error) {
+	query := `
+select m.map_id, m.profile_id, m.display_name, m.description, m.status, m.summary_json,
+  (select count(*) from test_map_nodes n where n.map_id = m.map_id) as node_count,
+  (select count(*) from test_map_edges e where e.map_id = m.map_id) as edge_count,
+  (select count(*) from test_map_paths p where p.map_id = m.map_id) as path_count,
+  (select count(*) from test_plan_materializations f where f.map_id = m.map_id) as materialization_count,
+  m.created_at, m.updated_at
+from test_maps m
+order by m.updated_at desc, m.map_id;`
+	return queryStoreRows(ctx, s.db, query, scanTestPlanMapSummary)
+}
+
 func prepareTestPlanGraphForReplace(graph store.TestPlanGraph, now time.Time) store.TestPlanGraph {
 	graph.Map.ID = strings.TrimSpace(graph.Map.ID)
 	if graph.Map.Status == "" {
@@ -339,6 +352,22 @@ func scanTestPlanNode(row scanner) (store.TestPlanNode, error) {
 	)
 	normalizeTestPlanNodeJSON(&item)
 	return item, err
+}
+
+func scanTestPlanMapSummary(row scanner) (store.TestPlanMapSummary, error) {
+	var item store.TestPlanMapSummary
+	var createdAt, updatedAt any
+	if err := row.Scan(
+		&item.ID, &item.ProfileID, &item.DisplayName, &item.Description, &item.Status, &item.SummaryJSON,
+		&item.NodeCount, &item.EdgeCount, &item.PathCount, &item.MaterializationCount,
+		&createdAt, &updatedAt,
+	); err != nil {
+		return store.TestPlanMapSummary{}, err
+	}
+	item.SummaryJSON = normalizeJSONText(item.SummaryJSON)
+	item.CreatedAt = decodeDBTime(createdAt)
+	item.UpdatedAt = decodeDBTime(updatedAt)
+	return item, nil
 }
 
 func scanTestPlanEdge(row scanner) (store.TestPlanEdge, error) {

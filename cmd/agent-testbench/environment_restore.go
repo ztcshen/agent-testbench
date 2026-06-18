@@ -212,7 +212,7 @@ func environmentRestoreBuildPlanAndReportWithWatchdog(ctx context.Context, env s
 				ElapsedMs: elapsed.Milliseconds(),
 			})
 		case <-timer.C:
-			return environmentRestorePlanBuildResult{Err: fmt.Errorf("environment restore plan timed out after %s before Docker execution; last observed operation: docker.compose.version", timeout)}, true
+			return environmentRestorePlanBuildResult{Err: fmt.Errorf("environment restore plan timed out after %s before Docker execution; last observed operation: docker.compose.version; command: docker compose version; no child stdout/stderr was captured before the watchdog fired, so this may be a Docker CLI hang or restore preflight bookkeeping waiting on that command", timeout)}, true
 		case <-ctx.Done():
 			return environmentRestorePlanBuildResult{Err: fmt.Errorf("environment restore plan canceled before Docker execution: %w", ctx.Err())}, true
 		}

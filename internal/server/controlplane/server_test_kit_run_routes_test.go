@@ -160,6 +160,64 @@ func TestServerTestKitRunFailsFastForBodylessWriteRequest(t *testing.T) {
 	}
 }
 
+func TestServerTestKitRunFailsAdmissionWhenRequiredInputMissing(t *testing.T) {
+	ctx := context.Background()
+	targetCalled := false
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		targetCalled = true
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer target.Close()
+
+	s := openTestKitSQLiteStore(t, ctx, "sandbox.sqlite")
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "sample",
+		IndexedAt: time.Now().UTC(),
+		APICases: []store.CatalogAPICase{
+			{ID: "case.requires-input", DisplayName: "Requires Input", NodeID: "node.alpha", Status: "active"},
+		},
+		TemplateConfigs: []store.CatalogTemplateConfig{
+			{
+				ID:         "cfg.case.requires-input",
+				TemplateID: "template.case.requires-input",
+				NodeID:     "node.alpha",
+				Status:     "active",
+				ConfigJSON: `{
+					"caseId":"case.requires-input",
+					"inputs":[{"name":"resource_id","source":"override"}],
+					"caseExecution":{
+						"method":"POST",
+						"nodeId":"node.alpha",
+						"path":"/cancel",
+						"body":{"resource_id":"{{override:resource_id|serial:RID}}"},
+						"expectedHttpCodes":[200]
+					}
+				}`,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("replace profile catalog: %v", err)
+	}
+
+	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample"}, s))
+	defer server.Close()
+
+	var result map[string]any
+	postJSONInto(t, server.URL+"/api/test-kit/run", fmt.Sprintf(`{
+		"caseId":"case.requires-input",
+		"baseUrl":%q
+	}`, target.URL), http.StatusOK, &result)
+	if targetCalled {
+		t.Fatal("required-input case should fail before sending HTTP")
+	}
+	if result["ok"] != false ||
+		!strings.Contains(fmt.Sprint(result["error"]), "missing required case input") ||
+		!strings.Contains(fmt.Sprint(result["error"]), "resource_id") {
+		t.Fatalf("test kit result = %#v", result)
+	}
+}
+
 func TestServerExecutesTestKitRunFromStoreRegisteredServicePort(t *testing.T) {
 	ctx := context.Background()
 	var receivedPath string

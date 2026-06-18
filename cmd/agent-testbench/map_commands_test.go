@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"agent-testbench/internal/domain/mapplanner"
 	"agent-testbench/internal/store"
 )
 
@@ -70,6 +72,86 @@ func TestMapImportWorkflowsAndExplainUsesStoreCatalog(t *testing.T) {
 	}
 }
 
+func TestMapExplainScopeAllCanSavePlannerInstance(t *testing.T) {
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "map-explain-save.sqlite")
+	storeRef := "sqlite://" + storePath
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if err := runtime.ReplaceProfileCatalog(ctx, mapCommandProfileCatalogFixture()); err != nil {
+		t.Fatalf("seed profile catalog: %v", err)
+	}
+	closeCLIStore(runtime)
+
+	runCLI(t, "map", "import-workflows", "--store", storeRef, "--json")
+	out := runCLI(t, "map", "explain", "--store", storeRef, "--map", "map.profile.flow", "--scope", "all", "--environment", "env.local", "--save", "--json")
+	var report struct {
+		OK             bool   `json:"ok"`
+		PlanID         string `json:"planId"`
+		MapID          string `json:"mapId"`
+		Scope          string `json:"scope"`
+		EnvironmentID  string `json:"environmentId"`
+		LogicalPlan    []any  `json:"logicalPlan"`
+		RulesApplied   []any  `json:"rulesApplied"`
+		CandidatePlans []any  `json:"candidatePlans"`
+		PhysicalTasks  []struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+		} `json:"physicalTasks"`
+		TaskEdges []any `json:"taskEdges"`
+		Summary   struct {
+			WorkflowTasks int `json:"workflowTasks"`
+			CaseTasks     int `json:"caseTasks"`
+			ReplayTasks   int `json:"replayTasks"`
+		} `json:"summary"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode saved map explain json: %v\n%s", err, out)
+	}
+	if !report.OK || report.PlanID == "" || report.MapID != "map.profile.flow" || report.Scope != "all" || report.EnvironmentID != "env.local" {
+		t.Fatalf("saved map explain report = %#v", report)
+	}
+	if len(report.LogicalPlan) == 0 || len(report.RulesApplied) == 0 || len(report.CandidatePlans) == 0 || len(report.PhysicalTasks) == 0 {
+		t.Fatalf("planner explain should expose optimizer details: %#v", report)
+	}
+	if report.Summary.WorkflowTasks == 0 || report.Summary.CaseTasks == 0 || report.Summary.ReplayTasks != 0 {
+		t.Fatalf("planner summary should include workflow and case tasks: %#v", report.Summary)
+	}
+	if !mapExplainHasTaskKind(report.PhysicalTasks, "reuse_materialization") {
+		t.Fatalf("planner should include materialized replay task: %#v", report.PhysicalTasks)
+	}
+
+	runtime, err = openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	defer closeCLIStore(runtime)
+	saved, err := runtime.GetTestMapPlan(ctx, report.PlanID)
+	if err != nil {
+		t.Fatalf("get saved planner instance: %v", err)
+	}
+	if saved.Instance.MapID != "map.profile.flow" || saved.Instance.Scope != "all" || saved.Instance.EnvironmentID != "env.local" {
+		t.Fatalf("saved instance = %#v", saved.Instance)
+	}
+	if len(saved.Tasks) != len(report.PhysicalTasks) {
+		t.Fatalf("saved tasks = %#v, report tasks = %#v", saved.Tasks, report.PhysicalTasks)
+	}
+}
+
+func mapExplainHasTaskKind(tasks []struct {
+	ID   string `json:"id"`
+	Kind string `json:"kind"`
+}, kind string) bool {
+	for _, task := range tasks {
+		if task.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
 func TestMapImportWorkflowsRejectsPositionalArgsBeforeOpeningStore(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "map.sqlite")
 	out := runCLIFails(t, "map", "import-workflows", "typo", "--store", "sqlite://"+storePath, "--json")
@@ -90,20 +172,372 @@ func TestMapCommandsAreDiscoverable(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode commands json: %v\n%s", err, out)
 	}
-	if report.Count != 4 {
+	wantCommands := []string{
+		"map import-workflows",
+		"map list",
+		"map plans",
+		"map update",
+		"map snapshot",
+		"map publish",
+		"map versions",
+		"map coverage",
+		"map workflows",
+		"map explain",
+		"map gate",
+		"map run",
+		"map run explain",
+		"map atlas",
+	}
+	if report.Count != len(wantCommands) {
 		t.Fatalf("map command count = %#v", report)
 	}
-	if report.Commands[0].Command != "map import-workflows" || !report.Commands[0].StoreAware {
-		t.Fatalf("map import command = %#v", report.Commands)
+	for index, want := range wantCommands {
+		if report.Commands[index].Command != want || !report.Commands[index].StoreAware {
+			t.Fatalf("map command %d = %#v, want %s", index, report.Commands[index], want)
+		}
 	}
-	if report.Commands[1].Command != "map workflows" || !report.Commands[1].StoreAware {
-		t.Fatalf("map workflows command = %#v", report.Commands)
+}
+
+func TestMapListAndPlansExposeAtlasEntrypoints(t *testing.T) {
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "map-list.sqlite")
+	storeRef := "sqlite://" + storePath
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
 	}
-	if report.Commands[2].Command != "map explain" || !report.Commands[2].StoreAware {
-		t.Fatalf("map explain command = %#v", report.Commands)
+	graph := store.TestPlanGraph{
+		Map: store.TestPlanMap{ID: "map.atlas", ProfileID: "profile.atlas", DisplayName: "Capability Atlas", Status: "active", SummaryJSON: `{}`},
+		Nodes: []store.TestPlanNode{
+			{MapID: "map.atlas", ID: "node.submit", CaseID: "case.submit", SummaryJSON: `{}`},
+			{MapID: "map.atlas", ID: "node.cancel", CaseID: "case.cancel", SummaryJSON: `{}`},
+		},
+		Paths: []store.TestPlanPath{
+			{MapID: "map.atlas", ID: "path.submit", WorkflowID: "workflow.submit", DisplayName: "Submit", SummaryJSON: `{}`},
+		},
+		PathSteps: []store.TestPlanPathStep{
+			{MapID: "map.atlas", PathID: "path.submit", StepIndex: 1, NodeID: "node.submit", CaseID: "case.submit", SummaryJSON: `{}`},
+		},
+		Edges: []store.TestPlanEdge{
+			{MapID: "map.atlas", ID: "edge.submit.cancel", FromNodeID: "node.submit", ToNodeID: "node.cancel", Kind: "control", SummaryJSON: `{}`},
+		},
+		Materializations: []store.TestPlanMaterialization{
+			{MapID: "map.atlas", ID: "mat.submit", FixtureID: "fixture.submit", SummaryJSON: `{}`},
+		},
 	}
-	if report.Commands[3].Command != "map review-html" || !report.Commands[3].StoreAware {
-		t.Fatalf("map review-html command = %#v", report.Commands)
+	if err := runtime.ReplaceTestPlanGraph(ctx, graph); err != nil {
+		t.Fatalf("seed test plan graph: %v", err)
+	}
+	record := store.TestMapPlanRecord{
+		Instance: store.TestMapPlanInstance{
+			ID: "plan.atlas.001", MapID: "map.atlas", ProfileID: "profile.atlas", EnvironmentID: "env.atlas",
+			Scope: "all", TargetKind: "map", TargetID: "map.atlas", Mode: "run", Status: "failed", SummaryJSON: `{}`,
+		},
+		Tasks: []store.TestMapPlanTask{{
+			PlanID: "plan.atlas.001", ID: "task.case", Index: 1, Kind: "case", Operation: "run_case",
+			NodeID: "node.submit", CaseID: "case.submit", Status: "failed", Reason: "HTTP 400", SummaryJSON: `{}`,
+		}},
+	}
+	if err := runtime.SaveTestMapPlan(ctx, record); err != nil {
+		t.Fatalf("seed test map plan: %v", err)
+	}
+	closeCLIStore(runtime)
+
+	listOut := runCLI(t, "map", "list", "--store", storeRef, "--json")
+	var listReport struct {
+		OK    bool `json:"ok"`
+		Count int  `json:"count"`
+		Maps  []struct {
+			ID               string `json:"id"`
+			ProfileID        string `json:"profileId"`
+			DisplayName      string `json:"displayName"`
+			Status           string `json:"status"`
+			NodeCount        int    `json:"nodeCount"`
+			PathCount        int    `json:"pathCount"`
+			Materializations int    `json:"materializations"`
+		} `json:"maps"`
+	}
+	if err := json.Unmarshal([]byte(listOut), &listReport); err != nil {
+		t.Fatalf("decode map list json: %v\n%s", err, listOut)
+	}
+	if !listReport.OK || listReport.Count != 1 {
+		t.Fatalf("map list report = %#v", listReport)
+	}
+	item := listReport.Maps[0]
+	if item.ID != "map.atlas" || item.ProfileID != "profile.atlas" || item.DisplayName != "Capability Atlas" || item.Status != "active" || item.NodeCount != 2 || item.PathCount != 1 || item.Materializations != 1 {
+		t.Fatalf("map list item = %#v", item)
+	}
+
+	plansOut := runCLI(t, "map", "plans", "--store", storeRef, "--map", "map.atlas", "--json")
+	var plansReport struct {
+		OK    bool   `json:"ok"`
+		MapID string `json:"mapId"`
+		Count int    `json:"count"`
+		Plans []struct {
+			ID            string `json:"id"`
+			Status        string `json:"status"`
+			Mode          string `json:"mode"`
+			Scope         string `json:"scope"`
+			EnvironmentID string `json:"environmentId"`
+			AtlasCommand  string `json:"atlasCommand"`
+			GateCommand   string `json:"gateCommand"`
+		} `json:"plans"`
+	}
+	if err := json.Unmarshal([]byte(plansOut), &plansReport); err != nil {
+		t.Fatalf("decode map plans json: %v\n%s", err, plansOut)
+	}
+	if !plansReport.OK || plansReport.MapID != "map.atlas" || plansReport.Count != 1 {
+		t.Fatalf("map plans report = %#v", plansReport)
+	}
+	plan := plansReport.Plans[0]
+	if plan.ID != "plan.atlas.001" || plan.Status != "failed" || plan.Mode != "run" || plan.Scope != "all" || plan.EnvironmentID != "env.atlas" {
+		t.Fatalf("map plan item = %#v", plan)
+	}
+	if !strings.Contains(plan.AtlasCommand, "map atlas --map 'map.atlas' --plan 'plan.atlas.001'") || !strings.Contains(plan.GateCommand, "map gate --plan 'plan.atlas.001'") {
+		t.Fatalf("map plan commands = %#v", plan)
+	}
+}
+
+func TestMapUpdateMaintainsMapMetadataWithoutLosingGraph(t *testing.T) {
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "map-update.sqlite")
+	storeRef := "sqlite://" + storePath
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	graph := store.TestPlanGraph{
+		Map: store.TestPlanMap{ID: "map.authoring", ProfileID: "profile.authoring", DisplayName: "Draft Map", Description: "old", Status: "draft", SummaryJSON: `{}`},
+		Nodes: []store.TestPlanNode{
+			{MapID: "map.authoring", ID: "node.prepare", CaseID: "case.prepare", SummaryJSON: `{}`},
+			{MapID: "map.authoring", ID: "node.submit", CaseID: "case.submit", SummaryJSON: `{}`},
+		},
+		Paths: []store.TestPlanPath{
+			{MapID: "map.authoring", ID: "path.submit", WorkflowID: "workflow.submit", DisplayName: "Submit", SummaryJSON: `{}`},
+		},
+		PathSteps: []store.TestPlanPathStep{
+			{MapID: "map.authoring", PathID: "path.submit", StepIndex: 1, NodeID: "node.prepare", CaseID: "case.prepare", SummaryJSON: `{}`},
+			{MapID: "map.authoring", PathID: "path.submit", StepIndex: 2, NodeID: "node.submit", CaseID: "case.submit", SummaryJSON: `{}`},
+		},
+		Edges: []store.TestPlanEdge{
+			{MapID: "map.authoring", ID: "edge.prepare.submit", FromNodeID: "node.prepare", ToNodeID: "node.submit", Kind: "control", SummaryJSON: `{}`},
+		},
+	}
+	if err := runtime.ReplaceTestPlanGraph(ctx, graph); err != nil {
+		t.Fatalf("seed authoring graph: %v", err)
+	}
+	closeCLIStore(runtime)
+
+	out := runCLI(t, "map", "update", "--store", storeRef, "--map", "map.authoring", "--display-name", "Published Atlas", "--description", "ready for reviewers", "--status", "review", "--json")
+	var report struct {
+		OK  bool `json:"ok"`
+		Map struct {
+			ID          string `json:"id"`
+			DisplayName string `json:"displayName"`
+			Description string `json:"description"`
+			Status      string `json:"status"`
+		} `json:"map"`
+		Counts struct {
+			Nodes     int `json:"nodes"`
+			Edges     int `json:"edges"`
+			Paths     int `json:"paths"`
+			PathSteps int `json:"pathSteps"`
+		} `json:"counts"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode map update json: %v\n%s", err, out)
+	}
+	if !report.OK || report.Map.ID != "map.authoring" || report.Map.DisplayName != "Published Atlas" || report.Map.Description != "ready for reviewers" || report.Map.Status != "review" {
+		t.Fatalf("map update report = %#v", report)
+	}
+	if report.Counts.Nodes != 2 || report.Counts.Edges != 1 || report.Counts.Paths != 1 || report.Counts.PathSteps != 2 {
+		t.Fatalf("map update should preserve graph counts: %#v", report.Counts)
+	}
+
+	runtime, err = openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	loaded, err := runtime.GetTestPlanGraph(ctx, "map.authoring")
+	closeCLIStore(runtime)
+	if err != nil {
+		t.Fatalf("load updated graph: %v", err)
+	}
+	if loaded.Map.DisplayName != "Published Atlas" || loaded.Map.Description != "ready for reviewers" || loaded.Map.Status != "review" || len(loaded.Nodes) != 2 || len(loaded.Edges) != 1 || len(loaded.Paths) != 1 || len(loaded.PathSteps) != 2 {
+		t.Fatalf("updated graph = %#v", loaded)
+	}
+}
+
+func TestMapSnapshotAndPublishCreateVersionedAtlas(t *testing.T) {
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "map-version.sqlite")
+	storeRef := "sqlite://" + storePath
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	graph := store.TestPlanGraph{
+		Map: store.TestPlanMap{ID: "map.versioned", ProfileID: "profile.versioned", DisplayName: "Versioned Atlas", Description: "draft", Status: "review", SummaryJSON: `{}`},
+		Nodes: []store.TestPlanNode{
+			{MapID: "map.versioned", ID: "node.prepare", CaseID: "case.prepare", SummaryJSON: `{}`},
+			{MapID: "map.versioned", ID: "node.submit", CaseID: "case.submit", SummaryJSON: `{}`},
+		},
+		Paths: []store.TestPlanPath{
+			{MapID: "map.versioned", ID: "path.submit", WorkflowID: "workflow.submit", DisplayName: "Submit", SummaryJSON: `{}`},
+		},
+		PathSteps: []store.TestPlanPathStep{
+			{MapID: "map.versioned", PathID: "path.submit", StepIndex: 1, NodeID: "node.prepare", CaseID: "case.prepare", SummaryJSON: `{}`},
+			{MapID: "map.versioned", PathID: "path.submit", StepIndex: 2, NodeID: "node.submit", CaseID: "case.submit", SummaryJSON: `{}`},
+		},
+		Edges: []store.TestPlanEdge{
+			{MapID: "map.versioned", ID: "edge.prepare.submit", FromNodeID: "node.prepare", ToNodeID: "node.submit", Kind: "control", SummaryJSON: `{}`},
+		},
+	}
+	if err := runtime.ReplaceTestPlanGraph(ctx, graph); err != nil {
+		t.Fatalf("seed versioned graph: %v", err)
+	}
+	closeCLIStore(runtime)
+
+	snapshotOut := runCLI(t, "map", "snapshot", "--store", storeRef, "--map", "map.versioned", "--version", "v1-review", "--status", "review", "--summary", "ready for review", "--json")
+	var snapshot struct {
+		OK      bool `json:"ok"`
+		Version struct {
+			ID      string `json:"id"`
+			MapID   string `json:"mapId"`
+			Version string `json:"version"`
+			Status  string `json:"status"`
+			Summary string `json:"summary"`
+		} `json:"version"`
+		Counts struct {
+			Nodes int `json:"nodes"`
+			Paths int `json:"paths"`
+		} `json:"counts"`
+	}
+	if err := json.Unmarshal([]byte(snapshotOut), &snapshot); err != nil {
+		t.Fatalf("decode map snapshot json: %v\n%s", err, snapshotOut)
+	}
+	if !snapshot.OK || snapshot.Version.MapID != "map.versioned" || snapshot.Version.Version != "v1-review" || snapshot.Version.Status != "review" || snapshot.Version.Summary != "ready for review" || snapshot.Counts.Nodes != 2 || snapshot.Counts.Paths != 1 {
+		t.Fatalf("snapshot report = %#v", snapshot)
+	}
+
+	publishOut := runCLI(t, "map", "publish", "--store", storeRef, "--map", "map.versioned", "--version", "v1", "--summary", "accepted atlas", "--json")
+	var publish struct {
+		OK  bool `json:"ok"`
+		Map struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"map"`
+		Version struct {
+			Version string `json:"version"`
+			Status  string `json:"status"`
+		} `json:"version"`
+	}
+	if err := json.Unmarshal([]byte(publishOut), &publish); err != nil {
+		t.Fatalf("decode map publish json: %v\n%s", err, publishOut)
+	}
+	if !publish.OK || publish.Map.ID != "map.versioned" || publish.Map.Status != "active" || publish.Version.Version != "v1" || publish.Version.Status != "published" {
+		t.Fatalf("publish report = %#v", publish)
+	}
+
+	versionsOut := runCLI(t, "map", "versions", "--store", storeRef, "--map", "map.versioned", "--json")
+	var versions struct {
+		OK       bool   `json:"ok"`
+		MapID    string `json:"mapId"`
+		Count    int    `json:"count"`
+		Versions []struct {
+			Version string `json:"version"`
+			Status  string `json:"status"`
+			Summary string `json:"summary"`
+		} `json:"versions"`
+	}
+	if err := json.Unmarshal([]byte(versionsOut), &versions); err != nil {
+		t.Fatalf("decode map versions json: %v\n%s", err, versionsOut)
+	}
+	if !versions.OK || versions.MapID != "map.versioned" || versions.Count != 2 {
+		t.Fatalf("versions report = %#v", versions)
+	}
+	if versions.Versions[0].Version != "v1" || versions.Versions[0].Status != "published" || versions.Versions[1].Version != "v1-review" || versions.Versions[1].Status != "review" {
+		t.Fatalf("version order = %#v", versions.Versions)
+	}
+}
+
+func TestMapCoverageReportsWorkflowConvergence(t *testing.T) {
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "map-coverage.sqlite")
+	storeRef := "sqlite://" + storePath
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	catalog := store.ProfileCatalog{
+		ProfileID: "profile.coverage",
+		Workflows: []store.CatalogWorkflow{
+			{ID: "workflow.apply", DisplayName: "Apply"},
+			{ID: "workflow.cancel", DisplayName: "Cancel"},
+		},
+		APICases: []store.CatalogAPICase{
+			{ID: "case.prepare", NodeID: "node.prepare", Status: "active"},
+			{ID: "case.submit", NodeID: "node.submit", Status: "active"},
+			{ID: "case.cancel", NodeID: "node.cancel", Status: "active"},
+		},
+	}
+	if err := runtime.ReplaceProfileCatalog(ctx, catalog); err != nil {
+		t.Fatalf("seed coverage catalog: %v", err)
+	}
+	graph := store.TestPlanGraph{
+		Map: store.TestPlanMap{ID: "map.coverage", ProfileID: "profile.coverage", DisplayName: "Coverage Atlas", Status: "active", SummaryJSON: `{}`},
+		Nodes: []store.TestPlanNode{
+			{MapID: "map.coverage", ID: "node.prepare", CaseID: "case.prepare", SummaryJSON: `{}`},
+			{MapID: "map.coverage", ID: "node.submit", CaseID: "case.submit", SummaryJSON: `{}`},
+			{MapID: "map.coverage", ID: "node.cancel", CaseID: "case.cancel", SummaryJSON: `{}`},
+		},
+		Paths: []store.TestPlanPath{
+			{MapID: "map.coverage", ID: "path.apply", WorkflowID: "workflow.apply", DisplayName: "Apply", SummaryJSON: `{}`},
+			{MapID: "map.coverage", ID: "path.cancel", WorkflowID: "workflow.cancel", DisplayName: "Cancel", SummaryJSON: `{}`},
+		},
+		PathSteps: []store.TestPlanPathStep{
+			{MapID: "map.coverage", PathID: "path.apply", StepIndex: 1, NodeID: "node.prepare", CaseID: "case.prepare", SummaryJSON: `{}`},
+			{MapID: "map.coverage", PathID: "path.apply", StepIndex: 2, NodeID: "node.submit", CaseID: "case.submit", SummaryJSON: `{}`},
+			{MapID: "map.coverage", PathID: "path.cancel", StepIndex: 1, NodeID: "node.submit", CaseID: "case.submit", SummaryJSON: `{}`},
+			{MapID: "map.coverage", PathID: "path.cancel", StepIndex: 2, NodeID: "node.cancel", CaseID: "case.cancel", SummaryJSON: `{}`},
+		},
+		Edges: []store.TestPlanEdge{
+			{MapID: "map.coverage", ID: "edge.prepare.submit", FromNodeID: "node.prepare", ToNodeID: "node.submit", Kind: "control", PathID: "path.apply", SummaryJSON: `{}`},
+			{MapID: "map.coverage", ID: "edge.submit.cancel", FromNodeID: "node.submit", ToNodeID: "node.cancel", Kind: "control", PathID: "path.cancel", SummaryJSON: `{}`},
+		},
+		Materializations: []store.TestPlanMaterialization{
+			{MapID: "map.coverage", ID: "mat.submit", FixtureID: "fixture.submit", SourcePathID: "path.apply", SourceUntilNodeID: "node.submit", SummaryJSON: `{}`},
+		},
+	}
+	if err := runtime.ReplaceTestPlanGraph(ctx, graph); err != nil {
+		t.Fatalf("seed coverage graph: %v", err)
+	}
+	closeCLIStore(runtime)
+
+	out := runCLI(t, "map", "coverage", "--store", storeRef, "--map", "map.coverage", "--json")
+	var report struct {
+		OK        bool   `json:"ok"`
+		MapID     string `json:"mapId"`
+		Workflows struct {
+			Catalog int `json:"catalog"`
+			Mapped  int `json:"mapped"`
+			Missing int `json:"missing"`
+		} `json:"workflows"`
+		Cases struct {
+			Nodes          int `json:"nodes"`
+			PathReferences int `json:"pathReferences"`
+			Reused         int `json:"reused"`
+		} `json:"cases"`
+		Materializations int `json:"materializations"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode map coverage json: %v\n%s", err, out)
+	}
+	if !report.OK || report.MapID != "map.coverage" || report.Workflows.Catalog != 2 || report.Workflows.Mapped != 2 || report.Workflows.Missing != 0 {
+		t.Fatalf("workflow coverage = %#v", report)
+	}
+	if report.Cases.Nodes != 3 || report.Cases.PathReferences != 4 || report.Cases.Reused != 1 || report.Materializations != 1 {
+		t.Fatalf("case convergence = %#v", report)
 	}
 }
 
@@ -169,9 +603,9 @@ func TestMapWorkflowsSearchesNamedPaths(t *testing.T) {
 	}
 }
 
-func TestMapReviewHTMLWritesInteractiveArtifact(t *testing.T) {
+func TestMapAtlasWritesInteractiveArtifact(t *testing.T) {
 	ctx := context.Background()
-	storePath := filepath.Join(t.TempDir(), "map-review.sqlite")
+	storePath := filepath.Join(t.TempDir(), "map-atlas.sqlite")
 	storeRef := "sqlite://" + storePath
 	runtime, err := openStore(ctx, storeRef)
 	if err != nil {
@@ -183,8 +617,8 @@ func TestMapReviewHTMLWritesInteractiveArtifact(t *testing.T) {
 	closeCLIStore(runtime)
 
 	runCLI(t, "map", "import-workflows", "--store", storeRef, "--json")
-	outputPath := filepath.Join(t.TempDir(), "flow-map-review.html")
-	out := runCLI(t, "map", "review-html", "--store", storeRef, "--map", "map.profile.flow", "--output", outputPath, "--json")
+	outputPath := filepath.Join(t.TempDir(), "flow-map-atlas.html")
+	out := runCLI(t, "map", "atlas", "--store", storeRef, "--map", "map.profile.flow", "--output", outputPath, "--json")
 	var report struct {
 		OK     bool   `json:"ok"`
 		MapID  string `json:"mapId"`
@@ -195,18 +629,18 @@ func TestMapReviewHTMLWritesInteractiveArtifact(t *testing.T) {
 		} `json:"counts"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode map review-html json: %v\n%s", err, out)
+		t.Fatalf("decode map atlas json: %v\n%s", err, out)
 	}
 	if !report.OK || report.MapID != "map.profile.flow" || report.Output != outputPath || report.Counts.Nodes != 3 || report.Counts.Paths != 1 {
-		t.Fatalf("map review-html report = %#v", report)
+		t.Fatalf("map atlas report = %#v", report)
 	}
 	raw, err := os.ReadFile(outputPath)
 	if err != nil {
-		t.Fatalf("read review html: %v", err)
+		t.Fatalf("read atlas: %v", err)
 	}
 	html := string(raw)
 	for _, want := range []string{
-		`id="map-review-data"`,
+		`id="map-atlas-data"`,
 		`function selectNode`,
 		`id="workflow-filter"`,
 		`case.submit.field.required`,
@@ -214,7 +648,7 @@ func TestMapReviewHTMLWritesInteractiveArtifact(t *testing.T) {
 		`template.submit`,
 		`Interface reverse cases`,
 		`function interfaceReverseCases`,
-		`id="map-review-minimap"`,
+		`id="map-atlas-minimap"`,
 		`id="node-history"`,
 		`Path Finder`,
 		`function navigateToState`,
@@ -225,7 +659,7 @@ func TestMapReviewHTMLWritesInteractiveArtifact(t *testing.T) {
 		`run validation case as a patched single request`,
 	} {
 		if !strings.Contains(html, want) {
-			t.Fatalf("review html missing %q\n%s", want, html)
+			t.Fatalf("atlas missing %q\n%s", want, html)
 		}
 	}
 	if strings.Contains(html, `adj.get(e.toNodeId).push(e.fromNodeId)`) {
@@ -237,14 +671,101 @@ func TestMapReviewHTMLWritesInteractiveArtifact(t *testing.T) {
 		`selectNode(\''+esc`,
 	} {
 		if strings.Contains(html, unsafeHandler) {
-			t.Fatalf("review html should use JavaScript-string escaping for handler arguments %q:\n%s", unsafeHandler, html)
+			t.Fatalf("atlas should use JavaScript-string escaping for handler arguments %q:\n%s", unsafeHandler, html)
 		}
 	}
 }
 
-func TestMapReviewHTMLCanFilterWorkflowPaths(t *testing.T) {
+func TestMapAtlasOverlaysSavedPlanTasks(t *testing.T) {
 	ctx := context.Background()
-	storePath := filepath.Join(t.TempDir(), "map-review-filter.sqlite")
+	storePath := filepath.Join(t.TempDir(), "map-atlas-plan.sqlite")
+	storeRef := "sqlite://" + storePath
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if err := runtime.ReplaceProfileCatalog(ctx, mapCommandProfileCatalogFixture()); err != nil {
+		t.Fatalf("seed profile catalog: %v", err)
+	}
+	closeCLIStore(runtime)
+
+	runCLI(t, "map", "import-workflows", "--store", storeRef, "--json")
+	runtime, err = openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	now := time.Now().UTC()
+	record := store.TestMapPlanRecord{
+		Instance: store.TestMapPlanInstance{
+			ID:             "plan.atlas.failed",
+			MapID:          "map.profile.flow",
+			ProfileID:      "profile.flow",
+			Mode:           mapplanner.ModeRun,
+			Status:         store.StatusFailed,
+			Scope:          mapplanner.ScopeCases,
+			TargetKind:     mapplanner.TargetMap,
+			TargetID:       "map.profile.flow",
+			PlannerVersion: mapplanner.PlannerVersion,
+			StartedAt:      now,
+			FinishedAt:     now,
+		},
+		Tasks: []store.TestMapPlanTask{{
+			PlanID:       "plan.atlas.failed",
+			ID:           "task.failed.case",
+			Index:        1,
+			Kind:         mapplanner.TaskRunCase,
+			Operation:    mapplanner.TaskRunCase,
+			NodeID:       "case.submit.field.required",
+			CaseID:       "case.submit.field.required",
+			Status:       store.StatusFailed,
+			Reason:       "expected status mismatch",
+			APICaseRunID: "run.atlas.failed.case",
+			EvidenceRoot: ".runtime/evidence/run.atlas.failed",
+			SummaryJSON:  `{"error":"expected status mismatch"}`,
+			StartedAt:    now,
+			FinishedAt:   now,
+		}},
+	}
+	if err := runtime.SaveTestMapPlan(ctx, record); err != nil {
+		t.Fatalf("save review plan: %v", err)
+	}
+	closeCLIStore(runtime)
+
+	outputPath := filepath.Join(t.TempDir(), "flow-map-atlas-plan.html")
+	out := runCLI(t, "map", "atlas", "--store", storeRef, "--map", "map.profile.flow", "--plan", "plan.atlas.failed", "--output", outputPath, "--json")
+	var report struct {
+		OK     bool   `json:"ok"`
+		MapID  string `json:"mapId"`
+		PlanID string `json:"planId"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode map atlas plan json: %v\n%s", err, out)
+	}
+	if !report.OK || report.MapID != "map.profile.flow" || report.PlanID != "plan.atlas.failed" {
+		t.Fatalf("map atlas plan report = %#v", report)
+	}
+	raw, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read atlas: %v", err)
+	}
+	html := string(raw)
+	for _, want := range []string{
+		`"planId":"plan.atlas.failed"`,
+		`"status":"failed"`,
+		`"apiCaseRunId":"run.atlas.failed.case"`,
+		`"evidenceRoot":".runtime/evidence/run.atlas.failed"`,
+		`Map run plan`,
+		`Run tasks`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("atlas with plan missing %q\n%s", want, html)
+		}
+	}
+}
+
+func TestMapAtlasCanFilterWorkflowPaths(t *testing.T) {
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "map-atlas-filter.sqlite")
 	storeRef := "sqlite://" + storePath
 	runtime, err := openStore(ctx, storeRef)
 	if err != nil {
@@ -277,8 +798,8 @@ func TestMapReviewHTMLCanFilterWorkflowPaths(t *testing.T) {
 	}
 	closeCLIStore(runtime)
 
-	outputPath := filepath.Join(t.TempDir(), "cancel-map-review.html")
-	out := runCLI(t, "map", "review-html", "--store", storeRef, "--map", "map.contract", "--filter", "cancel", "--output", outputPath, "--json")
+	outputPath := filepath.Join(t.TempDir(), "cancel-map-atlas.html")
+	out := runCLI(t, "map", "atlas", "--store", storeRef, "--map", "map.contract", "--filter", "cancel", "--output", outputPath, "--json")
 	var report struct {
 		OK     bool   `json:"ok"`
 		Filter string `json:"filter"`
@@ -288,25 +809,54 @@ func TestMapReviewHTMLCanFilterWorkflowPaths(t *testing.T) {
 		} `json:"counts"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode filtered map review-html json: %v\n%s", err, out)
+		t.Fatalf("decode filtered map atlas json: %v\n%s", err, out)
 	}
 	if !report.OK || report.Filter != "cancel" || report.Counts.Paths != 1 || report.Counts.Nodes != 2 {
 		t.Fatalf("filtered review report = %#v", report)
 	}
 	raw, err := os.ReadFile(outputPath)
 	if err != nil {
-		t.Fatalf("read filtered review html: %v", err)
+		t.Fatalf("read filtered atlas: %v", err)
 	}
 	html := string(raw)
 	if !strings.Contains(html, "workflow.cancel.success") {
-		t.Fatalf("filtered review html missing cancel workflow:\n%s", html)
+		t.Fatalf("filtered atlas missing cancel workflow:\n%s", html)
 	}
 	if strings.Contains(html, "workflow.create.success") {
-		t.Fatalf("filtered review html should not include create workflow:\n%s", html)
+		t.Fatalf("filtered atlas should not include create workflow:\n%s", html)
 	}
 }
 
-func TestMapReviewFilterIncludesReplayPathForFixtureTarget(t *testing.T) {
+func TestMapAtlasHandlesWorkflowPathWithoutSteps(t *testing.T) {
+	document := mapAtlasDocument{
+		Version: "1.0",
+		Map: store.TestPlanMap{
+			ID:          "map.contract",
+			ProfileID:   "profile.contract",
+			DisplayName: "Contract Map",
+			Status:      "active",
+		},
+		Counts: mapAtlasCountsReport{Paths: 1},
+		Paths: []mapAtlasPath{{
+			ID:          "workflow.empty",
+			WorkflowID:  "workflow.empty",
+			DisplayName: "Empty workflow",
+			Status:      "active",
+		}},
+	}
+	html, err := renderMapAtlasHTML(document)
+	if err != nil {
+		t.Fatalf("render atlas: %v", err)
+	}
+	if strings.Contains(html, `"steps":null`) {
+		t.Fatalf("atlas should serialize empty path steps as an empty array:\n%s", html)
+	}
+	if strings.Contains(html, `p.steps.length`) {
+		t.Fatalf("atlas should not assume workflow path steps are non-null:\n%s", html)
+	}
+}
+
+func TestMapAtlasFilterIncludesReplayPathForFixtureTarget(t *testing.T) {
 	graph := store.TestPlanGraph{
 		Map: store.TestPlanMap{ID: "map.contract", ProfileID: "profile.contract", DisplayName: "Contract Map", Status: "active"},
 		Nodes: []store.TestPlanNode{
@@ -330,7 +880,7 @@ func TestMapReviewFilterIncludesReplayPathForFixtureTarget(t *testing.T) {
 		},
 	}
 
-	filtered := filterMapReviewGraph(graph, "field.required")
+	filtered := filterMapAtlasGraph(graph, "field.required")
 	if len(filtered.Paths) != 1 || filtered.Paths[0].ID != "workflow.create.success" {
 		t.Fatalf("filtered fixture target should retain replay path: %#v", filtered.Paths)
 	}

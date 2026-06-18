@@ -14,6 +14,7 @@ import (
 type runnableAPICase struct {
 	Case        profile.APICase
 	Execution   *caseExecutionConfig
+	Inputs      []map[string]any
 	CaseBaseURL string
 }
 
@@ -38,6 +39,7 @@ type caseExecutionTemplateConfig struct {
 	CaseID        string              `json:"caseId"`
 	CaseExecution caseExecutionConfig `json:"caseExecution"`
 	Exports       []map[string]any    `json:"exports"`
+	Inputs        []map[string]any    `json:"inputs"`
 }
 
 var caseSerialCounter uint64
@@ -87,6 +89,7 @@ func handleTestKitRunBatch(w http.ResponseWriter, r *http.Request, bundle profil
 			"caseId":         caseID,
 			"baseUrl":        payload["baseUrl"],
 			"timeoutSeconds": payload["timeoutSeconds"],
+			"overrides":      payload["overrides"],
 		}
 		result, _ := testKitCaseResult(r.Context(), bundle, runtime, itemPayload)
 		runID, err := recordTestKitRunWithContext(r.Context(), bundle, runtime, itemPayload, result)

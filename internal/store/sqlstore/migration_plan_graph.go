@@ -8,7 +8,8 @@ func corePlanGraphSchemaSQL(d Dialect, types coreSchemaTypes) []string {
 	statements = append(statements, corePlanGraphNodeSchemaSQL(d, types, idType)...)
 	statements = append(statements, corePlanGraphEdgeSchemaSQL(d, types, idType)...)
 	statements = append(statements, corePlanGraphPathSchemaSQL(d, types, idType)...)
-	return append(statements, corePlanGraphMaterializationSchemaSQL(d, types, idType)...)
+	statements = append(statements, corePlanGraphMaterializationSchemaSQL(d, types, idType)...)
+	return append(statements, corePlanGraphVersionSchemaSQL(d, types)...)
 }
 
 func corePlanGraphMapSchemaSQL(d Dialect, types coreSchemaTypes, idType string) []string {
@@ -134,5 +135,22 @@ create table if not exists test_plan_materializations (
   foreign key (map_id) references test_maps(map_id) on delete cascade
 );`, idType, idType, idType, idType, idType, idType, idType, types.keyText, types.intType, types.keyText, types.jsonType, types.intType),
 		d.CreateIndexSQL("idx_test_plan_materializations_source", "test_plan_materializations", []string{"map_id", "source_path_id", "source_until_node_id"}),
+	}
+}
+
+func corePlanGraphVersionSchemaSQL(d Dialect, types coreSchemaTypes) []string {
+	return []string{
+		fmt.Sprintf(`
+create table if not exists test_map_versions (
+  version_id %s primary key,
+  map_id %s not null,
+  version %s not null,
+  status %s not null,
+  summary %s not null,
+  graph_json %s not null,
+  created_at %s not null
+);`, types.keyText, types.keyText, types.keyText, types.keyText, types.text, types.jsonType, types.timeType),
+		d.CreateIndexSQL("idx_test_map_versions_map_created", "test_map_versions", []string{"map_id", "created_at", "version_id"}),
+		d.CreateIndexSQL("idx_test_map_versions_map_version", "test_map_versions", []string{"map_id", "version"}),
 	}
 }

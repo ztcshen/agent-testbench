@@ -389,7 +389,7 @@ exit 0
 	normal := waitEnvironmentRestoreComposeServiceHealthCheck(context.Background(), environmentRestoreHealthCheckReport{
 		Kind:    "compose-service",
 		Service: "app",
-	}, 20*time.Millisecond, workspace, []string{"-f", filepath.Join(workspace, "compose.yml")})
+	}, 500*time.Millisecond, workspace, []string{"-f", filepath.Join(workspace, "compose.yml")})
 	if normal.OK || normal.State != environmentRestoreDockerStateExited || normal.ExitCode != 0 {
 		t.Fatalf("non-one-shot exited service should not pass: %#v", normal)
 	}

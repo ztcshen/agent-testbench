@@ -34,6 +34,9 @@ func executeTestKitCase(ctx context.Context, bundle profile.Bundle, runtime stor
 			},
 		}
 	}
+	if missing := missingRequiredCaseInputs(item.Inputs, mapFromAny(payload["overrides"])); len(missing) > 0 {
+		return failedCaseExecution(item.Case.ID, "missing required case input: "+strings.Join(missing, ", "))
+	}
 	request, err := buildCaseHTTPRequest(ctx, bundle, runtime, *item.Execution, item.CaseBaseURL, payload)
 	if err != nil {
 		return failedCaseExecution(item.Case.ID, err.Error())
@@ -115,6 +118,29 @@ func executeTestKitCase(ctx context.Context, bundle profile.Bundle, runtime stor
 			"response": responseSummary,
 		},
 	}
+}
+
+func missingRequiredCaseInputs(inputs []map[string]any, overrides map[string]any) []string {
+	missing := []string{}
+	for _, input := range inputs {
+		name := valueString(input["name"])
+		if name == "" || !caseInputRequired(input) {
+			continue
+		}
+		value, ok := overrides[name]
+		if !ok || value == nil {
+			missing = append(missing, name)
+		}
+	}
+	return missing
+}
+
+func caseInputRequired(input map[string]any) bool {
+	raw, ok := input["required"]
+	if !ok {
+		return true
+	}
+	return boolValue(raw)
 }
 
 type caseHTTPRequest struct {

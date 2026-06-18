@@ -133,6 +133,50 @@ exit 0
 	}
 }
 
+func TestSandboxStartFailsFastWhenHealthCheckedComposeServiceExits(t *testing.T) {
+	storePath := writeSandboxComposeHealthServiceFixture(t, "docker compose up -d worker-service", "worker-service", "http://127.0.0.1:1/health")
+	fakeEnv, callsPath := fakeDockerCommand(t)
+	installSandboxDockerTool(t, callsPath, `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
+if [ "$1" = "compose" ] && [ "$2" = "up" ]; then
+  exit 0
+fi
+if [ "$1" = "compose" ] && [[ "$*" == *" ps -a --format json "* ]]; then
+  service="${@: -1}"
+  printf '{"Name":"sandbox-%s","Service":"%s","State":"exited","ExitCode":1}\n' "$service" "$service"
+  exit 0
+fi
+exit 0
+`)
+
+	started := time.Now()
+	out := runCLIFailsWithEnv(t, fakeEnv, "sandbox", "start", "--store", "sqlite://"+storePath, "--service", "worker-service", "--timeout-seconds", "5", "--json")
+	elapsed := time.Since(started)
+	var report sandboxStartCommandReport
+	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
+		t.Fatalf("decode health-compose-exited report: %v\n%s", err, out)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("health-checked compose exit should fail fast, elapsed=%s report=%#v", elapsed, report)
+	}
+	if report.OK || report.Counts.Failed != 1 || len(report.Services) != 1 {
+		t.Fatalf("health-compose-exited report = %#v", report)
+	}
+	service := report.Services[0]
+	if service.Readiness != sandboxComposeServiceStoppedReadiness ||
+		!strings.Contains(service.Error, "compose service is not running after startup") ||
+		!strings.Contains(service.Error, "exitCode=1") {
+		t.Fatalf("health-compose-exited service = %#v", service)
+	}
+	calls, err := os.ReadFile(callsPath)
+	if err != nil {
+		t.Fatalf("read docker calls: %v", err)
+	}
+	if !strings.Contains(string(calls), "compose ps -a --format json worker-service") {
+		t.Fatalf("health-compose-exited should inspect service state while waiting:\n%s", calls)
+	}
+}
+
 func TestSandboxStartJSONIncludesRuntimeConsistencyEvidence(t *testing.T) {
 	fixture := writeSandboxStartStoreFixture(t)
 	report := runSandboxStartJSON(t, "sqlite://"+fixture.storePath, "sandbox start runtime evidence")
@@ -319,6 +363,16 @@ func writeSandboxStartStoreFixture(t *testing.T) sandboxStartFixture {
 
 func writeSandboxComposeServiceFixture(t *testing.T, startupCommand string, dockerService string) string {
 	t.Helper()
+	return writeSandboxComposeServiceFixtureWithHealth(t, startupCommand, dockerService, "")
+}
+
+func writeSandboxComposeHealthServiceFixture(t *testing.T, startupCommand string, dockerService string, healthURL string) string {
+	t.Helper()
+	return writeSandboxComposeServiceFixtureWithHealth(t, startupCommand, dockerService, healthURL)
+}
+
+func writeSandboxComposeServiceFixtureWithHealth(t *testing.T, startupCommand string, dockerService string, healthURL string) string {
+	t.Helper()
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
@@ -335,6 +389,7 @@ func writeSandboxComposeServiceFixture(t *testing.T, startupCommand string, dock
 			Kind:           "app",
 			ContainerName:  "sandbox-worker-service",
 			DockerService:  dockerService,
+			HealthURL:      healthURL,
 			StartupCommand: startupCommand,
 			Status:         "active",
 		}},

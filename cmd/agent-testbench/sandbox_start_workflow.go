@@ -151,7 +151,7 @@ func runSandboxServiceComposeRecovery(ctx context.Context, service store.Catalog
 
 func verifySandboxServiceStartupReadiness(ctx context.Context, service store.CatalogService, timeout time.Duration, started time.Time, composeService string, result sandboxStartServiceResult) sandboxStartServiceResult {
 	if strings.TrimSpace(service.HealthURL) != "" {
-		return verifySandboxServiceHealthURL(ctx, service.HealthURL, timeout, started, result)
+		return verifySandboxServiceHealthURL(ctx, service.HealthURL, timeout, started, composeService, result)
 	}
 	if composeService == "" {
 		result.Warning = "startup command completed; no healthUrl or compose service is recorded, so application readiness was not verified"
@@ -160,11 +160,16 @@ func verifySandboxServiceStartupReadiness(ctx context.Context, service store.Cat
 	return verifySandboxComposeServiceRunning(ctx, composeService, timeout, started, result)
 }
 
-func verifySandboxServiceHealthURL(ctx context.Context, healthURL string, timeout time.Duration, started time.Time, result sandboxStartServiceResult) sandboxStartServiceResult {
+func verifySandboxServiceHealthURL(ctx context.Context, healthURL string, timeout time.Duration, started time.Time, composeService string, result sandboxStartServiceResult) sandboxStartServiceResult {
 	deadline := time.Now().Add(sandboxStartRemainingTimeout(timeout, started))
 	client := &http.Client{Timeout: 2 * time.Second}
 	var lastErr string
 	for {
+		if composeService != "" {
+			if next, stopped := checkSandboxComposeServiceStopped(ctx, composeService, sandboxStartRemainingTimeout(timeout, started), result); stopped {
+				return next
+			}
+		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSpace(healthURL), nil)
 		if err != nil {
 			result.ExitCode = 1
@@ -204,6 +209,31 @@ func verifySandboxServiceHealthURL(ctx context.Context, healthURL string, timeou
 	}
 }
 
+func checkSandboxComposeServiceStopped(ctx context.Context, composeService string, timeout time.Duration, result sandboxStartServiceResult) (sandboxStartServiceResult, bool) {
+	if timeout <= 0 {
+		timeout = time.Nanosecond
+	}
+	if timeout > 2*time.Second {
+		timeout = 2 * time.Second
+	}
+	commandCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	commandResult := runAgentObservedCommand(commandCtx, agentObservedCommandOptions{
+		Command: []string{"/bin/sh", "-c", "docker compose ps -a --format json " + composeService},
+	})
+	if commandCtx.Err() == context.DeadlineExceeded || commandResult.Err != nil {
+		return result, false
+	}
+	state, health, exitCode, hasExitCode := parseComposeServiceHealth(commandResult.Output)
+	if state == "" || state == "running" {
+		return result, false
+	}
+	result.ExitCode = 1
+	result.Readiness = sandboxComposeServiceStoppedReadiness
+	result.Error = sandboxComposeServiceNotRunningError(state, health, exitCode, hasExitCode)
+	return result, true
+}
+
 func verifySandboxComposeServiceRunning(ctx context.Context, composeService string, timeout time.Duration, started time.Time, result sandboxStartServiceResult) sandboxStartServiceResult {
 	command := "docker compose ps -a --format json " + composeService
 	commandCtx, cancel := context.WithTimeout(ctx, sandboxStartRemainingTimeout(timeout, started))
@@ -231,6 +261,11 @@ func verifySandboxComposeServiceRunning(ctx context.Context, composeService stri
 	}
 	result.ExitCode = 1
 	result.Readiness = sandboxComposeServiceStoppedReadiness
+	result.Error = sandboxComposeServiceNotRunningError(state, health, exitCode, hasExitCode)
+	return result
+}
+
+func sandboxComposeServiceNotRunningError(state string, health string, exitCode int, hasExitCode bool) string {
 	detail := "state=" + firstNonEmpty(state, "unknown")
 	if health != "" {
 		detail += " health=" + health
@@ -238,8 +273,7 @@ func verifySandboxComposeServiceRunning(ctx context.Context, composeService stri
 	if hasExitCode {
 		detail += fmt.Sprintf(" exitCode=%d", exitCode)
 	}
-	result.Error = "compose service is not running after startup: " + detail + "; add healthUrl for application readiness"
-	return result
+	return "compose service is not running after startup: " + detail + "; add healthUrl for application readiness"
 }
 
 func sandboxStartRemainingTimeout(timeout time.Duration, started time.Time) time.Duration {

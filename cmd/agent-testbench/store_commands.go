@@ -389,17 +389,6 @@ func openStore(ctx context.Context, storeURL string) (store.Store, error) {
 }
 
 func runStoreCatalogCase(ctx context.Context, storeURL string, profileID string, caseID string, baseURL string, evidenceDir string, runID string, timeoutSeconds int, overrides map[string]any) (map[string]any, error) {
-	if strings.TrimSpace(storeURL) == "" {
-		return nil, errNoActiveStoreConfigured
-	}
-	runtime, err := openStore(ctx, storeURL)
-	if err != nil {
-		return nil, err
-	}
-	defer closeCLIStore(runtime)
-	handler := controlplane.NewWithStore(profile.Bundle{ID: strings.TrimSpace(profileID)}, runtime)
-	server := httptest.NewServer(handler)
-	defer server.Close()
 	payload := map[string]any{
 		"caseId":      strings.TrimSpace(caseID),
 		"baseUrl":     strings.TrimSpace(baseURL),
@@ -412,6 +401,21 @@ func runStoreCatalogCase(ctx context.Context, storeURL string, profileID string,
 	if len(overrides) > 0 {
 		payload["overrides"] = overrides
 	}
+	return runStoreCatalogCaseWithPayload(ctx, storeURL, profileID, payload)
+}
+
+func runStoreCatalogCaseWithPayload(ctx context.Context, storeURL string, profileID string, payload map[string]any) (map[string]any, error) {
+	if strings.TrimSpace(storeURL) == "" {
+		return nil, errNoActiveStoreConfigured
+	}
+	runtime, err := openStore(ctx, storeURL)
+	if err != nil {
+		return nil, err
+	}
+	defer closeCLIStore(runtime)
+	handler := controlplane.NewWithStore(profile.Bundle{ID: strings.TrimSpace(profileID)}, runtime)
+	server := httptest.NewServer(handler)
+	defer server.Close()
 	result, err := postReportMap(server.URL+"/api/test-kit/run", payload)
 	if err != nil {
 		return nil, err

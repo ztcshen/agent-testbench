@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	CurrentSchemaVersion = 16
+	CurrentSchemaVersion = 18
 	CoreSchemaName       = "create shared sql store schema"
 	mysqlVarchar255Type  = "varchar(255)"
 	sha256ColumnName     = "sha256"
@@ -124,6 +124,7 @@ func CoreSchemaSQL(d Dialect) []string {
 	statements = append(statements, coreAgentTaskSchemaSQL(d, types)...)
 	statements = append(statements, coreProfileConfigSchemaSQL(d, types)...)
 	statements = append(statements, corePlanGraphSchemaSQL(d, types)...)
+	statements = append(statements, coreMapPlannerSchemaSQL(d, types)...)
 	return append(statements, coreEnvironmentCatalogSchemaSQL(d, types)...)
 }
 
@@ -435,6 +436,26 @@ create table if not exists environment_files (
 	}
 	if current < 16 {
 		statements = append(statements, plannerAssociationMigrationSQL(d)...)
+	}
+	if current < 17 {
+		statements = append(statements, coreMapPlannerSchemaSQL(d, coreSchemaTypes{
+			text:          d.TextType(),
+			keyText:       d.KeyTextType(),
+			profileIDText: profileIdentifierTextType(d),
+			runIDText:     runIdentifierTextType(d),
+			intType:       "integer",
+			timeType:      d.TimeType(),
+			jsonType:      d.JSONType(),
+			boolType:      d.BoolType(),
+		})...)
+	}
+	if current < 18 {
+		statements = append(statements, corePlanGraphVersionSchemaSQL(d, coreSchemaTypes{
+			text:     d.TextType(),
+			keyText:  d.KeyTextType(),
+			timeType: d.TimeType(),
+			jsonType: d.JSONType(),
+		})...)
 	}
 	return statements
 }

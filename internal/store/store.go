@@ -7,6 +7,7 @@ import (
 
 	"agent-testbench/internal/domain/catalog"
 	"agent-testbench/internal/domain/execution"
+	"agent-testbench/internal/domain/mapplanner"
 	"agent-testbench/internal/domain/plangraph"
 )
 
@@ -27,6 +28,7 @@ type Store interface {
 	BaselineGateStore
 	ProfileCatalogStore
 	PlanGraphStore
+	MapPlannerStore
 	EnvironmentStore
 	AgentTaskStore
 }
@@ -75,6 +77,15 @@ type ProfileCatalogStore interface {
 type PlanGraphStore interface {
 	ReplaceTestPlanGraph(context.Context, TestPlanGraph) error
 	GetTestPlanGraph(context.Context, string) (TestPlanGraph, error)
+	ListTestPlanMaps(context.Context) ([]TestPlanMapSummary, error)
+	SaveTestPlanMapVersion(context.Context, TestPlanMapVersion) (TestPlanMapVersion, error)
+	ListTestPlanMapVersions(context.Context, string) ([]TestPlanMapVersion, error)
+}
+
+type MapPlannerStore interface {
+	SaveTestMapPlan(context.Context, TestMapPlanRecord) error
+	GetTestMapPlan(context.Context, string) (TestMapPlanRecord, error)
+	ListTestMapPlans(context.Context, string, int) ([]TestMapPlanInstance, error)
 }
 
 type EnvironmentStore interface {
@@ -264,9 +275,39 @@ type CatalogFixture = catalog.Fixture
 type CatalogTemplateConfig = catalog.TemplateConfig
 
 type TestPlanGraph = plangraph.Graph
+type TestPlanMapSummary struct {
+	ID                   string
+	ProfileID            string
+	DisplayName          string
+	Description          string
+	Status               string
+	SummaryJSON          string
+	NodeCount            int
+	EdgeCount            int
+	PathCount            int
+	MaterializationCount int
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+}
+
+type TestPlanMapVersion struct {
+	ID        string
+	MapID     string
+	Version   string
+	Status    string
+	Summary   string
+	GraphJSON string
+	CreatedAt time.Time
+}
+
 type TestPlanMap = plangraph.Map
 type TestPlanNode = plangraph.Node
 type TestPlanEdge = plangraph.Edge
 type TestPlanPath = plangraph.Path
 type TestPlanPathStep = plangraph.PathStep
 type TestPlanMaterialization = plangraph.Materialization
+
+type TestMapPlanRecord = mapplanner.PlanRecord
+type TestMapPlanInstance = mapplanner.PlanInstance
+type TestMapPlanTask = mapplanner.TaskRecord
+type TestMapPlanTaskEdge = mapplanner.TaskEdgeRecord
