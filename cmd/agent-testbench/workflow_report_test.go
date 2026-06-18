@@ -92,6 +92,28 @@ func TestWorkflowReportFailsAdmissionWhenStepInputIsMissing(t *testing.T) {
 	}
 }
 
+func TestWorkflowReportRejectsGoTestFixtureProfileForSharedMySQLStore(t *testing.T) {
+	fixture := writeUniqueWorkflowBatchReportProfile(t)
+
+	out := runCLIFails(t,
+		"workflow", "report",
+		"--profile", fixture.profileDir,
+		"--workflow", fixture.workflowID,
+		"--base-url", "http://127.0.0.1:1",
+		"--store", "mysql://agent:secret@127.0.0.1:1/business_catalog?tls=false",
+	)
+
+	for _, want := range []string{
+		"refusing to publish Go test fixture profile",
+		fixture.profileID,
+		"business_catalog",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("workflow report safety error missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestWorkflowStepMissingInputsUsesPresenceNotStringTruthiness(t *testing.T) {
 	step := map[string]any{
 		"inputs": []any{

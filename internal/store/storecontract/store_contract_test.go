@@ -502,6 +502,32 @@ func requireConfigVersionContract(t *testing.T, ctx context.Context, s store.Sto
 	if activeVersion.ID != "config.empty.001" || activeVersion.ProfileID != "empty" || activeVersion.BundleDigest != "sha256:bundle" || !activeVersion.Active {
 		t.Fatalf("active config version = %#v", activeVersion)
 	}
+	_, err = s.UpsertConfigVersion(ctx, store.ConfigVersion{
+		ID:           "config.other.001",
+		ProfileID:    "other",
+		SourcePath:   "/tmp/external-profile-bundles/other",
+		BundleDigest: "sha256:other",
+		SummaryJSON:  `{"services":0}`,
+		Active:       true,
+		PublishedAt:  started.Add(4 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("upsert other active config version: %v", err)
+	}
+	reactivated, err := s.ActivateLatestConfigVersion(ctx, contractProfileID)
+	if err != nil {
+		t.Fatalf("activate latest config version: %v", err)
+	}
+	if reactivated.ID != "config.empty.001" || reactivated.ProfileID != contractProfileID || !reactivated.Active {
+		t.Fatalf("reactivated config version = %#v", reactivated)
+	}
+	activeVersion, err = s.GetActiveConfigVersion(ctx)
+	if err != nil {
+		t.Fatalf("get reactivated config version: %v", err)
+	}
+	if activeVersion.ID != "config.empty.001" || activeVersion.ProfileID != contractProfileID || !activeVersion.Active {
+		t.Fatalf("active config version after restore = %#v", activeVersion)
+	}
 	return activeVersion
 }
 
@@ -555,6 +581,20 @@ func requireProfileCatalogContract(t *testing.T, ctx context.Context, s store.St
 	}
 	if len(catalog.APICases) != 1 || catalog.APICases[0].CasePath != "cases/case.alpha.json" || catalog.APICases[0].SourceKind != "karate" || catalog.APICases[0].SourcePath != "tests/api.feature" || catalog.APICases[0].ExecutorID != "executor.karate" || catalog.APICases[0].BaseURL != "http://127.0.0.1:18080" || catalog.APICases[0].EvidenceDir != ".runtime/cases" || catalog.APICases[0].TimeoutSeconds != 12 || catalog.APICases[0].DefaultOverridesJSON != `{"itemId":"item-001"}` {
 		t.Fatalf("profile catalog api case run config = %#v", catalog.APICases)
+	}
+	catalogByID, err := s.GetProfileCatalogByID(ctx, contractProfileID)
+	if err != nil {
+		t.Fatalf("get profile catalog by id: %v", err)
+	}
+	if catalogByID.ProfileID != contractProfileID || len(catalogByID.Workflows) != 1 {
+		t.Fatalf("profile catalog by id = %#v", catalogByID)
+	}
+	indexes, err := s.ListProfileCatalogIndexes(ctx)
+	if err != nil {
+		t.Fatalf("list profile catalog indexes: %v", err)
+	}
+	if len(indexes) != 1 || indexes[0].ProfileID != contractProfileID || indexes[0].Counts.APICases != 1 {
+		t.Fatalf("profile catalog indexes = %#v", indexes)
 	}
 }
 

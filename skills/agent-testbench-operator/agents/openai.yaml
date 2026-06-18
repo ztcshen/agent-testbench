@@ -1,4 +1,0 @@
-interface:
-  display_name: "AgentTestBench Operator"
-  short_description: "Run AgentTestBench onboarding, tasks, workflows, case suites, Store checks, and sandbox diagnostics"
-  default_prompt: "Use $agent-testbench-operator to operate AgentTestBench through the repository CLI/service with source-light, Store-aware commands."

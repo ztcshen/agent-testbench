@@ -174,6 +174,12 @@ func runMap(ctx context.Context, args []string) error {
 		return runMapVersions(ctx, args[1:])
 	case "coverage":
 		return runMapCoverage(ctx, args[1:])
+	case cliCommandDoctor:
+		return runMapDoctor(ctx, args[1:])
+	case "diff":
+		return runMapDiff(ctx, args[1:])
+	case mapCommandValidation:
+		return runMapValidation(ctx, args[1:])
 	case "workflows":
 		return runMapWorkflows(ctx, args[1:])
 	case "explain":
@@ -182,10 +188,24 @@ func runMap(ctx context.Context, args []string) error {
 		return runMapGate(ctx, args[1:])
 	case "run":
 		return runMapRun(ctx, args[1:])
+	case "plan":
+		return runMapPlan(ctx, args[1:])
 	case "atlas":
 		return runMapAtlas(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown map command: %s", args[0])
+	}
+}
+
+func runMapPlan(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing map plan command")
+	}
+	switch args[0] {
+	case "inspect":
+		return runMapRunExplain(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown map plan command: %s", args[0])
 	}
 }
 
@@ -397,6 +417,8 @@ func runMapImportWorkflows(ctx context.Context, args []string) error {
 	mapID := flags.String("map", "", "Plan map id")
 	displayName := flags.String("display-name", "", "Plan map display name")
 	description := flags.String("description", "", "Plan map description")
+	var workflowIDs stringListFlag
+	flags.Var(&workflowIDs, "workflow", "Workflow id to import into the map; repeat for multiple workflows")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -417,6 +439,7 @@ func runMapImportWorkflows(ctx context.Context, args []string) error {
 		MapID:       *mapID,
 		DisplayName: *displayName,
 		Description: *description,
+		WorkflowIDs: workflowIDs.Values(),
 	})
 	if err != nil {
 		return err

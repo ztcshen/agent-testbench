@@ -16,6 +16,7 @@ type ImportOptions struct {
 	MapID       string
 	DisplayName string
 	Description string
+	WorkflowIDs []string
 	Now         time.Time
 }
 
@@ -35,7 +36,7 @@ func ImportCatalog(snapshot catalog.ProfileCatalog, options ImportOptions) (Grap
 	if mapID == "" {
 		mapID = "map." + profileID
 	}
-	builder := newGraphBuilder(snapshot, mapID, now)
+	builder := newGraphBuilder(snapshot, mapID, now, options.WorkflowIDs)
 	builder.graph.Map = Map{
 		ID:          mapID,
 		ProfileID:   profileID,
@@ -46,7 +47,7 @@ func ImportCatalog(snapshot catalog.ProfileCatalog, options ImportOptions) (Grap
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	if err := builder.importPaths(); err != nil {
+	if err := builder.importPaths(len(builder.workflowFilter) > 0); err != nil {
 		return Graph{}, err
 	}
 	builder.importValidationCases()
@@ -67,13 +68,14 @@ type graphBuilder struct {
 	workflowByID   map[string]catalog.Workflow
 	bindingsByPath map[string][]catalog.WorkflowBinding
 	boundCaseIDs   map[string]bool
+	workflowFilter map[string]bool
 	nodeByID       map[string]Node
 	pathByID       map[string]Path
 	edgeByID       map[string]Edge
 	matByID        map[string]Materialization
 }
 
-func newGraphBuilder(snapshot catalog.ProfileCatalog, mapID string, now time.Time) *graphBuilder {
+func newGraphBuilder(snapshot catalog.ProfileCatalog, mapID string, now time.Time, workflowIDs []string) *graphBuilder {
 	b := &graphBuilder{
 		catalog:        snapshot,
 		mapID:          mapID,
@@ -82,6 +84,7 @@ func newGraphBuilder(snapshot catalog.ProfileCatalog, mapID string, now time.Tim
 		workflowByID:   map[string]catalog.Workflow{},
 		bindingsByPath: map[string][]catalog.WorkflowBinding{},
 		boundCaseIDs:   map[string]bool{},
+		workflowFilter: normalizedWorkflowIDSet(workflowIDs),
 		nodeByID:       map[string]Node{},
 		pathByID:       map[string]Path{},
 		edgeByID:       map[string]Edge{},
@@ -107,18 +110,24 @@ func newGraphBuilder(snapshot catalog.ProfileCatalog, mapID string, now time.Tim
 		if item.WorkflowID == "" || item.CaseID == "" {
 			continue
 		}
+		if len(b.workflowFilter) > 0 && !b.workflowFilter[item.WorkflowID] {
+			continue
+		}
 		b.bindingsByPath[item.WorkflowID] = append(b.bindingsByPath[item.WorkflowID], item)
 		b.boundCaseIDs[item.CaseID] = true
 	}
 	return b
 }
 
-func (b *graphBuilder) importPaths() error {
+func (b *graphBuilder) importPaths(requireMatchedWorkflow bool) error {
 	pathIDs := make([]string, 0, len(b.bindingsByPath))
 	for id := range b.bindingsByPath {
 		pathIDs = append(pathIDs, id)
 	}
 	sort.Strings(pathIDs)
+	if requireMatchedWorkflow && len(pathIDs) == 0 {
+		return fmt.Errorf("no workflow bindings matched requested workflows: %s", strings.Join(sortedWorkflowFilterIDs(b.workflowFilter), ", "))
+	}
 	for index, pathID := range pathIDs {
 		bindings := b.bindingsByPath[pathID]
 		sortWorkflowBindings(bindings)
@@ -186,6 +195,12 @@ func (b *graphBuilder) importValidationCases() {
 		apiCase := b.caseByID[caseID]
 		if b.boundCaseIDs[caseID] || !isValidationCase(apiCase) {
 			continue
+		}
+		if len(b.workflowFilter) > 0 {
+			baseCaseID := b.baseCaseFor(apiCase)
+			if !b.boundCaseIDs[baseCaseID] {
+				continue
+			}
 		}
 		b.upsertCaseNode(apiCase, false)
 	}
@@ -468,6 +483,30 @@ func truncateIDPart(value string, max int) string {
 }
 
 func sortedCaseIDs(items map[string]catalog.APICase) []string {
+	out := make([]string, 0, len(items))
+	for id := range items {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func normalizedWorkflowIDSet(values []string) map[string]bool {
+	var out map[string]bool
+	for _, raw := range values {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
+		}
+		if out == nil {
+			out = map[string]bool{}
+		}
+		out[id] = true
+	}
+	return out
+}
+
+func sortedWorkflowFilterIDs(items map[string]bool) []string {
 	out := make([]string, 0, len(items))
 	for id := range items {
 		out = append(out, id)

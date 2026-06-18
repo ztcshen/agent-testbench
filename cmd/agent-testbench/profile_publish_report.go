@@ -72,6 +72,22 @@ type profileCatalogIndexReport struct {
 	ConfigVersion *profileConfigVersion `json:"configVersion,omitempty"`
 }
 
+type profileCatalogListReport struct {
+	OK    bool                  `json:"ok"`
+	Count int                   `json:"count"`
+	Items []profileCatalogIndex `json:"items"`
+}
+
+type profileCatalogRestoreReport struct {
+	OK            bool                  `json:"ok"`
+	ProfileID     string                `json:"profileId"`
+	RestoredAt    time.Time             `json:"restoredAt"`
+	Before        profileCatalogIndex   `json:"before"`
+	After         profileCatalogIndex   `json:"after"`
+	ConfigVersion *profileConfigVersion `json:"configVersion,omitempty"`
+	Notes         []string              `json:"notes,omitempty"`
+}
+
 type profileCatalogIndexCounts struct {
 	Services         int `json:"services"`
 	Workflows        int `json:"workflows"`
@@ -286,6 +302,25 @@ func printProfileCatalogIndex(report profileCatalogIndexReport) {
 	fmt.Printf("Request Templates: %d\n", report.Counts.RequestTemplates)
 	if report.ConfigVersion != nil {
 		fmt.Printf("Config Version: %s\n", report.ConfigVersion.ID)
+	}
+}
+
+func printProfileCatalogList(report profileCatalogListReport) {
+	fmt.Printf("Profile Catalogs: %d\n", report.Count)
+	for _, item := range report.Items {
+		fmt.Printf("%s\t%s\tworkflows=%d\tapiCases=%d\n", item.ProfileID, item.IndexedAt.Format(time.RFC3339), item.Counts.Workflows, item.Counts.APICases)
+	}
+}
+
+func printProfileCatalogRestore(report profileCatalogRestoreReport) {
+	fmt.Printf("Restored Profile Catalog: %s\n", report.ProfileID)
+	fmt.Printf("Before: %s\n", report.Before.ProfileID)
+	fmt.Printf("After: %s\n", report.After.ProfileID)
+	if report.ConfigVersion != nil {
+		fmt.Printf("Config Version: %s\n", report.ConfigVersion.ID)
+	}
+	for _, note := range report.Notes {
+		fmt.Printf("Note: %s\n", note)
 	}
 }
 

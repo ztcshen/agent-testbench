@@ -18,23 +18,15 @@ import (
 )
 
 func runProfileCatalogIndex(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("profile catalog-index", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
+	options, err := parseProfileCatalogReadOptions("profile catalog-index", args)
 	if err != nil {
 		return err
 	}
-	report, err := readProfileCatalogIndex(ctx, resolvedStoreURL)
+	report, err := readProfileCatalogIndex(ctx, options.StoreURL)
 	if err != nil {
 		return err
 	}
-	if *jsonOutput {
+	if options.JSONOutput {
 		return writeIndentedJSON(report)
 	}
 	printProfileCatalogIndex(report)
@@ -60,15 +52,18 @@ func runProfileVerify(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	resolvedProfilePath, err := materializeProfileReference(templatePackageReference(*templatePackagePath, *profilePath), *profileHome, *force)
+	if err != nil {
+		return err
+	}
+	if err := guardProfilePublishTarget(resolvedProfilePath, resolvedStoreURL); err != nil {
+		return err
+	}
 	s, err := openStore(ctx, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
 	defer closeCLIStore(s)
-	resolvedProfilePath, err := materializeProfileReference(templatePackageReference(*templatePackagePath, *profilePath), *profileHome, *force)
-	if err != nil {
-		return err
-	}
 	report, err := verifyProfileBundle(ctx, s, resolvedProfilePath, maskStoreURL(resolvedStoreURL), profileVerifyOptions{
 		RequireCaseRuns:     *requireCaseRuns,
 		RequireWorkflowRuns: *requireWorkflowRuns,
@@ -123,16 +118,18 @@ func runConfigPublishWithFlags(ctx context.Context, flags *flag.FlagSet, args []
 	if err != nil {
 		return err
 	}
+	resolvedFrom, err := materializeProfileReference(*from, *profileHome, *force)
+	if err != nil {
+		return err
+	}
+	if err := guardProfilePublishTarget(resolvedFrom, resolvedStoreURL); err != nil {
+		return err
+	}
 	s, err := openStore(ctx, resolvedStoreURL)
 	if err != nil {
 		return err
 	}
 	defer closeCLIStore(s)
-
-	resolvedFrom, err := materializeProfileReference(*from, *profileHome, *force)
-	if err != nil {
-		return err
-	}
 	report, err := publishProfileBundleToStore(ctx, s, resolvedFrom, maskStoreURL(resolvedStoreURL), *auditOutput, *requireAuditOK)
 	if err != nil {
 		return err

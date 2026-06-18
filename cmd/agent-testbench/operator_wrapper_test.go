@@ -8,23 +8,6 @@ import (
 	"testing"
 )
 
-func TestOperatorWrapperStatusPrefersRepoRuntime(t *testing.T) {
-	repo := t.TempDir()
-	writeExecutable(t, filepath.Join(repo, ".runtime", "bin", "agent-testbench"), "#!/usr/bin/env sh\necho runtime \"$@\"\n")
-	writeExecutable(t, filepath.Join(repo, "bin", "agent-testbench.sh"), "#!/usr/bin/env sh\necho wrapper \"$@\"\n")
-
-	cmd := exec.Command("./skills/agent-testbench-operator/scripts/atb.sh", "status")
-	cmd.Dir = repoRootForTest(t)
-	cmd.Env = append(os.Environ(), "ATB_REPO_DIR="+repo, "ATB_BIN=")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("run atb wrapper: %v\n%s", err, out)
-	}
-	if strings.TrimSpace(string(out)) != "runtime status" {
-		t.Fatalf("status should use repo runtime, got %q", out)
-	}
-}
-
 func TestRepoWrapperStatusPrefersRepoRuntime(t *testing.T) {
 	repo := t.TempDir()
 	writeExecutable(t, filepath.Join(repo, ".runtime", "bin", "agent-testbench"), "#!/usr/bin/env sh\necho runtime \"$@\"\n")

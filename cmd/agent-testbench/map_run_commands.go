@@ -51,6 +51,9 @@ func runMapRun(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := validateMapRunCatalogPreflight(ctx, runtime, graph, record); err != nil {
+		return err
+	}
 	if err := runtime.SaveTestMapPlan(ctx, record); err != nil {
 		return err
 	}

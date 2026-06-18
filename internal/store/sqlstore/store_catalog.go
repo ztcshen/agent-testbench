@@ -57,6 +57,26 @@ limit 1;`).Scan(&payload)
 	return catalog, nil
 }
 
+func (s *Store) GetProfileCatalogByID(ctx context.Context, profileID string) (store.ProfileCatalog, error) {
+	query := fmt.Sprintf(`
+select catalog_json
+from profile_catalogs
+where profile_id = %s;`, s.dialect.BindVar(1))
+	var payload string
+	err := s.db.QueryRowContext(ctx, query, profileID).Scan(&payload)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return store.ProfileCatalog{}, store.ErrNotFound
+		}
+		return store.ProfileCatalog{}, err
+	}
+	var catalog store.ProfileCatalog
+	if err := json.Unmarshal([]byte(payload), &catalog); err != nil {
+		return store.ProfileCatalog{}, fmt.Errorf("decode profile catalog %q: %w", profileID, err)
+	}
+	return catalog, nil
+}
+
 func (s *Store) GetProfileCatalogIndex(ctx context.Context) (store.ProfileCatalogIndex, error) {
 	row := s.db.QueryRowContext(ctx, `
 select profile_id, indexed_at, services, workflows, interface_nodes, api_cases, request_templates,
@@ -69,6 +89,29 @@ limit 1;`)
 		return store.ProfileCatalogIndex{}, err
 	}
 	return index, nil
+}
+
+func (s *Store) ListProfileCatalogIndexes(ctx context.Context) (indexes []store.ProfileCatalogIndex, err error) {
+	rows, err := s.db.QueryContext(ctx, `
+select profile_id, indexed_at, services, workflows, interface_nodes, api_cases, request_templates,
+  workflow_bindings, case_dependencies, fixtures, templates, template_configs
+from profile_catalogs
+order by indexed_at desc, profile_id desc;`)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRows(rows, &err)
+	for rows.Next() {
+		index, err := scanProfileCatalogIndex(rows)
+		if err != nil {
+			return nil, err
+		}
+		indexes = append(indexes, index)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return indexes, nil
 }
 
 func scanProfileCatalogIndex(row scanner) (store.ProfileCatalogIndex, error) {

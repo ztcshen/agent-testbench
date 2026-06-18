@@ -71,7 +71,10 @@ type ProfileCatalogStore interface {
 	GetReadModel(context.Context, string, string) (ReadModel, error)
 	ReplaceProfileCatalog(context.Context, ProfileCatalog) error
 	GetProfileCatalog(context.Context) (ProfileCatalog, error)
+	GetProfileCatalogByID(context.Context, string) (ProfileCatalog, error)
 	GetProfileCatalogIndex(context.Context) (ProfileCatalogIndex, error)
+	ListProfileCatalogIndexes(context.Context) ([]ProfileCatalogIndex, error)
+	ActivateLatestConfigVersion(context.Context, string) (ConfigVersion, error)
 }
 
 type PlanGraphStore interface {

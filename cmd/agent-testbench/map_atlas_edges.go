@@ -2,18 +2,23 @@ package main
 
 import (
 	"strconv"
+	"strings"
 
+	"agent-testbench/internal/domain/plangraph"
 	"agent-testbench/internal/store"
 )
 
+const mapNodeRoleNegative = "negative"
+
 func mapAtlasEdges(graph store.TestPlanGraph) []mapAtlasEdge {
-	out := make([]mapAtlasEdge, 0, len(graph.Edges)+len(graph.PathSteps))
+	out := make([]mapAtlasEdge, 0, len(graph.Edges)+len(graph.Nodes)+len(graph.PathSteps))
 	seen := map[string]bool{}
 	for _, edge := range graph.Edges {
 		item := mapAtlasEdgeFromStore(edge)
 		out = append(out, item)
 		seen[mapAtlasEdgeKey(item.FromNodeID, item.ToNodeID, item.PathID)] = true
 	}
+	out = append(out, generatedMapAtlasValidationEdges(graph.Nodes, seen)...)
 	return append(out, generatedMapAtlasPathEdges(graph.PathSteps, seen)...)
 }
 
@@ -59,6 +64,47 @@ func generatedMapAtlasPathEdges(steps []store.TestPlanPathStep, seen map[string]
 	return out
 }
 
+func generatedMapAtlasValidationEdges(nodes []store.TestPlanNode, seen map[string]bool) []mapAtlasEdge {
+	nodeIDs := mapAtlasPlanNodeIDs(nodes)
+	primaryByInterface := map[string]string{}
+	for _, node := range nodes {
+		if mapAtlasNodeIsValidation(node) || node.InterfaceNodeID == "" {
+			continue
+		}
+		if primaryByInterface[node.InterfaceNodeID] == "" {
+			primaryByInterface[node.InterfaceNodeID] = node.ID
+		}
+	}
+
+	out := []mapAtlasEdge{}
+	for index, node := range nodes {
+		if !mapAtlasNodeIsValidation(node) {
+			continue
+		}
+		fromID := stringDefault(node.AnchorNodeID, node.BaseCaseID)
+		if fromID == "" {
+			fromID = primaryByInterface[node.InterfaceNodeID]
+		}
+		if fromID == "" || fromID == node.ID || !nodeIDs[fromID] {
+			continue
+		}
+		key := mapAtlasEdgeKey(fromID, node.ID, "")
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, mapAtlasEdge{
+			ID:         "validation:" + fromID + ":" + node.ID,
+			FromNodeID: fromID,
+			ToNodeID:   node.ID,
+			Kind:       plangraph.NodeRoleValidation,
+			Generated:  true,
+			SortOrder:  index,
+		})
+	}
+	return out
+}
+
 func mapAtlasEdgeKey(fromID string, toID string, pathID string) string {
 	return fromID + "\x00" + toID + "\x00" + pathID
 }
@@ -68,11 +114,23 @@ func mapAtlasWarnings(graph store.TestPlanGraph) []string {
 	nodeUsage := mapAtlasNodeConnectivity(graph.PathSteps, graph.Edges)
 	warnings := []string{}
 	for _, node := range graph.Nodes {
-		if nodeUsage[node.ID] == 0 {
+		if nodeUsage[node.ID] == 0 && !mapAtlasNodeIsValidation(node) {
 			warnings = append(warnings, "node "+node.ID+" is not used by any workflow path")
 		}
 	}
 	return append(warnings, mapAtlasEdgeWarnings(graph.Edges, nodeIDs)...)
+}
+
+func mapAtlasNodeIsValidation(node store.TestPlanNode) bool {
+	role := strings.ToLower(node.Role)
+	state := strings.ToLower(node.StateEffect)
+	mode := strings.ToLower(node.RenderMode)
+	return role == plangraph.NodeRoleValidation ||
+		role == mapNodeRoleNegative ||
+		state == plangraph.StateEffectUnchanged ||
+		mode == "template_patch" ||
+		node.BaseCaseID != "" ||
+		node.AnchorNodeID != ""
 }
 
 func mapAtlasPlanNodeIDs(nodes []store.TestPlanNode) map[string]bool {

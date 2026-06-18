@@ -246,7 +246,7 @@ func taskIDFromJSONReport(t *testing.T, raw string) string {
 }
 
 func TestCommandCatalogIncludesOnboardTaskWatchAndNotify(t *testing.T) {
-	out := runCLI(t, "commands", "--filter", "task", "--json")
+	out := runCLI(t, "commands", "--all", "--filter", "task", "--json")
 	for _, want := range []string{`"command": "task run"`, `"command": "task schedule"`, `"command": "task list"`} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("command catalog missing %s:\n%s", want, out)

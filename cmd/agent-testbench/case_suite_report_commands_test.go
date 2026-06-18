@@ -280,12 +280,20 @@ func requireCaseSuiteNamedActiveCoverage(t *testing.T, label string) {
 	t.Helper()
 
 	coverageOut := runCLI(t, "case", "suite", "coverage", "--status", "active", "--json")
+	coverageViewOut := runCLI(t, "case", "suite", "report", "--view", "coverage", "--status", "active", "--json")
 	var coverage caseSuiteNamedActiveCoverage
 	if err := json.Unmarshal([]byte(coverageOut), &coverage); err != nil {
 		t.Fatalf("decode %s suite coverage json: %v\n%s", label, err, coverageOut)
 	}
 	if !coverage.OK || coverage.Counts.Total != 2 || coverage.Counts.Passed != 2 || coverage.Counts.Failed != 0 || coverage.Counts.NotRun != 0 {
 		t.Fatalf("%s suite coverage = %#v", label, coverage)
+	}
+	var coverageView caseSuiteNamedActiveCoverage
+	if err := json.Unmarshal([]byte(coverageViewOut), &coverageView); err != nil {
+		t.Fatalf("decode %s suite report --view coverage json: %v\n%s", label, err, coverageViewOut)
+	}
+	if coverageView != coverage {
+		t.Fatalf("%s suite report --view coverage = %#v want %#v", label, coverageView, coverage)
 	}
 }
 

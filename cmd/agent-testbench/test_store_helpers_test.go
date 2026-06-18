@@ -37,12 +37,32 @@ func configureNamedMySQLActiveStore(t *testing.T, name string) string {
 	if dsn == "" {
 		t.Skip("set AGENT_TESTBENCH_MYSQL_TEST_DSN to run named MySQL daily path coverage")
 	}
+	requireSafeNamedMySQLActiveStoreForFixtureTests(t, dsn)
 	t.Setenv("AGENT_TESTBENCH_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	runCLI(t, "store", "config", "set", name, "--url", dsn)
 	runCLI(t, "store", "use", name)
 	runCLI(t, "store", "upgrade")
 	resetNamedMySQLActiveStore(t, dsn)
 	return dsn
+}
+
+func requireSafeNamedMySQLActiveStoreForFixtureTests(t *testing.T, dsn string) {
+	t.Helper()
+	mode := strings.TrimSpace(os.Getenv("AGENT_TESTBENCH_MYSQL_TEST_DSN_MODE"))
+	switch mode {
+	case "":
+		t.Skip("set AGENT_TESTBENCH_MYSQL_TEST_DSN_MODE=existing and " + allowTestFixtureProfilePublishEnv + "=1 to run named MySQL fixture tests")
+	case "existing":
+	default:
+		t.Fatalf("unsupported AGENT_TESTBENCH_MYSQL_TEST_DSN_MODE %q for named MySQL fixture tests; use existing", mode)
+	}
+	database := sqlStoreDatabaseName(dsn)
+	if !isDedicatedAgentTestBenchStoreDatabaseName(database) {
+		t.Fatalf("refusing named MySQL fixture tests against database %q; use a dedicated AgentTestBench test database whose name contains agent_testbench", database)
+	}
+	if !testFixtureProfilePublishAllowed() {
+		t.Skip("set " + allowTestFixtureProfilePublishEnv + "=1 to allow Go test fixture profile publication to the dedicated MySQL test Store")
+	}
 }
 
 func configureNamedSQLiteActiveStore(t *testing.T, name string) string {
