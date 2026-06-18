@@ -252,11 +252,18 @@ func addMapGateTask(report *mapGateReport, item mapGateTaskItem) {
 	if item.APICaseRunID != "" {
 		report.Counts.APICaseRuns++
 	}
-	if item.EvidenceCount > 0 || strings.EqualFold(item.Status, mapplanner.TaskStatusSkipped) {
+	if item.EvidenceCount > 0 || mapGateTaskEvidenceExempt(item) {
 		report.Counts.EvidenceComplete++
 		return
 	}
 	report.MissingEvidence = append(report.MissingEvidence, item)
+}
+
+func mapGateTaskEvidenceExempt(item mapGateTaskItem) bool {
+	if strings.EqualFold(item.Status, mapplanner.TaskStatusSkipped) {
+		return true
+	}
+	return strings.EqualFold(item.Status, store.StatusPassed) && item.Kind == mapplanner.TaskReuseMaterialized
 }
 
 func mapGateNextActions(report mapGateReport, options mapGateOptions) []string {

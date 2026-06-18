@@ -58,7 +58,7 @@ writes `test_maps`, `test_map_nodes`, `test_map_edges`, `test_map_paths`,
 
 ## Discover Maps And Runs / 发现 Map 和运行历史
 
-List Store-backed maps before choosing a review or execution target:
+List Store-backed maps before choosing an atlas or execution target:
 
 ```bash
 agent-testbench map list --store STORE_NAME --json
@@ -70,14 +70,14 @@ for nodes, edges, workflow paths, and materializations.
 Update map metadata without rebuilding the graph:
 
 ```bash
-agent-testbench map update --store STORE_NAME --map MAP_ID --display-name "Payment Atlas" --status review --json
+agent-testbench map update --store STORE_NAME --map MAP_ID --display-name "Capability Scenario Atlas" --status review --json
 ```
 
 Use `draft`, `review`, `active`, or `archived` as lightweight lifecycle labels
 for local teams. The command preserves nodes, edges, paths, path steps, and
 materializations.
 
-Create immutable Store snapshots as the map moves through review and publish:
+Create immutable Store snapshots as the atlas moves through acceptance and publish:
 
 ```bash
 agent-testbench map snapshot --store STORE_NAME --map MAP_ID --version v1-review --status review --summary "ready for review" --json
@@ -87,8 +87,8 @@ agent-testbench map versions --store STORE_NAME --map MAP_ID --json
 
 `map snapshot` records the current graph into `test_map_versions` without
 changing the working map. `map publish` sets the working map status to `active`
-and records a `published` version. `map versions` lists the saved atlas
-snapshots for audit, review, and future diff work.
+and records a `published` version. `map versions` lists the saved Test Scenario
+Atlas snapshots for audit, acceptance, and future diff work.
 
 Validate workflow convergence after migrating existing workflow assets:
 
@@ -142,11 +142,11 @@ agent-testbench map atlas --store STORE_NAME --map MAP_ID --plan PLAN_ID --outpu
 
 The atlas is built from Store facts, not model inference. It embeds the
 map nodes, edges, workflow paths, materializations, catalog case metadata, and
-planner explanations. `--filter` narrows the generated review to matching path
+planner explanations. `--filter` narrows the generated atlas to matching path
 ids, workflow ids, display names, node ids, or case ids. `--plan` overlays a
-saved planner/run instance so reviewers can inspect task status, child
+saved planner/run instance so operators can inspect task status, child
 workflow/API case run ids, Evidence roots, and failure reasons from the same
-graph. Reviewers can search cases, filter by workflow path, click case nodes,
+graph. Operators can search cases, filter by workflow path, click case nodes,
 inspect request templates, patch/expected JSON, workflow reuse, and the replay
 operations selected by `map explain`.
 

@@ -1,6 +1,7 @@
 package mapplanner_test
 
 import (
+	"strings"
 	"testing"
 
 	"agent-testbench/internal/domain/mapplanner"
@@ -129,6 +130,68 @@ func TestExplainCasesScopeHonorsConcreteCaseTarget(t *testing.T) {
 	}
 	if len(plan.PhysicalTasks) != 2 {
 		t.Fatalf("targeted case should not plan all validation cases = %#v", plan.PhysicalTasks)
+	}
+}
+
+func TestExplainCasesScopeHonorsTargetKindCase(t *testing.T) {
+	graph := validationCaseGraph()
+	graph.Nodes = append(graph.Nodes, plangraph.Node{MapID: "map.contract", ID: "case.submit.bad-format", CaseID: "case.submit.bad-format", Role: "validation", StateEffect: "unchanged", AnchorNodeID: "case.submit", SortOrder: 4})
+
+	plan, err := mapplanner.Explain(graph, mapplanner.Query{
+		MapID:       "map.contract",
+		Scope:       mapplanner.ScopeCases,
+		TargetKind:  mapplanner.TargetCase,
+		TargetID:    "case.submit.missing-days",
+		PlannerMode: mapplanner.ModeRun,
+	})
+	if err != nil {
+		t.Fatalf("explain targeted case under cases scope: %v", err)
+	}
+	if plan.Scope != mapplanner.ScopeCase || plan.TargetCaseID != "case.submit.missing-days" {
+		t.Fatalf("target-kind case query should normalize to single case = %#v", plan)
+	}
+	for _, task := range plan.PhysicalTasks {
+		if task.CaseID == "case.submit.bad-format" || task.NodeID == "case.submit.bad-format" {
+			t.Fatalf("target-kind case query should not plan sibling validation case = %#v", plan.PhysicalTasks)
+		}
+	}
+}
+
+func TestExplainRejectsConflictingScopeAndTargetKind(t *testing.T) {
+	graph := validationCaseGraph()
+
+	_, err := mapplanner.Explain(graph, mapplanner.Query{
+		MapID:       "map.contract",
+		Scope:       mapplanner.ScopeWorkflows,
+		TargetKind:  mapplanner.TargetCase,
+		TargetID:    "case.submit.missing-days",
+		PlannerMode: mapplanner.ModeRun,
+	})
+	if err == nil || !strings.Contains(err.Error(), "conflicts") {
+		t.Fatalf("expected conflicting workflow scope and case target to fail, got %v", err)
+	}
+}
+
+func TestGraphFingerprintTracksExecutableGraphFacts(t *testing.T) {
+	graph := validationCaseGraph()
+	base := mapplanner.GraphFingerprint(graph)
+
+	nodeChanged := validationCaseGraph()
+	nodeChanged.Nodes[2].PatchJSON = `[{"op":"remove","path":"$.days"}]`
+	if got := mapplanner.GraphFingerprint(nodeChanged); got == base {
+		t.Fatalf("node execution metadata should affect fingerprint: %s", got)
+	}
+
+	edgeChanged := validationCaseGraph()
+	edgeChanged.Edges[1].MappingsJSON = `[{"from":"$.item_id","to":"$.request.item_id"}]`
+	if got := mapplanner.GraphFingerprint(edgeChanged); got == base {
+		t.Fatalf("edge mappings should affect fingerprint: %s", got)
+	}
+
+	materializationChanged := validationCaseGraph()
+	materializationChanged.Materializations[0].FixtureID = "fixture.other"
+	if got := mapplanner.GraphFingerprint(materializationChanged); got == base {
+		t.Fatalf("materialization fixture should affect fingerprint: %s", got)
 	}
 }
 

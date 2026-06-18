@@ -211,13 +211,13 @@ Use `map gate --plan PLAN_ID --require-passed --require-tasks
 plan, task statuses, child run ids, and Store Evidence indexes, then reports
 failed tasks, missing Evidence, and recovery commands. Use
 `map atlas --map MAP_ID --filter TEXT --output PATH` when a human needs to
-review the Store-backed Test Scenario Atlas visually: the generated page embeds
-the current map facts, can be narrowed to matching workflows/cases, supports
-workflow filtering/search, and shows clickable case details including request
-template, patch/expected JSON, reuse paths, and planner replay operations. Add
-`--plan PLAN_ID` to overlay a saved planner/run instance with task status,
-child workflow/API case run ids, Evidence roots, and failure reasons for review
-without re-running the map.
+navigate the Store-backed Test Scenario Atlas visually: the generated graph
+embeds the current map facts, can be narrowed to matching workflows/cases,
+supports workflow filtering/search, and shows clickable case details including
+request template, patch/expected JSON, reuse paths, and planner replay
+operations. Add `--plan PLAN_ID` to overlay a saved planner/run instance with
+task status, child workflow/API case run ids, Evidence roots, and failure
+reasons without re-running the map.
 
 For compose-backed sandbox services, `sandbox start --json` reports
 `recoveryCommand`, `readiness`, and `warning` on each service result when

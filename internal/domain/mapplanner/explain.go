@@ -13,6 +13,9 @@ func Explain(graph plangraph.Graph, query Query) (Plan, error) {
 	if query.MapID == "" {
 		return Plan{}, fmt.Errorf("map id is required")
 	}
+	if err := validateQueryScopeTarget(query); err != nil {
+		return Plan{}, err
+	}
 	builder := planBuilder{
 		graph:     graph,
 		query:     query,
@@ -27,13 +30,17 @@ func Explain(graph plangraph.Graph, query Query) (Plan, error) {
 		if err := builder.planWorkflowScope(&plan); err != nil {
 			return Plan{}, err
 		}
-		builder.planCaseScope(&plan)
+		if err := builder.planCaseScope(&plan); err != nil {
+			return Plan{}, err
+		}
 	case ScopeWorkflows:
 		if err := builder.planWorkflowScope(&plan); err != nil {
 			return Plan{}, err
 		}
 	case ScopeCases:
-		builder.planCaseScope(&plan)
+		if err := builder.planCaseScope(&plan); err != nil {
+			return Plan{}, err
+		}
 	case ScopeCase:
 		if err := builder.planTargetCase(&plan); err != nil {
 			return Plan{}, err
@@ -160,7 +167,7 @@ func (b *planBuilder) planWorkflowScope(plan *Plan) error {
 	return nil
 }
 
-func (b *planBuilder) planCaseScope(plan *Plan) {
+func (b *planBuilder) planCaseScope(plan *Plan) error {
 	plan.LogicalPlan = append(plan.LogicalPlan, LogicalOp{
 		ID:         "logical.validation_cases",
 		Op:         "scan_validation_cases",
@@ -168,10 +175,15 @@ func (b *planBuilder) planCaseScope(plan *Plan) {
 		TargetID:   b.query.MapID,
 		Children:   []string{"logical.scan_map"},
 	})
+	matched := 0
 	for _, node := range b.graph.Nodes {
 		if !isValidationNode(node) {
 			continue
 		}
+		if b.caseTargeted() && !b.nodeMatchesQuery(node) {
+			continue
+		}
+		matched++
 		if err := b.planCaseNode(plan, node); err != nil {
 			plan.RejectedPlans = append(plan.RejectedPlans, RejectedPlan{
 				ID:     "candidate.case." + safeID(node.ID),
@@ -180,6 +192,10 @@ func (b *planBuilder) planCaseScope(plan *Plan) {
 			})
 		}
 	}
+	if b.caseTargeted() && matched == 0 {
+		return fmt.Errorf("map case target not found: %s %s", b.query.TargetKind, b.query.TargetID)
+	}
+	return nil
 }
 
 func (b *planBuilder) planTargetCase(plan *Plan) error {
@@ -373,7 +389,11 @@ func (b *planBuilder) finish(plan *Plan) {
 func normalizeQuery(graph plangraph.Graph, query Query) Query {
 	query.MapID = firstNonEmpty(strings.TrimSpace(query.MapID), graph.Map.ID)
 	query.PlannerMode = firstNonEmpty(strings.TrimSpace(query.PlannerMode), ModeExplain)
+	scopeWasEmpty := strings.TrimSpace(query.Scope) == ""
 	query.Scope = strings.TrimSpace(query.Scope)
+	if query.Scope == "workflow" {
+		query.Scope = ScopeWorkflows
+	}
 	query.TargetKind = strings.TrimSpace(query.TargetKind)
 	query.TargetID = strings.TrimSpace(query.TargetID)
 	switch {
@@ -394,18 +414,43 @@ func normalizeQuery(graph plangraph.Graph, query Query) Query {
 		query.TargetKind = TargetWorkflow
 		query.TargetID = strings.TrimSpace(query.WorkflowID)
 	default:
+		switch query.TargetKind {
+		case TargetCase, TargetNode:
+			if scopeWasEmpty || query.Scope == ScopeCases {
+				query.Scope = ScopeCase
+			}
+		case TargetPath, TargetWorkflow:
+			if scopeWasEmpty {
+				query.Scope = ScopeWorkflows
+			}
+		}
 		query.Scope = stringDefault(query.Scope, ScopeAll)
 		query.TargetKind = stringDefault(query.TargetKind, TargetMap)
 		query.TargetID = stringDefault(query.TargetID, query.MapID)
 	}
-	if query.Scope == "workflow" {
-		query.Scope = ScopeWorkflows
-	}
 	return query
+}
+
+func validateQueryScopeTarget(query Query) error {
+	switch query.Scope {
+	case ScopeWorkflows:
+		if query.TargetKind == TargetCase || query.TargetKind == TargetNode {
+			return fmt.Errorf("map planner scope %s conflicts with target kind %s", query.Scope, query.TargetKind)
+		}
+	case ScopeCases, ScopeCase:
+		if query.TargetKind == TargetPath || query.TargetKind == TargetWorkflow {
+			return fmt.Errorf("map planner scope %s conflicts with target kind %s", query.Scope, query.TargetKind)
+		}
+	}
+	return nil
 }
 
 func (b *planBuilder) workflowTargeted() bool {
 	return b.query.TargetKind == TargetPath || b.query.TargetKind == TargetWorkflow
+}
+
+func (b *planBuilder) caseTargeted() bool {
+	return b.query.TargetKind == TargetCase || b.query.TargetKind == TargetNode
 }
 
 func (b *planBuilder) pathMatchesQuery(path plangraph.Path) bool {
@@ -421,14 +466,22 @@ func (b *planBuilder) pathMatchesQuery(path plangraph.Path) bool {
 
 func (b *planBuilder) findTargetNode() (plangraph.Node, bool) {
 	for _, node := range b.graph.Nodes {
-		if b.query.TargetKind == TargetNode && node.ID == b.query.TargetID {
-			return node, true
-		}
-		if b.query.TargetKind == TargetCase && node.CaseID == b.query.TargetID {
+		if b.nodeMatchesQuery(node) {
 			return node, true
 		}
 	}
 	return plangraph.Node{}, false
+}
+
+func (b *planBuilder) nodeMatchesQuery(node plangraph.Node) bool {
+	switch b.query.TargetKind {
+	case TargetNode:
+		return node.ID == b.query.TargetID
+	case TargetCase:
+		return node.CaseID == b.query.TargetID
+	default:
+		return true
+	}
 }
 
 func isValidationNode(node plangraph.Node) bool {

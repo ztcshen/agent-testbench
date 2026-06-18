@@ -207,22 +207,22 @@ func TestMapListAndPlansExposeAtlasEntrypoints(t *testing.T) {
 		t.Fatalf("open store: %v", err)
 	}
 	graph := store.TestPlanGraph{
-		Map: store.TestPlanMap{ID: "map.review", ProfileID: "profile.review", DisplayName: "Review Map", Status: "active", SummaryJSON: `{}`},
+		Map: store.TestPlanMap{ID: "map.atlas", ProfileID: "profile.atlas", DisplayName: "Capability Atlas", Status: "active", SummaryJSON: `{}`},
 		Nodes: []store.TestPlanNode{
-			{MapID: "map.review", ID: "node.submit", CaseID: "case.submit", SummaryJSON: `{}`},
-			{MapID: "map.review", ID: "node.cancel", CaseID: "case.cancel", SummaryJSON: `{}`},
+			{MapID: "map.atlas", ID: "node.submit", CaseID: "case.submit", SummaryJSON: `{}`},
+			{MapID: "map.atlas", ID: "node.cancel", CaseID: "case.cancel", SummaryJSON: `{}`},
 		},
 		Paths: []store.TestPlanPath{
-			{MapID: "map.review", ID: "path.submit", WorkflowID: "workflow.submit", DisplayName: "Submit", SummaryJSON: `{}`},
+			{MapID: "map.atlas", ID: "path.submit", WorkflowID: "workflow.submit", DisplayName: "Submit", SummaryJSON: `{}`},
 		},
 		PathSteps: []store.TestPlanPathStep{
-			{MapID: "map.review", PathID: "path.submit", StepIndex: 1, NodeID: "node.submit", CaseID: "case.submit", SummaryJSON: `{}`},
+			{MapID: "map.atlas", PathID: "path.submit", StepIndex: 1, NodeID: "node.submit", CaseID: "case.submit", SummaryJSON: `{}`},
 		},
 		Edges: []store.TestPlanEdge{
-			{MapID: "map.review", ID: "edge.submit.cancel", FromNodeID: "node.submit", ToNodeID: "node.cancel", Kind: "control", SummaryJSON: `{}`},
+			{MapID: "map.atlas", ID: "edge.submit.cancel", FromNodeID: "node.submit", ToNodeID: "node.cancel", Kind: "control", SummaryJSON: `{}`},
 		},
 		Materializations: []store.TestPlanMaterialization{
-			{MapID: "map.review", ID: "mat.submit", FixtureID: "fixture.submit", SummaryJSON: `{}`},
+			{MapID: "map.atlas", ID: "mat.submit", FixtureID: "fixture.submit", SummaryJSON: `{}`},
 		},
 	}
 	if err := runtime.ReplaceTestPlanGraph(ctx, graph); err != nil {
@@ -230,11 +230,11 @@ func TestMapListAndPlansExposeAtlasEntrypoints(t *testing.T) {
 	}
 	record := store.TestMapPlanRecord{
 		Instance: store.TestMapPlanInstance{
-			ID: "plan.review.001", MapID: "map.review", ProfileID: "profile.review", EnvironmentID: "env.review",
-			Scope: "all", TargetKind: "map", TargetID: "map.review", Mode: "run", Status: "failed", SummaryJSON: `{}`,
+			ID: "plan.atlas.001", MapID: "map.atlas", ProfileID: "profile.atlas", EnvironmentID: "env.atlas",
+			Scope: "all", TargetKind: "map", TargetID: "map.atlas", Mode: "run", Status: "failed", SummaryJSON: `{}`,
 		},
 		Tasks: []store.TestMapPlanTask{{
-			PlanID: "plan.review.001", ID: "task.case", Index: 1, Kind: "case", Operation: "run_case",
+			PlanID: "plan.atlas.001", ID: "task.case", Index: 1, Kind: "case", Operation: "run_case",
 			NodeID: "node.submit", CaseID: "case.submit", Status: "failed", Reason: "HTTP 400", SummaryJSON: `{}`,
 		}},
 	}
@@ -264,11 +264,11 @@ func TestMapListAndPlansExposeAtlasEntrypoints(t *testing.T) {
 		t.Fatalf("map list report = %#v", listReport)
 	}
 	item := listReport.Maps[0]
-	if item.ID != "map.review" || item.ProfileID != "profile.review" || item.DisplayName != "Review Map" || item.Status != "active" || item.NodeCount != 2 || item.PathCount != 1 || item.Materializations != 1 {
+	if item.ID != "map.atlas" || item.ProfileID != "profile.atlas" || item.DisplayName != "Capability Atlas" || item.Status != "active" || item.NodeCount != 2 || item.PathCount != 1 || item.Materializations != 1 {
 		t.Fatalf("map list item = %#v", item)
 	}
 
-	plansOut := runCLI(t, "map", "plans", "--store", storeRef, "--map", "map.review", "--json")
+	plansOut := runCLI(t, "map", "plans", "--store", storeRef, "--map", "map.atlas", "--json")
 	var plansReport struct {
 		OK    bool   `json:"ok"`
 		MapID string `json:"mapId"`
@@ -286,14 +286,14 @@ func TestMapListAndPlansExposeAtlasEntrypoints(t *testing.T) {
 	if err := json.Unmarshal([]byte(plansOut), &plansReport); err != nil {
 		t.Fatalf("decode map plans json: %v\n%s", err, plansOut)
 	}
-	if !plansReport.OK || plansReport.MapID != "map.review" || plansReport.Count != 1 {
+	if !plansReport.OK || plansReport.MapID != "map.atlas" || plansReport.Count != 1 {
 		t.Fatalf("map plans report = %#v", plansReport)
 	}
 	plan := plansReport.Plans[0]
-	if plan.ID != "plan.review.001" || plan.Status != "failed" || plan.Mode != "run" || plan.Scope != "all" || plan.EnvironmentID != "env.review" {
+	if plan.ID != "plan.atlas.001" || plan.Status != "failed" || plan.Mode != "run" || plan.Scope != "all" || plan.EnvironmentID != "env.atlas" {
 		t.Fatalf("map plan item = %#v", plan)
 	}
-	if !strings.Contains(plan.AtlasCommand, "map atlas --map 'map.review' --plan 'plan.review.001'") || !strings.Contains(plan.GateCommand, "map gate --plan 'plan.review.001'") {
+	if !strings.Contains(plan.AtlasCommand, "map atlas --map 'map.atlas' --plan 'plan.atlas.001'") || !strings.Contains(plan.GateCommand, "map gate --plan 'plan.atlas.001'") {
 		t.Fatalf("map plan commands = %#v", plan)
 	}
 }
@@ -697,7 +697,7 @@ func TestMapAtlasOverlaysSavedPlanTasks(t *testing.T) {
 	now := time.Now().UTC()
 	record := store.TestMapPlanRecord{
 		Instance: store.TestMapPlanInstance{
-			ID:             "plan.review.failed",
+			ID:             "plan.atlas.failed",
 			MapID:          "map.profile.flow",
 			ProfileID:      "profile.flow",
 			Mode:           mapplanner.ModeRun,
@@ -710,7 +710,7 @@ func TestMapAtlasOverlaysSavedPlanTasks(t *testing.T) {
 			FinishedAt:     now,
 		},
 		Tasks: []store.TestMapPlanTask{{
-			PlanID:       "plan.review.failed",
+			PlanID:       "plan.atlas.failed",
 			ID:           "task.failed.case",
 			Index:        1,
 			Kind:         mapplanner.TaskRunCase,
@@ -719,8 +719,8 @@ func TestMapAtlasOverlaysSavedPlanTasks(t *testing.T) {
 			CaseID:       "case.submit.field.required",
 			Status:       store.StatusFailed,
 			Reason:       "expected status mismatch",
-			APICaseRunID: "run.review.failed.case",
-			EvidenceRoot: ".runtime/evidence/run.review.failed",
+			APICaseRunID: "run.atlas.failed.case",
+			EvidenceRoot: ".runtime/evidence/run.atlas.failed",
 			SummaryJSON:  `{"error":"expected status mismatch"}`,
 			StartedAt:    now,
 			FinishedAt:   now,
@@ -732,7 +732,7 @@ func TestMapAtlasOverlaysSavedPlanTasks(t *testing.T) {
 	closeCLIStore(runtime)
 
 	outputPath := filepath.Join(t.TempDir(), "flow-map-atlas-plan.html")
-	out := runCLI(t, "map", "atlas", "--store", storeRef, "--map", "map.profile.flow", "--plan", "plan.review.failed", "--output", outputPath, "--json")
+	out := runCLI(t, "map", "atlas", "--store", storeRef, "--map", "map.profile.flow", "--plan", "plan.atlas.failed", "--output", outputPath, "--json")
 	var report struct {
 		OK     bool   `json:"ok"`
 		MapID  string `json:"mapId"`
@@ -741,7 +741,7 @@ func TestMapAtlasOverlaysSavedPlanTasks(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode map atlas plan json: %v\n%s", err, out)
 	}
-	if !report.OK || report.MapID != "map.profile.flow" || report.PlanID != "plan.review.failed" {
+	if !report.OK || report.MapID != "map.profile.flow" || report.PlanID != "plan.atlas.failed" {
 		t.Fatalf("map atlas plan report = %#v", report)
 	}
 	raw, err := os.ReadFile(outputPath)
@@ -750,10 +750,10 @@ func TestMapAtlasOverlaysSavedPlanTasks(t *testing.T) {
 	}
 	html := string(raw)
 	for _, want := range []string{
-		`"planId":"plan.review.failed"`,
+		`"planId":"plan.atlas.failed"`,
 		`"status":"failed"`,
-		`"apiCaseRunId":"run.review.failed.case"`,
-		`"evidenceRoot":".runtime/evidence/run.review.failed"`,
+		`"apiCaseRunId":"run.atlas.failed.case"`,
+		`"evidenceRoot":".runtime/evidence/run.atlas.failed"`,
 		`Map run plan`,
 		`Run tasks`,
 	} {

@@ -53,6 +53,33 @@ func TestMapGateCountsEvidenceStoredUnderCaseRunID(t *testing.T) {
 	}
 }
 
+func TestMapGateExemptsPassedMaterializationTaskFromEvidence(t *testing.T) {
+	ctx := context.Background()
+	record := mapGatePlanFixture(store.StatusPassed)
+	record.Tasks = append(record.Tasks[:1], append([]store.TestMapPlanTask{{
+		ID:                "task.materialization",
+		PlanID:            "plan.gate",
+		Index:             1,
+		Kind:              mapplanner.TaskReuseMaterialized,
+		Status:            store.StatusPassed,
+		MaterializationID: "fixture.before.case",
+		SummaryJSON:       `{"fixtureId":"fixture.before.case"}`,
+		StartedAt:         record.Tasks[0].StartedAt,
+		FinishedAt:        record.Tasks[0].FinishedAt,
+	}}, record.Tasks[1:]...)...)
+	storeRef := seedMapGateStore(t, ctx, record, true)
+
+	out := runCLI(t, "map", "gate", "--store", storeRef, "--plan", "plan.gate", "--require-passed", "--require-tasks", "--require-evidence", "--json")
+	report := decodeMapGateReport(t, out)
+
+	if !report.OK || !report.Gates.EvidenceComplete || report.Counts.EvidenceComplete != 3 {
+		t.Fatalf("passed materialization should be evidence-complete by provenance = %#v", report)
+	}
+	if len(report.MissingEvidence) != 0 {
+		t.Fatalf("materialization task should not be missing evidence = %#v", report.MissingEvidence)
+	}
+}
+
 func TestMapGateFailsForFailedTaskAndMissingEvidence(t *testing.T) {
 	ctx := context.Background()
 	storeRef := seedMapGateStore(t, ctx, mapGatePlanFixture(store.StatusFailed), false)

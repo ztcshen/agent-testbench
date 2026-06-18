@@ -92,6 +92,25 @@ func TestWorkflowReportFailsAdmissionWhenStepInputIsMissing(t *testing.T) {
 	}
 }
 
+func TestWorkflowStepMissingInputsUsesPresenceNotStringTruthiness(t *testing.T) {
+	step := map[string]any{
+		"inputs": []any{
+			map[string]any{"name": "note"},
+			map[string]any{"name": "enabled"},
+			map[string]any{"name": "quantity"},
+		},
+	}
+	contextValues := map[string]any{
+		"note":     "",
+		"enabled":  false,
+		"quantity": 0,
+	}
+
+	if missing := workflowStepMissingInputs(step, contextValues); len(missing) != 0 {
+		t.Fatalf("required workflow inputs should use key presence, missing=%#v", missing)
+	}
+}
+
 func newFailingWorkflowReportServer(t *testing.T) string {
 	t.Helper()
 

@@ -196,7 +196,8 @@ func workflowStepMissingInputs(step map[string]any, contextValues map[string]any
 		if name == "" || !workflowInputRequired(item) {
 			continue
 		}
-		if valueString(contextValues[name]) == "" {
+		value, ok := contextValues[name]
+		if !ok || value == nil {
 			missing = append(missing, name)
 		}
 	}
@@ -454,7 +455,7 @@ func workflowExportedValues(step map[string]any, result map[string]any) map[stri
 			continue
 		}
 		value := workflowValueAtPath(workflowExportRoot(result, valueString(item["from"])), valueString(item["path"]))
-		if value != nil && valueString(value) != "" {
+		if value != nil {
 			out[name] = value
 		}
 	}
