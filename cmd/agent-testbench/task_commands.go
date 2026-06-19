@@ -17,6 +17,12 @@ func runTask(ctx context.Context, args []string) error {
 		return errors.New("missing task command")
 	}
 	switch args[0] {
+	case "catalog":
+		return runTaskCatalog(args[1:])
+	case "suggest":
+		return runTaskSuggest(args[1:])
+	case "plan":
+		return runTaskPlan(args[1:])
 	case "run":
 		return runTaskRun(ctx, args[1:])
 	case "schedule":
@@ -45,6 +51,12 @@ func runTaskRun(ctx context.Context, args []string) error {
 	flags.SetOutput(os.Stderr)
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	command := flags.String("command", "", "AgentTestBench command to execute")
+	mapID := flags.String("map", "", "Test map ID for built-in map tasks")
+	environmentID := flags.String("environment", "", "Environment ID for built-in environment tasks")
+	workspace := flags.String("workspace", "", "Workspace path for built-in environment tasks")
+	caseRunID := flags.String("case-run", "", "Case run ID for built-in diagnosis tasks")
+	runID := flags.String("run", "", "Run ID for built-in diagnosis tasks")
+	dryRun := flags.Bool("dry-run", false, "Plan a built-in task without executing commands")
 	shellMode := flags.Bool("shell", false, "Execute --command through /bin/sh -c for local sandbox trigger commands")
 	notifyFile := flags.String("notify-file", "", "Append completion notifications to a JSONL file")
 	notifyWebhook := flags.String("notify-webhook", "", "POST completion notifications to a webhook")
@@ -57,7 +69,15 @@ func runTaskRun(ctx context.Context, args []string) error {
 	}
 	name := flags.Arg(0)
 	if strings.TrimSpace(*command) == "" {
-		return errors.New("--command is required")
+		inputs := builtInTaskInputs{
+			Map:         *mapID,
+			Environment: *environmentID,
+			Workspace:   *workspace,
+			CaseRun:     *caseRunID,
+			Run:         *runID,
+			Store:       *storeRef,
+		}
+		return runBuiltInTask(ctx, name, inputs, *dryRun, *jsonOutput)
 	}
 	runtime, cleanup, err := openTaskStore(ctx, *storeRef)
 	if err != nil {
