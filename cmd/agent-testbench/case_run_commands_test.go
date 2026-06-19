@@ -240,6 +240,19 @@ func TestCaseGateFailsWithActionableReportForFailedCaseRuns(t *testing.T) {
 	assertCaseGateFailureReport(t, decodeCaseGateCLIReport(t, out), runID)
 }
 
+func TestCaseGateResolvesBatchRunChildCaseRuns(t *testing.T) {
+	dir := t.TempDir()
+	storePath, batchRunID := seedCaseGateBatchStore(t, dir)
+	out := runCLI(t, "case", "gate", "--store", "sqlite://"+storePath, "--run", batchRunID, "--require-no-failures", "--require-evidence", "--min-passed", "2", "--json")
+	report := decodeCaseGateCLIReport(t, out)
+	if !report.OK || report.RunID != batchRunID || report.Counts.Total != 2 || report.Counts.Passed != 2 || report.Counts.Failed != 0 || report.Counts.EvidenceComplete != 2 {
+		t.Fatalf("batch gate report = %#v", report)
+	}
+	if !report.Gates.HasCaseRuns || !report.Gates.NoFailures || !report.Gates.EvidenceComplete {
+		t.Fatalf("batch gate booleans = %#v", report.Gates)
+	}
+}
+
 func TestCaseRunCommandExecutesStoreCatalogCaseID(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/catalog" {

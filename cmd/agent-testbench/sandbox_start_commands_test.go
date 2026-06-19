@@ -177,6 +177,41 @@ exit 0
 	}
 }
 
+func TestSandboxStartPreflightsDockerDaemonBeforeStartup(t *testing.T) {
+	storePath := writeSandboxComposeServiceFixture(t, "docker compose up -d worker-service", "worker-service")
+	fakeEnv, callsPath := fakeDockerCommand(t)
+	installSandboxDockerTool(t, callsPath, `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
+if [ "$1" = "info" ]; then
+  printf 'Cannot connect to the Docker daemon at unix:///tmp/docker.sock. Is the docker daemon running?\n' >&2
+  exit 1
+fi
+exit 0
+`)
+
+	out := runCLIFailsWithEnv(t, fakeEnv, "sandbox", "start", "--store", "sqlite://"+storePath, "--service", "worker-service", "--json")
+	var report sandboxStartCommandReport
+	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
+		t.Fatalf("decode docker daemon preflight report: %v\n%s", err, out)
+	}
+	if report.OK || report.Counts.Failed != 1 || len(report.Services) != 1 {
+		t.Fatalf("docker daemon preflight report = %#v", report)
+	}
+	service := report.Services[0]
+	if service.Readiness != "docker-daemon-unavailable" ||
+		!strings.Contains(service.Error, "environment-not-ready") ||
+		!strings.Contains(service.Error, "Docker daemon unavailable") {
+		t.Fatalf("docker daemon preflight service = %#v", service)
+	}
+	calls, err := os.ReadFile(callsPath)
+	if err != nil {
+		t.Fatalf("read docker calls: %v", err)
+	}
+	if strings.Contains(string(calls), "compose up") {
+		t.Fatalf("docker daemon preflight must not run startup command:\n%s", calls)
+	}
+}
+
 func TestSandboxStartJSONIncludesRuntimeConsistencyEvidence(t *testing.T) {
 	fixture := writeSandboxStartStoreFixture(t)
 	report := runSandboxStartJSON(t, "sqlite://"+fixture.storePath, "sandbox start runtime evidence")

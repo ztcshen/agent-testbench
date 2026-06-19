@@ -14,24 +14,26 @@ import (
 )
 
 type mapRunOptions struct {
-	storeRef       string
-	storeURL       string
-	mapID          string
-	planID         string
-	scope          string
-	caseID         string
-	nodeID         string
-	pathID         string
-	workflowID     string
-	environmentID  string
-	baseURL        string
-	evidenceDir    string
-	timeoutSeconds int
-	resumeRun      bool
-	retryFailed    bool
-	skipPassed     bool
-	rerunTaskIDs   []string
-	jsonOutput     bool
+	storeRef         string
+	storeURL         string
+	mapID            string
+	planID           string
+	scope            string
+	caseID           string
+	nodeID           string
+	pathID           string
+	workflowID       string
+	interfaceID      string
+	validationFamily string
+	environmentID    string
+	baseURL          string
+	evidenceDir      string
+	timeoutSeconds   int
+	resumeRun        bool
+	retryFailed      bool
+	skipPassed       bool
+	rerunTaskIDs     []string
+	jsonOutput       bool
 }
 
 func runMapRun(ctx context.Context, args []string) error {
@@ -89,6 +91,8 @@ func parseMapRunOptions(args []string) (mapRunOptions, error) {
 	nodeID := flags.String("node", "", "Target plan node id")
 	pathID := flags.String("path", "", "Target map path id")
 	workflowID := flags.String("workflow", "", "Target workflow id")
+	interfaceID := flags.String("interface", "", "Filter validation cases by interface node id")
+	validationFamily := flags.String("validation-family", "", "Filter validation cases by family such as empty/null, length, type, enum, state, boundary, or contract")
 	environmentID := flags.String("environment", "", "Environment id to bind into runs")
 	baseURL := flags.String("base-url", "", "Base URL override for API case execution")
 	evidenceDir := flags.String("evidence-dir", filepath.Join(".runtime", "map-runs"), "Evidence output directory")
@@ -111,6 +115,8 @@ func parseMapRunOptions(args []string) (mapRunOptions, error) {
 	options.nodeID = strings.TrimSpace(*nodeID)
 	options.pathID = strings.TrimSpace(*pathID)
 	options.workflowID = strings.TrimSpace(*workflowID)
+	options.interfaceID = strings.TrimSpace(*interfaceID)
+	options.validationFamily = strings.TrimSpace(*validationFamily)
 	options.environmentID = strings.TrimSpace(*environmentID)
 	options.baseURL = strings.TrimSpace(*baseURL)
 	options.evidenceDir = strings.TrimSpace(*evidenceDir)
@@ -194,14 +200,16 @@ func mapRunPlanRecord(ctx context.Context, runtime store.Store, graph store.Test
 		return prepareExistingMapRunRecord(record, options), nil
 	}
 	plan, err := mapplanner.Explain(graph, mapplanner.Query{
-		MapID:         options.mapID,
-		EnvironmentID: options.environmentID,
-		Scope:         options.scope,
-		CaseID:        options.caseID,
-		NodeID:        options.nodeID,
-		PathID:        options.pathID,
-		WorkflowID:    options.workflowID,
-		PlannerMode:   mapplanner.ModeRun,
+		MapID:            options.mapID,
+		EnvironmentID:    options.environmentID,
+		Scope:            options.scope,
+		CaseID:           options.caseID,
+		NodeID:           options.nodeID,
+		PathID:           options.pathID,
+		WorkflowID:       options.workflowID,
+		InterfaceNodeID:  options.interfaceID,
+		ValidationFamily: options.validationFamily,
+		PlannerMode:      mapplanner.ModeRun,
 	})
 	if err != nil {
 		return store.TestMapPlanRecord{}, err
@@ -266,7 +274,9 @@ func mapRunHasConcreteTarget(options mapRunOptions) bool {
 	return strings.TrimSpace(options.caseID) != "" ||
 		strings.TrimSpace(options.nodeID) != "" ||
 		strings.TrimSpace(options.pathID) != "" ||
-		strings.TrimSpace(options.workflowID) != ""
+		strings.TrimSpace(options.workflowID) != "" ||
+		strings.TrimSpace(options.interfaceID) != "" ||
+		strings.TrimSpace(options.validationFamily) != ""
 }
 
 func mapRunTaskSelectedForExecution(task store.TestMapPlanTask, options mapRunOptions) bool {

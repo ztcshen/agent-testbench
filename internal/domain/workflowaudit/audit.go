@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -132,6 +133,7 @@ func (a referenceAuditor) issues(bundle profile.Bundle, bindings []profile.Workf
 	issues = append(issues, dependencyIssues...)
 	issues = append(issues, a.requestTemplateIssues(bundle.RequestTemplates, nodeIDs)...)
 	issues = append(issues, a.fixtureJSONIssues(fixtureIDs)...)
+	issues = append(issues, workflowStepContextIssues(bundle.TemplateConfigs, bindings)...)
 	return issues
 }
 
@@ -214,6 +216,112 @@ func (a referenceAuditor) fixtureJSONIssues(fixtureIDs []string) []Issue {
 		}
 	}
 	return issues
+}
+
+func workflowStepContextIssues(configs []profile.TemplateConfig, bindings []profile.WorkflowBinding) []Issue {
+	if len(bindings) == 0 || len(configs) == 0 {
+		return nil
+	}
+	ordered := append([]profile.WorkflowBinding(nil), bindings...)
+	sort.SliceStable(ordered, func(i int, j int) bool {
+		if ordered[i].SortOrder != ordered[j].SortOrder {
+			return ordered[i].SortOrder < ordered[j].SortOrder
+		}
+		return ordered[i].StepID < ordered[j].StepID
+	})
+	workflowID := strings.TrimSpace(ordered[0].WorkflowID)
+	configByStep := workflowStepConfigByStep(configs, workflowID)
+	provided := map[string]bool{}
+	var issues []Issue
+	for _, binding := range ordered {
+		config, ok := configByStep[binding.StepID]
+		if !ok {
+			continue
+		}
+		doc := stepConfigDocument(config.ConfigJSON)
+		for _, input := range stepConfigList(doc["inputs"]) {
+			name := strings.TrimSpace(stepConfigString(input["name"]))
+			if name == "" || !stepConfigRequired(input) || !stepConfigNeedsPreviousContext(input) {
+				continue
+			}
+			if provided[name] {
+				continue
+			}
+			issues = append(issues, auditrefs.NewIssue(
+				"workflow-step-input-unbound",
+				"workflowBinding",
+				auditrefs.BindingSubject(binding.WorkflowID, binding.StepID),
+				"inputs."+name,
+				"Workflow step requires input "+name+" from a previous step, but no earlier step exports it",
+			))
+		}
+		for _, export := range stepConfigList(doc["exports"]) {
+			name := strings.TrimSpace(stepConfigString(export["name"]))
+			if name != "" {
+				provided[name] = true
+			}
+		}
+	}
+	return issues
+}
+
+func workflowStepConfigByStep(configs []profile.TemplateConfig, workflowID string) map[string]profile.TemplateConfig {
+	out := map[string]profile.TemplateConfig{}
+	for _, config := range configs {
+		if !visibleWorkflowAuditConfigStatus(config.Status) || strings.TrimSpace(config.ScopeType) != "step" || strings.TrimSpace(config.WorkflowID) != workflowID || strings.TrimSpace(config.ScopeID) == "" {
+			continue
+		}
+		out[config.ScopeID] = config
+	}
+	return out
+}
+
+func visibleWorkflowAuditConfigStatus(status string) bool {
+	status = strings.TrimSpace(strings.ToLower(status))
+	return status == "" || (status != "inactive" && status != "deleted" && status != "disabled")
+}
+
+func stepConfigDocument(raw string) map[string]any {
+	var out map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &out); err != nil || out == nil {
+		return map[string]any{}
+	}
+	return out
+}
+
+func stepConfigList(value any) []map[string]any {
+	raw, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(raw))
+	for _, item := range raw {
+		if typed, ok := item.(map[string]any); ok && typed != nil {
+			out = append(out, typed)
+		}
+	}
+	return out
+}
+
+func stepConfigString(value any) string {
+	if typed, ok := value.(string); ok {
+		return typed
+	}
+	return ""
+}
+
+func stepConfigRequired(input map[string]any) bool {
+	raw, ok := input["required"]
+	if !ok {
+		return true
+	}
+	typed, ok := raw.(bool)
+	return ok && typed
+}
+
+func stepConfigNeedsPreviousContext(input map[string]any) bool {
+	source := strings.TrimSpace(strings.ToLower(stepConfigString(input["source"])))
+	return source == "" || source == "previous" || source == "context"
 }
 
 func auditStore(ctx context.Context, profileID string, workflowID string, bindings []profile.WorkflowBinding, s Store) (StoreReport, error) {

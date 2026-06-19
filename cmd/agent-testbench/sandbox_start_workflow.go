@@ -14,6 +14,7 @@ const (
 	sandboxStartupCommandEmpty             = "startup command is empty"
 	sandboxComposeServiceRunningReadiness  = "compose-service-running"
 	sandboxComposeServiceStoppedReadiness  = "compose-service-not-running"
+	sandboxDockerDaemonUnavailableReadiness = "docker-daemon-unavailable"
 	sandboxDockerComposeLegacyCommandToken = "docker-compose"
 )
 
@@ -101,6 +102,14 @@ func runSandboxServiceStartup(ctx context.Context, service store.CatalogService,
 	if dryRun {
 		result.Planned = true
 		return result
+	}
+	if sandboxStartNeedsDockerPreflight(service, command) {
+		if detail, unavailable := preflightSandboxDockerDaemon(ctx, timeout); unavailable {
+			result.ExitCode = 1
+			result.Readiness = sandboxDockerDaemonUnavailableReadiness
+			result.Error = "environment-not-ready: Docker daemon unavailable before sandbox start: " + detail
+			return result
+		}
 	}
 	started := time.Now()
 	commandCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -335,4 +344,47 @@ func sandboxStartCommandHasToken(fields []string, token string) bool {
 		}
 	}
 	return false
+}
+
+func sandboxStartNeedsDockerPreflight(service store.CatalogService, command string) bool {
+	if strings.TrimSpace(service.DockerService) != "" || strings.TrimSpace(service.ContainerName) != "" {
+		return true
+	}
+	for _, field := range strings.Fields(command) {
+		if sandboxStartDockerCommandToken(field) {
+			return true
+		}
+	}
+	return false
+}
+
+func sandboxStartDockerCommandToken(field string) bool {
+	field = strings.TrimSpace(field)
+	return field == "docker" ||
+		field == sandboxDockerComposeLegacyCommandToken ||
+		strings.HasSuffix(field, "/docker") ||
+		strings.HasSuffix(field, "/"+sandboxDockerComposeLegacyCommandToken)
+}
+
+func preflightSandboxDockerDaemon(ctx context.Context, timeout time.Duration) (string, bool) {
+	preflightTimeout := 10 * time.Second
+	if timeout > 0 && timeout < preflightTimeout {
+		preflightTimeout = timeout
+	}
+	commandCtx, cancel := context.WithTimeout(ctx, preflightTimeout)
+	defer cancel()
+	commandResult := runAgentObservedCommand(commandCtx, agentObservedCommandOptions{
+		Command: []string{"docker", "info"},
+	})
+	if commandResult.Err == nil && commandCtx.Err() == nil {
+		return "", false
+	}
+	detail := strings.TrimSpace(commandResult.Output)
+	if detail == "" && commandCtx.Err() != nil {
+		detail = commandCtx.Err().Error()
+	}
+	if detail == "" && commandResult.Err != nil {
+		detail = commandResult.Err.Error()
+	}
+	return truncateReportText(detail, 240), true
 }

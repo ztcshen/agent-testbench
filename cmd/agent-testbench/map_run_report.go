@@ -35,20 +35,24 @@ type mapRunSummary struct {
 }
 
 type mapRunTaskReport struct {
-	ID            string         `json:"id"`
-	Index         int            `json:"index"`
-	Kind          string         `json:"kind"`
-	Operation     string         `json:"operation"`
-	PathID        string         `json:"pathId,omitempty"`
-	WorkflowID    string         `json:"workflowId,omitempty"`
-	NodeID        string         `json:"nodeId,omitempty"`
-	CaseID        string         `json:"caseId,omitempty"`
-	Status        string         `json:"status"`
-	Reason        string         `json:"reason,omitempty"`
-	WorkflowRunID string         `json:"workflowRunId,omitempty"`
-	APICaseRunID  string         `json:"apiCaseRunId,omitempty"`
-	EvidenceRoot  string         `json:"evidenceRoot,omitempty"`
-	Summary       map[string]any `json:"summary,omitempty"`
+	ID               string         `json:"id"`
+	Index            int            `json:"index"`
+	Kind             string         `json:"kind"`
+	Operation        string         `json:"operation"`
+	PathID           string         `json:"pathId,omitempty"`
+	WorkflowID       string         `json:"workflowId,omitempty"`
+	NodeID           string         `json:"nodeId,omitempty"`
+	CaseID           string         `json:"caseId,omitempty"`
+	ReplayGroupID    string         `json:"replayGroupId,omitempty"`
+	InterfaceNodeID  string         `json:"interfaceNodeId,omitempty"`
+	AnchorNodeID     string         `json:"anchorNodeId,omitempty"`
+	ValidationFamily string         `json:"validationFamily,omitempty"`
+	Status           string         `json:"status"`
+	Reason           string         `json:"reason,omitempty"`
+	WorkflowRunID    string         `json:"workflowRunId,omitempty"`
+	APICaseRunID     string         `json:"apiCaseRunId,omitempty"`
+	EvidenceRoot     string         `json:"evidenceRoot,omitempty"`
+	Summary          map[string]any `json:"summary,omitempty"`
 }
 
 func mapRunStatus(tasks []store.TestMapPlanTask) string {
@@ -100,21 +104,26 @@ func mapRunSummaryFromTasks(tasks []store.TestMapPlanTask) mapRunSummary {
 func mapRunReportFromRecord(record store.TestMapPlanRecord) mapRunReport {
 	tasks := make([]mapRunTaskReport, 0, len(record.Tasks))
 	for _, task := range record.Tasks {
+		summary := jsonObjectString(task.SummaryJSON)
 		tasks = append(tasks, mapRunTaskReport{
-			ID:            task.ID,
-			Index:         task.Index,
-			Kind:          task.Kind,
-			Operation:     task.Operation,
-			PathID:        task.PathID,
-			WorkflowID:    task.WorkflowID,
-			NodeID:        task.NodeID,
-			CaseID:        task.CaseID,
-			Status:        task.Status,
-			Reason:        task.Reason,
-			WorkflowRunID: task.WorkflowRunID,
-			APICaseRunID:  task.APICaseRunID,
-			EvidenceRoot:  task.EvidenceRoot,
-			Summary:       jsonObjectString(task.SummaryJSON),
+			ID:               task.ID,
+			Index:            task.Index,
+			Kind:             task.Kind,
+			Operation:        task.Operation,
+			PathID:           task.PathID,
+			WorkflowID:       task.WorkflowID,
+			NodeID:           task.NodeID,
+			CaseID:           task.CaseID,
+			ReplayGroupID:    valueString(summary["replayGroupId"]),
+			InterfaceNodeID:  valueString(summary["interfaceNodeId"]),
+			AnchorNodeID:     valueString(summary["anchorNodeId"]),
+			ValidationFamily: valueString(summary["validationFamily"]),
+			Status:           task.Status,
+			Reason:           task.Reason,
+			WorkflowRunID:    task.WorkflowRunID,
+			APICaseRunID:     task.APICaseRunID,
+			EvidenceRoot:     task.EvidenceRoot,
+			Summary:          summary,
 		})
 	}
 	status := record.Instance.Status

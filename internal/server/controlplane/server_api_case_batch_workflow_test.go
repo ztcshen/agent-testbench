@@ -9,8 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/domain/profilecatalog"
 	"agent-testbench/internal/server/controlplane"
 	"agent-testbench/internal/store"
 	"agent-testbench/internal/store/sqlite"
@@ -45,6 +47,45 @@ func TestServerStartsAsyncAPICaseBatchRunForWorkflow(t *testing.T) {
 	report := waitAPICaseBatchReport(t, server.URL+created.ReportURL)
 	requireAPICaseBatchWorkflowReport(t, report)
 	requireAPICaseBatchWorkflowStoreRecords(t, ctx, s, report)
+}
+
+func TestServerRefreshesStoreWorkflowBindingsForBatchRun(t *testing.T) {
+	ctx, s := openAPICaseBatchSQLiteStore(t)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/v1/workflow-steps/") {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer target.Close()
+	dir := t.TempDir()
+	bundle := profile.Bundle{
+		ID:        "sample",
+		Workflows: []profile.Workflow{{ID: "workflow.ten", DisplayName: "Ten Step Workflow"}},
+	}
+	appendAPICaseBatchWorkflowStep(t, &bundle, dir, target.URL, 1)
+	if err := s.ReplaceProfileCatalog(ctx, profilecatalog.FromBundle(bundle, time.Now().UTC())); err != nil {
+		t.Fatalf("replace initial catalog: %v", err)
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
+	defer server.Close()
+
+	current := bundle
+	appendAPICaseBatchWorkflowStep(t, &current, dir, target.URL, 2)
+	if err := s.ReplaceProfileCatalog(ctx, profilecatalog.FromBundle(current, time.Now().UTC())); err != nil {
+		t.Fatalf("replace refreshed catalog: %v", err)
+	}
+
+	var created apiCaseBatchRunCreatedForTest
+	postJSONInto(t, server.URL+"/api/cases/batch-runs", `{"requestId":"workflow-refresh-001","workflowId":"workflow.ten"}`, http.StatusAccepted, &created)
+	if created.Total != 2 {
+		t.Fatalf("workflow batch should use refreshed Store catalog, total=%d created=%#v", created.Total, created)
+	}
+	report := waitAPICaseBatchReport(t, server.URL+created.ReportURL)
+	if report.Completed != 2 || len(report.Cases) != 2 {
+		t.Fatalf("refreshed workflow batch report = %#v", report)
+	}
 }
 
 func TestServerRejectsGenericBatchRunForEnvironmentVerificationWorkflow(t *testing.T) {
