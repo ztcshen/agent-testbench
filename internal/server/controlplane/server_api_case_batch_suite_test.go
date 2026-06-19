@@ -10,12 +10,13 @@ import (
 	"time"
 
 	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/domain/profilecatalog"
 	"agent-testbench/internal/server/controlplane"
 	"agent-testbench/internal/store"
 )
 
 func TestServerExposesAPICaseBatchFailureSummary(t *testing.T) {
-	_, s := openAPICaseBatchSQLiteStore(t)
+	ctx, s := openAPICaseBatchSQLiteStore(t)
 
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -57,6 +58,9 @@ func TestServerExposesAPICaseBatchFailureSummary(t *testing.T) {
 			{ID: "case.pass", DisplayName: "Passing Case", NodeID: "node.alpha", CasePath: writeAPICaseBatchGETCase(t, dir, "case.pass", "/v1/failures/pass"), BaseURL: target.URL, EvidenceDir: filepath.Join(dir, "evidence")},
 			{ID: "case.fail", DisplayName: "Failing Case", NodeID: "node.alpha", CasePath: writeAPICaseBatchGETCase(t, dir, "case.fail", "/v1/failures/fail"), BaseURL: target.URL, EvidenceDir: filepath.Join(dir, "evidence")},
 		},
+	}
+	if err := s.ReplaceProfileCatalog(ctx, profilecatalog.FromBundle(bundle, time.Now().UTC())); err != nil {
+		t.Fatalf("replace profile catalog: %v", err)
 	}
 	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
 	defer server.Close()

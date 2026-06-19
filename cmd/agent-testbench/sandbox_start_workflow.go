@@ -11,11 +11,12 @@ import (
 )
 
 const (
-	sandboxStartupCommandEmpty             = "startup command is empty"
-	sandboxComposeServiceRunningReadiness  = "compose-service-running"
-	sandboxComposeServiceStoppedReadiness  = "compose-service-not-running"
+	sandboxStartupCommandEmpty              = "startup command is empty"
+	sandboxComposeServiceRunningReadiness   = "compose-service-running"
+	sandboxComposeServiceStoppedReadiness   = "compose-service-not-running"
 	sandboxDockerDaemonUnavailableReadiness = "docker-daemon-unavailable"
-	sandboxDockerComposeLegacyCommandToken = "docker-compose"
+	sandboxDockerComposeLegacyCommandToken  = "docker-compose"
+	sandboxDockerInfoCommand                = "info"
 )
 
 func sandboxWorkflowRequiredServiceReasons(catalog store.ProfileCatalog, workflowID string) (map[string]string, error) {
@@ -104,7 +105,7 @@ func runSandboxServiceStartup(ctx context.Context, service store.CatalogService,
 		return result
 	}
 	if sandboxStartNeedsDockerPreflight(service, command) {
-		if detail, unavailable := preflightSandboxDockerDaemon(ctx, timeout); unavailable {
+		if detail, unavailable := preflightSandboxDockerDaemon(ctx, timeout, command); unavailable {
 			result.ExitCode = 1
 			result.Readiness = sandboxDockerDaemonUnavailableReadiness
 			result.Error = "environment-not-ready: Docker daemon unavailable before sandbox start: " + detail
@@ -366,7 +367,7 @@ func sandboxStartDockerCommandToken(field string) bool {
 		strings.HasSuffix(field, "/"+sandboxDockerComposeLegacyCommandToken)
 }
 
-func preflightSandboxDockerDaemon(ctx context.Context, timeout time.Duration) (string, bool) {
+func preflightSandboxDockerDaemon(ctx context.Context, timeout time.Duration, startupCommand string) (string, bool) {
 	preflightTimeout := 10 * time.Second
 	if timeout > 0 && timeout < preflightTimeout {
 		preflightTimeout = timeout
@@ -374,7 +375,7 @@ func preflightSandboxDockerDaemon(ctx context.Context, timeout time.Duration) (s
 	commandCtx, cancel := context.WithTimeout(ctx, preflightTimeout)
 	defer cancel()
 	commandResult := runAgentObservedCommand(commandCtx, agentObservedCommandOptions{
-		Command: []string{"docker", "info"},
+		Command: sandboxDockerPreflightCommand(startupCommand),
 	})
 	if commandResult.Err == nil && commandCtx.Err() == nil {
 		return "", false
@@ -387,4 +388,23 @@ func preflightSandboxDockerDaemon(ctx context.Context, timeout time.Duration) (s
 		detail = commandResult.Err.Error()
 	}
 	return truncateReportText(detail, 240), true
+}
+
+func sandboxDockerPreflightCommand(startupCommand string) []string {
+	fields := strings.Fields(startupCommand)
+	for index, field := range fields {
+		switch {
+		case field == "docker" || strings.HasSuffix(field, "/docker"):
+			if index == 0 {
+				return []string{field, sandboxDockerInfoCommand}
+			}
+			if index == 1 && fields[0] == "sudo" {
+				return []string{"sudo", field, sandboxDockerInfoCommand}
+			}
+			return []string{"docker", sandboxDockerInfoCommand}
+		case field == "compose" && index == 1 && strings.TrimSpace(fields[0]) != "":
+			return []string{fields[0], sandboxDockerInfoCommand}
+		}
+	}
+	return []string{"docker", sandboxDockerInfoCommand}
 }

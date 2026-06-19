@@ -212,6 +212,60 @@ exit 0
 	}
 }
 
+func TestSandboxStartPreflightsDockerThroughConfiguredWrapper(t *testing.T) {
+	fakeEnv, callsPath := fakeDockerCommand(t)
+	dir := filepath.Dir(callsPath)
+	wrapperCallsPath := filepath.Join(dir, "docker-wrapper-calls.txt")
+	wrapperPath := filepath.Join(dir, "docker-wrapper")
+	installSandboxDockerTool(t, callsPath, `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
+if [ "$1" = "info" ]; then
+  printf 'bare docker cannot access daemon\n' >&2
+  exit 1
+fi
+if [ "$1" = "compose" ] && [ "$2" = "ps" ]; then
+  printf '{"Name":"worker-service","Service":"worker-service","State":"running","Health":"healthy"}\n'
+fi
+exit 0
+`)
+	writeFile(t, wrapperPath, `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_WRAPPER_CALLS_FILE"
+if [ "$1" = "info" ]; then
+  printf 'wrapper daemon ok\n'
+  exit 0
+fi
+exit 0
+`)
+	if err := os.Chmod(wrapperPath, 0o755); err != nil {
+		t.Fatalf("chmod docker wrapper: %v", err)
+	}
+	storePath := writeSandboxComposeServiceFixture(t, wrapperPath+" compose up -d worker-service", "worker-service")
+	env := append(fakeEnv, "DOCKER_WRAPPER_CALLS_FILE="+wrapperCallsPath)
+
+	out := runCLIWithEnv(t, env, "sandbox", "start", "--store", "sqlite://"+storePath, "--service", "worker-service", "--json")
+	var report sandboxStartCommandReport
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode wrapper docker preflight report: %v\n%s", err, out)
+	}
+	if !report.OK || len(report.Services) != 1 || report.Services[0].ExitCode != 0 || report.Services[0].Readiness != "compose-service-running" {
+		t.Fatalf("wrapper docker preflight should allow startup = %#v", report)
+	}
+	bareCalls, err := os.ReadFile(callsPath)
+	if err != nil {
+		t.Fatalf("read bare docker calls: %v", err)
+	}
+	if strings.Contains(string(bareCalls), "info") {
+		t.Fatalf("preflight should not use bare docker when startup uses wrapper:\n%s", bareCalls)
+	}
+	wrapperCalls, err := os.ReadFile(wrapperCallsPath)
+	if err != nil {
+		t.Fatalf("read wrapper docker calls: %v", err)
+	}
+	if !strings.Contains(string(wrapperCalls), "info") || !strings.Contains(string(wrapperCalls), "compose up -d worker-service") {
+		t.Fatalf("configured wrapper should handle preflight and startup:\n%s", wrapperCalls)
+	}
+}
+
 func TestSandboxStartJSONIncludesRuntimeConsistencyEvidence(t *testing.T) {
 	fixture := writeSandboxStartStoreFixture(t)
 	report := runSandboxStartJSON(t, "sqlite://"+fixture.storePath, "sandbox start runtime evidence")

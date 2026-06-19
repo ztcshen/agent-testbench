@@ -150,6 +150,11 @@ func TestMapRunReusesMaterializationFixtureDataForCaseTask(t *testing.T) {
 	if report.Tasks[1].Kind != mapplanner.TaskRunCase || report.Tasks[1].Status != store.StatusPassed || report.Tasks[1].APICaseRunID == "" {
 		t.Fatalf("case task should run with materialized overrides = %#v", report.Tasks[1])
 	}
+	for _, task := range report.Tasks {
+		if task.ReplayGroupID == "" || task.InterfaceNodeID != "node.submit" || task.AnchorNodeID != "case.submit.success" || task.ValidationFamily != "empty/null" {
+			t.Fatalf("executed task should keep planner replay metadata = %#v", task)
+		}
+	}
 }
 
 func TestMapRunRejectsMismatchedPlanAndMap(t *testing.T) {
@@ -371,13 +376,17 @@ type mapRunCommandReport struct {
 }
 
 type mapRunCommandTask struct {
-	ID            string `json:"id"`
-	Kind          string `json:"kind"`
-	Status        string `json:"status"`
-	Reason        string `json:"reason"`
-	CaseID        string `json:"caseId"`
-	WorkflowRunID string `json:"workflowRunId"`
-	APICaseRunID  string `json:"apiCaseRunId"`
+	ID               string `json:"id"`
+	Kind             string `json:"kind"`
+	Status           string `json:"status"`
+	Reason           string `json:"reason"`
+	CaseID           string `json:"caseId"`
+	ReplayGroupID    string `json:"replayGroupId"`
+	InterfaceNodeID  string `json:"interfaceNodeId"`
+	AnchorNodeID     string `json:"anchorNodeId"`
+	ValidationFamily string `json:"validationFamily"`
+	WorkflowRunID    string `json:"workflowRunId"`
+	APICaseRunID     string `json:"apiCaseRunId"`
 }
 
 type mapRunExplainCommandReport struct {

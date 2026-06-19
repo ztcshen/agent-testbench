@@ -231,12 +231,16 @@ func workflowStepContextIssues(configs []profile.TemplateConfig, bindings []prof
 	})
 	workflowID := strings.TrimSpace(ordered[0].WorkflowID)
 	configByStep := workflowStepConfigByStep(configs, workflowID)
+	configByCase := workflowCaseConfigByCase(configs)
 	provided := map[string]bool{}
 	var issues []Issue
 	for _, binding := range ordered {
 		config, ok := configByStep[binding.StepID]
 		if !ok {
-			continue
+			config, ok = configByCase[binding.CaseID]
+			if !ok {
+				continue
+			}
 		}
 		doc := stepConfigDocument(config.ConfigJSON)
 		for _, input := range stepConfigList(doc["inputs"]) {
@@ -269,6 +273,18 @@ func workflowStepConfigByStep(configs []profile.TemplateConfig, workflowID strin
 	out := map[string]profile.TemplateConfig{}
 	for _, config := range configs {
 		if !visibleWorkflowAuditConfigStatus(config.Status) || strings.TrimSpace(config.ScopeType) != "step" || strings.TrimSpace(config.WorkflowID) != workflowID || strings.TrimSpace(config.ScopeID) == "" {
+			continue
+		}
+		out[config.ScopeID] = config
+	}
+	return out
+}
+
+func workflowCaseConfigByCase(configs []profile.TemplateConfig) map[string]profile.TemplateConfig {
+	out := map[string]profile.TemplateConfig{}
+	for _, config := range configs {
+		scopeType := strings.TrimSpace(config.ScopeType)
+		if !visibleWorkflowAuditConfigStatus(config.Status) || (scopeType != "api-case" && scopeType != "case") || strings.TrimSpace(config.ScopeID) == "" {
 			continue
 		}
 		out[config.ScopeID] = config

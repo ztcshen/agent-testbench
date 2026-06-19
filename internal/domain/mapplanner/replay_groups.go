@@ -22,7 +22,7 @@ func (b *planBuilder) prepareReplayGroup(plan *Plan, node plangraph.Node, task P
 	groupIndex, ok := b.replayGroupByKey[key]
 	if !ok {
 		group := ReplayGroup{
-			ID:                "replay." + safeID(firstNonEmpty(node.InterfaceNodeID, "interface")) + "." + safeID(firstNonEmpty(node.AnchorNodeID, task.UntilNodeID, "anchor")) + "." + safeID(family),
+			ID:                replayGroupID(node, family, task),
 			InterfaceNodeID:   node.InterfaceNodeID,
 			AnchorNodeID:      node.AnchorNodeID,
 			AnchorCaseID:      node.BaseCaseID,
@@ -46,6 +46,21 @@ func (b *planBuilder) prepareReplayGroup(plan *Plan, node plangraph.Node, task P
 		reusedTaskID = b.replayTaskByGroup[group.ID]
 	}
 	return group.ID, reusedTaskID, reusable
+}
+
+func replayGroupID(node plangraph.Node, family string, task PhysicalTask) string {
+	source := strings.Join([]string{
+		firstNonEmpty(task.PathID, "path"),
+		firstNonEmpty(task.UntilNodeID, "until"),
+		firstNonEmpty(task.MaterializationID, "materialization"),
+	}, ".")
+	return strings.Join([]string{
+		"replay",
+		safeID(firstNonEmpty(node.InterfaceNodeID, "interface")),
+		safeID(firstNonEmpty(node.AnchorNodeID, task.UntilNodeID, "anchor")),
+		safeID(family),
+		safeID(source),
+	}, ".")
 }
 
 func (b *planBuilder) addReplayGroupTask(plan *Plan, groupID string, taskID string) {
