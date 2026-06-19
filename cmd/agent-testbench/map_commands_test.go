@@ -570,6 +570,52 @@ func TestMapDoctorReportsBrokenGraphReferences(t *testing.T) {
 	}
 }
 
+func TestMapDoctorAcceptsWorkflowPatchSmokeCaseWithoutValidationAnchor(t *testing.T) {
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "map-doctor-smoke.sqlite")
+	storeRef := "sqlite://" + storePath
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	catalog := store.ProfileCatalog{
+		ProfileID: "profile.smoke",
+		Workflows: []store.CatalogWorkflow{
+			{ID: "workflow.smoke", DisplayName: "Smoke"},
+		},
+		APICases: []store.CatalogAPICase{
+			{
+				ID: "case.smoke.patch", DisplayName: "Patch smoke", NodeID: "node.smoke", RequestTemplateID: "template.smoke",
+				RenderMode: "template_patch", PatchJSON: `[{"op":"add","path":"$.body.trace","value":"smoke"}]`,
+				Status: "active", SortOrder: 1,
+			},
+		},
+		WorkflowBindings: []store.CatalogWorkflowBinding{
+			{WorkflowID: "workflow.smoke", StepID: "step.smoke", NodeID: "node.smoke", CaseID: "case.smoke.patch", Required: true, SortOrder: 1},
+		},
+	}
+	if err := runtime.ReplaceProfileCatalog(ctx, catalog); err != nil {
+		t.Fatalf("seed catalog: %v", err)
+	}
+	closeCLIStore(runtime)
+
+	runCLI(t, "map", "import-workflows", "--store", storeRef, "--json")
+	out := runCLI(t, "map", "doctor", "--store", storeRef, "--map", "map.profile.smoke", "--json")
+	var report struct {
+		OK         bool `json:"ok"`
+		IssueCount int  `json:"issueCount"`
+		Counts     struct {
+			Nodes int `json:"nodes"`
+		} `json:"counts"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode map doctor json: %v\n%s", err, out)
+	}
+	if !report.OK || report.IssueCount != 0 || report.Counts.Nodes != 1 {
+		t.Fatalf("workflow patch smoke case should not require validation anchor: %#v", report)
+	}
+}
+
 func TestMapValidationAttachAndListGroupsByInterface(t *testing.T) {
 	ctx := context.Background()
 	storePath := filepath.Join(t.TempDir(), "map-validation.sqlite")

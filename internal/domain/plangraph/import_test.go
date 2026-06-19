@@ -112,6 +112,69 @@ func TestImportCatalogCanLimitImportedWorkflowPaths(t *testing.T) {
 	}
 }
 
+func TestImportCatalogKeepsWorkflowPatchSmokeCasePrimary(t *testing.T) {
+	graph, err := ImportCatalog(catalog.ProfileCatalog{
+		ProfileID: "profile.smoke",
+		Workflows: []catalog.Workflow{
+			{ID: "workflow.smoke"},
+		},
+		APICases: []catalog.APICase{
+			{
+				ID: "case.smoke.patch", NodeID: "node.smoke", RequestTemplateID: "template.smoke",
+				RenderMode: "template_patch", PatchJSON: `[{"op":"add","path":"$.body.trace","value":"smoke"}]`,
+				Status: "active", SortOrder: 1,
+			},
+		},
+		WorkflowBindings: []catalog.WorkflowBinding{
+			{WorkflowID: "workflow.smoke", StepID: "step.smoke", NodeID: "node.smoke", CaseID: "case.smoke.patch", Required: true, SortOrder: 1},
+		},
+	}, ImportOptions{})
+	if err != nil {
+		t.Fatalf("import catalog: %v", err)
+	}
+
+	node := requireNode(t, graph, "case.smoke.patch")
+	if node.Role != NodeRolePrimary || node.StateEffect != StateEffectAdvance || node.BaseCaseID != "" || node.AnchorNodeID != "" {
+		t.Fatalf("workflow patch smoke case should remain primary, got %#v", node)
+	}
+}
+
+func TestImportCatalogAnchorsValidationToWorkflowPatchSmokeCase(t *testing.T) {
+	graph, err := ImportCatalog(catalog.ProfileCatalog{
+		ProfileID: "profile.patch-anchor",
+		Workflows: []catalog.Workflow{
+			{ID: "workflow.patch-anchor"},
+		},
+		APICases: []catalog.APICase{
+			{
+				ID: "case.apply.patch.smoke", NodeID: "node.apply", RequestTemplateID: "template.apply",
+				RenderMode: "template_patch", PatchJSON: `[{"op":"add","path":"$.body.trace","value":"smoke"}]`,
+				Status: "active", SortOrder: 1,
+			},
+			{
+				ID: "case.apply.amount.invalid", NodeID: "node.apply", RequestTemplateID: "template.apply",
+				CaseType: "negative", RenderMode: "template_patch", PatchJSON: `[{"op":"replace","path":"$.body.amount","value":""}]`,
+				Status: "active", SortOrder: 2,
+			},
+		},
+		WorkflowBindings: []catalog.WorkflowBinding{
+			{WorkflowID: "workflow.patch-anchor", StepID: "step.apply", NodeID: "node.apply", CaseID: "case.apply.patch.smoke", Required: true, SortOrder: 1},
+		},
+	}, ImportOptions{})
+	if err != nil {
+		t.Fatalf("import catalog: %v", err)
+	}
+
+	anchor := requireNode(t, graph, "case.apply.patch.smoke")
+	if anchor.Role != NodeRolePrimary || anchor.StateEffect != StateEffectAdvance {
+		t.Fatalf("workflow patch smoke anchor should remain primary, got %#v", anchor)
+	}
+	validation := requireNode(t, graph, "case.apply.amount.invalid")
+	if validation.Role != NodeRoleValidation || validation.BaseCaseID != "case.apply.patch.smoke" || validation.AnchorNodeID != "case.apply.patch.smoke" {
+		t.Fatalf("validation should anchor to workflow patch smoke case, got %#v", validation)
+	}
+}
+
 func TestExplainCaseSelectsReplayPrefixForValidationDiff(t *testing.T) {
 	graph, err := ImportCatalog(plannerFixtureCatalog(), ImportOptions{})
 	if err != nil {
@@ -169,6 +232,42 @@ func TestExplainCaseIgnoresOptionalFixtureEdge(t *testing.T) {
 	prefix := explain.Operations[0]
 	if prefix.Kind != OperationRunPathPrefix || prefix.UntilNodeID == "case.audit" || strings.Contains(prefix.Reason, "fixture") {
 		t.Fatalf("optional fixture should not drive mandatory replay prefix: %#v", prefix)
+	}
+}
+
+func TestExplainCaseUsesFixtureReplayForStandalonePrimaryCase(t *testing.T) {
+	source := plannerFixtureCatalog()
+	source.APICases = append(source.APICases, catalog.APICase{
+		ID: "case.submit.smoke.single", NodeID: "node.submit", RequestTemplateID: "template.submit",
+		Status: "active", SortOrder: 5,
+	})
+	source.CaseDependencies = append(source.CaseDependencies, catalog.CaseDependency{
+		ID: "dependency.submit.smoke.single", CaseID: "case.submit.smoke.single", FixtureID: "fixture.before.submit",
+		Required: true, SortOrder: 2,
+	})
+	graph, err := ImportCatalog(source, ImportOptions{})
+	if err != nil {
+		t.Fatalf("import catalog: %v", err)
+	}
+	node := requireNode(t, graph, "case.submit.smoke.single")
+	if node.Role != NodeRolePrimary || node.StateEffect != StateEffectAdvance {
+		t.Fatalf("standalone fixture-backed smoke case should stay primary, got %#v", node)
+	}
+
+	explain, err := ExplainCase(graph, ExplainOptions{CaseID: "case.submit.smoke.single"})
+	if err != nil {
+		t.Fatalf("explain fixture-backed primary case: %v", err)
+	}
+	if len(explain.Operations) != 2 {
+		t.Fatalf("operations = %#v", explain.Operations)
+	}
+	prefix := explain.Operations[0]
+	if prefix.Kind != OperationRunPathPrefix || prefix.MaterializationID != "fixture.before.submit" || prefix.PathID != "workflow.flow.create" || prefix.UntilNodeID != "case.prepare" {
+		t.Fatalf("fixture-backed primary prefix operation = %#v", prefix)
+	}
+	runCase := explain.Operations[1]
+	if runCase.Kind != OperationRunCase || runCase.CaseID != "case.submit.smoke.single" || runCase.PatchJSON != "" {
+		t.Fatalf("fixture-backed primary case operation = %#v", runCase)
 	}
 }
 
