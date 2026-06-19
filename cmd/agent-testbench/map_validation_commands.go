@@ -328,10 +328,10 @@ func mapValidationFamilies(cases []mapValidationCaseSummary) []mapValidationFami
 	return families
 }
 
-func normalizeMapJSON(value string, fallback string) string {
+func normalizeMapJSON(value string, emptyValue string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return fallback
+		return emptyValue
 	}
 	var decoded any
 	if err := json.Unmarshal([]byte(value), &decoded); err != nil {

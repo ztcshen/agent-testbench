@@ -40,6 +40,7 @@ type caseQueryTimedCase struct {
 type caseRunsCommandReport struct {
 	OK       bool                    `json:"ok"`
 	CaseRuns []caseRunsCommandResult `json:"caseRuns"`
+	Warnings []string                `json:"warnings"`
 }
 
 type caseRunsCommandResult struct {

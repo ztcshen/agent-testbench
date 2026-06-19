@@ -172,14 +172,14 @@ if [[ "$scoped" -eq 0 ]]; then
   }
 
   generic_resolver_count=$(count_cli_daily_matches 'resolveStoreReference\(')
-  if [[ "$generic_resolver_count" != "4" ]]; then
+  if [[ "$generic_resolver_count" -gt 1 ]]; then
     echo "Daily command code must not add generic Store resolver calls; use resolveRequiredDailyStoreReference unless the path is Store maintenance, offline review, or migration." >&2
     print_cli_daily_matches 'resolveStoreReference\('
     violations=1
   fi
 
   compat_required_resolver_count=$(count_cli_daily_matches 'resolveRequiredStoreReference\(')
-  if [[ "$compat_required_resolver_count" != "1" ]]; then
+  if [[ "$compat_required_resolver_count" -gt 1 ]]; then
     echo "Only explicit migration/compatibility commands may use resolveRequiredStoreReference in CLI handlers." >&2
     print_cli_daily_matches 'resolveRequiredStoreReference\('
     violations=1
