@@ -11,6 +11,9 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	if !strings.Contains(out, "--store NAME_OR_DSN") {
 		t.Fatalf("top-level help should show Store-first flag, got %q", out)
 	}
+	if !strings.Contains(out, "Recommended workflows") || !strings.Contains(out, "agent-testbench commands --all") {
+		t.Fatalf("top-level help should be a task-oriented start page with a path to the full catalog:\n%s", out)
+	}
 	if strings.Contains(out, "agent-testbench research ") {
 		t.Fatalf("top-level help should not expose feature radar as an AgentTestBench product capability:\n%s", out)
 	}
@@ -25,23 +28,20 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	if !strings.Contains(out, "case run --case PATH") || !strings.Contains(out, "--dry-run") {
 		t.Fatalf("top-level help should expose case run dry-run preflight:\n%s", out)
 	}
+	if !strings.Contains(out, "agent-testbench task suggest --goal \"maintain map\" --json") || !strings.Contains(out, "agent-testbench task plan map-maintain --map MAP_ID --json") {
+		t.Fatalf("top-level help should expose task-intent discovery:\n%s", out)
+	}
 	if !strings.Contains(out, "agent-testbench case diagnose") {
 		t.Fatalf("top-level help should expose case diagnosis:\n%s", out)
 	}
 	if !strings.Contains(out, "agent-testbench case gate") {
 		t.Fatalf("top-level help should expose CI-ready case gates:\n%s", out)
 	}
-	if !strings.Contains(out, "agent-testbench case config upsert") || !strings.Contains(out, "--response-not-contains") {
-		t.Fatalf("top-level help should expose Store-backed case config upsert:\n%s", out)
-	}
 	if !strings.Contains(out, "agent-testbench workflow gate") {
 		t.Fatalf("top-level help should expose workflow orchestration gates:\n%s", out)
 	}
 	if !strings.Contains(out, "agent-testbench workflow task run") || !strings.Contains(out, "--step STEP=TASK_NAME_OR_ID") {
 		t.Fatalf("top-level help should expose workflow task trigger/postcondition steps:\n%s", out)
-	}
-	if !strings.Contains(out, "agent-testbench workflow register") || !strings.Contains(out, "agent-testbench workflow binding register") {
-		t.Fatalf("top-level help should expose Store-first workflow upsert commands:\n%s", out)
 	}
 	if !strings.Contains(out, "agent-testbench update") || !strings.Contains(out, "--check") || !strings.Contains(out, "--output PATH") {
 		t.Fatalf("top-level help should expose self-update command:\n%s", out)
@@ -52,13 +52,18 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	if !strings.Contains(out, "Examples:") || !strings.Contains(out, "agent-testbench commands --filter \"case gate\"") {
 		t.Fatalf("top-level help should include copyable common CLI examples:\n%s", out)
 	}
+	for _, noisy := range []string{
+		"agent-testbench workflow register",
+		"agent-testbench workflow binding register",
+		"agent-testbench interface-node case draft",
+		"agent-testbench profile import-plan http-capture",
+	} {
+		if strings.Contains(out, noisy) {
+			t.Fatalf("top-level help should not list advanced command %q:\n%s", noisy, out)
+		}
+	}
 	if !strings.Contains(out, "agent-testbench store config set NAME --url postgres://...") || !strings.Contains(out, "agent-testbench store config set NAME --url mysql://...") {
 		t.Fatalf("top-level help should show copyable PostgreSQL and MySQL Store setup commands:\n%s", out)
-	}
-	for _, want := range []string{"--clean-docker-state", "--clean-docker-images", "--allow-destructive-docker-cleanup"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("top-level help missing restore cleanup flag %q:\n%s", want, out)
-		}
 	}
 	if strings.Contains(out, "--store-url PATH") {
 		t.Fatalf("top-level help should not promote deprecated store-url path flag:\n%s", out)
@@ -384,14 +389,66 @@ func TestCommandsDefaultSurfaceShowsDailyCommandsOnly(t *testing.T) {
 			t.Fatalf("default catalog returned non-daily or unclassified command: %#v", item)
 		}
 	}
-	for _, want := range []string{"status", "doctor", "store current", "environment restore", "map explain", "map run", "case run", "case suite report"} {
+	if report.Count > 30 {
+		t.Fatalf("default command catalog should stay at or below the first target of 30 commands, got %d", report.Count)
+	}
+	for _, want := range []string{"status", "doctor", "store current", "environment restore", "task suggest", "task plan", "map explain", "map run", "case run", "case suite report"} {
 		if _, ok := commands[want]; !ok {
 			t.Fatalf("default catalog missing daily command %q in %#v", want, commands)
 		}
 	}
-	for _, hidden := range []string{"profile import", "template-package import", "runtime mysql endpoints", "executor plan", "case suite coverage", "workflow acceptance start", "baseline get"} {
+	for _, hidden := range []string{"profile import", "template-package import", "runtime mysql endpoints", "executor plan", "case suite coverage", "workflow acceptance start", "baseline get", "workflow report", "case suite plan", "map plan inspect"} {
 		if _, ok := commands[hidden]; ok {
 			t.Fatalf("default catalog should hide %q: %#v", hidden, commands[hidden])
+		}
+	}
+}
+
+func TestCommandsDailySurfaceExplainsAdmission(t *testing.T) {
+	out := runCLI(t, "commands", "--json")
+
+	var report struct {
+		Commands []struct {
+			Command     string `json:"command"`
+			DailyReason string `json:"dailyReason"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode daily command catalog: %v\n%s", err, out)
+	}
+	reasons := map[string]string{}
+	for _, item := range report.Commands {
+		reasons[item.Command] = item.DailyReason
+		if item.DailyReason == "" {
+			t.Fatalf("daily command %q missing dailyReason: %#v", item.Command, item)
+		}
+	}
+	for _, command := range []string{"map run", "case run", "task plan", "workflow gate"} {
+		if reasons[command] == "" {
+			t.Fatalf("daily command %q should explain admission: %#v", command, reasons)
+		}
+	}
+}
+
+func TestNonDailyWorkflowCommandsHaveReplacementHints(t *testing.T) {
+	out := runCLI(t, "commands", "--area", "workflow", "--all", "--json")
+
+	var report struct {
+		Commands []struct {
+			Command     string `json:"command"`
+			Tier        string `json:"tier"`
+			Replacement string `json:"replacement"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode workflow command catalog: %v\n%s", err, out)
+	}
+	for _, item := range report.Commands {
+		if item.Tier == "daily" {
+			continue
+		}
+		if item.Replacement == "" {
+			t.Fatalf("non-daily workflow command should have a replacement hint: %#v", item)
 		}
 	}
 }

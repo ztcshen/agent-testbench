@@ -123,7 +123,11 @@ func runVersion(args []string) error {
 }
 
 func printHelp() {
-	fmt.Println(helpText())
+	fmt.Println(topLevelHelpText())
+}
+
+func topLevelHelpText() string {
+	return topLevelHelpTextContent
 }
 
 func helpText() string {

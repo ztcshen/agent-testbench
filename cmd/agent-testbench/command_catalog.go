@@ -32,6 +32,7 @@ type commandCatalogItem struct {
 	Replacement string   `json:"replacement,omitempty"`
 	Lifecycle   string   `json:"lifecycle,omitempty"`
 	Rank        int      `json:"rank,omitempty"`
+	DailyReason string   `json:"dailyReason,omitempty"`
 }
 
 type commandCatalogOptions struct {
@@ -39,24 +40,6 @@ type commandCatalogOptions struct {
 	Tier     string
 	Audience string
 }
-
-const (
-	cliCommandDoctor = "doctor"
-
-	commandCatalogTierDaily      = "daily"
-	commandCatalogTierAdvanced   = "advanced"
-	commandCatalogTierCompat     = "compat"
-	commandCatalogTierDeprecated = "deprecated"
-
-	commandCatalogAudienceAgent     = "agent"
-	commandCatalogAudienceOperator  = "operator"
-	commandCatalogAudienceDeveloper = "developer"
-
-	commandCatalogStabilityStable = "stable"
-	commandCatalogStabilityLegacy = "legacy"
-
-	commandCatalogCaseSuiteCoverage = "case suite coverage"
-)
 
 func runCommands(args []string) error {
 	flags := flag.NewFlagSet("commands", flag.ContinueOnError)
@@ -194,6 +177,7 @@ func commandCatalogItemFromUsage(usage string) commandCatalogItem {
 		Replacement: metadata.Replacement,
 		Lifecycle:   metadata.Lifecycle,
 		Rank:        metadata.Rank,
+		DailyReason: metadata.DailyReason,
 	}
 }
 
@@ -232,6 +216,7 @@ type commandCatalogMetadataReport struct {
 	Replacement string
 	Lifecycle   string
 	Rank        int
+	DailyReason string
 }
 
 func commandCatalogMetadata(command string, area string, usage string) commandCatalogMetadataReport {
@@ -250,6 +235,7 @@ func commandCatalogMetadata(command string, area string, usage string) commandCa
 	if commandCatalogDailyCommands()[command] {
 		metadata.Tier = commandCatalogTierDaily
 		metadata.Audience = commandCatalogAudienceAgent
+		metadata.DailyReason = commandCatalogDailyAdmissionReason(command)
 		return metadata
 	}
 	if replacement, ok := commandCatalogCompatReplacements()[command]; ok {
@@ -269,68 +255,6 @@ func commandCatalogMetadata(command string, area string, usage string) commandCa
 		metadata.Audience = commandCatalogAudienceOperator
 	}
 	return metadata
-}
-
-func commandCatalogMapLifecycle(command string) string {
-	switch command {
-	case "map list", "map workflows", "map coverage", "map plans", "map versions":
-		return "inspect"
-	case "map import-workflows", "map doctor", "map diff", "map validation list", "map validation attach", "map update", "map snapshot", "map publish":
-		return "maintain"
-	case "map explain", "map plan inspect", "map run explain":
-		return "plan"
-	case "map run", "map gate":
-		return "execute"
-	case "map atlas":
-		return "review"
-	default:
-		return ""
-	}
-}
-
-func commandCatalogTaskRank(command string) int {
-	switch command {
-	case "map doctor":
-		return 10
-	case "map coverage":
-		return 20
-	case "map diff":
-		return 30
-	case "map validation list":
-		return 40
-	case "map validation attach":
-		return 50
-	case "map update":
-		return 60
-	case "map snapshot":
-		return 70
-	case "map publish":
-		return 80
-	case "map versions":
-		return 90
-	case "map import-workflows":
-		return 100
-	case "map list":
-		return 110
-	case "map workflows":
-		return 120
-	case "map explain":
-		return 210
-	case "map plan inspect":
-		return 220
-	case "map run":
-		return 230
-	case "map gate":
-		return 240
-	case "map run explain":
-		return 250
-	case "map plans":
-		return 260
-	case "map atlas":
-		return 310
-	default:
-		return 0
-	}
 }
 
 func sortCommandCatalog(commands []commandCatalogItem, filter string) {
@@ -360,36 +284,36 @@ func commandCatalogSortRank(item commandCatalogItem) int {
 
 func commandCatalogDailyCommands() map[string]bool {
 	return map[string]bool{
-		"status":                      true,
-		cliCommandDoctor:              true,
-		"commands":                    true,
-		"store current":               true,
-		"store status":                true,
-		"environment discover":        true,
-		"environment inspect":         true,
-		"environment restore":         true,
-		"environment status":          true,
-		"environment stop":            true,
-		"environment service restart": true,
-		"map list":                    true,
-		"map coverage":                true,
-		"map doctor":                  true,
-		"map explain":                 true,
-		"map gate":                    true,
-		"map run":                     true,
-		"map atlas":                   true,
-		"case discover":               true,
-		"case suite report":           true,
-		"case runs":                   true,
-		"case evidence":               true,
-		"case diagnose":               true,
-		"case gate":                   true,
-		"case run":                    true,
-		"workflow gate":               true,
-		"task catalog":                true,
-		"task suggest":                true,
-		"task plan":                   true,
-		"task run":                    true,
+		cliCommandStatus:                 true,
+		cliCommandDoctor:                 true,
+		cliCommandCommands:               true,
+		"store current":                  true,
+		"store status":                   true,
+		"environment discover":           true,
+		"environment inspect":            true,
+		commandCatalogEnvironmentRestore: true,
+		commandCatalogEnvironmentStatus:  true,
+		commandCatalogEnvironmentStop:    true,
+		commandCatalogEnvironmentRestart: true,
+		commandCatalogMapList:            true,
+		commandCatalogMapCoverage:        true,
+		commandCatalogMapDoctor:          true,
+		commandCatalogMapExplain:         true,
+		commandCatalogMapGate:            true,
+		commandCatalogMapRun:             true,
+		commandCatalogMapAtlas:           true,
+		"case discover":                  true,
+		"case suite report":              true,
+		"case runs":                      true,
+		"case evidence":                  true,
+		commandCatalogCaseDiagnose:       true,
+		commandCatalogCaseGate:           true,
+		commandCatalogCaseRun:            true,
+		commandCatalogWorkflowGate:       true,
+		"task catalog":                   true,
+		"task suggest":                   true,
+		commandCatalogTaskPlan:           true,
+		"task run":                       true,
 	}
 }
 
@@ -408,7 +332,7 @@ func commandCatalogCompatReplacements() map[string]string {
 		"workflow acceptance report":    "agent-testbench environment acceptance report",
 		"baseline get":                  "agent-testbench gate baseline get",
 		"baseline set":                  "agent-testbench gate baseline set",
-		"map run explain":               "agent-testbench map plan inspect",
+		commandCatalogMapRunExplain:     "agent-testbench map plan inspect",
 	}
 }
 
@@ -420,6 +344,19 @@ func commandCatalogAdvancedReplacements() map[string]string {
 		"replay evidence":            "agent-testbench evidence list --run RUN_ID --json",
 		"sandbox service register":   "agent-testbench environment restore or agent-testbench environment service restart",
 		"sandbox interface register": "agent-testbench case config upsert",
+		"workflow discover":          "agent-testbench map list --json or agent-testbench map workflows --map MAP_ID --json",
+		"workflow register":          workflowToMapImportReplacement,
+		"workflow upsert":            workflowToMapImportReplacement,
+		"workflow binding register":  workflowToMapImportReplacement,
+		"workflow binding upsert":    workflowToMapImportReplacement,
+		"workflow plan":              "agent-testbench map explain --map MAP_ID --workflow WORKFLOW_ID",
+		"workflow audit":             "agent-testbench map doctor --map MAP_ID",
+		"workflow runs":              "agent-testbench map plans --map MAP_ID",
+		"workflow run":               "agent-testbench map plan inspect --plan PLAN_ID",
+		"workflow step":              "agent-testbench map run explain --plan PLAN_ID",
+		"workflow latest-step":       "agent-testbench map run explain --plan PLAN_ID",
+		"workflow task run":          "agent-testbench task run NAME --command COMMAND or agent-testbench map run --plan PLAN_ID --rerun-task TASK_ID",
+		"workflow report":            "agent-testbench map atlas --map MAP_ID",
 	}
 }
 
@@ -467,10 +404,10 @@ func commandCatalogTags(command string, area string, usage string) []string {
 
 func commandCatalogTaskTags(command string) []string {
 	switch command {
-	case "map import-workflows", "map list", "map coverage", "map doctor", "map workflows", "map atlas",
-		"map update", "map snapshot", "map publish", "map versions", "map diff", "map validation list", "map validation attach":
+	case commandCatalogMapImportWorkflows, commandCatalogMapList, commandCatalogMapCoverage, commandCatalogMapDoctor, commandCatalogMapWorkflows, commandCatalogMapAtlas,
+		commandCatalogMapUpdate, commandCatalogMapSnapshot, commandCatalogMapPublish, commandCatalogMapVersions, commandCatalogMapDiff, commandCatalogMapValidationList, commandCatalogMapValidationAttach:
 		return []string{"maintain map", "map maintenance"}
-	case "map plans", "map explain", "map gate", "map run", "map plan inspect", "map run explain":
+	case commandCatalogMapPlans, commandCatalogMapExplain, commandCatalogMapGate, commandCatalogMapRun, commandCatalogMapPlanInspect, commandCatalogMapRunExplain:
 		return []string{"execute map", "map execution"}
 	case "environment restore", "environment status", "environment stop", "environment service restart", "environment discover", "environment inspect":
 		return []string{"restore environment", "environment operations"}
@@ -507,6 +444,9 @@ func printCommandCatalog(report commandCatalogReport) {
 		fmt.Printf("  Tier: %s Audience: %s Stability: %s\n", item.Tier, item.Audience, item.Stability)
 		if item.Lifecycle != "" {
 			fmt.Printf("  Lifecycle: %s\n", item.Lifecycle)
+		}
+		if item.DailyReason != "" {
+			fmt.Printf("  Daily: %s\n", item.DailyReason)
 		}
 		if item.Replacement != "" {
 			fmt.Printf("  Replacement: %s\n", item.Replacement)
@@ -589,11 +529,11 @@ type commandCatalogLifecycleGroup struct {
 
 func commandCatalogMapLifecycleGroups() []commandCatalogLifecycleGroup {
 	return []commandCatalogLifecycleGroup{
-		{ID: "inspect", Label: "Inspect"},
-		{ID: "maintain", Label: "Maintain"},
-		{ID: "plan", Label: "Plan"},
-		{ID: "execute", Label: "Execute"},
-		{ID: "review", Label: "Review"},
+		{ID: commandCatalogLifecycleInspect, Label: "Inspect"},
+		{ID: commandCatalogLifecycleMaintain, Label: "Maintain"},
+		{ID: commandCatalogLifecyclePlan, Label: "Plan"},
+		{ID: commandCatalogLifecycleExecute, Label: "Execute"},
+		{ID: commandCatalogLifecycleReview, Label: "Review"},
 	}
 }
 

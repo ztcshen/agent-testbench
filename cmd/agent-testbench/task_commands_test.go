@@ -232,71 +232,45 @@ func TestNotifyTestWritesJSONLine(t *testing.T) {
 	}
 }
 
-func TestTaskCatalogSuggestAndPlanBuiltInTasks(t *testing.T) {
-	catalogOut := runCLI(t, "task", "catalog", "--json")
-	var catalog struct {
-		OK    bool `json:"ok"`
-		Count int  `json:"count"`
-		Tasks []struct {
-			ID             string   `json:"id"`
-			Goal           string   `json:"goal"`
-			Tags           []string `json:"tags"`
-			RequiredInputs []struct {
-				Name     string `json:"name"`
-				Flag     string `json:"flag"`
-				Required bool   `json:"required"`
-			} `json:"requiredInputs"`
-			Steps []struct {
-				ID       string `json:"id"`
-				Command  string `json:"command"`
-				ReadOnly bool   `json:"readOnly"`
-			} `json:"steps"`
-		} `json:"tasks"`
-	}
-	if err := json.Unmarshal([]byte(catalogOut), &catalog); err != nil {
-		t.Fatalf("decode task catalog: %v\n%s", err, catalogOut)
-	}
-	if !catalog.OK || catalog.Count < 4 {
-		t.Fatalf("task catalog should expose built-in tasks: %#v", catalog)
-	}
-	taskByID := map[string]struct {
-		Goal           string
-		Tags           []string
+type taskCatalogTestReport struct {
+	OK    bool `json:"ok"`
+	Count int  `json:"count"`
+	Tasks []struct {
+		ID             string   `json:"id"`
+		Goal           string   `json:"goal"`
+		Tags           []string `json:"tags"`
 		RequiredInputs []struct {
 			Name     string `json:"name"`
 			Flag     string `json:"flag"`
 			Required bool   `json:"required"`
-		}
+		} `json:"requiredInputs"`
 		Steps []struct {
 			ID       string `json:"id"`
 			Command  string `json:"command"`
 			ReadOnly bool   `json:"readOnly"`
-		}
-	}{}
-	for _, task := range catalog.Tasks {
-		taskByID[task.ID] = struct {
-			Goal           string
-			Tags           []string
-			RequiredInputs []struct {
-				Name     string `json:"name"`
-				Flag     string `json:"flag"`
-				Required bool   `json:"required"`
-			}
-			Steps []struct {
-				ID       string `json:"id"`
-				Command  string `json:"command"`
-				ReadOnly bool   `json:"readOnly"`
-			}
-		}{Goal: task.Goal, Tags: task.Tags, RequiredInputs: task.RequiredInputs, Steps: task.Steps}
+		} `json:"steps"`
+	} `json:"tasks"`
+}
+
+func TestTaskCatalogExposesBuiltInTasks(t *testing.T) {
+	catalog := decodeTaskCatalogTestReport(t, runCLI(t, "task", "catalog", "--json"))
+	if !catalog.OK || catalog.Count < 4 {
+		t.Fatalf("task catalog should expose built-in tasks: %#v", catalog)
 	}
-	maintain, ok := taskByID["map-maintain"]
-	if !ok || maintain.Goal == "" || !stringSliceContains(maintain.Tags, "maintain map") || len(maintain.RequiredInputs) == 0 || maintain.RequiredInputs[0].Flag != "--map" || len(maintain.Steps) < 3 {
+	tasks := taskCatalogEntriesByID(catalog)
+	maintain := tasks["map-maintain"]
+	if maintain.Goal == "" || !stringSliceContains(maintain.Tags, "maintain map") {
 		t.Fatalf("map-maintain catalog entry = %#v", maintain)
 	}
-	if _, ok := taskByID["map-execute"]; !ok {
-		t.Fatalf("task catalog missing map-execute: %#v", taskByID)
+	if len(maintain.RequiredInputs) == 0 || maintain.RequiredInputs[0].Flag != "--map" || len(maintain.Steps) < 3 {
+		t.Fatalf("map-maintain catalog inputs/steps = %#v", maintain)
 	}
+	if _, ok := tasks["map-execute"]; !ok {
+		t.Fatalf("task catalog missing map-execute: %#v", tasks)
+	}
+}
 
+func TestTaskSuggestBuiltInTasks(t *testing.T) {
 	suggestOut := runCLI(t, "task", "suggest", "--goal", "maintain map", "--json")
 	var suggest struct {
 		OK          bool `json:"ok"`
@@ -315,7 +289,9 @@ func TestTaskCatalogSuggestAndPlanBuiltInTasks(t *testing.T) {
 	if !strings.Contains(executeSuggest, `"id": "map-execute"`) {
 		t.Fatalf("execute map suggestion should include map-execute:\n%s", executeSuggest)
 	}
+}
 
+func TestTaskPlanBuiltInMapMaintain(t *testing.T) {
 	planOut := runCLI(t, "task", "plan", "map-maintain", "--map", "map.demo", "--json")
 	var plan struct {
 		OK      bool              `json:"ok"`
@@ -353,6 +329,62 @@ func TestTaskCatalogSuggestAndPlanBuiltInTasks(t *testing.T) {
 	if !strings.Contains(missingOut, "--map") || !strings.Contains(missingOut, "missing") {
 		t.Fatalf("task plan should explain missing inputs:\n%s", missingOut)
 	}
+}
+
+func decodeTaskCatalogTestReport(t *testing.T, raw string) taskCatalogTestReport {
+	t.Helper()
+	var report taskCatalogTestReport
+	if err := json.Unmarshal([]byte(raw), &report); err != nil {
+		t.Fatalf("decode task catalog: %v\n%s", err, raw)
+	}
+	return report
+}
+
+func taskCatalogEntriesByID(report taskCatalogTestReport) map[string]struct {
+	Goal           string
+	Tags           []string
+	RequiredInputs []struct {
+		Name     string `json:"name"`
+		Flag     string `json:"flag"`
+		Required bool   `json:"required"`
+	}
+	Steps []struct {
+		ID       string `json:"id"`
+		Command  string `json:"command"`
+		ReadOnly bool   `json:"readOnly"`
+	}
+} {
+	out := map[string]struct {
+		Goal           string
+		Tags           []string
+		RequiredInputs []struct {
+			Name     string `json:"name"`
+			Flag     string `json:"flag"`
+			Required bool   `json:"required"`
+		}
+		Steps []struct {
+			ID       string `json:"id"`
+			Command  string `json:"command"`
+			ReadOnly bool   `json:"readOnly"`
+		}
+	}{}
+	for _, task := range report.Tasks {
+		out[task.ID] = struct {
+			Goal           string
+			Tags           []string
+			RequiredInputs []struct {
+				Name     string `json:"name"`
+				Flag     string `json:"flag"`
+				Required bool   `json:"required"`
+			}
+			Steps []struct {
+				ID       string `json:"id"`
+				Command  string `json:"command"`
+				ReadOnly bool   `json:"readOnly"`
+			}
+		}{Goal: task.Goal, Tags: task.Tags, RequiredInputs: task.RequiredInputs, Steps: task.Steps}
+	}
+	return out
 }
 
 func TestTaskRunBuiltInMapTasksDryRun(t *testing.T) {

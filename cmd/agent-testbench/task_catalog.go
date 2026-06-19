@@ -12,6 +12,16 @@ import (
 	"agent-testbench/internal/store"
 )
 
+const (
+	builtInTaskMapMaintain    = "map-maintain"
+	builtInTaskMapExecute     = "map-execute"
+	builtInTaskJSONCount      = "count"
+	builtInTaskFlagMap        = "--map"
+	builtInTaskFlagWorkspace  = "--workspace"
+	builtInTaskInputWorkspace = "workspace"
+	builtInTaskStepEvidence   = "evidence"
+)
+
 type builtInTaskDescriptor struct {
 	ID             string                   `json:"id"`
 	Name           string                   `json:"name"`
@@ -81,7 +91,7 @@ func runTaskCatalog(args []string) error {
 		return err
 	}
 	tasks := filterBuiltInTasks(*filter)
-	report := map[string]any{"ok": true, "filter": strings.TrimSpace(*filter), "count": len(tasks), "tasks": tasks}
+	report := map[string]any{"ok": true, "filter": strings.TrimSpace(*filter), builtInTaskJSONCount: len(tasks), "tasks": tasks}
 	if *jsonOutput {
 		return writeIndentedJSON(report)
 	}
@@ -104,7 +114,7 @@ func runTaskSuggest(args []string) error {
 		return errors.New("--goal is required")
 	}
 	suggestions := suggestBuiltInTasks(*goal)
-	report := map[string]any{"ok": true, "goal": strings.TrimSpace(*goal), "count": len(suggestions), "suggestions": suggestions}
+	report := map[string]any{"ok": true, "goal": strings.TrimSpace(*goal), builtInTaskJSONCount: len(suggestions), "suggestions": suggestions}
 	if *jsonOutput {
 		return writeIndentedJSON(report)
 	}
@@ -158,7 +168,7 @@ func runBuiltInTask(ctx context.Context, id string, inputs builtInTaskInputs, dr
 		printBuiltInTaskPlan(report)
 		return nil
 	}
-	if report.Task.ID != "map-maintain" {
+	if report.Task.ID != builtInTaskMapMaintain {
 		report.OK = false
 		report.Error = "built-in task execution is only enabled for read-only map-maintain; use --dry-run to inspect this task"
 		if jsonOutput {
@@ -211,13 +221,13 @@ func registerBuiltInTaskFlags(flags *flag.FlagSet) (*builtInTaskInputs, *bool) {
 func builtInTaskDescriptors() []builtInTaskDescriptor {
 	return []builtInTaskDescriptor{
 		{
-			ID:      "map-maintain",
+			ID:      builtInTaskMapMaintain,
 			Name:    "Maintain test scenario map",
 			Goal:    "Inspect and maintain a test scenario map before execution.",
 			Summary: "Runs read-only map health, coverage, diff, and validation-list checks.",
-			Tags:    []string{"maintain map", "map maintenance", "doctor", "coverage", "validation"},
+			Tags:    []string{"maintain map", "map maintenance", cliCommandDoctor, "coverage", mapCommandValidation},
 			RequiredInputs: []builtInTaskInput{
-				{Name: "map", Flag: "--map", Description: "Test map ID", Required: true},
+				{Name: "map", Flag: builtInTaskFlagMap, Description: "Test map ID", Required: true},
 			},
 			Steps: []builtInTaskStepPattern{
 				{ID: "doctor", Title: "Check map health", Command: "map doctor --map {{map}}", ReadOnly: true},
@@ -227,13 +237,13 @@ func builtInTaskDescriptors() []builtInTaskDescriptor {
 			},
 		},
 		{
-			ID:      "map-execute",
+			ID:      builtInTaskMapExecute,
 			Name:    "Execute test scenario map",
 			Goal:    "Plan, run, gate, and review a test scenario map.",
 			Summary: "Shows the map execution lifecycle without hiding explain/gate/review steps.",
 			Tags:    []string{"execute map", "map execution", "planner", "gate", "atlas"},
 			RequiredInputs: []builtInTaskInput{
-				{Name: "map", Flag: "--map", Description: "Test map ID", Required: true},
+				{Name: "map", Flag: builtInTaskFlagMap, Description: "Test map ID", Required: true},
 			},
 			Steps: []builtInTaskStepPattern{
 				{ID: "explain", Title: "Create a run plan", Command: "map explain --map {{map}} --scope all --save"},
@@ -250,7 +260,7 @@ func builtInTaskDescriptors() []builtInTaskDescriptor {
 			Tags:    []string{"restore environment", "environment operations", "health"},
 			RequiredInputs: []builtInTaskInput{
 				{Name: "environment", Flag: "--environment", Description: "Environment ID", Required: true},
-				{Name: "workspace", Flag: "--workspace", Description: "Workspace path", Required: true},
+				{Name: builtInTaskInputWorkspace, Flag: builtInTaskFlagWorkspace, Description: "Workspace path", Required: true},
 			},
 			Steps: []builtInTaskStepPattern{
 				{ID: "inspect", Title: "Inspect environment catalog", Command: "environment inspect {{environment}}", ReadOnly: true},
@@ -263,13 +273,13 @@ func builtInTaskDescriptors() []builtInTaskDescriptor {
 			Name:    "Diagnose case evidence",
 			Goal:    "Inspect case evidence and gate a case run.",
 			Summary: "Groups case evidence diagnosis commands for failed or suspicious case runs.",
-			Tags:    []string{"diagnose evidence", "case diagnosis", "case gate"},
+			Tags:    []string{"diagnose evidence", "case diagnosis", commandCatalogCaseGate},
 			RequiredInputs: []builtInTaskInput{
 				{Name: "caseRun", Flag: "--case-run", Description: "Case run ID", Required: true},
 			},
 			Steps: []builtInTaskStepPattern{
 				{ID: "diagnose", Title: "Diagnose case run", Command: "case diagnose --case-run {{caseRun}}", ReadOnly: true},
-				{ID: "evidence", Title: "Inspect case evidence", Command: "case evidence --case-run {{caseRun}}", ReadOnly: true},
+				{ID: builtInTaskStepEvidence, Title: "Inspect case evidence", Command: "case evidence --case-run {{caseRun}}", ReadOnly: true},
 			},
 		},
 	}
@@ -430,7 +440,8 @@ func builtInTaskCommandSummary(steps []builtInTaskPlanStep) string {
 }
 
 func builtInTaskSearchText(task builtInTaskDescriptor) string {
-	parts := []string{task.ID, task.Name, task.Goal, task.Summary}
+	parts := make([]string, 0, 4+len(task.Tags)+3*len(task.RequiredInputs)+3*len(task.Steps))
+	parts = append(parts, task.ID, task.Name, task.Goal, task.Summary)
 	parts = append(parts, task.Tags...)
 	for _, input := range task.RequiredInputs {
 		parts = append(parts, input.Name, input.Flag, input.Description)
@@ -447,7 +458,7 @@ func (inputs builtInTaskInputs) value(name string) string {
 		return inputs.Map
 	case "environment":
 		return inputs.Environment
-	case "workspace":
+	case builtInTaskInputWorkspace:
 		return inputs.Workspace
 	case "caseRun":
 		return inputs.CaseRun
@@ -461,12 +472,12 @@ func (inputs builtInTaskInputs) value(name string) string {
 func (inputs builtInTaskInputs) asMap() map[string]string {
 	values := map[string]string{}
 	for key, value := range map[string]string{
-		"map":         inputs.Map,
-		"environment": inputs.Environment,
-		"workspace":   inputs.Workspace,
-		"caseRun":     inputs.CaseRun,
-		"run":         inputs.Run,
-		"store":       inputs.Store,
+		"map":                     inputs.Map,
+		"environment":             inputs.Environment,
+		builtInTaskInputWorkspace: inputs.Workspace,
+		"caseRun":                 inputs.CaseRun,
+		"run":                     inputs.Run,
+		"store":                   inputs.Store,
 	} {
 		value = strings.TrimSpace(value)
 		if value != "" {
