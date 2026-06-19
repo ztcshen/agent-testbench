@@ -171,10 +171,11 @@ func commandCatalogItemFromUsage(usage string) commandCatalogItem {
 	if len(path) > 0 {
 		area = path[0]
 	}
-	tags := commandCatalogTags(area, usage)
-	metadata := commandCatalogMetadata(strings.Join(path, " "), area, usage)
+	command := strings.Join(path, " ")
+	tags := commandCatalogTags(command, area, usage)
+	metadata := commandCatalogMetadata(command, area, usage)
 	return commandCatalogItem{
-		Command:     strings.Join(path, " "),
+		Command:     command,
 		Area:        area,
 		Path:        path,
 		Usage:       usage,
@@ -353,7 +354,7 @@ func commandUsagePathStops(token string) bool {
 	return hasLetter
 }
 
-func commandCatalogTags(area string, usage string) []string {
+func commandCatalogTags(command string, area string, usage string) []string {
 	tags := []string{area}
 	if strings.Contains(usage, "--store NAME_OR_DSN") {
 		tags = append(tags, "store-first")
@@ -370,7 +371,24 @@ func commandCatalogTags(area string, usage string) []string {
 	if strings.Contains(usage, "workflow") {
 		tags = append(tags, "workflow")
 	}
+	tags = append(tags, commandCatalogTaskTags(command)...)
 	return normalizeStringList(tags)
+}
+
+func commandCatalogTaskTags(command string) []string {
+	switch command {
+	case "map import-workflows", "map list", "map coverage", "map doctor", "map workflows", "map atlas",
+		"map update", "map snapshot", "map publish", "map versions", "map diff", "map validation list", "map validation attach":
+		return []string{"maintain map", "map maintenance"}
+	case "map plans", "map explain", "map gate", "map run", "map plan inspect", "map run explain":
+		return []string{"execute map", "map execution"}
+	case "environment restore", "environment status", "environment stop", "environment service restart", "environment discover", "environment inspect":
+		return []string{"restore environment", "environment operations"}
+	case "case diagnose", "case evidence", "case gate", "workflow gate", "evidence list", "evidence tasks", cliCommandDoctor:
+		return []string{"diagnose evidence", "evidence diagnosis"}
+	default:
+		return nil
+	}
 }
 
 func commandCatalogMatches(item commandCatalogItem, filter string) bool {
@@ -402,4 +420,85 @@ func printCommandCatalog(report commandCatalogReport) {
 		}
 		fmt.Printf("  %s\n", item.Usage)
 	}
+}
+
+func commandHelpText(prefix []string) (string, error) {
+	prefix = normalizeCommandHelpPrefix(prefix)
+	if len(prefix) == 0 {
+		return helpText(), nil
+	}
+	command := strings.Join(prefix, " ")
+	if usages := commandUsageLinesForCommand(command); len(usages) > 0 {
+		var builder strings.Builder
+		fmt.Fprintf(&builder, "Command: %s\n\nUsage:\n", command)
+		for _, usage := range usages {
+			fmt.Fprintf(&builder, "  %s\n", usage)
+		}
+		return strings.TrimRight(builder.String(), "\n"), nil
+	}
+
+	report := commandCatalogForAreaWithOptions("", "", commandCatalogOptions{All: true})
+	matches := []commandCatalogItem{}
+	for _, item := range report.Commands {
+		if commandPathHasPrefix(item.Path, prefix) {
+			matches = append(matches, item)
+		}
+	}
+	if len(matches) == 0 {
+		return "", fmt.Errorf("unknown help target: %s", command)
+	}
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "Commands: %s\n\nUsage:\n", command)
+	for _, item := range matches {
+		fmt.Fprintf(&builder, "  %s\n", item.Usage)
+	}
+	fmt.Fprintf(&builder, "\nUse `agent-testbench commands --filter %q --all` for machine-readable metadata.", command)
+	return strings.TrimRight(builder.String(), "\n"), nil
+}
+
+func printCommandHelp(prefix []string) error {
+	text, err := commandHelpText(prefix)
+	if err != nil {
+		return err
+	}
+	fmt.Println(text)
+	return nil
+}
+
+func commandUsageLinesForCommand(command string) []string {
+	lines := []string{}
+	for _, usage := range commandUsageLines() {
+		item := commandCatalogItemFromUsage(usage)
+		if item.Command == command {
+			lines = append(lines, usage)
+		}
+	}
+	return lines
+}
+
+func commandPathHasPrefix(path []string, prefix []string) bool {
+	if len(prefix) > len(path) {
+		return false
+	}
+	for index := range prefix {
+		if path[index] != prefix[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeCommandHelpPrefix(prefix []string) []string {
+	out := []string{}
+	for _, item := range prefix {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if strings.HasPrefix(item, "-") {
+			break
+		}
+		out = append(out, item)
+	}
+	return out
 }

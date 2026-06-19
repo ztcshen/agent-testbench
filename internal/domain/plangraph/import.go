@@ -193,7 +193,7 @@ func (b *graphBuilder) importValidationCases() {
 	caseIDs := sortedCaseIDs(b.caseByID)
 	for _, caseID := range caseIDs {
 		apiCase := b.caseByID[caseID]
-		if b.boundCaseIDs[caseID] || !isValidationCase(apiCase) {
+		if b.boundCaseIDs[caseID] || !shouldImportStandaloneValidationCase(apiCase) {
 			continue
 		}
 		if len(b.workflowFilter) > 0 {
@@ -296,7 +296,7 @@ func (b *graphBuilder) upsertCaseNode(apiCase catalog.APICase, inPath bool) Node
 	stateEffect := StateEffectAdvance
 	baseCaseID := ""
 	anchorNodeID := ""
-	if !inPath || isValidationCase(apiCase) {
+	if caseNeedsValidationRole(apiCase, inPath) {
 		role = NodeRoleValidation
 		stateEffect = StateEffectUnchanged
 		baseCaseID = b.baseCaseFor(apiCase)
@@ -345,7 +345,7 @@ func (b *graphBuilder) baseCaseFor(apiCase catalog.APICase) string {
 		if candidate.ID == apiCase.ID || strings.TrimSpace(candidate.NodeID) != nodeID {
 			continue
 		}
-		if isValidationCase(candidate) || isDiffCase(candidate) {
+		if caseNeedsValidationRole(candidate, b.boundCaseIDs[candidate.ID]) {
 			continue
 		}
 		candidates = append(candidates, candidate)
@@ -524,14 +524,25 @@ func isActiveStatus(status string) bool {
 	}
 }
 
-func isValidationCase(apiCase catalog.APICase) bool {
+func caseNeedsValidationRole(apiCase catalog.APICase, inPath bool) bool {
+	if hasValidationSemantics(apiCase) {
+		return true
+	}
+	return !inPath && isDiffCase(apiCase)
+}
+
+func shouldImportStandaloneValidationCase(apiCase catalog.APICase) bool {
+	return caseNeedsValidationRole(apiCase, false)
+}
+
+func hasValidationSemantics(apiCase catalog.APICase) bool {
 	caseType := strings.ToLower(strings.TrimSpace(apiCase.CaseType + " " + apiCase.Scenario))
 	if strings.Contains(caseType, "negative") || strings.Contains(caseType, "invalid") ||
 		strings.Contains(caseType, "failure") || strings.Contains(caseType, "error") ||
 		strings.Contains(caseType, "boundary") || strings.Contains(caseType, "validation") {
 		return true
 	}
-	return isDiffCase(apiCase)
+	return false
 }
 
 func isDiffCase(apiCase catalog.APICase) bool {

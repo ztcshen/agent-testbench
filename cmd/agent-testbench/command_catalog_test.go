@@ -65,6 +65,62 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	}
 }
 
+func TestGroupedHelpShowsAreaAndExactCommandUsage(t *testing.T) {
+	mapHelp := runCLI(t, "map", "--help")
+	if !strings.Contains(mapHelp, "Commands: map") || !strings.Contains(mapHelp, "agent-testbench map explain") || !strings.Contains(mapHelp, "agent-testbench map run") {
+		t.Fatalf("map grouped help should show map commands:\n%s", mapHelp)
+	}
+	if strings.Contains(mapHelp, "agent-testbench case run") || strings.Contains(mapHelp, "unknown command") {
+		t.Fatalf("map grouped help should not fall back to noisy global help:\n%s", mapHelp)
+	}
+
+	mapRunHelp := runCLI(t, "map", "run", "--help")
+	if !strings.Contains(mapRunHelp, "Command: map run") || !strings.Contains(mapRunHelp, "agent-testbench map run [--map ID | --plan PLAN_ID]") {
+		t.Fatalf("map run exact help should show the run usage:\n%s", mapRunHelp)
+	}
+	if strings.Contains(mapRunHelp, "map run explain") || strings.Contains(mapRunHelp, "agent-testbench case run") || strings.Contains(mapRunHelp, "unknown command") {
+		t.Fatalf("map run exact help should stay focused:\n%s", mapRunHelp)
+	}
+
+	mapRunComposingHelp := runCLI(t, "map", "run", "--map", "map.checkout", "--help")
+	if !strings.Contains(mapRunComposingHelp, "Command: map run") || !strings.Contains(mapRunComposingHelp, "agent-testbench map run [--map ID | --plan PLAN_ID]") {
+		t.Fatalf("map run help should ignore already typed flags:\n%s", mapRunComposingHelp)
+	}
+	if strings.Contains(mapRunComposingHelp, "unknown help target") || strings.Contains(mapRunComposingHelp, "map run --map") {
+		t.Fatalf("map run composing help should not treat flags as command tokens:\n%s", mapRunComposingHelp)
+	}
+
+	caseHelp := runCLI(t, "case", "--help")
+	if !strings.Contains(caseHelp, "Commands: case") || !strings.Contains(caseHelp, "agent-testbench case diagnose") || strings.Contains(caseHelp, "agent-testbench workflow run") {
+		t.Fatalf("case grouped help should show only case commands:\n%s", caseHelp)
+	}
+}
+
+func TestTemplatePackageAliasHelpUsesCatalog(t *testing.T) {
+	initHelp := runCLI(t, "template-package", "init", "--help")
+	if !strings.Contains(initHelp, "Command: template-package init") || !strings.Contains(initHelp, "agent-testbench template-package init --output PATH") {
+		t.Fatalf("template-package init help should be catalog-backed:\n%s", initHelp)
+	}
+	if strings.Contains(initHelp, "unknown help target") {
+		t.Fatalf("template-package init help should not fail before dispatcher fallback:\n%s", initHelp)
+	}
+
+	verifyHelp := runCLI(t, "template-packages", "verify", "--help")
+	if !strings.Contains(verifyHelp, "Command: template-packages verify") || !strings.Contains(verifyHelp, "agent-testbench template-packages verify --template-package PATH_OR_ID") {
+		t.Fatalf("template-packages verify alias help should be catalog-backed:\n%s", verifyHelp)
+	}
+}
+
+func TestCommandsFilterCanSearchLiteralHelp(t *testing.T) {
+	out := runCLI(t, "commands", "--filter", "help", "--json")
+	if !strings.Contains(out, `"filter": "help"`) || !strings.Contains(out, `"ok": true`) {
+		t.Fatalf("commands should treat help as a literal filter value:\n%s", out)
+	}
+	if strings.Contains(out, "Command: commands") || strings.Contains(out, "unknown help target") {
+		t.Fatalf("commands literal help filter should not be intercepted as focused help:\n%s", out)
+	}
+}
+
 func TestCommandsCommandEmitsSearchableCommandCatalog(t *testing.T) {
 	out := runCLI(t, "commands", "--filter", "gate", "--json")
 
@@ -185,6 +241,24 @@ func TestCommandsCanFilterByArea(t *testing.T) {
 	for _, item := range report.Commands {
 		if item.Area != "workflow" {
 			t.Fatalf("area filter returned non-workflow command: %#v", item)
+		}
+	}
+}
+
+func TestCommandsSupportTaskOrientedFilters(t *testing.T) {
+	tests := []struct {
+		filter string
+		want   string
+	}{
+		{filter: "maintain map", want: "map doctor"},
+		{filter: "execute map", want: "map run"},
+		{filter: "restore environment", want: "environment restore"},
+		{filter: "diagnose evidence", want: "case diagnose"},
+	}
+	for _, tt := range tests {
+		out := runCLI(t, "commands", "--all", "--filter", tt.filter, "--json")
+		if !strings.Contains(out, `"command": "`+tt.want+`"`) {
+			t.Fatalf("commands --filter %q should find %q:\n%s", tt.filter, tt.want, out)
 		}
 	}
 }

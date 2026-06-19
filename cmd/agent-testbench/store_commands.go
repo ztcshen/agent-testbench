@@ -141,6 +141,30 @@ func runMySQLStoreStatus(ctx context.Context, cfg mysql.Config, jsonOutput bool)
 	return nil
 }
 
+func printPostgresStoreStatus(status postgres.SchemaStatusResult) {
+	pending := status.TargetVersion - status.CurrentVersion
+	if pending < 0 {
+		pending = 0
+	}
+	fmt.Println("Store: postgres")
+	fmt.Printf("URL: %s\n", maskStoreURL(status.URL))
+	fmt.Printf("Version: %d\n", status.CurrentVersion)
+	fmt.Printf("Target: %d\n", status.TargetVersion)
+	fmt.Printf("Pending: %d\n", pending)
+}
+
+func printMySQLStoreStatus(status mysql.SchemaStatusResult) {
+	pending := status.TargetVersion - status.CurrentVersion
+	if pending < 0 {
+		pending = 0
+	}
+	fmt.Println("Store: mysql")
+	fmt.Printf("URL: %s\n", maskStoreURL(status.URL))
+	fmt.Printf("Version: %d\n", status.CurrentVersion)
+	fmt.Printf("Target: %d\n", status.TargetVersion)
+	fmt.Printf("Pending: %d\n", pending)
+}
+
 func runMySQLStoreProvision(ctx context.Context, cfg mysql.Config, jsonOutput bool) error {
 	result, err := mysqlProvisionDatabase(ctx, cfg)
 	if err != nil {

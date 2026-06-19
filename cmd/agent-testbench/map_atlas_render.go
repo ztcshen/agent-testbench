@@ -208,7 +208,8 @@ func mapAtlasVisibilityJS() string {
 }
 function isReverseCase(n){
   const role=String(n.role||"").toLowerCase(),caseType=String(n.caseType||"").toLowerCase(),state=String(n.stateEffect||"").toLowerCase(),mode=String(n.renderMode||"").toLowerCase();
-  return role==="validation"||role==="negative"||caseType.includes("negative")||caseType.includes("validation")||state==="unchanged"||mode==="template_patch"||!!n.baseCaseId||!!n.anchorNodeId;
+  const patchSuggestsReverse=mode==="template_patch"&&role!=="primary";
+  return role==="validation"||role==="negative"||caseType.includes("negative")||caseType.includes("validation")||state==="unchanged"||patchSuggestsReverse||!!n.baseCaseId||!!n.anchorNodeId;
 	}
 	function interfaceReverseCases(n){return interfaceCases(n).filter(isReverseCase)}
 	function interfacePrimaryCasesByKey(key){return interfaceCasesByKey(key).filter(function(item){return !isReverseCase(item)})}

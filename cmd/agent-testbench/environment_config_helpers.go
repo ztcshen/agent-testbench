@@ -10,28 +10,6 @@ import (
 	"agent-testbench/internal/store"
 )
 
-func environmentServices(services stringListFlag, repos stringListFlag, branches stringListFlag, repoRefs stringListFlag, checkouts stringListFlag) []map[string]any {
-	rows := environmentServiceRows(services, repos, branches, repoRefs, checkouts)
-	out := make([]map[string]any, 0, len(rows))
-	for _, row := range rows {
-		item := map[string]any{"id": row.ServiceID}
-		if row.RepoURL != "" {
-			item["repo"] = row.RepoURL
-		}
-		if row.Branch != "" {
-			item["branch"] = row.Branch
-		}
-		if row.Ref != "" {
-			item["ref"] = row.Ref
-		}
-		if row.Checkout != "" {
-			item["checkout"] = row.Checkout
-		}
-		out = append(out, item)
-	}
-	return out
-}
-
 func environmentServiceRows(services stringListFlag, repos stringListFlag, branches stringListFlag, repoRefs stringListFlag, checkouts stringListFlag) []store.EnvironmentService {
 	repoByService := environmentKeyValueMap(repos)
 	branchByService := environmentKeyValueMap(branches)
@@ -74,44 +52,6 @@ func environmentServiceRows(services stringListFlag, repos stringListFlag, branc
 
 func environmentServiceRowsFromJSON(services []any, repos map[string]any) []store.EnvironmentService {
 	return store.EnvironmentServicesFromJSON(services, repos, "environment.legacy-json")
-}
-
-func environmentRepoMap(repos stringListFlag, branches stringListFlag, repoRefs stringListFlag, checkouts stringListFlag) map[string]any {
-	repoByService := environmentKeyValueMap(repos)
-	branchByService := environmentKeyValueMap(branches)
-	refByService := environmentKeyValueMap(repoRefs)
-	checkoutByService := environmentKeyValueMap(checkouts)
-	ids := map[string]bool{}
-	for id := range repoByService {
-		ids[id] = true
-	}
-	for id := range branchByService {
-		ids[id] = true
-	}
-	for id := range refByService {
-		ids[id] = true
-	}
-	for id := range checkoutByService {
-		ids[id] = true
-	}
-	out := map[string]any{}
-	for id := range ids {
-		item := map[string]any{}
-		if repo := repoByService[id]; repo != "" {
-			item["url"] = repo
-		}
-		if branch := branchByService[id]; branch != "" {
-			item["branch"] = branch
-		}
-		if ref := refByService[id]; ref != "" {
-			item["ref"] = ref
-		}
-		if checkout := checkoutByService[id]; checkout != "" {
-			item["checkout"] = checkout
-		}
-		out[id] = item
-	}
-	return out
 }
 
 func environmentComposeConfig(composeFiles stringListFlag, generatedFiles stringListFlag, startCommand string, projectName string, envFiles stringListFlag, envs stringListFlag, profiles stringListFlag, services stringListFlag, skipPull bool, skipBuild bool, packageRepo string, packageBranch string, packageRef string) (map[string]any, error) {
@@ -334,32 +274,6 @@ func environmentRepoUpdateMap(repos stringListFlag, branches stringListFlag, rep
 		add(serviceID, "checkout", value)
 	}
 	return updates
-}
-
-func environmentServicesWithRepoUpdates(existing []any, updates map[string]map[string]string) []any {
-	out := make([]any, 0, len(existing)+len(updates))
-	seen := map[string]bool{}
-	for _, raw := range existing {
-		item := jsonObjectFromAny(raw)
-		serviceID := strings.TrimSpace(valueString(item["id"]))
-		if serviceID == "" {
-			continue
-		}
-		if update, ok := updates[serviceID]; ok {
-			applyEnvironmentServiceRepoUpdate(item, update)
-		}
-		seen[serviceID] = true
-		out = append(out, item)
-	}
-	for _, serviceID := range sortedMapKeys(updates) {
-		if seen[serviceID] {
-			continue
-		}
-		item := map[string]any{"id": serviceID}
-		applyEnvironmentServiceRepoUpdate(item, updates[serviceID])
-		out = append(out, item)
-	}
-	return out
 }
 
 func environmentKeyValueMap(values stringListFlag) map[string]string {

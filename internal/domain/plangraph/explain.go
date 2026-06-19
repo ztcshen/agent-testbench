@@ -28,6 +28,9 @@ func ExplainCase(graph Graph, options ExplainOptions) (Explanation, error) {
 	}
 	pathID, steps := pathPrefixToNode(graph, node.ID)
 	if pathID == "" {
+		if materialization, ok := materializationForTarget(graph, node.ID); ok {
+			return explainFixtureBackedCaseNode(graph, node, explain, materialization), nil
+		}
 		return Explanation{}, errors.New("target node is not reachable from any path")
 	}
 	explain.PathID = pathID
@@ -43,6 +46,30 @@ func ExplainCase(graph Graph, options ExplainOptions) (Explanation, error) {
 		ProvidedPropertyJSON: node.ProvidedPropertyJSON,
 	})
 	return explain, nil
+}
+
+func explainFixtureBackedCaseNode(graph Graph, node Node, explain Explanation, materialization Materialization) Explanation {
+	explain.PathID = materialization.SourcePathID
+	explain.PathSteps = pathPrefixUntilNode(graph, materialization.SourcePathID, materialization.SourceUntilNodeID)
+	explain.LogicalPath = explain.PathSteps
+	explain.Operations = append(explain.Operations, PhysicalOperation{
+		Kind:                 OperationRunPathPrefix,
+		PathID:               materialization.SourcePathID,
+		UntilNodeID:          materialization.SourceUntilNodeID,
+		MaterializationID:    materialization.ID,
+		Reason:               "replay workflow prefix required by case fixture",
+		RequiredPropertyJSON: node.RequiredPropertyJSON,
+	})
+	explain.Operations = append(explain.Operations, PhysicalOperation{
+		Kind:                 OperationRunCase,
+		NodeID:               node.ID,
+		CaseID:               node.CaseID,
+		Reason:               "run fixture-backed case as a single request",
+		PatchJSON:            node.PatchJSON,
+		RequiredPropertyJSON: node.RequiredPropertyJSON,
+		ProvidedPropertyJSON: node.ProvidedPropertyJSON,
+	})
+	return explainPathSelection(graph, explain, materialization.SourcePathID, node.ID, "selected replay path for target case precondition")
 }
 
 func explainValidationNode(graph Graph, node Node, explain Explanation) (Explanation, error) {

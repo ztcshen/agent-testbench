@@ -124,11 +124,9 @@ func mapAtlasWarnings(graph store.TestPlanGraph) []string {
 func mapAtlasNodeIsValidation(node store.TestPlanNode) bool {
 	role := strings.ToLower(node.Role)
 	state := strings.ToLower(node.StateEffect)
-	mode := strings.ToLower(node.RenderMode)
 	return role == plangraph.NodeRoleValidation ||
 		role == mapNodeRoleNegative ||
 		state == plangraph.StateEffectUnchanged ||
-		mode == "template_patch" ||
 		node.BaseCaseID != "" ||
 		node.AnchorNodeID != ""
 }

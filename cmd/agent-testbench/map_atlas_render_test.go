@@ -118,6 +118,44 @@ func TestMapAtlasDerivesValidationAnchorEdges(t *testing.T) {
 	t.Fatalf("expected generated validation edge, got %#v", edges)
 }
 
+func TestMapAtlasTreatsPrimaryPatchCaseAsMainPathNode(t *testing.T) {
+	graph := store.TestPlanGraph{
+		Nodes: []store.TestPlanNode{
+			{
+				ID:          "case.smoke.patch",
+				CaseID:      "case.smoke.patch",
+				Role:        "primary",
+				StateEffect: "advance",
+				RenderMode:  "template_patch",
+			},
+		},
+		PathSteps: []store.TestPlanPathStep{
+			{PathID: "workflow.smoke", StepIndex: 1, NodeID: "case.smoke.patch", CaseID: "case.smoke.patch", Required: true},
+		},
+	}
+
+	if mapAtlasNodeIsValidation(graph.Nodes[0]) {
+		t.Fatalf("primary workflow patch case should not be classified as validation: %#v", graph.Nodes[0])
+	}
+	if warnings := strings.Join(mapAtlasWarnings(graph), "\n"); strings.Contains(warnings, "case.smoke.patch") {
+		t.Fatalf("primary workflow patch case should be treated as path-connected:\n%s", warnings)
+	}
+
+	html, err := renderMapAtlasHTML(mapAtlasDocument{Nodes: []mapAtlasNode{{
+		ID:          "case.smoke.patch",
+		CaseID:      "case.smoke.patch",
+		Role:        "primary",
+		StateEffect: "advance",
+		RenderMode:  "template_patch",
+	}}})
+	if err != nil {
+		t.Fatalf("render atlas: %v", err)
+	}
+	if !strings.Contains(html, `mode==="template_patch"&&role!=="primary"`) {
+		t.Fatalf("browser-side reverse-case classification should not hide primary patch nodes:\n%s", html)
+	}
+}
+
 func TestMapAtlasWarningsIgnoreStandaloneValidationNodes(t *testing.T) {
 	graph := store.TestPlanGraph{
 		Nodes: []store.TestPlanNode{
