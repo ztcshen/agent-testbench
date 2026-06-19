@@ -70,6 +70,11 @@ func TestGroupedHelpShowsAreaAndExactCommandUsage(t *testing.T) {
 	if !strings.Contains(mapHelp, "Commands: map") || !strings.Contains(mapHelp, "agent-testbench map explain") || !strings.Contains(mapHelp, "agent-testbench map run") {
 		t.Fatalf("map grouped help should show map commands:\n%s", mapHelp)
 	}
+	for _, heading := range []string{"Inspect:", "Maintain:", "Plan:", "Execute:", "Review:"} {
+		if !strings.Contains(mapHelp, heading) {
+			t.Fatalf("map grouped help should include lifecycle heading %q:\n%s", heading, mapHelp)
+		}
+	}
 	if strings.Contains(mapHelp, "agent-testbench case run") || strings.Contains(mapHelp, "unknown command") {
 		t.Fatalf("map grouped help should not fall back to noisy global help:\n%s", mapHelp)
 	}
@@ -259,6 +264,82 @@ func TestCommandsSupportTaskOrientedFilters(t *testing.T) {
 		out := runCLI(t, "commands", "--all", "--filter", tt.filter, "--json")
 		if !strings.Contains(out, `"command": "`+tt.want+`"`) {
 			t.Fatalf("commands --filter %q should find %q:\n%s", tt.filter, tt.want, out)
+		}
+	}
+
+	out := runCLI(t, "commands", "--all", "--filter", "maintain map", "--json")
+	var report struct {
+		Commands []struct {
+			Command string `json:"command"`
+			Rank    int    `json:"rank"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode maintain map command catalog: %v\n%s", err, out)
+	}
+	wantOrder := []string{"map doctor", "map coverage", "map diff", "map validation list", "map validation attach"}
+	if len(report.Commands) < len(wantOrder) {
+		t.Fatalf("maintain map command catalog too short: %#v", report.Commands)
+	}
+	for i, want := range wantOrder {
+		if report.Commands[i].Command != want {
+			t.Fatalf("maintain map command %d = %q, want %q; full report: %#v", i, report.Commands[i].Command, want, report.Commands)
+		}
+		if report.Commands[i].Rank == 0 {
+			t.Fatalf("maintain map command %q should expose a stable rank: %#v", want, report.Commands[i])
+		}
+	}
+}
+
+func TestMapCommandsExposeLifecycleMetadata(t *testing.T) {
+	out := runCLI(t, "commands", "--area", "map", "--all", "--json")
+
+	var report struct {
+		OK       bool `json:"ok"`
+		Commands []struct {
+			Command   string   `json:"command"`
+			Lifecycle string   `json:"lifecycle"`
+			Tags      []string `json:"tags"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode map command catalog: %v\n%s", err, out)
+	}
+	if !report.OK || len(report.Commands) == 0 {
+		t.Fatalf("map command catalog should be populated: %#v", report)
+	}
+	wantLifecycle := map[string]string{
+		"map list":              "inspect",
+		"map workflows":         "inspect",
+		"map coverage":          "inspect",
+		"map plans":             "inspect",
+		"map doctor":            "maintain",
+		"map diff":              "maintain",
+		"map validation list":   "maintain",
+		"map validation attach": "maintain",
+		"map update":            "maintain",
+		"map snapshot":          "maintain",
+		"map publish":           "maintain",
+		"map explain":           "plan",
+		"map plan inspect":      "plan",
+		"map run explain":       "plan",
+		"map run":               "execute",
+		"map gate":              "execute",
+		"map atlas":             "review",
+	}
+	seen := map[string]string{}
+	for _, item := range report.Commands {
+		seen[item.Command] = item.Lifecycle
+		if item.Lifecycle == "" {
+			t.Fatalf("map command %q missing lifecycle metadata: %#v", item.Command, item)
+		}
+		if !stringSliceContains(item.Tags, item.Lifecycle) {
+			t.Fatalf("map command %q should include lifecycle tag %q: %#v", item.Command, item.Lifecycle, item.Tags)
+		}
+	}
+	for command, lifecycle := range wantLifecycle {
+		if seen[command] != lifecycle {
+			t.Fatalf("map command %q lifecycle = %q, want %q; seen=%#v", command, seen[command], lifecycle, seen)
 		}
 	}
 }

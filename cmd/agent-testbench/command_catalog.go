@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -29,6 +30,8 @@ type commandCatalogItem struct {
 	Audience    string   `json:"audience"`
 	Stability   string   `json:"stability"`
 	Replacement string   `json:"replacement,omitempty"`
+	Lifecycle   string   `json:"lifecycle,omitempty"`
+	Rank        int      `json:"rank,omitempty"`
 }
 
 type commandCatalogOptions struct {
@@ -130,6 +133,7 @@ func commandCatalogForAreaWithOptions(filter string, area string, options comman
 		seen[item.Command] = len(report.Commands)
 		report.Commands = append(report.Commands, item)
 	}
+	sortCommandCatalog(report.Commands, filter)
 	report.Count = len(report.Commands)
 	return report
 }
@@ -172,8 +176,11 @@ func commandCatalogItemFromUsage(usage string) commandCatalogItem {
 		area = path[0]
 	}
 	command := strings.Join(path, " ")
-	tags := commandCatalogTags(command, area, usage)
 	metadata := commandCatalogMetadata(command, area, usage)
+	tags := commandCatalogTags(command, area, usage)
+	if metadata.Lifecycle != "" {
+		tags = append(tags, metadata.Lifecycle)
+	}
 	return commandCatalogItem{
 		Command:     command,
 		Area:        area,
@@ -185,6 +192,8 @@ func commandCatalogItemFromUsage(usage string) commandCatalogItem {
 		Audience:    metadata.Audience,
 		Stability:   metadata.Stability,
 		Replacement: metadata.Replacement,
+		Lifecycle:   metadata.Lifecycle,
+		Rank:        metadata.Rank,
 	}
 }
 
@@ -221,10 +230,17 @@ type commandCatalogMetadataReport struct {
 	Audience    string
 	Stability   string
 	Replacement string
+	Lifecycle   string
+	Rank        int
 }
 
 func commandCatalogMetadata(command string, area string, usage string) commandCatalogMetadataReport {
 	metadata := commandCatalogMetadataReport{Tier: commandCatalogTierAdvanced, Audience: commandCatalogAudienceOperator, Stability: commandCatalogStabilityStable}
+	if area == "map" {
+		metadata.Audience = commandCatalogAudienceAgent
+		metadata.Lifecycle = commandCatalogMapLifecycle(command)
+		metadata.Rank = commandCatalogTaskRank(command)
+	}
 	if strings.Contains(usage, "--offline-template-package") || strings.Contains(usage, "--case PATH") {
 		metadata.Tier = commandCatalogTierCompat
 		metadata.Audience = commandCatalogAudienceAgent
@@ -246,9 +262,6 @@ func commandCatalogMetadata(command string, area string, usage string) commandCa
 	if replacement, ok := commandCatalogAdvancedReplacements()[command]; ok {
 		metadata.Replacement = replacement
 	}
-	if area == "map" {
-		metadata.Audience = commandCatalogAudienceAgent
-	}
 	if area == "profile" || area == "template-package" || area == "runtime" || area == "executor" || area == "trace" || area == "replay" {
 		metadata.Audience = commandCatalogAudienceDeveloper
 	}
@@ -256,6 +269,93 @@ func commandCatalogMetadata(command string, area string, usage string) commandCa
 		metadata.Audience = commandCatalogAudienceOperator
 	}
 	return metadata
+}
+
+func commandCatalogMapLifecycle(command string) string {
+	switch command {
+	case "map list", "map workflows", "map coverage", "map plans", "map versions":
+		return "inspect"
+	case "map import-workflows", "map doctor", "map diff", "map validation list", "map validation attach", "map update", "map snapshot", "map publish":
+		return "maintain"
+	case "map explain", "map plan inspect", "map run explain":
+		return "plan"
+	case "map run", "map gate":
+		return "execute"
+	case "map atlas":
+		return "review"
+	default:
+		return ""
+	}
+}
+
+func commandCatalogTaskRank(command string) int {
+	switch command {
+	case "map doctor":
+		return 10
+	case "map coverage":
+		return 20
+	case "map diff":
+		return 30
+	case "map validation list":
+		return 40
+	case "map validation attach":
+		return 50
+	case "map update":
+		return 60
+	case "map snapshot":
+		return 70
+	case "map publish":
+		return 80
+	case "map versions":
+		return 90
+	case "map import-workflows":
+		return 100
+	case "map list":
+		return 110
+	case "map workflows":
+		return 120
+	case "map explain":
+		return 210
+	case "map plan inspect":
+		return 220
+	case "map run":
+		return 230
+	case "map gate":
+		return 240
+	case "map run explain":
+		return 250
+	case "map plans":
+		return 260
+	case "map atlas":
+		return 310
+	default:
+		return 0
+	}
+}
+
+func sortCommandCatalog(commands []commandCatalogItem, filter string) {
+	needle := normalizedDiscoveryText(filter)
+	if needle == "" {
+		return
+	}
+	if !strings.Contains(needle, "maintainmap") && !strings.Contains(needle, "executemap") {
+		return
+	}
+	sort.SliceStable(commands, func(i, j int) bool {
+		left := commandCatalogSortRank(commands[i])
+		right := commandCatalogSortRank(commands[j])
+		if left != right {
+			return left < right
+		}
+		return commands[i].Command < commands[j].Command
+	})
+}
+
+func commandCatalogSortRank(item commandCatalogItem) int {
+	if item.Rank > 0 {
+		return item.Rank
+	}
+	return 100000
 }
 
 func commandCatalogDailyCommands() map[string]bool {
@@ -415,6 +515,9 @@ func printCommandCatalog(report commandCatalogReport) {
 	for _, item := range report.Commands {
 		fmt.Printf("- %s [%s]\n", item.Command, item.Area)
 		fmt.Printf("  Tier: %s Audience: %s Stability: %s\n", item.Tier, item.Audience, item.Stability)
+		if item.Lifecycle != "" {
+			fmt.Printf("  Lifecycle: %s\n", item.Lifecycle)
+		}
 		if item.Replacement != "" {
 			fmt.Printf("  Replacement: %s\n", item.Replacement)
 		}
@@ -449,11 +552,59 @@ func commandHelpText(prefix []string) (string, error) {
 	}
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "Commands: %s\n\nUsage:\n", command)
-	for _, item := range matches {
-		fmt.Fprintf(&builder, "  %s\n", item.Usage)
+	if command == "map" && len(prefix) == 1 {
+		appendMapLifecycleHelp(&builder, matches)
+	} else {
+		for _, item := range matches {
+			fmt.Fprintf(&builder, "  %s\n", item.Usage)
+		}
 	}
 	fmt.Fprintf(&builder, "\nUse `agent-testbench commands --filter %q --all` for machine-readable metadata.", command)
 	return strings.TrimRight(builder.String(), "\n"), nil
+}
+
+func appendMapLifecycleHelp(builder *strings.Builder, matches []commandCatalogItem) {
+	byLifecycle := map[string][]commandCatalogItem{}
+	for _, item := range matches {
+		lifecycle := item.Lifecycle
+		if lifecycle == "" {
+			lifecycle = "other"
+		}
+		byLifecycle[lifecycle] = append(byLifecycle[lifecycle], item)
+	}
+	for _, group := range commandCatalogMapLifecycleGroups() {
+		items := byLifecycle[group.ID]
+		if len(items) == 0 {
+			continue
+		}
+		sort.SliceStable(items, func(i, j int) bool {
+			left := commandCatalogSortRank(items[i])
+			right := commandCatalogSortRank(items[j])
+			if left != right {
+				return left < right
+			}
+			return items[i].Command < items[j].Command
+		})
+		fmt.Fprintf(builder, "\n%s:\n", group.Label)
+		for _, item := range items {
+			fmt.Fprintf(builder, "  %s\n", item.Usage)
+		}
+	}
+}
+
+type commandCatalogLifecycleGroup struct {
+	ID    string
+	Label string
+}
+
+func commandCatalogMapLifecycleGroups() []commandCatalogLifecycleGroup {
+	return []commandCatalogLifecycleGroup{
+		{ID: "inspect", Label: "Inspect"},
+		{ID: "maintain", Label: "Maintain"},
+		{ID: "plan", Label: "Plan"},
+		{ID: "execute", Label: "Execute"},
+		{ID: "review", Label: "Review"},
+	}
 }
 
 func printCommandHelp(prefix []string) error {
