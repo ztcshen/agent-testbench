@@ -19,6 +19,7 @@ const (
 	sandboxDockerInfoCommand                = "info"
 	sandboxComposeProfileOption             = "--profile"
 	sandboxDockerContextOption              = "--context"
+	sandboxDockerShortContextOption         = "-c"
 	sandboxSudoCommandToken                 = "sudo"
 )
 
@@ -446,7 +447,9 @@ func sandboxDockerCommandSpecFromDockerCLI(fields []string) (sandboxDockerComman
 		infoCommand := append([]string{}, commandPrefix...)
 		infoCommand = append(infoCommand, fields[index+1:commandIndex]...)
 		infoCommand = append(infoCommand, sandboxDockerInfoCommand)
-		composeCommand := []string{"docker", "compose"}
+		composeCommand := append([]string{}, commandPrefix...)
+		composeCommand = append(composeCommand, fields[index+1:commandIndex]...)
+		composeCommand = append(composeCommand, "compose")
 		if commandIndex < len(fields) && fields[commandIndex] == "compose" {
 			composeEnd := sandboxComposeCommandBaseEnd(fields, commandIndex+1)
 			composeCommand = append([]string{}, commandPrefix...)
@@ -511,7 +514,7 @@ func sandboxDockerSubcommandIndex(fields []string, start int) int {
 
 func sandboxDockerOptionTakesValue(field string) bool {
 	switch strings.TrimSpace(field) {
-	case "--config", sandboxDockerContextOption, "--host", "-H", "--log-level", "--tlscacert", "--tlscert", "--tlskey":
+	case "--config", sandboxDockerContextOption, sandboxDockerShortContextOption, "--host", "-H", "--log-level", "--tlscacert", "--tlscert", "--tlskey":
 		return true
 	default:
 		return false

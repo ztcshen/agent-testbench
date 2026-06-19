@@ -289,6 +289,11 @@ func TestSandboxDockerPreflightPreservesDockerGlobalOptions(t *testing.T) {
 			want: []string{"docker", sandboxDockerContextOption, "remote", "info"},
 		},
 		{
+			name: "short context",
+			in:   "docker -c remote compose up -d worker-service",
+			want: []string{"docker", sandboxDockerShortContextOption, "remote", "info"},
+		},
+		{
 			name: "host",
 			in:   "docker -H ssh://host compose up -d worker-service",
 			want: []string{"docker", "-H", "ssh://host", "info"},
@@ -315,6 +320,18 @@ func TestSandboxDockerPreflightPreservesDockerGlobalOptions(t *testing.T) {
 				t.Fatalf("preflight command = %#v, want %#v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSandboxDockerCommandSpecReusesConfiguredDockerForComposeChecks(t *testing.T) {
+	spec := sandboxDockerCommandSpecFor("/opt/bin/docker --context remote start sandbox-worker-service")
+	wantInfo := []string{"/opt/bin/docker", sandboxDockerContextOption, "remote", "info"}
+	wantCompose := []string{"/opt/bin/docker", sandboxDockerContextOption, "remote", "compose"}
+	if !reflect.DeepEqual(spec.InfoCommand, wantInfo) {
+		t.Fatalf("info command = %#v, want %#v", spec.InfoCommand, wantInfo)
+	}
+	if !reflect.DeepEqual(spec.ComposeCommand, wantCompose) {
+		t.Fatalf("compose command = %#v, want %#v", spec.ComposeCommand, wantCompose)
 	}
 }
 
