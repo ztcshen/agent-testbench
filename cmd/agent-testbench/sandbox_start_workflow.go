@@ -17,6 +17,7 @@ const (
 	sandboxDockerDaemonUnavailableReadiness = "docker-daemon-unavailable"
 	sandboxDockerComposeLegacyCommandToken  = "docker-compose"
 	sandboxDockerInfoCommand                = "info"
+	sandboxComposeProfileOption             = "--profile"
 )
 
 type sandboxDockerCommandSpec struct {
@@ -503,16 +504,23 @@ func sandboxDockerCommandSpecFromComposeWrapper(fields []string) (sandboxDockerC
 
 func sandboxDockerSubcommandIndex(fields []string, start int) int {
 	for index := start; index < len(fields); index++ {
-		if sandboxDockerSubcommandToken(fields[index]) {
+		field := strings.TrimSpace(fields[index])
+		if field == "" {
+			continue
+		}
+		if !strings.HasPrefix(field, "-") {
 			return index
+		}
+		if sandboxDockerOptionTakesValue(field) && !strings.Contains(field, "=") && index+1 < len(fields) {
+			index++
 		}
 	}
 	return -1
 }
 
-func sandboxDockerSubcommandToken(field string) bool {
+func sandboxDockerOptionTakesValue(field string) bool {
 	switch strings.TrimSpace(field) {
-	case "attach", "build", "compose", "config", "context", "cp", "create", "exec", "images", "info", "inspect", "kill", "logs", "network", "pause", "ps", "pull", "push", "restart", "rm", "run", "start", "stats", "stop", "system", "unpause", "volume", "wait":
+	case "--config", "--context", "--host", "-H", "--log-level", "--tlscacert", "--tlscert", "--tlskey":
 		return true
 	default:
 		return false
@@ -521,16 +529,23 @@ func sandboxDockerSubcommandToken(field string) bool {
 
 func sandboxComposeCommandBaseEnd(fields []string, start int) int {
 	for index := start; index < len(fields); index++ {
-		if sandboxComposeLifecycleCommand(fields[index]) {
+		field := strings.TrimSpace(fields[index])
+		if field == "" {
+			continue
+		}
+		if !strings.HasPrefix(field, "-") {
 			return index
+		}
+		if sandboxComposeOptionTakesValue(field) && !strings.Contains(field, "=") && index+1 < len(fields) {
+			index++
 		}
 	}
 	return len(fields)
 }
 
-func sandboxComposeLifecycleCommand(field string) bool {
+func sandboxComposeOptionTakesValue(field string) bool {
 	switch strings.TrimSpace(field) {
-	case "build", "config", "cp", "create", "down", "exec", "images", "kill", "logs", "ls", "pause", "port", "ps", "pull", "push", "restart", "rm", "run", "start", "stop", "top", "unpause", "up", "version", "wait":
+	case "--ansi", "--env-file", "--file", "-f", "--parallel", sandboxComposeProfileOption, "--progress", "--project-directory", "--project-name", "-p":
 		return true
 	default:
 		return false
