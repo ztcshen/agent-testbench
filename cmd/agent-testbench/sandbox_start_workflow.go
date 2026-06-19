@@ -18,6 +18,8 @@ const (
 	sandboxDockerComposeLegacyCommandToken  = "docker-compose"
 	sandboxDockerInfoCommand                = "info"
 	sandboxComposeProfileOption             = "--profile"
+	sandboxDockerContextOption              = "--context"
+	sandboxSudoCommandToken                 = "sudo"
 )
 
 type sandboxDockerCommandSpec struct {
@@ -338,20 +340,9 @@ func sandboxStartCommandUsesCompose(fields []string) bool {
 		if field == sandboxDockerComposeLegacyCommandToken {
 			return true
 		}
-		if field == "compose" && sandboxStartCommandHasDockerBinaryBefore(fields, index) {
-			return true
-		}
-		if sandboxStartDockerBinaryToken(field) && index+1 < len(fields) && fields[index+1] == "compose" {
-			return true
-		}
-	}
-	return false
-}
-
-func sandboxStartCommandHasDockerBinaryBefore(fields []string, before int) bool {
-	for index := 0; index < before && index < len(fields); index++ {
-		if sandboxStartDockerBinaryToken(fields[index]) {
-			return true
+		if sandboxStartDockerBinaryToken(field) {
+			commandIndex := sandboxDockerSubcommandIndex(fields, index+1)
+			return commandIndex >= 0 && commandIndex < len(fields) && fields[commandIndex] == "compose"
 		}
 	}
 	return false
@@ -485,8 +476,8 @@ func sandboxDockerCommandSpecFromLegacyCompose(fields []string) (sandboxDockerCo
 }
 
 func sandboxDockerExecutablePrefix(fields []string, index int) []string {
-	if index == 1 && len(fields) > 1 && fields[0] == "sudo" {
-		return []string{fields[0], fields[index]}
+	if index > 0 && len(fields) > index && fields[0] == sandboxSudoCommandToken {
+		return append([]string{}, fields[:index+1]...)
 	}
 	return []string{fields[index]}
 }
@@ -520,7 +511,7 @@ func sandboxDockerSubcommandIndex(fields []string, start int) int {
 
 func sandboxDockerOptionTakesValue(field string) bool {
 	switch strings.TrimSpace(field) {
-	case "--config", "--context", "--host", "-H", "--log-level", "--tlscacert", "--tlscert", "--tlskey":
+	case "--config", sandboxDockerContextOption, "--host", "-H", "--log-level", "--tlscacert", "--tlscert", "--tlskey":
 		return true
 	default:
 		return false

@@ -142,7 +142,7 @@ func apiCaseBatchPlanningBundle(ctx context.Context, runtime store.Store, fallba
 		return fallback
 	}
 	refreshed := profilecatalog.ToBundle(catalog)
-	if len(refreshed.FailureCategories) == 0 && len(fallback.FailureCategories) > 0 {
+	if len(refreshed.FailureCategories) == 0 && len(fallback.FailureCategories) > 0 && strings.TrimSpace(refreshed.ID) == strings.TrimSpace(fallback.ID) {
 		refreshed.FailureCategories = append([]profile.FailureCategoryRule(nil), fallback.FailureCategories...)
 	}
 	return refreshed

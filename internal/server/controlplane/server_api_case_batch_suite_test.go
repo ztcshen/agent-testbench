@@ -110,6 +110,75 @@ func TestServerExposesAPICaseBatchFailureSummary(t *testing.T) {
 	}
 }
 
+func TestServerDoesNotReuseFallbackFailureRulesAcrossProfileCatalogs(t *testing.T) {
+	ctx, s := openAPICaseBatchSQLiteStore(t)
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not ok", http.StatusInternalServerError)
+	}))
+	defer target.Close()
+
+	dir := t.TempDir()
+	fallback := profile.Bundle{
+		ID: "fallback-profile",
+		FailureCategories: []profile.FailureCategoryRule{{
+			Name: "Fallback product errors",
+			Matchers: profile.FailureCategoryMatchers{
+				Statuses:          []string{store.StatusFailed},
+				FailureCategories: []string{"assertion-mismatch"},
+			},
+		}},
+	}
+	storeBundle := profile.Bundle{
+		ID: "store-profile",
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.store", DisplayName: "Store Node", Operation: "Store Failure"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.store.fail", DisplayName: "Store Failing Case", NodeID: "node.store", CasePath: writeAPICaseBatchGETCase(t, dir, "case.store.fail", "/v1/store/fail"), BaseURL: target.URL, EvidenceDir: filepath.Join(dir, "evidence")},
+		},
+	}
+	if err := s.ReplaceProfileCatalog(ctx, profilecatalog.FromBundle(storeBundle, time.Now().UTC())); err != nil {
+		t.Fatalf("replace store profile catalog: %v", err)
+	}
+	server := httptest.NewServer(controlplane.NewWithStore(fallback, s))
+	defer server.Close()
+
+	var created struct {
+		ReportURL         string `json:"reportUrl"`
+		FailureSummaryURL string `json:"failureSummaryUrl"`
+	}
+	postJSONInto(t, server.URL+"/api/cases/batch-runs", `{"requestId":"profile-mismatch-001","caseIds":["case.store.fail"]}`, http.StatusAccepted, &created)
+	if created.FailureSummaryURL == "" {
+		t.Fatalf("failure summary url missing: %#v", created)
+	}
+	report := waitAPICaseBatchReport(t, server.URL+created.ReportURL)
+	if report.ProfileID != "store-profile" || report.OK || report.Failed != 1 {
+		t.Fatalf("store profile batch report = %#v", report)
+	}
+
+	summaryResp, err := http.Get(server.URL + created.FailureSummaryURL)
+	if err != nil {
+		t.Fatalf("get failure summary: %v", err)
+	}
+	defer summaryResp.Body.Close()
+	var summary struct {
+		Failures []struct {
+			CaseID          string `json:"caseId"`
+			FailureCategory string `json:"failureCategory"`
+		} `json:"failures"`
+	}
+	if err := json.NewDecoder(summaryResp.Body).Decode(&summary); err != nil {
+		t.Fatalf("decode failure summary: %v", err)
+	}
+	if len(summary.Failures) != 1 || summary.Failures[0].CaseID != "case.store.fail" {
+		t.Fatalf("profile mismatch failure summary = %#v", summary)
+	}
+	if summary.Failures[0].FailureCategory != "assertion-mismatch" {
+		t.Fatalf("store profile must not use fallback failure rule, got %#v", summary.Failures[0])
+	}
+}
+
 func TestServerStartsAsyncAPICaseBatchRunForMaintainedSuiteRunStates(t *testing.T) {
 	ctx, s := openAPICaseBatchSQLiteStore(t)
 

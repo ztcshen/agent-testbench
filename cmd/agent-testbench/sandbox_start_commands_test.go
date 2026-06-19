@@ -286,7 +286,7 @@ func TestSandboxDockerPreflightPreservesDockerGlobalOptions(t *testing.T) {
 		{
 			name: "context",
 			in:   "docker --context remote compose up -d worker-service",
-			want: []string{"docker", "--context", "remote", "info"},
+			want: []string{"docker", sandboxDockerContextOption, "remote", "info"},
 		},
 		{
 			name: "host",
@@ -296,7 +296,17 @@ func TestSandboxDockerPreflightPreservesDockerGlobalOptions(t *testing.T) {
 		{
 			name: "sudo context",
 			in:   "sudo docker --context remote compose up -d worker-service",
-			want: []string{"sudo", "docker", "--context", "remote", "info"},
+			want: []string{sandboxSudoCommandToken, "docker", sandboxDockerContextOption, "remote", "info"},
+		},
+		{
+			name: "sudo non interactive",
+			in:   "sudo -n docker compose up -d worker-service",
+			want: []string{sandboxSudoCommandToken, "-n", "docker", "info"},
+		},
+		{
+			name: "sudo preserve env context",
+			in:   "sudo -E docker --context remote compose up -d worker-service",
+			want: []string{sandboxSudoCommandToken, "-E", "docker", sandboxDockerContextOption, "remote", "info"},
 		},
 	}
 	for _, tt := range tests {
@@ -312,6 +322,13 @@ func TestSandboxStartComposeServiceIgnoresNonDockerComposeText(t *testing.T) {
 	service := store.CatalogService{StartupCommand: "printf compose up worker-service"}
 	if got := sandboxStartComposeService(service, service.StartupCommand); got != "" {
 		t.Fatalf("non-Docker startup text should not infer compose service, got %q", got)
+	}
+}
+
+func TestSandboxStartComposeServiceIgnoresDockerRunArgsWithComposeText(t *testing.T) {
+	service := store.CatalogService{StartupCommand: "docker run alpine compose up worker-service"}
+	if got := sandboxStartComposeService(service, service.StartupCommand); got != "" {
+		t.Fatalf("docker run command args should not infer compose service, got %q", got)
 	}
 }
 
