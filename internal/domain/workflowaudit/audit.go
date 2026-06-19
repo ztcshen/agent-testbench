@@ -236,12 +236,10 @@ func workflowStepContextIssues(configs []profile.TemplateConfig, bindings []prof
 		return ordered[i].StepID < ordered[j].StepID
 	})
 	workflowID := strings.TrimSpace(ordered[0].WorkflowID)
-	configByStep := workflowStepConfigByStep(configs, workflowID)
-	configByCase := workflowCaseConfigByCase(configs)
 	provided := map[string]bool{}
 	var issues []Issue
 	for _, binding := range ordered {
-		docs := workflowBindingConfigDocuments(configByStep, configByCase, binding)
+		docs := workflowBindingConfigDocuments(configs, workflowID, binding)
 		if len(docs) == 0 {
 			continue
 		}
@@ -275,38 +273,44 @@ func workflowStepContextIssues(configs []profile.TemplateConfig, bindings []prof
 	return issues
 }
 
-func workflowBindingConfigDocuments(configByStep map[string]profile.TemplateConfig, configByCase map[string]profile.TemplateConfig, binding profile.WorkflowBinding) []map[string]any {
-	docs := []map[string]any{}
-	if config, ok := configByStep[binding.StepID]; ok {
-		docs = append(docs, stepConfigDocument(config.ConfigJSON))
+func workflowBindingConfigDocuments(configs []profile.TemplateConfig, workflowID string, binding profile.WorkflowBinding) []map[string]any {
+	if doc, ok := workflowStepExecutionConfigDocument(configs, workflowID, binding.StepID); ok {
+		return []map[string]any{doc}
 	}
-	if config, ok := configByCase[binding.CaseID]; ok {
-		docs = append(docs, stepConfigDocument(config.ConfigJSON))
+	if doc, ok := workflowCaseExecutionConfigDocument(configs, binding.CaseID); ok {
+		return []map[string]any{doc}
 	}
-	return docs
+	return nil
 }
 
-func workflowStepConfigByStep(configs []profile.TemplateConfig, workflowID string) map[string]profile.TemplateConfig {
-	out := map[string]profile.TemplateConfig{}
+func workflowStepExecutionConfigDocument(configs []profile.TemplateConfig, workflowID string, stepID string) (map[string]any, bool) {
 	for _, config := range configs {
 		if !visibleWorkflowAuditConfigStatus(config.Status) || strings.TrimSpace(config.ScopeType) != templateConfigScopeStep || strings.TrimSpace(config.WorkflowID) != workflowID || strings.TrimSpace(config.ScopeID) == "" {
 			continue
 		}
-		out[config.ScopeID] = config
-	}
-	return out
-}
-
-func workflowCaseConfigByCase(configs []profile.TemplateConfig) map[string]profile.TemplateConfig {
-	out := map[string]profile.TemplateConfig{}
-	for _, config := range configs {
-		scopeType := strings.TrimSpace(config.ScopeType)
-		if !visibleWorkflowAuditConfigStatus(config.Status) || (scopeType != templateConfigScopeAPICase && scopeType != templateConfigScopeCase) || strings.TrimSpace(config.ScopeID) == "" {
+		if strings.TrimSpace(config.ScopeID) != stepID {
 			continue
 		}
-		out[config.ScopeID] = config
+		doc := stepConfigDocument(config.ConfigJSON)
+		if stepConfigHasCaseExecution(doc) {
+			return doc, true
+		}
 	}
-	return out
+	return nil, false
+}
+
+func workflowCaseExecutionConfigDocument(configs []profile.TemplateConfig, caseID string) (map[string]any, bool) {
+	for _, config := range configs {
+		if !visibleWorkflowAuditConfigStatus(config.Status) {
+			continue
+		}
+		doc := stepConfigDocument(config.ConfigJSON)
+		if strings.TrimSpace(stepConfigString(doc["caseId"])) != caseID || !stepConfigHasCaseExecution(doc) {
+			continue
+		}
+		return doc, true
+	}
+	return nil, false
 }
 
 func visibleWorkflowAuditConfigStatus(status string) bool {
@@ -334,6 +338,16 @@ func stepConfigList(value any) []map[string]any {
 		}
 	}
 	return out
+}
+
+func stepConfigHasCaseExecution(doc map[string]any) bool {
+	execution, ok := doc["caseExecution"].(map[string]any)
+	if !ok {
+		return false
+	}
+	return strings.TrimSpace(stepConfigString(execution["method"])) != "" ||
+		strings.TrimSpace(stepConfigString(execution["path"])) != "" ||
+		strings.TrimSpace(stepConfigString(execution["nodeId"])) != ""
 }
 
 func stepConfigString(value any) string {
