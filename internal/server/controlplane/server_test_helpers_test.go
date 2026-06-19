@@ -21,6 +21,7 @@ import (
 type apiCaseBatchReportForTest struct {
 	OK                   bool   `json:"ok"`
 	BatchRunID           string `json:"batchRunId"`
+	ProfileID            string `json:"profileId"`
 	Status               string `json:"status"`
 	WorkflowID           string `json:"workflowId"`
 	HTMLReportPath       string `json:"htmlReportPath"`

@@ -1,6 +1,8 @@
 package mapplanner
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 
 	"agent-testbench/internal/domain/plangraph"
@@ -22,7 +24,7 @@ func (b *planBuilder) prepareReplayGroup(plan *Plan, node plangraph.Node, task P
 	groupIndex, ok := b.replayGroupByKey[key]
 	if !ok {
 		group := ReplayGroup{
-			ID:                "replay." + safeID(firstNonEmpty(node.InterfaceNodeID, "interface")) + "." + safeID(firstNonEmpty(node.AnchorNodeID, task.UntilNodeID, "anchor")) + "." + safeID(family),
+			ID:                replayGroupID(node, family, task),
 			InterfaceNodeID:   node.InterfaceNodeID,
 			AnchorNodeID:      node.AnchorNodeID,
 			AnchorCaseID:      node.BaseCaseID,
@@ -46,6 +48,27 @@ func (b *planBuilder) prepareReplayGroup(plan *Plan, node plangraph.Node, task P
 		reusedTaskID = b.replayTaskByGroup[group.ID]
 	}
 	return group.ID, reusedTaskID, reusable
+}
+
+func replayGroupID(node plangraph.Node, family string, task PhysicalTask) string {
+	return strings.Join([]string{
+		"replay",
+		replayGroupIDComponent(firstNonEmpty(node.InterfaceNodeID, "interface")),
+		replayGroupIDComponent(firstNonEmpty(node.AnchorNodeID, task.UntilNodeID, "anchor")),
+		replayGroupIDComponent(firstNonEmpty(family, "family")),
+		replayGroupIDComponent(firstNonEmpty(task.PathID, "path")),
+		replayGroupIDComponent(firstNonEmpty(task.UntilNodeID, "until")),
+		replayGroupIDComponent(firstNonEmpty(task.MaterializationID, "materialization")),
+	}, ".")
+}
+
+func replayGroupIDComponent(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		value = "unknown"
+	}
+	sum := sha256.Sum256([]byte(value))
+	return safeID(value) + "_" + hex.EncodeToString(sum[:6])
 }
 
 func (b *planBuilder) addReplayGroupTask(plan *Plan, groupID string, taskID string) {

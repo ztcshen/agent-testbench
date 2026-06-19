@@ -505,11 +505,29 @@ func (e mapRunExecutor) finishTask(task *store.TestMapPlanTask, status string, s
 		task.StartedAt = finishedAt
 	}
 	if len(summary) > 0 {
+		summary = mapRunTaskSummaryWithPlannerMetadata(task.SummaryJSON, summary)
 		task.SummaryJSON = mustCompactJSON(summary)
 	}
 	if status == store.StatusFailed || status == mapplanner.TaskStatusBlocked {
 		task.Reason = firstNonEmpty(valueString(summary["error"]), task.Reason)
 	}
+}
+
+func mapRunTaskSummaryWithPlannerMetadata(existingRaw string, summary map[string]any) map[string]any {
+	existing := jsonObjectString(existingRaw)
+	out := map[string]any{}
+	for key, value := range summary {
+		out[key] = value
+	}
+	for _, key := range []string{"replayGroupId", "interfaceNodeId", "anchorNodeId", "validationFamily"} {
+		if _, ok := out[key]; ok {
+			continue
+		}
+		if value := valueString(existing[key]); value != "" {
+			out[key] = value
+		}
+	}
+	return out
 }
 
 func taskUntilNodeID(task store.TestMapPlanTask) string {

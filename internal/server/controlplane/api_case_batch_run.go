@@ -141,7 +141,11 @@ func apiCaseBatchPlanningBundle(ctx context.Context, runtime store.Store, fallba
 	if err != nil || strings.TrimSpace(catalog.ProfileID) == "" {
 		return fallback
 	}
-	return profilecatalog.ToBundle(catalog)
+	refreshed := profilecatalog.ToBundle(catalog)
+	if len(refreshed.FailureCategories) == 0 && len(fallback.FailureCategories) > 0 && strings.TrimSpace(refreshed.ID) == strings.TrimSpace(fallback.ID) {
+		refreshed.FailureCategories = append([]profile.FailureCategoryRule(nil), fallback.FailureCategories...)
+	}
+	return refreshed
 }
 
 func validateAPICaseBatchEnvironmentWorkflowGate(ctx context.Context, runtime store.Store, request apiCaseBatchRunRequest) (int, error) {

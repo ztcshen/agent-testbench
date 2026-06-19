@@ -173,6 +173,98 @@ func TestExplainGroupsValidationCasesByReusableReplayCheckpoint(t *testing.T) {
 	}
 }
 
+func TestExplainSeparatesReplayGroupsByReplaySource(t *testing.T) {
+	graph := validationCaseGraph()
+	graph.Paths = append(graph.Paths, plangraph.Path{MapID: "map.contract", ID: "a", WorkflowID: "workflow.a", Status: "active", SummaryJSON: `{}`, SortOrder: 2})
+	graph.PathSteps = append(graph.PathSteps,
+		plangraph.PathStep{MapID: "map.contract", PathID: "a_b", StepIndex: 1, StepID: "c", NodeID: "c", CaseID: "case.c", Required: true, SummaryJSON: `{}`},
+		plangraph.PathStep{MapID: "map.contract", PathID: "a", StepIndex: 1, StepID: "b", NodeID: "b", CaseID: "case.b", Required: true, SummaryJSON: `{}`},
+	)
+	graph.Paths[0].ID = "a_b"
+	graph.Paths[0].WorkflowID = "workflow.a_b"
+	graph.Edges[0].PathID = "a_b"
+	graph.PathSteps[0].PathID = "a_b"
+	graph.Materializations[0].ID = "m"
+	graph.Materializations[0].FixtureID = "m"
+	graph.Materializations[0].SourcePathID = "a_b"
+	graph.Materializations[0].SourceWorkflowID = "workflow.a_b"
+	graph.Materializations[0].SourceUntilStep = "c"
+	graph.Materializations[0].SourceUntilNodeID = "c"
+	graph.Edges[1].MaterializationID = "m"
+	graph.Nodes[2].InterfaceNodeID = "interface.submit"
+	graph.Nodes[2].SummaryJSON = `{"validationFamily":"empty/null"}`
+	graph.Nodes = append(graph.Nodes, plangraph.Node{
+		MapID:                "map.contract",
+		ID:                   "case.submit.missing-amount",
+		CaseID:               "case.submit.missing-amount",
+		Role:                 "validation",
+		StateEffect:          "unchanged",
+		BaseCaseID:           "case.submit",
+		AnchorNodeID:         "case.submit",
+		InterfaceNodeID:      "interface.submit",
+		RequiredPropertyJSON: `{"samePreconditionAsCase":"case.submit"}`,
+		ProvidedPropertyJSON: `{"state":"prepared"}`,
+		SummaryJSON:          `{"validationFamily":"empty/null"}`,
+		SortOrder:            4,
+	})
+	graph.Edges = append(graph.Edges, plangraph.Edge{
+		MapID:             "map.contract",
+		ID:                "edge.fixture.amount",
+		FromNodeID:        "case.prepare",
+		ToNodeID:          "case.submit.missing-amount",
+		Kind:              "fixture",
+		MaterializationID: "c_m",
+		Required:          true,
+		MappingsJSON:      `[]`,
+		SummaryJSON:       `{}`,
+		SortOrder:         3,
+	})
+	graph.Materializations = append(graph.Materializations, plangraph.Materialization{
+		MapID:             "map.contract",
+		ID:                "c_m",
+		FixtureID:         "c_m",
+		SourcePathID:      "a",
+		SourceWorkflowID:  "workflow.a",
+		SourceUntilStep:   "b",
+		SourceUntilNodeID: "b",
+		SnapshotKind:      "workflow_prefix",
+		Status:            "active",
+		SummaryJSON:       `{}`,
+		SortOrder:         2,
+	})
+
+	plan, err := mapplanner.Explain(graph, mapplanner.Query{
+		MapID:            "map.contract",
+		Scope:            mapplanner.ScopeCases,
+		InterfaceNodeID:  "interface.submit",
+		ValidationFamily: "empty/null",
+		PlannerMode:      mapplanner.ModeExplain,
+	})
+	if err != nil {
+		t.Fatalf("explain validation replay source groups: %v", err)
+	}
+
+	groupIDs := map[string]bool{}
+	for _, group := range plan.ReplayGroups {
+		if groupIDs[group.ID] {
+			t.Fatalf("replay group id should include replay source, duplicate %q in %#v", group.ID, plan.ReplayGroups)
+		}
+		groupIDs[group.ID] = true
+	}
+	if len(plan.ReplayGroups) != 2 {
+		t.Fatalf("distinct materializations should create two replay groups = %#v", plan.ReplayGroups)
+	}
+	reuseTasksByGroup := map[string]int{}
+	for _, task := range plan.PhysicalTasks {
+		if task.Kind == mapplanner.TaskReuseMaterialized {
+			reuseTasksByGroup[task.ReplayGroupID]++
+		}
+	}
+	if len(reuseTasksByGroup) != 2 {
+		t.Fatalf("distinct replay groups should each keep their own reuse task, groups=%#v tasks=%#v", plan.ReplayGroups, plan.PhysicalTasks)
+	}
+}
+
 func TestExplainRejectsUnmatchedWorkflowTarget(t *testing.T) {
 	graph := validationCaseGraph()
 
