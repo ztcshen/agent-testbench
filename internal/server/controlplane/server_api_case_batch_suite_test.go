@@ -110,7 +110,7 @@ func TestServerExposesAPICaseBatchFailureSummary(t *testing.T) {
 	}
 }
 
-func TestServerDoesNotReuseFallbackFailureRulesAcrossProfileCatalogs(t *testing.T) {
+func TestServerDoesNotReuseBootstrapFailureRulesAcrossProfileCatalogs(t *testing.T) {
 	ctx, s := openAPICaseBatchSQLiteStore(t)
 
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -119,10 +119,10 @@ func TestServerDoesNotReuseFallbackFailureRulesAcrossProfileCatalogs(t *testing.
 	defer target.Close()
 
 	dir := t.TempDir()
-	fallback := profile.Bundle{
-		ID: "fallback-profile",
+	bootstrap := profile.Bundle{
+		ID: "bootstrap-profile",
 		FailureCategories: []profile.FailureCategoryRule{{
-			Name: "Fallback product errors",
+			Name: "Bootstrap product errors",
 			Matchers: profile.FailureCategoryMatchers{
 				Statuses:          []string{store.StatusFailed},
 				FailureCategories: []string{"assertion-mismatch"},
@@ -141,7 +141,7 @@ func TestServerDoesNotReuseFallbackFailureRulesAcrossProfileCatalogs(t *testing.
 	if err := s.ReplaceProfileCatalog(ctx, profilecatalog.FromBundle(storeBundle, time.Now().UTC())); err != nil {
 		t.Fatalf("replace store profile catalog: %v", err)
 	}
-	server := httptest.NewServer(controlplane.NewWithStore(fallback, s))
+	server := httptest.NewServer(controlplane.NewWithStore(bootstrap, s))
 	defer server.Close()
 
 	var created struct {
@@ -175,7 +175,7 @@ func TestServerDoesNotReuseFallbackFailureRulesAcrossProfileCatalogs(t *testing.
 		t.Fatalf("profile mismatch failure summary = %#v", summary)
 	}
 	if summary.Failures[0].FailureCategory != "assertion-mismatch" {
-		t.Fatalf("store profile must not use fallback failure rule, got %#v", summary.Failures[0])
+		t.Fatalf("store profile must not use bootstrap failure rule, got %#v", summary.Failures[0])
 	}
 }
 

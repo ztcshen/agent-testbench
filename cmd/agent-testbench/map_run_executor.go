@@ -448,7 +448,7 @@ func (e mapRunExecutor) stepExecutionConfig(task store.TestMapPlanTask, step sto
 		return nil
 	}
 	caseID := firstNonEmpty(step.CaseID, task.CaseID)
-	var fallback map[string]any
+	var caseConfig map[string]any
 	for _, item := range catalog.TemplateConfigs {
 		if strings.TrimSpace(item.Status) != "" && item.Status != "active" {
 			continue
@@ -460,11 +460,11 @@ func (e mapRunExecutor) stepExecutionConfig(task store.TestMapPlanTask, step sto
 		if item.WorkflowID == task.WorkflowID && strings.TrimSpace(step.StepID) != "" && item.ScopeID == step.StepID {
 			return config
 		}
-		if fallback == nil && (item.ScopeID == caseID || valueString(config["caseId"]) == caseID) {
-			fallback = config
+		if caseConfig == nil && (item.ScopeID == caseID || valueString(config["caseId"]) == caseID) {
+			caseConfig = config
 		}
 	}
-	return fallback
+	return caseConfig
 }
 
 func runCatalogCaseOnRuntime(ctx context.Context, runtime store.Store, profileID string, payload map[string]any) (map[string]any, error) {

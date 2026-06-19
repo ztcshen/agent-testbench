@@ -172,17 +172,17 @@ func taskRecordSummary(task PhysicalTask) map[string]any {
 	return summary
 }
 
-func mustJSONText(value any, fallback string) string {
+func mustJSONText(value any, defaultText string) string {
 	raw, err := json.Marshal(value)
 	if err != nil || string(raw) == "null" {
-		return fallback
+		return defaultText
 	}
 	return string(raw)
 }
 
-func stringDefault(value string, fallback string) string {
+func stringDefault(value string, defaultText string) string {
 	if strings.TrimSpace(value) == "" {
-		return fallback
+		return defaultText
 	}
 	return value
 }

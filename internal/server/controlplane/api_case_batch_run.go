@@ -133,17 +133,17 @@ func startAPICaseBatchRun(ctx context.Context, bundle profile.Bundle, runtime st
 	return report, http.StatusAccepted, nil
 }
 
-func apiCaseBatchPlanningBundle(ctx context.Context, runtime store.Store, fallback profile.Bundle) profile.Bundle {
+func apiCaseBatchPlanningBundle(ctx context.Context, runtime store.Store, bootstrap profile.Bundle) profile.Bundle {
 	if runtime == nil {
-		return fallback
+		return bootstrap
 	}
 	catalog, err := runtime.GetProfileCatalog(ctx)
 	if err != nil || strings.TrimSpace(catalog.ProfileID) == "" {
-		return fallback
+		return bootstrap
 	}
 	refreshed := profilecatalog.ToBundle(catalog)
-	if len(refreshed.FailureCategories) == 0 && len(fallback.FailureCategories) > 0 && strings.TrimSpace(refreshed.ID) == strings.TrimSpace(fallback.ID) {
-		refreshed.FailureCategories = append([]profile.FailureCategoryRule(nil), fallback.FailureCategories...)
+	if len(refreshed.FailureCategories) == 0 && len(bootstrap.FailureCategories) > 0 && strings.TrimSpace(refreshed.ID) == strings.TrimSpace(bootstrap.ID) {
+		refreshed.FailureCategories = append([]profile.FailureCategoryRule(nil), bootstrap.FailureCategories...)
 	}
 	return refreshed
 }

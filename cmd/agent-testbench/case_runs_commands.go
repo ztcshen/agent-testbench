@@ -60,10 +60,13 @@ func listCaseRunsFromStore(ctx context.Context, runtime store.Store, runFilter s
 		return caseRunsCLIReport{}, err
 	}
 	filter := strings.TrimSpace(runFilter)
-	filterRunIDs := caseRunFilterRunIDs(runs, filter)
+	filterRunIDs, childRunCount, err := caseRunFilterRunIDs(ctx, runtime, runs, filter)
+	if err != nil {
+		return caseRunsCLIReport{}, err
+	}
 	report := caseRunsCLIReport{OK: true, Warnings: []string{}}
-	if filter != "" && len(filterRunIDs) > 1 {
-		report.Warnings = append(report.Warnings, fmt.Sprintf("run %s resolved to %d child case run(s) from batch summary", filter, len(filterRunIDs)-1))
+	if filter != "" && childRunCount > 0 {
+		report.Warnings = append(report.Warnings, fmt.Sprintf("run %s resolved to %d child case run(s) from batch summary", filter, childRunCount))
 	}
 	for i := len(runs) - 1; i >= 0; i-- {
 		run := runs[i]
@@ -85,10 +88,10 @@ func listCaseRunsFromStore(ctx context.Context, runtime store.Store, runFilter s
 	return report, nil
 }
 
-func caseRunFilterRunIDs(runs []store.Run, filter string) map[string]bool {
+func caseRunFilterRunIDs(ctx context.Context, runtime store.Store, runs []store.Run, filter string) (map[string]bool, int, error) {
 	filter = strings.TrimSpace(filter)
 	if filter == "" {
-		return nil
+		return nil, 0, nil
 	}
 	out := map[string]bool{}
 	for _, run := range runs {
@@ -96,11 +99,21 @@ func caseRunFilterRunIDs(runs []store.Run, filter string) map[string]bool {
 			continue
 		}
 		out[run.ID] = true
+		parentCaseRuns, err := runtime.ListAPICaseRuns(ctx, run.ID)
+		if err != nil {
+			return nil, 0, err
+		}
+		if len(parentCaseRuns) > 0 {
+			return out, 0, nil
+		}
+		childRunCount := 0
 		for _, childRunID := range childRunIDsFromBatchSummary(run.SummaryJSON) {
 			out[childRunID] = true
+			childRunCount++
 		}
+		return out, childRunCount, nil
 	}
-	return out
+	return out, 0, nil
 }
 
 func childRunIDsFromBatchSummary(raw string) []string {
