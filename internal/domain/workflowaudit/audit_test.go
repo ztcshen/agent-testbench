@@ -31,7 +31,7 @@ func TestAuditDetectsRequiredStepInputWithoutEarlierExport(t *testing.T) {
 			{
 				ID:         "config.step.first",
 				WorkflowID: "workflow.context",
-				ScopeType:  "step",
+				ScopeType:  templateConfigScopeStep,
 				ScopeID:    "step.first",
 				Status:     "active",
 				ConfigJSON: `{"caseId":"case.first","caseExecution":{"method":"GET","path":"/first"}}`,
@@ -39,7 +39,7 @@ func TestAuditDetectsRequiredStepInputWithoutEarlierExport(t *testing.T) {
 			{
 				ID:         "config.step.second",
 				WorkflowID: "workflow.context",
-				ScopeType:  "step",
+				ScopeType:  templateConfigScopeStep,
 				ScopeID:    "step.second",
 				Status:     "active",
 				ConfigJSON: `{"caseId":"case.second","caseExecution":{"method":"GET","path":"/second"},"inputs":[{"name":"item_id","source":"previous"}]}`,
@@ -85,7 +85,7 @@ func TestAuditAcceptsRequiredInputFromEarlierCaseScopedExport(t *testing.T) {
 		TemplateConfigs: []profile.TemplateConfig{
 			{
 				ID:         "config.case.first",
-				ScopeType:  "api-case",
+				ScopeType:  templateConfigScopeAPICase,
 				ScopeID:    "case.first",
 				Status:     "active",
 				ConfigJSON: `{"caseId":"case.first","caseExecution":{"method":"GET","path":"/first"},"exports":[{"name":"item_id","from":"responseBody","path":"item_id"}]}`,
@@ -93,7 +93,7 @@ func TestAuditAcceptsRequiredInputFromEarlierCaseScopedExport(t *testing.T) {
 			{
 				ID:         "config.step.second",
 				WorkflowID: "workflow.context",
-				ScopeType:  "step",
+				ScopeType:  templateConfigScopeStep,
 				ScopeID:    "step.second",
 				Status:     "active",
 				ConfigJSON: `{"caseId":"case.second","caseExecution":{"method":"GET","path":"/second"},"inputs":[{"name":"item_id","source":"previous"}]}`,
@@ -108,6 +108,64 @@ func TestAuditAcceptsRequiredInputFromEarlierCaseScopedExport(t *testing.T) {
 	for _, issue := range report.Issues {
 		if issue.Code == "workflow-step-input-unbound" && issue.SubjectID == "workflow.context/step.second" {
 			t.Fatalf("case scoped export should satisfy later step input: %#v", report.Issues)
+		}
+	}
+}
+
+func TestAuditMergesEarlierStepAndCaseScopedExports(t *testing.T) {
+	bundle := profile.Bundle{
+		ID:          "profile.workflow-merged-context",
+		DisplayName: "Workflow Merged Context Profile",
+		Workflows: []profile.Workflow{{
+			ID:          "workflow.context",
+			DisplayName: "Context Workflow",
+		}},
+		InterfaceNodes: []profile.InterfaceNode{
+			{ID: "node.first", DisplayName: "First"},
+			{ID: "node.second", DisplayName: "Second"},
+		},
+		APICases: []profile.APICase{
+			{ID: "case.first", NodeID: "node.first"},
+			{ID: "case.second", NodeID: "node.second"},
+		},
+		WorkflowBindings: []profile.WorkflowBinding{
+			{WorkflowID: "workflow.context", StepID: "step.first", NodeID: "node.first", CaseID: "case.first", Required: true, SortOrder: 1},
+			{WorkflowID: "workflow.context", StepID: "step.second", NodeID: "node.second", CaseID: "case.second", Required: true, SortOrder: 2},
+		},
+		TemplateConfigs: []profile.TemplateConfig{
+			{
+				ID:         "config.step.first",
+				WorkflowID: "workflow.context",
+				ScopeType:  templateConfigScopeStep,
+				ScopeID:    "step.first",
+				Status:     "active",
+				ConfigJSON: `{"displayName":"First step presentation","caseId":"case.first"}`,
+			},
+			{
+				ID:         "config.case.first",
+				ScopeType:  templateConfigScopeAPICase,
+				ScopeID:    "case.first",
+				Status:     "active",
+				ConfigJSON: `{"caseId":"case.first","caseExecution":{"method":"GET","path":"/first"},"exports":[{"name":"item_id","from":"responseBody","path":"item_id"}]}`,
+			},
+			{
+				ID:         "config.step.second",
+				WorkflowID: "workflow.context",
+				ScopeType:  templateConfigScopeStep,
+				ScopeID:    "step.second",
+				Status:     "active",
+				ConfigJSON: `{"caseId":"case.second","caseExecution":{"method":"GET","path":"/second"},"inputs":[{"name":"item_id","source":"previous"}]}`,
+			},
+		},
+	}
+
+	report, err := Audit(context.Background(), Options{Bundle: bundle, WorkflowID: "workflow.context"})
+	if err != nil {
+		t.Fatalf("audit merged workflow case context: %v", err)
+	}
+	for _, issue := range report.Issues {
+		if issue.Code == "workflow-step-input-unbound" && issue.SubjectID == "workflow.context/step.second" {
+			t.Fatalf("case scoped export should not be masked by step config: %#v", report.Issues)
 		}
 	}
 }

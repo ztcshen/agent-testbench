@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -224,7 +225,8 @@ if [ "$1" = "info" ]; then
   exit 1
 fi
 if [ "$1" = "compose" ] && [ "$2" = "ps" ]; then
-  printf '{"Name":"worker-service","Service":"worker-service","State":"running","Health":"healthy"}\n'
+  printf 'bare docker compose cannot access daemon\n' >&2
+  exit 1
 fi
 exit 0
 `)
@@ -232,6 +234,10 @@ exit 0
 printf '%s\n' "$*" >> "$DOCKER_WRAPPER_CALLS_FILE"
 if [ "$1" = "info" ]; then
   printf 'wrapper daemon ok\n'
+  exit 0
+fi
+if [ "$1" = "compose" ] && [ "$2" = "ps" ]; then
+  printf '{"Name":"worker-service","Service":"worker-service","State":"running","Health":"healthy"}\n'
   exit 0
 fi
 exit 0
@@ -251,18 +257,61 @@ exit 0
 		t.Fatalf("wrapper docker preflight should allow startup = %#v", report)
 	}
 	bareCalls, err := os.ReadFile(callsPath)
-	if err != nil {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("read bare docker calls: %v", err)
 	}
 	if strings.Contains(string(bareCalls), "info") {
 		t.Fatalf("preflight should not use bare docker when startup uses wrapper:\n%s", bareCalls)
 	}
+	if strings.Contains(string(bareCalls), "compose ps") {
+		t.Fatalf("readiness should not use bare docker when startup uses wrapper:\n%s", bareCalls)
+	}
 	wrapperCalls, err := os.ReadFile(wrapperCallsPath)
 	if err != nil {
 		t.Fatalf("read wrapper docker calls: %v", err)
 	}
-	if !strings.Contains(string(wrapperCalls), "info") || !strings.Contains(string(wrapperCalls), "compose up -d worker-service") {
-		t.Fatalf("configured wrapper should handle preflight and startup:\n%s", wrapperCalls)
+	if !strings.Contains(string(wrapperCalls), "info") ||
+		!strings.Contains(string(wrapperCalls), "compose up -d worker-service") ||
+		!strings.Contains(string(wrapperCalls), "compose ps -a --format json worker-service") {
+		t.Fatalf("configured wrapper should handle preflight, startup, and readiness:\n%s", wrapperCalls)
+	}
+}
+
+func TestSandboxDockerPreflightPreservesDockerGlobalOptions(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{
+			name: "context",
+			in:   "docker --context remote compose up -d worker-service",
+			want: []string{"docker", "--context", "remote", "info"},
+		},
+		{
+			name: "host",
+			in:   "docker -H ssh://host compose up -d worker-service",
+			want: []string{"docker", "-H", "ssh://host", "info"},
+		},
+		{
+			name: "sudo context",
+			in:   "sudo docker --context remote compose up -d worker-service",
+			want: []string{"sudo", "docker", "--context", "remote", "info"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sandboxDockerPreflightCommand(tt.in); !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("preflight command = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSandboxStartComposeServiceIgnoresNonDockerComposeText(t *testing.T) {
+	service := store.CatalogService{StartupCommand: "printf compose up worker-service"}
+	if got := sandboxStartComposeService(service, service.StartupCommand); got != "" {
+		t.Fatalf("non-Docker startup text should not infer compose service, got %q", got)
 	}
 }
 

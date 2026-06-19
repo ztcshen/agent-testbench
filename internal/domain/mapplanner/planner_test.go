@@ -175,6 +175,22 @@ func TestExplainGroupsValidationCasesByReusableReplayCheckpoint(t *testing.T) {
 
 func TestExplainSeparatesReplayGroupsByReplaySource(t *testing.T) {
 	graph := validationCaseGraph()
+	graph.Paths = append(graph.Paths, plangraph.Path{MapID: "map.contract", ID: "a", WorkflowID: "workflow.a", Status: "active", SummaryJSON: `{}`, SortOrder: 2})
+	graph.PathSteps = append(graph.PathSteps,
+		plangraph.PathStep{MapID: "map.contract", PathID: "a_b", StepIndex: 1, StepID: "c", NodeID: "c", CaseID: "case.c", Required: true, SummaryJSON: `{}`},
+		plangraph.PathStep{MapID: "map.contract", PathID: "a", StepIndex: 1, StepID: "b", NodeID: "b", CaseID: "case.b", Required: true, SummaryJSON: `{}`},
+	)
+	graph.Paths[0].ID = "a_b"
+	graph.Paths[0].WorkflowID = "workflow.a_b"
+	graph.Edges[0].PathID = "a_b"
+	graph.PathSteps[0].PathID = "a_b"
+	graph.Materializations[0].ID = "m"
+	graph.Materializations[0].FixtureID = "m"
+	graph.Materializations[0].SourcePathID = "a_b"
+	graph.Materializations[0].SourceWorkflowID = "workflow.a_b"
+	graph.Materializations[0].SourceUntilStep = "c"
+	graph.Materializations[0].SourceUntilNodeID = "c"
+	graph.Edges[1].MaterializationID = "m"
 	graph.Nodes[2].InterfaceNodeID = "interface.submit"
 	graph.Nodes[2].SummaryJSON = `{"validationFamily":"empty/null"}`
 	graph.Nodes = append(graph.Nodes, plangraph.Node{
@@ -197,7 +213,7 @@ func TestExplainSeparatesReplayGroupsByReplaySource(t *testing.T) {
 		FromNodeID:        "case.prepare",
 		ToNodeID:          "case.submit.missing-amount",
 		Kind:              "fixture",
-		MaterializationID: "fixture.amount",
+		MaterializationID: "c_m",
 		Required:          true,
 		MappingsJSON:      `[]`,
 		SummaryJSON:       `{}`,
@@ -205,12 +221,12 @@ func TestExplainSeparatesReplayGroupsByReplaySource(t *testing.T) {
 	})
 	graph.Materializations = append(graph.Materializations, plangraph.Materialization{
 		MapID:             "map.contract",
-		ID:                "fixture.amount",
-		FixtureID:         "fixture.amount",
-		SourcePathID:      "workflow.submit.success",
-		SourceWorkflowID:  "workflow.submit.success",
-		SourceUntilStep:   "prepare",
-		SourceUntilNodeID: "case.prepare",
+		ID:                "c_m",
+		FixtureID:         "c_m",
+		SourcePathID:      "a",
+		SourceWorkflowID:  "workflow.a",
+		SourceUntilStep:   "b",
+		SourceUntilNodeID: "b",
 		SnapshotKind:      "workflow_prefix",
 		Status:            "active",
 		SummaryJSON:       `{}`,

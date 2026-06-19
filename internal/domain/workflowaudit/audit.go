@@ -46,6 +46,12 @@ type BindingRef struct {
 
 type Issue = auditrefs.Issue
 
+const (
+	templateConfigScopeStep    = "step"
+	templateConfigScopeAPICase = "api-case"
+	templateConfigScopeCase    = "case"
+)
+
 type StoreReport struct {
 	LatestRun    *RunState          `json:"latestRun,omitempty"`
 	BindingCases []BindingCaseState `json:"bindingCases"`
@@ -235,44 +241,55 @@ func workflowStepContextIssues(configs []profile.TemplateConfig, bindings []prof
 	provided := map[string]bool{}
 	var issues []Issue
 	for _, binding := range ordered {
-		config, ok := configByStep[binding.StepID]
-		if !ok {
-			config, ok = configByCase[binding.CaseID]
-			if !ok {
-				continue
+		docs := workflowBindingConfigDocuments(configByStep, configByCase, binding)
+		if len(docs) == 0 {
+			continue
+		}
+		for _, doc := range docs {
+			for _, input := range stepConfigList(doc["inputs"]) {
+				name := strings.TrimSpace(stepConfigString(input["name"]))
+				if name == "" || !stepConfigRequired(input) || !stepConfigNeedsPreviousContext(input) {
+					continue
+				}
+				if provided[name] {
+					continue
+				}
+				issues = append(issues, auditrefs.NewIssue(
+					"workflow-step-input-unbound",
+					"workflowBinding",
+					auditrefs.BindingSubject(binding.WorkflowID, binding.StepID),
+					"inputs."+name,
+					"Workflow step requires input "+name+" from a previous step, but no earlier step exports it",
+				))
 			}
 		}
-		doc := stepConfigDocument(config.ConfigJSON)
-		for _, input := range stepConfigList(doc["inputs"]) {
-			name := strings.TrimSpace(stepConfigString(input["name"]))
-			if name == "" || !stepConfigRequired(input) || !stepConfigNeedsPreviousContext(input) {
-				continue
-			}
-			if provided[name] {
-				continue
-			}
-			issues = append(issues, auditrefs.NewIssue(
-				"workflow-step-input-unbound",
-				"workflowBinding",
-				auditrefs.BindingSubject(binding.WorkflowID, binding.StepID),
-				"inputs."+name,
-				"Workflow step requires input "+name+" from a previous step, but no earlier step exports it",
-			))
-		}
-		for _, export := range stepConfigList(doc["exports"]) {
-			name := strings.TrimSpace(stepConfigString(export["name"]))
-			if name != "" {
-				provided[name] = true
+		for _, doc := range docs {
+			for _, export := range stepConfigList(doc["exports"]) {
+				name := strings.TrimSpace(stepConfigString(export["name"]))
+				if name != "" {
+					provided[name] = true
+				}
 			}
 		}
 	}
 	return issues
 }
 
+func workflowBindingConfigDocuments(configByStep map[string]profile.TemplateConfig, configByCase map[string]profile.TemplateConfig, binding profile.WorkflowBinding) []map[string]any {
+	docs := []map[string]any{}
+	if config, ok := configByStep[binding.StepID]; ok {
+		docs = append(docs, stepConfigDocument(config.ConfigJSON))
+	}
+	if config, ok := configByCase[binding.CaseID]; ok {
+		docs = append(docs, stepConfigDocument(config.ConfigJSON))
+	}
+	return docs
+}
+
 func workflowStepConfigByStep(configs []profile.TemplateConfig, workflowID string) map[string]profile.TemplateConfig {
 	out := map[string]profile.TemplateConfig{}
 	for _, config := range configs {
-		if !visibleWorkflowAuditConfigStatus(config.Status) || strings.TrimSpace(config.ScopeType) != "step" || strings.TrimSpace(config.WorkflowID) != workflowID || strings.TrimSpace(config.ScopeID) == "" {
+		if !visibleWorkflowAuditConfigStatus(config.Status) || strings.TrimSpace(config.ScopeType) != templateConfigScopeStep || strings.TrimSpace(config.WorkflowID) != workflowID || strings.TrimSpace(config.ScopeID) == "" {
 			continue
 		}
 		out[config.ScopeID] = config
@@ -284,7 +301,7 @@ func workflowCaseConfigByCase(configs []profile.TemplateConfig) map[string]profi
 	out := map[string]profile.TemplateConfig{}
 	for _, config := range configs {
 		scopeType := strings.TrimSpace(config.ScopeType)
-		if !visibleWorkflowAuditConfigStatus(config.Status) || (scopeType != "api-case" && scopeType != "case") || strings.TrimSpace(config.ScopeID) == "" {
+		if !visibleWorkflowAuditConfigStatus(config.Status) || (scopeType != templateConfigScopeAPICase && scopeType != templateConfigScopeCase) || strings.TrimSpace(config.ScopeID) == "" {
 			continue
 		}
 		out[config.ScopeID] = config
