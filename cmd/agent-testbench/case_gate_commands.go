@@ -94,7 +94,7 @@ func buildCaseGateReport(ctx context.Context, runtime store.Store, options caseG
 		FailedCaseRuns:  []caseRunsCLIItem{},
 		MissingEvidence: []caseRunsCLIItem{},
 		NextActions:     []string{},
-		Warnings:        []string{},
+		Warnings:        append([]string(nil), items.Warnings...),
 	}
 	for _, item := range items.CaseRuns {
 		report.Counts.Total++

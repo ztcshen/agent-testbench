@@ -75,7 +75,7 @@ func loadOfflineWorkflowAuditInputs(ctx context.Context, profilePath string, sto
 	if err != nil {
 		return profile.Bundle{}, nil, func() {}, err
 	}
-	resolvedStoreURL, err := resolveStoreReference(storeRef, storeURL)
+	resolvedStoreURL, err := resolveOptionalBundleStoreReference(profilePath, storeRef, storeURL)
 	if err != nil {
 		return profile.Bundle{}, nil, func() {}, err
 	}

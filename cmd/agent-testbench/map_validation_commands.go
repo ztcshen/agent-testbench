@@ -306,31 +306,11 @@ func mapNodeIsValidation(node store.TestPlanNode) bool {
 }
 
 func mapNodeDisplayName(node store.TestPlanNode) string {
-	summary := jsonObjectString(node.SummaryJSON)
-	if value, ok := summary["displayName"].(string); ok {
-		return value
-	}
-	return stringDefault(node.CaseID, node.ID)
+	return plangraph.NodeDisplayName(node)
 }
 
 func validationFamilyForNode(node store.TestPlanNode) string {
-	text := strings.ToLower(strings.Join([]string{node.ID, node.CaseID, mapNodeDisplayName(node), node.PatchJSON, node.ExpectedJSON}, " "))
-	switch {
-	case strings.Contains(text, "length"), strings.Contains(text, "too-long"), strings.Contains(text, "long"), strings.Contains(text, "max"):
-		return "length"
-	case strings.Contains(text, "blank"), strings.Contains(text, "empty"), strings.Contains(text, "null"), strings.Contains(text, "required"):
-		return "empty/null"
-	case strings.Contains(text, "type"), strings.Contains(text, "numeric"), strings.Contains(text, "number"):
-		return "type"
-	case strings.Contains(text, "enum"):
-		return "enum"
-	case strings.Contains(text, "boundary"), strings.Contains(text, "min"), strings.Contains(text, "max"):
-		return "boundary"
-	case strings.Contains(text, "state"), strings.Contains(text, "status"):
-		return "state"
-	default:
-		return "contract"
-	}
+	return plangraph.ValidationFamilyForNode(node)
 }
 
 func mapValidationFamilies(cases []mapValidationCaseSummary) []mapValidationFamily {

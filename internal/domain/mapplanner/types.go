@@ -37,16 +37,19 @@ const (
 )
 
 type Query struct {
-	MapID         string `json:"mapId,omitempty"`
-	EnvironmentID string `json:"environmentId,omitempty"`
-	Scope         string `json:"scope,omitempty"`
-	TargetKind    string `json:"targetKind,omitempty"`
-	TargetID      string `json:"targetId,omitempty"`
-	CaseID        string `json:"caseId,omitempty"`
-	NodeID        string `json:"nodeId,omitempty"`
-	PathID        string `json:"pathId,omitempty"`
-	WorkflowID    string `json:"workflowId,omitempty"`
-	PlannerMode   string `json:"mode,omitempty"`
+	MapID            string `json:"mapId,omitempty"`
+	EnvironmentID    string `json:"environmentId,omitempty"`
+	Scope            string `json:"scope,omitempty"`
+	TargetKind       string `json:"targetKind,omitempty"`
+	TargetID         string `json:"targetId,omitempty"`
+	CaseID           string `json:"caseId,omitempty"`
+	NodeID           string `json:"nodeId,omitempty"`
+	PathID           string `json:"pathId,omitempty"`
+	WorkflowID       string `json:"workflowId,omitempty"`
+	InterfaceNodeID  string `json:"interfaceNodeId,omitempty"`
+	ValidationFamily string `json:"validationFamily,omitempty"`
+	Role             string `json:"role,omitempty"`
+	PlannerMode      string `json:"mode,omitempty"`
 }
 
 type Plan struct {
@@ -68,6 +71,7 @@ type Plan struct {
 	RulesApplied       []RuleTrace         `json:"rulesApplied"`
 	CandidatePlans     []CandidatePlan     `json:"candidatePlans"`
 	RejectedPlans      []RejectedPlan      `json:"rejectedPlans,omitempty"`
+	ReplayGroups       []ReplayGroup       `json:"replayGroups,omitempty"`
 	PhysicalTasks      []PhysicalTask      `json:"physicalTasks"`
 	TaskEdges          []TaskEdge          `json:"taskEdges"`
 	Operations         []PhysicalOperation `json:"operations,omitempty"`
@@ -115,6 +119,24 @@ type RejectedPlan struct {
 	Reason string `json:"reason"`
 }
 
+type ReplayGroup struct {
+	ID                string   `json:"id"`
+	InterfaceNodeID   string   `json:"interfaceNodeId,omitempty"`
+	AnchorNodeID      string   `json:"anchorNodeId,omitempty"`
+	AnchorCaseID      string   `json:"anchorCaseId,omitempty"`
+	ValidationFamily  string   `json:"validationFamily,omitempty"`
+	PathID            string   `json:"pathId,omitempty"`
+	WorkflowID        string   `json:"workflowId,omitempty"`
+	UntilNodeID       string   `json:"untilNodeId,omitempty"`
+	MaterializationID string   `json:"materializationId,omitempty"`
+	Decision          string   `json:"decision"`
+	Reason            string   `json:"reason,omitempty"`
+	Count             int      `json:"count"`
+	NodeIDs           []string `json:"nodeIds,omitempty"`
+	CaseIDs           []string `json:"caseIds,omitempty"`
+	TaskIDs           []string `json:"taskIds,omitempty"`
+}
+
 type PhysicalTask struct {
 	ID                 string         `json:"id"`
 	Index              int            `json:"index"`
@@ -125,6 +147,10 @@ type PhysicalTask struct {
 	UntilNodeID        string         `json:"untilNodeId,omitempty"`
 	NodeID             string         `json:"nodeId,omitempty"`
 	CaseID             string         `json:"caseId,omitempty"`
+	ReplayGroupID      string         `json:"replayGroupId,omitempty"`
+	InterfaceNodeID    string         `json:"interfaceNodeId,omitempty"`
+	AnchorNodeID       string         `json:"anchorNodeId,omitempty"`
+	ValidationFamily   string         `json:"validationFamily,omitempty"`
 	MaterializationID  string         `json:"materializationId,omitempty"`
 	Status             string         `json:"status"`
 	Reason             string         `json:"reason,omitempty"`

@@ -1,9 +1,7 @@
 package mapplanner
 
 import (
-	"encoding/json"
 	"fmt"
-	"strings"
 
 	"agent-testbench/internal/domain/plangraph"
 )
@@ -17,11 +15,13 @@ func Explain(graph plangraph.Graph, query Query) (Plan, error) {
 		return Plan{}, err
 	}
 	builder := planBuilder{
-		graph:     graph,
-		query:     query,
-		pathByID:  map[string]plangraph.Path{},
-		nodeByID:  map[string]plangraph.Node{},
-		pathSteps: map[string][]plangraph.PathStep{},
+		graph:             graph,
+		query:             query,
+		pathByID:          map[string]plangraph.Path{},
+		nodeByID:          map[string]plangraph.Node{},
+		pathSteps:         map[string][]plangraph.PathStep{},
+		replayGroupByKey:  map[string]int{},
+		replayTaskByGroup: map[string]string{},
 	}
 	builder.indexGraph()
 	plan := builder.basePlan()
@@ -53,11 +53,13 @@ func Explain(graph plangraph.Graph, query Query) (Plan, error) {
 }
 
 type planBuilder struct {
-	graph     plangraph.Graph
-	query     Query
-	pathByID  map[string]plangraph.Path
-	nodeByID  map[string]plangraph.Node
-	pathSteps map[string][]plangraph.PathStep
+	graph             plangraph.Graph
+	query             Query
+	pathByID          map[string]plangraph.Path
+	nodeByID          map[string]plangraph.Node
+	pathSteps         map[string][]plangraph.PathStep
+	replayGroupByKey  map[string]int
+	replayTaskByGroup map[string]string
 }
 
 func (b *planBuilder) indexGraph() {
@@ -88,6 +90,9 @@ func (b *planBuilder) basePlan() Plan {
 			"targetKind":       b.query.TargetKind,
 			"targetId":         b.query.TargetID,
 			"environmentId":    b.query.EnvironmentID,
+			"interfaceNodeId":  b.query.InterfaceNodeID,
+			"validationFamily": b.query.ValidationFamily,
+			"role":             b.query.Role,
 			"graphFingerprint": GraphFingerprint(b.graph),
 		},
 		LogicalPlan: []LogicalOp{{
@@ -180,6 +185,9 @@ func (b *planBuilder) planCaseScope(plan *Plan) error {
 		if !isValidationNode(node) {
 			continue
 		}
+		if !b.validationNodeMatchesFilters(node) {
+			continue
+		}
 		if b.caseTargeted() && !b.nodeMatchesQuery(node) {
 			continue
 		}
@@ -217,6 +225,22 @@ func (b *planBuilder) planCaseNode(plan *Plan, node plangraph.Node) error {
 	}
 	plan.TargetNodeID = firstNonEmpty(plan.TargetNodeID, explain.TargetNodeID)
 	plan.TargetCaseID = firstNonEmpty(plan.TargetCaseID, explain.TargetCaseID)
+	b.appendCaseCandidates(plan, node, explain)
+	b.appendCaseRejections(plan, node, explain)
+	taskResult := b.appendCaseTasks(plan, node, explain.Operations)
+	b.tagCaseTasksWithReplayGroup(plan, node, taskResult)
+	b.appendCaseRuleTraces(plan, node, explain, taskResult)
+	plan.Operations = append(plan.Operations, convertOperations(explain.Operations, b.pathByID)...)
+	return nil
+}
+
+type casePlanTaskResult struct {
+	startIndex              int
+	materializedReplayTasks int
+	caseReplayGroupID       string
+}
+
+func (b *planBuilder) appendCaseCandidates(plan *Plan, node plangraph.Node, explain plangraph.Explanation) {
 	for _, candidate := range explain.CandidatePaths {
 		plan.CandidatePlans = append(plan.CandidatePlans, CandidatePlan{
 			ID:         "candidate.case." + safeID(node.ID) + "." + safeID(candidate.PathID),
@@ -230,6 +254,9 @@ func (b *planBuilder) planCaseNode(plan *Plan, node plangraph.Node) error {
 			Reason:     candidate.Reason,
 		})
 	}
+}
+
+func (b *planBuilder) appendCaseRejections(plan *Plan, node plangraph.Node, explain plangraph.Explanation) {
 	for _, rejected := range explain.RejectedReasons {
 		plan.RejectedPlans = append(plan.RejectedPlans, RejectedPlan{
 			ID:     "rejected." + safeID(node.ID) + "." + safeID(rejected.PathID),
@@ -237,16 +264,35 @@ func (b *planBuilder) planCaseNode(plan *Plan, node plangraph.Node) error {
 			Reason: rejected.Reason,
 		})
 	}
+}
+
+func (b *planBuilder) appendCaseTasks(plan *Plan, node plangraph.Node, operations []plangraph.PhysicalOperation) casePlanTaskResult {
 	startIndex := len(plan.PhysicalTasks)
 	var previousTaskID string
 	materializedReplayTasks := 0
-	for _, operation := range explain.Operations {
+	caseReplayGroupID := ""
+	for _, operation := range operations {
 		task := b.taskFromOperation(operation)
+		groupID, reusedTaskID, reusable := b.prepareReplayGroup(plan, node, task)
+		if groupID != "" {
+			task.ReplayGroupID = groupID
+			task.InterfaceNodeID = node.InterfaceNodeID
+			task.AnchorNodeID = node.AnchorNodeID
+			task.ValidationFamily = plangraph.ValidationFamilyForNode(node)
+			caseReplayGroupID = groupID
+		}
+		if reusable && reusedTaskID != "" {
+			previousTaskID = reusedTaskID
+			continue
+		}
 		b.appendTask(plan, task)
+		currentTaskID := plan.PhysicalTasks[len(plan.PhysicalTasks)-1].ID
+		if groupID != "" {
+			b.addReplayGroupTask(plan, groupID, currentTaskID)
+		}
 		if task.Kind == TaskReuseMaterialized {
 			materializedReplayTasks++
 		}
-		currentTaskID := plan.PhysicalTasks[len(plan.PhysicalTasks)-1].ID
 		if previousTaskID != "" {
 			plan.TaskEdges = append(plan.TaskEdges, TaskEdge{
 				FromTaskID: previousTaskID,
@@ -258,8 +304,32 @@ func (b *planBuilder) planCaseNode(plan *Plan, node plangraph.Node) error {
 		}
 		previousTaskID = currentTaskID
 	}
-	if len(plan.PhysicalTasks) > startIndex {
-		if materializedReplayTasks > 0 {
+	return casePlanTaskResult{
+		startIndex:              startIndex,
+		materializedReplayTasks: materializedReplayTasks,
+		caseReplayGroupID:       caseReplayGroupID,
+	}
+}
+
+func (b *planBuilder) tagCaseTasksWithReplayGroup(plan *Plan, node plangraph.Node, result casePlanTaskResult) {
+	if result.caseReplayGroupID != "" && len(plan.PhysicalTasks) > result.startIndex {
+		for index := result.startIndex; index < len(plan.PhysicalTasks); index++ {
+			task := &plan.PhysicalTasks[index]
+			if task.Kind != TaskRunCase || task.ReplayGroupID != "" {
+				continue
+			}
+			task.ReplayGroupID = result.caseReplayGroupID
+			task.InterfaceNodeID = node.InterfaceNodeID
+			task.AnchorNodeID = node.AnchorNodeID
+			task.ValidationFamily = plangraph.ValidationFamilyForNode(node)
+			b.addReplayGroupTask(plan, result.caseReplayGroupID, task.ID)
+		}
+	}
+}
+
+func (b *planBuilder) appendCaseRuleTraces(plan *Plan, node plangraph.Node, explain plangraph.Explanation, result casePlanTaskResult) {
+	if len(plan.PhysicalTasks) > result.startIndex {
+		if result.materializedReplayTasks > 0 {
 			plan.RulesApplied = append(plan.RulesApplied, RuleTrace{
 				Rule:   "prefer_materialized_replay",
 				Status: RuleStatusApplied,
@@ -269,7 +339,7 @@ func (b *planBuilder) planCaseNode(plan *Plan, node plangraph.Node) error {
 				Details: map[string]any{
 					"nodeId": node.ID,
 					"caseId": node.CaseID,
-					"tasks":  materializedReplayTasks,
+					"tasks":  result.materializedReplayTasks,
 				},
 			})
 		}
@@ -280,7 +350,7 @@ func (b *planBuilder) planCaseNode(plan *Plan, node plangraph.Node) error {
 			Details: map[string]any{
 				"nodeId": node.ID,
 				"caseId": node.CaseID,
-				"tasks":  len(plan.PhysicalTasks) - startIndex,
+				"tasks":  len(plan.PhysicalTasks) - result.startIndex,
 			},
 		})
 		if caseOperationCount(explain.Operations) > 0 {
@@ -295,67 +365,30 @@ func (b *planBuilder) planCaseNode(plan *Plan, node plangraph.Node) error {
 			})
 		}
 	}
-	plan.Operations = append(plan.Operations, convertOperations(explain.Operations, b.pathByID)...)
-	return nil
-}
-
-func (b *planBuilder) taskFromOperation(operation plangraph.PhysicalOperation) PhysicalTask {
-	kind := operation.Kind
-	if kind == "" {
-		kind = TaskRunCase
-	}
-	if kind == TaskRunPathPrefix && strings.TrimSpace(operation.MaterializationID) != "" {
-		kind = TaskReuseMaterialized
-	}
-	path := b.pathByID[operation.PathID]
-	task := PhysicalTask{
-		Kind:               kind,
-		Operation:          kind,
-		PathID:             operation.PathID,
-		WorkflowID:         path.WorkflowID,
-		UntilNodeID:        operation.UntilNodeID,
-		NodeID:             operation.NodeID,
-		CaseID:             operation.CaseID,
-		MaterializationID:  operation.MaterializationID,
-		Status:             TaskStatusPlanned,
-		Reason:             operation.Reason,
-		RequiredProperties: jsonObject(operation.RequiredPropertyJSON),
-		ProvidedProperties: jsonObject(operation.ProvidedPropertyJSON),
-	}
-	switch kind {
-	case TaskRunPathPrefix:
-		task.Cost = PlanCost{EstimatedTasks: 1, ReplayTasks: 1, TotalSteps: len(prefixSteps(b.pathSteps[operation.PathID], operation.UntilNodeID))}
-	case TaskReuseMaterialized:
-		task.Cost = PlanCost{EstimatedTasks: 1}
-		task.Summary = map[string]any{
-			"sourcePathId":      operation.PathID,
-			"sourceWorkflowId":  path.WorkflowID,
-			"sourceUntilNodeId": operation.UntilNodeID,
-		}
-	case TaskRunCase:
-		task.Cost = PlanCost{EstimatedTasks: 1, CaseTasks: 1}
-	default:
-		task.Cost = PlanCost{EstimatedTasks: 1}
-	}
-	return task
-}
-
-func (b *planBuilder) appendTask(plan *Plan, task PhysicalTask) {
-	task.Index = len(plan.PhysicalTasks) + 1
-	if task.ID == "" {
-		task.ID = fmt.Sprintf("task.%03d.%s", task.Index, safeID(firstNonEmpty(task.Kind, task.Operation)))
-	}
-	if task.Operation == "" {
-		task.Operation = task.Kind
-	}
-	if task.Status == "" {
-		task.Status = TaskStatusPlanned
-	}
-	plan.PhysicalTasks = append(plan.PhysicalTasks, task)
 }
 
 func (b *planBuilder) finish(plan *Plan) {
 	plan.OptimizedPlan = append([]LogicalOp(nil), plan.LogicalPlan...)
+	if len(plan.ReplayGroups) > 0 {
+		plan.OptimizedPlan = append(plan.OptimizedPlan, LogicalOp{
+			ID:         "logical.replay_groups",
+			Op:         "group_replay_checkpoints",
+			TargetKind: TargetMap,
+			TargetID:   b.query.MapID,
+			Children:   []string{"logical.validation_cases"},
+			Properties: map[string]any{
+				"groups": len(plan.ReplayGroups),
+			},
+		})
+		plan.RulesApplied = append(plan.RulesApplied, RuleTrace{
+			Rule:   "group_replay_checkpoints",
+			Status: RuleStatusApplied,
+			Reason: "validation cases sharing interface, anchor, family, and replay source are grouped for reuse",
+			Details: map[string]any{
+				"groups": len(plan.ReplayGroups),
+			},
+		})
+	}
 	plan.RulesApplied = append(plan.RulesApplied, RuleTrace{
 		Rule:   "build_physical_task_dag",
 		Status: RuleStatusApplied,
@@ -384,196 +417,4 @@ func (b *planBuilder) finish(plan *Plan) {
 		TotalTasks:    len(plan.PhysicalTasks),
 		TotalSteps:    plan.Cost.TotalSteps,
 	}
-}
-
-func normalizeQuery(graph plangraph.Graph, query Query) Query {
-	query.MapID = firstNonEmpty(strings.TrimSpace(query.MapID), graph.Map.ID)
-	query.PlannerMode = firstNonEmpty(strings.TrimSpace(query.PlannerMode), ModeExplain)
-	scopeWasEmpty := strings.TrimSpace(query.Scope) == ""
-	query.Scope = strings.TrimSpace(query.Scope)
-	if query.Scope == "workflow" {
-		query.Scope = ScopeWorkflows
-	}
-	query.TargetKind = strings.TrimSpace(query.TargetKind)
-	query.TargetID = strings.TrimSpace(query.TargetID)
-	switch {
-	case strings.TrimSpace(query.CaseID) != "":
-		query.Scope = ScopeCase
-		query.TargetKind = TargetCase
-		query.TargetID = strings.TrimSpace(query.CaseID)
-	case strings.TrimSpace(query.NodeID) != "":
-		query.Scope = ScopeCase
-		query.TargetKind = TargetNode
-		query.TargetID = strings.TrimSpace(query.NodeID)
-	case strings.TrimSpace(query.PathID) != "":
-		query.Scope = ScopeWorkflows
-		query.TargetKind = TargetPath
-		query.TargetID = strings.TrimSpace(query.PathID)
-	case strings.TrimSpace(query.WorkflowID) != "":
-		query.Scope = ScopeWorkflows
-		query.TargetKind = TargetWorkflow
-		query.TargetID = strings.TrimSpace(query.WorkflowID)
-	default:
-		switch query.TargetKind {
-		case TargetCase, TargetNode:
-			if scopeWasEmpty || query.Scope == ScopeCases {
-				query.Scope = ScopeCase
-			}
-		case TargetPath, TargetWorkflow:
-			if scopeWasEmpty {
-				query.Scope = ScopeWorkflows
-			}
-		}
-		query.Scope = stringDefault(query.Scope, ScopeAll)
-		query.TargetKind = stringDefault(query.TargetKind, TargetMap)
-		query.TargetID = stringDefault(query.TargetID, query.MapID)
-	}
-	return query
-}
-
-func validateQueryScopeTarget(query Query) error {
-	switch query.Scope {
-	case ScopeWorkflows:
-		if query.TargetKind == TargetCase || query.TargetKind == TargetNode {
-			return fmt.Errorf("map planner scope %s conflicts with target kind %s", query.Scope, query.TargetKind)
-		}
-	case ScopeCases, ScopeCase:
-		if query.TargetKind == TargetPath || query.TargetKind == TargetWorkflow {
-			return fmt.Errorf("map planner scope %s conflicts with target kind %s", query.Scope, query.TargetKind)
-		}
-	}
-	return nil
-}
-
-func (b *planBuilder) workflowTargeted() bool {
-	return b.query.TargetKind == TargetPath || b.query.TargetKind == TargetWorkflow
-}
-
-func (b *planBuilder) caseTargeted() bool {
-	return b.query.TargetKind == TargetCase || b.query.TargetKind == TargetNode
-}
-
-func (b *planBuilder) pathMatchesQuery(path plangraph.Path) bool {
-	switch b.query.TargetKind {
-	case TargetPath:
-		return path.ID == b.query.TargetID
-	case TargetWorkflow:
-		return path.WorkflowID == b.query.TargetID
-	default:
-		return true
-	}
-}
-
-func (b *planBuilder) findTargetNode() (plangraph.Node, bool) {
-	for _, node := range b.graph.Nodes {
-		if b.nodeMatchesQuery(node) {
-			return node, true
-		}
-	}
-	return plangraph.Node{}, false
-}
-
-func (b *planBuilder) nodeMatchesQuery(node plangraph.Node) bool {
-	switch b.query.TargetKind {
-	case TargetNode:
-		return node.ID == b.query.TargetID
-	case TargetCase:
-		return node.CaseID == b.query.TargetID
-	default:
-		return true
-	}
-}
-
-func isValidationNode(node plangraph.Node) bool {
-	return node.Role == plangraph.NodeRoleValidation || node.StateEffect == plangraph.StateEffectUnchanged
-}
-
-func replayOperationCount(operations []plangraph.PhysicalOperation) int {
-	count := 0
-	for _, operation := range operations {
-		if operation.Kind == TaskRunPathPrefix && strings.TrimSpace(operation.MaterializationID) == "" {
-			count++
-		}
-	}
-	return count
-}
-
-func caseOperationCount(operations []plangraph.PhysicalOperation) int {
-	count := 0
-	for _, operation := range operations {
-		if operation.Kind == TaskRunCase {
-			count++
-		}
-	}
-	return count
-}
-
-func prefixSteps(steps []plangraph.PathStep, untilNodeID string) []plangraph.PathStep {
-	if untilNodeID == "" {
-		return steps
-	}
-	for i, step := range steps {
-		if step.NodeID == untilNodeID {
-			return steps[:i+1]
-		}
-	}
-	return nil
-}
-
-func convertOperations(operations []plangraph.PhysicalOperation, pathByID map[string]plangraph.Path) []PhysicalOperation {
-	out := make([]PhysicalOperation, 0, len(operations))
-	for _, operation := range operations {
-		path := pathByID[operation.PathID]
-		out = append(out, PhysicalOperation{
-			Kind:                 operation.Kind,
-			PathID:               operation.PathID,
-			WorkflowID:           path.WorkflowID,
-			UntilNodeID:          operation.UntilNodeID,
-			NodeID:               operation.NodeID,
-			CaseID:               operation.CaseID,
-			MaterializationID:    operation.MaterializationID,
-			Reason:               operation.Reason,
-			PatchJSON:            operation.PatchJSON,
-			RequiredPropertyJSON: operation.RequiredPropertyJSON,
-			ProvidedPropertyJSON: operation.ProvidedPropertyJSON,
-		})
-	}
-	return out
-}
-
-func jsonObject(raw string) map[string]any {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return map[string]any{}
-	}
-	var out map[string]any
-	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		return map[string]any{"raw": raw}
-	}
-	return out
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func safeID(value string) string {
-	value = strings.TrimSpace(value)
-	var out strings.Builder
-	for _, r := range value {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
-			out.WriteRune(r)
-			continue
-		}
-		out.WriteByte('_')
-	}
-	if out.Len() == 0 {
-		return "unknown"
-	}
-	return out.String()
 }

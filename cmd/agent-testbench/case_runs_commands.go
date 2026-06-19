@@ -60,10 +60,14 @@ func listCaseRunsFromStore(ctx context.Context, runtime store.Store, runFilter s
 		return caseRunsCLIReport{}, err
 	}
 	filter := strings.TrimSpace(runFilter)
+	filterRunIDs := caseRunFilterRunIDs(runs, filter)
 	report := caseRunsCLIReport{OK: true, Warnings: []string{}}
+	if filter != "" && len(filterRunIDs) > 1 {
+		report.Warnings = append(report.Warnings, fmt.Sprintf("run %s resolved to %d child case run(s) from batch summary", filter, len(filterRunIDs)-1))
+	}
 	for i := len(runs) - 1; i >= 0; i-- {
 		run := runs[i]
-		if filter != "" && run.ID != filter {
+		if filter != "" && !filterRunIDs[run.ID] {
 			continue
 		}
 		caseRuns, err := runtime.ListAPICaseRuns(ctx, run.ID)
@@ -79,6 +83,41 @@ func listCaseRunsFromStore(ctx context.Context, runtime store.Store, runFilter s
 		}
 	}
 	return report, nil
+}
+
+func caseRunFilterRunIDs(runs []store.Run, filter string) map[string]bool {
+	filter = strings.TrimSpace(filter)
+	if filter == "" {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, run := range runs {
+		if run.ID != filter {
+			continue
+		}
+		out[run.ID] = true
+		for _, childRunID := range childRunIDsFromBatchSummary(run.SummaryJSON) {
+			out[childRunID] = true
+		}
+	}
+	return out
+}
+
+func childRunIDsFromBatchSummary(raw string) []string {
+	summary := jsonObjectString(raw)
+	steps := listFromReportAny(summary["steps"])
+	out := make([]string, 0, len(steps))
+	seen := map[string]bool{}
+	for _, rawStep := range steps {
+		step := mapFromReportAny(rawStep)
+		runID := strings.TrimSpace(valueString(step["runId"]))
+		if runID == "" || seen[runID] {
+			continue
+		}
+		seen[runID] = true
+		out = append(out, runID)
+	}
+	return out
 }
 
 func caseRunsCLIItemFrom(run store.Run, item store.APICaseRun, evidence []store.EvidenceRecord) caseRunsCLIItem {

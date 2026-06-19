@@ -99,6 +99,80 @@ func TestExplainScopeAllPlansWorkflowAndCaseTasks(t *testing.T) {
 	}
 }
 
+func TestExplainGroupsValidationCasesByReusableReplayCheckpoint(t *testing.T) {
+	graph := validationCaseGraph()
+	graph.Nodes[1].InterfaceNodeID = "interface.submit"
+	graph.Nodes[2].InterfaceNodeID = "interface.submit"
+	graph.Nodes[2].SummaryJSON = `{"displayName":"days required"}`
+	graph.Nodes = append(graph.Nodes, plangraph.Node{
+		MapID:                "map.contract",
+		ID:                   "case.submit.amount.required",
+		CaseID:               "case.submit.amount.required",
+		InterfaceNodeID:      "interface.submit",
+		Role:                 "validation",
+		StateEffect:          "unchanged",
+		BaseCaseID:           "case.submit",
+		AnchorNodeID:         "case.submit",
+		RequiredPropertyJSON: `{"samePreconditionAsCase":"case.submit"}`,
+		ProvidedPropertyJSON: `{"state":"prepared"}`,
+		SummaryJSON:          `{"displayName":"amount required"}`,
+		SortOrder:            4,
+	})
+	graph.Edges = append(graph.Edges, plangraph.Edge{
+		MapID:             "map.contract",
+		ID:                "edge.fixture.amount-required",
+		FromNodeID:        "case.prepare",
+		ToNodeID:          "case.submit.amount.required",
+		Kind:              "fixture",
+		MaterializationID: "fixture.prepare",
+		Required:          true,
+		MappingsJSON:      `[]`,
+		SummaryJSON:       `{}`,
+		SortOrder:         3,
+	})
+
+	plan, err := mapplanner.Explain(graph, mapplanner.Query{
+		MapID:            "map.contract",
+		Scope:            mapplanner.ScopeCases,
+		InterfaceNodeID:  "interface.submit",
+		ValidationFamily: "empty/null",
+		PlannerMode:      mapplanner.ModeExplain,
+	})
+	if err != nil {
+		t.Fatalf("explain grouped validation cases: %v", err)
+	}
+
+	if len(plan.ReplayGroups) != 1 {
+		t.Fatalf("replay groups = %#v", plan.ReplayGroups)
+	}
+	group := plan.ReplayGroups[0]
+	if group.InterfaceNodeID != "interface.submit" || group.AnchorNodeID != "case.submit" || group.ValidationFamily != "empty/null" || group.MaterializationID != "fixture.prepare" || group.Decision != "reused" || group.Count != 2 {
+		t.Fatalf("replay group = %#v", group)
+	}
+	if len(group.CaseIDs) != 2 || len(group.TaskIDs) != 3 {
+		t.Fatalf("replay group members = %#v", group)
+	}
+	reuseTasks := 0
+	caseTasks := 0
+	for _, task := range plan.PhysicalTasks {
+		switch task.Kind {
+		case mapplanner.TaskReuseMaterialized:
+			reuseTasks++
+			if task.ReplayGroupID != group.ID {
+				t.Fatalf("reuse task missing replay group = %#v", task)
+			}
+		case mapplanner.TaskRunCase:
+			caseTasks++
+			if task.ReplayGroupID != group.ID {
+				t.Fatalf("case task missing replay group = %#v", task)
+			}
+		}
+	}
+	if reuseTasks != 1 || caseTasks != 2 {
+		t.Fatalf("planner should reuse one checkpoint for two validation cases, tasks=%#v", plan.PhysicalTasks)
+	}
+}
+
 func TestExplainRejectsUnmatchedWorkflowTarget(t *testing.T) {
 	graph := validationCaseGraph()
 

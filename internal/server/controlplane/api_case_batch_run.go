@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/domain/profilecatalog"
 	"agent-testbench/internal/store"
 )
 
@@ -57,6 +58,7 @@ func startAPICaseBatchRun(ctx context.Context, bundle profile.Bundle, runtime st
 	if status, err := validateAPICaseBatchEnvironmentWorkflowGate(ctx, runtime, request); err != nil {
 		return apiCaseBatchRunReport{}, status, err
 	}
+	bundle = apiCaseBatchPlanningBundle(ctx, runtime, bundle)
 	plans, err := apiCaseBatchPlans(ctx, bundle, runtime, request)
 	if err != nil {
 		var planErr apiCaseBatchPlanError
@@ -129,6 +131,17 @@ func startAPICaseBatchRun(ctx context.Context, bundle profile.Bundle, runtime st
 
 	go runner.run(context.Background(), batchRunID, bundle, request.EnvironmentID, request.WorkflowID, plans, runtime, bundle.FailureCategories, collector)
 	return report, http.StatusAccepted, nil
+}
+
+func apiCaseBatchPlanningBundle(ctx context.Context, runtime store.Store, fallback profile.Bundle) profile.Bundle {
+	if runtime == nil {
+		return fallback
+	}
+	catalog, err := runtime.GetProfileCatalog(ctx)
+	if err != nil || strings.TrimSpace(catalog.ProfileID) == "" {
+		return fallback
+	}
+	return profilecatalog.ToBundle(catalog)
 }
 
 func validateAPICaseBatchEnvironmentWorkflowGate(ctx context.Context, runtime store.Store, request apiCaseBatchRunRequest) (int, error) {

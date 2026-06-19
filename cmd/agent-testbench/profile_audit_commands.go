@@ -34,7 +34,7 @@ func runProfileAudit(ctx context.Context, args []string) error {
 		Bundle:     bundle,
 		BundlePath: resolvedProfilePath,
 	}
-	resolvedStoreURL, err := resolveStoreReference(options.StoreRef, options.StoreURL)
+	resolvedStoreURL, err := resolveOptionalBundleStoreReference(options.TemplatePackageReference(), options.StoreRef, options.StoreURL)
 	if err != nil {
 		return err
 	}
@@ -68,7 +68,7 @@ func runProfileAuditPlan(ctx context.Context, args []string) error {
 	if !options.OfflineTemplatePackage {
 		return errors.New("--profile audit-plan reads template packages only for offline review; add --offline-template-package")
 	}
-	resolvedStoreURL, err := resolveStoreReference(options.StoreRef, options.StoreURL)
+	resolvedStoreURL, err := resolveOptionalBundleStoreReference(options.TemplatePackageReference(), options.StoreRef, options.StoreURL)
 	if err != nil {
 		return err
 	}

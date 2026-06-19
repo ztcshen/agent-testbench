@@ -151,6 +151,18 @@ func taskRecordSummary(task PhysicalTask) map[string]any {
 	for key, value := range task.Summary {
 		summary[key] = value
 	}
+	if strings.TrimSpace(task.ReplayGroupID) != "" {
+		summary["replayGroupId"] = task.ReplayGroupID
+	}
+	if strings.TrimSpace(task.InterfaceNodeID) != "" {
+		summary["interfaceNodeId"] = task.InterfaceNodeID
+	}
+	if strings.TrimSpace(task.AnchorNodeID) != "" {
+		summary["anchorNodeId"] = task.AnchorNodeID
+	}
+	if strings.TrimSpace(task.ValidationFamily) != "" {
+		summary["validationFamily"] = task.ValidationFamily
+	}
 	if strings.TrimSpace(task.UntilNodeID) != "" {
 		summary["untilNodeId"] = task.UntilNodeID
 	}

@@ -497,6 +497,8 @@ func runMapExplain(ctx context.Context, args []string) error {
 	nodeID := flags.String("node", "", "Target plan node id")
 	pathID := flags.String("path", "", "Target map path id")
 	workflowID := flags.String("workflow", "", "Target workflow id")
+	interfaceID := flags.String("interface", "", "Filter validation cases by interface node id")
+	validationFamily := flags.String("validation-family", "", "Filter validation cases by family such as empty/null, length, type, enum, state, boundary, or contract")
 	environmentID := flags.String("environment", "", "Environment id to bind into the planner output")
 	savePlan := flags.Bool("save", false, "Persist the generated planner instance and task DAG")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
@@ -509,14 +511,16 @@ func runMapExplain(ctx context.Context, args []string) error {
 	}
 	defer cleanup()
 	plan, err := mapplanner.Explain(graph, mapplanner.Query{
-		MapID:         *mapID,
-		EnvironmentID: *environmentID,
-		Scope:         *scope,
-		CaseID:        *caseID,
-		NodeID:        *nodeID,
-		PathID:        *pathID,
-		WorkflowID:    *workflowID,
-		PlannerMode:   mapplanner.ModeExplain,
+		MapID:            *mapID,
+		EnvironmentID:    *environmentID,
+		Scope:            *scope,
+		CaseID:           *caseID,
+		NodeID:           *nodeID,
+		PathID:           *pathID,
+		WorkflowID:       *workflowID,
+		InterfaceNodeID:  *interfaceID,
+		ValidationFamily: *validationFamily,
+		PlannerMode:      mapplanner.ModeExplain,
 	})
 	if err != nil {
 		return err

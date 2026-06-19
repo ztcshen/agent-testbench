@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -224,6 +225,54 @@ func seedCaseGateFailureStore(t *testing.T, dir string) (string, string) {
 		t.Fatalf("close store: %v", err)
 	}
 	return storePath, runID
+}
+
+func seedCaseGateBatchStore(t *testing.T, dir string) (string, string) {
+	t.Helper()
+	ctx := context.Background()
+	storePath := filepath.Join(dir, "store.sqlite")
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	started := time.Date(2026, 5, 24, 9, 0, 0, 0, time.UTC)
+	batchRunID := "batch.case-gate"
+	childRunIDs := []string{batchRunID + ".step-alpha.case-alpha", batchRunID + ".step-beta.case-beta"}
+	if _, err := s.CreateRun(ctx, store.Run{
+		ID:           batchRunID,
+		ProfileID:    "sample",
+		WorkflowID:   "workflow.batch",
+		Status:       store.StatusPassed,
+		EvidenceRoot: filepath.Join(dir, "evidence", batchRunID),
+		SummaryJSON:  `{"steps":[{"runId":"` + childRunIDs[0] + `","caseRunId":"` + childRunIDs[0] + `.case"},{"runId":"` + childRunIDs[1] + `","caseRunId":"` + childRunIDs[1] + `.case"}]}`,
+		StartedAt:    started,
+		FinishedAt:   started.Add(2 * time.Second),
+		CreatedAt:    started,
+		UpdatedAt:    started.Add(2 * time.Second),
+	}); err != nil {
+		t.Fatalf("create batch run: %v", err)
+	}
+	for index, childRunID := range childRunIDs {
+		caseID := fmt.Sprintf("case.%c", 'a'+rune(index))
+		if _, err := s.CreateRun(ctx, store.Run{
+			ID:           childRunID,
+			ProfileID:    "sample",
+			WorkflowID:   "workflow.batch",
+			Status:       store.StatusPassed,
+			EvidenceRoot: filepath.Join(dir, "evidence", childRunID),
+			StartedAt:    started.Add(time.Duration(index) * time.Second),
+			FinishedAt:   started.Add(time.Duration(index+1) * time.Second),
+			CreatedAt:    started.Add(time.Duration(index) * time.Second),
+			UpdatedAt:    started.Add(time.Duration(index+1) * time.Second),
+		}); err != nil {
+			t.Fatalf("create child run %s: %v", childRunID, err)
+		}
+		recordCaseGateAPICaseRunWithEvidence(t, ctx, s, childRunID, dir, started, childRunID+".case", caseID, store.StatusPassed)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+	return storePath, batchRunID
 }
 
 func recordCaseGateAPICaseRuns(t *testing.T, ctx context.Context, s store.Store, runID string, dir string, started time.Time) {

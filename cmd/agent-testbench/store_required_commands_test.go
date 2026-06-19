@@ -304,3 +304,30 @@ func TestAuditCommandsRequireExplicitStoreOrOfflineReviewBeforeProfileLoad(t *te
 		})
 	}
 }
+
+func TestOfflineAuditCommandsIgnoreActiveStoreWithoutExplicitStoreFlag(t *testing.T) {
+	profileDir := t.TempDir()
+	writeWorkflowProfile(t, profileDir)
+	configHome := t.TempDir()
+	env := []string{"AGENT_TESTBENCH_CONFIG_HOME=" + configHome}
+	runCLIWithEnv(t, env, "store", "config", "set", "broken-mysql", "--url", "mysql://root:secret@127.0.0.1:1/agent_testbench_unreachable")
+	runCLIWithEnv(t, env, "store", "use", "broken-mysql")
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "profile audit", args: []string{"profile", "audit", "--profile", profileDir, "--offline-template-package", "--json"}},
+		{name: "profile audit-plan", args: []string{"profile", "audit-plan", "--profile", profileDir, "--offline-template-package", "--json"}},
+		{name: "workflow audit", args: []string{"workflow", "audit", "--profile", profileDir, "--offline-template-package", "--workflow", "workflow.alpha", "--json"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := runCLIWithEnv(t, env, tt.args...)
+			if strings.Contains(out, "127.0.0.1:1") || strings.Contains(out, "ping mysql store") {
+				t.Fatalf("%s should not open active Store in offline mode:\n%s", tt.name, out)
+			}
+		})
+	}
+}
