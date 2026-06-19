@@ -1,5 +1,57 @@
 package main
 
+const topLevelHelpTextContent = `AgentTestBench
+
+Usage:
+  agent-testbench status [--deep] [--json]
+  agent-testbench doctor [--fix] [--deep] [--trace-graphql-url URL] [--json]
+  agent-testbench commands [--area AREA] [--filter TEXT] [--all] [--json]
+  agent-testbench setup [--repo PATH] [--store NAME] [--url DSN | --sqlite PATH] [--build-runtime] [--runtime-only] [--json]
+  agent-testbench completion [bash|zsh]
+  agent-testbench logs [NAME|list] [-n N] [--json]
+  agent-testbench config show [--json]
+  agent-testbench task suggest --goal TEXT [--json]
+  agent-testbench task plan TASK_ID [--map ID] [--store NAME_OR_DSN] [--json]
+  agent-testbench task run NAME --command COMMAND [--store NAME_OR_DSN] [--json]
+  agent-testbench task run TASK_ID [--map ID] [--store NAME_OR_DSN] [--dry-run] [--json]
+  agent-testbench map --help
+  agent-testbench case run --case PATH [--dry-run] [--json]
+  agent-testbench case diagnose [--store NAME_OR_DSN] [--case-run ID | --run ID [--case-id ID]] [--json]
+  agent-testbench case gate [--store NAME_OR_DSN] [--run ID] [--require-no-failures] [--json]
+  agent-testbench workflow gate --run ID [--store NAME_OR_DSN] [--require-passed] [--json]
+  agent-testbench workflow task run --workflow ID --step STEP=TASK_NAME_OR_ID [--store NAME_OR_DSN] [--json]
+  agent-testbench environment restore ENV_ID --workspace PATH [--store NAME_OR_DSN] [--execute] [--json]
+  agent-testbench store config set NAME --url postgres://...
+  agent-testbench store config set NAME --url mysql://...
+  agent-testbench store config set NAME --url sqlite://PATH
+  agent-testbench update [--repo PATH] [--remote NAME] [--branch NAME] [--release TAG|latest] [--channel main|release] [--check] [--force] [--output PATH] [--json]
+  agent-testbench onboard [--repo PATH] [--store NAME] [--url DSN | --sqlite PATH] [--install-shell] [--json]
+  agent-testbench watch NAME --command COMMAND [--store NAME_OR_DSN] [--interval DURATION] [--limit N]
+  agent-testbench notify test (--file PATH | --webhook URL) [--message TEXT] [--json]
+
+Recommended workflows:
+  agent-testbench status --json
+  agent-testbench doctor --deep --json
+  agent-testbench task suggest --goal "maintain map" --json
+  agent-testbench task plan map-maintain --map MAP_ID --json
+  agent-testbench task run map-maintain --map MAP_ID --dry-run --json
+  agent-testbench map --help
+  agent-testbench commands --filter "case gate"
+  agent-testbench commands --filter "maintain map" --all --json
+  agent-testbench commands --all
+
+Examples:
+  agent-testbench setup --store local --sqlite .runtime/agent-testbench-local.sqlite --build-runtime
+  agent-testbench onboard --store local --sqlite .runtime/agent-testbench-local.sqlite --install-shell
+  agent-testbench status
+  agent-testbench doctor --fix
+  agent-testbench update --check --channel release --json --output .runtime/agent-testbench
+  agent-testbench commands --filter "case gate"
+  agent-testbench workflow task run --workflow workflow.message-smoke --step trigger=publish-message --store local --json
+  agent-testbench task run catalog-smoke --command "commands --json" --store local --json
+  agent-testbench watch catalog-smoke --command "commands --json" --store local --interval 5m --limit 3
+  agent-testbench notify test --file .runtime/notifications.jsonl --message "AgentTestBench ready"`
+
 const helpTextContent = `AgentTestBench
 
 Usage:
@@ -12,7 +64,11 @@ Usage:
   agent-testbench commands [--area AREA] [--filter TEXT] [--tier daily|advanced|compat|deprecated] [--audience agent|operator|developer|internal] [--all] [--json]
   agent-testbench completion [bash|zsh]
   agent-testbench logs [NAME|list] [-n N] [--json]
+  agent-testbench task catalog [--filter TEXT] [--json]
+  agent-testbench task suggest --goal TEXT [--json]
+  agent-testbench task plan TASK_ID [--map ID] [--environment ENV_ID] [--workspace PATH] [--case-run ID] [--run ID] [--store NAME_OR_DSN] [--json]
   agent-testbench task run NAME --command COMMAND [--store NAME_OR_DSN] [--shell] [--notify-file PATH] [--notify-webhook URL] [--json]
+  agent-testbench task run TASK_ID [--map ID] [--environment ENV_ID] [--workspace PATH] [--case-run ID] [--run ID] [--store NAME_OR_DSN] [--dry-run] [--json]
   agent-testbench task schedule NAME --command COMMAND (--interval DURATION | --cron EXPR) [--store NAME_OR_DSN] [--notify-file PATH] [--notify-webhook URL] [--json]
   agent-testbench task watch NAME --command COMMAND [--store NAME_OR_DSN] [--interval DURATION] [--limit N] [--until always|success|failure] [--notify-file PATH] [--notify-webhook URL] [--json]
   agent-testbench task list [--store NAME_OR_DSN] [--json]

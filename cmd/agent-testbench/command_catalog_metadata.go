@@ -1,0 +1,136 @@
+package main
+
+const (
+	cliCommandStatus   = "status"
+	cliCommandCommands = onboardSmokeCommands
+	cliCommandDoctor   = "doctor"
+
+	commandCatalogEnvironmentRestore = "environment restore"
+	commandCatalogEnvironmentStatus  = "environment status"
+	commandCatalogEnvironmentStop    = "environment stop"
+	commandCatalogEnvironmentRestart = "environment service restart"
+	commandCatalogTaskPlan           = "task plan"
+	commandCatalogWorkflowGate       = "workflow gate"
+	commandCatalogCaseDiagnose       = "case diagnose"
+	commandCatalogCaseGate           = "case gate"
+	commandCatalogCaseRun            = "case run"
+
+	commandCatalogMapList             = "map list"
+	commandCatalogMapWorkflows        = "map workflows"
+	commandCatalogMapCoverage         = "map coverage"
+	commandCatalogMapPlans            = "map plans"
+	commandCatalogMapVersions         = "map versions"
+	commandCatalogMapImportWorkflows  = "map import-workflows"
+	commandCatalogMapDoctor           = "map doctor"
+	commandCatalogMapDiff             = "map diff"
+	commandCatalogMapValidationList   = "map validation list"
+	commandCatalogMapValidationAttach = "map validation attach"
+	commandCatalogMapUpdate           = "map update"
+	commandCatalogMapSnapshot         = "map snapshot"
+	commandCatalogMapPublish          = "map publish"
+	commandCatalogMapExplain          = "map explain"
+	commandCatalogMapPlanInspect      = "map plan inspect"
+	commandCatalogMapRunExplain       = "map run explain"
+	commandCatalogMapRun              = "map run"
+	commandCatalogMapGate             = "map gate"
+	commandCatalogMapAtlas            = "map atlas"
+
+	commandCatalogLifecycleInspect  = "inspect"
+	commandCatalogLifecycleMaintain = "maintain"
+	commandCatalogLifecyclePlan     = "plan"
+	commandCatalogLifecycleExecute  = "execute"
+	commandCatalogLifecycleReview   = "review"
+
+	workflowToMapImportReplacement = "agent-testbench map import-workflows --workflow WORKFLOW_ID --map MAP_ID"
+
+	commandCatalogTierDaily      = "daily"
+	commandCatalogTierAdvanced   = "advanced"
+	commandCatalogTierCompat     = "compat"
+	commandCatalogTierDeprecated = "deprecated"
+
+	commandCatalogAudienceAgent     = "agent"
+	commandCatalogAudienceOperator  = "operator"
+	commandCatalogAudienceDeveloper = "developer"
+
+	commandCatalogStabilityStable = "stable"
+	commandCatalogStabilityLegacy = "legacy"
+
+	commandCatalogCaseSuiteCoverage = "case suite coverage"
+)
+
+func commandCatalogMapLifecycle(command string) string {
+	return commandCatalogMapLifecycles()[command]
+}
+
+func commandCatalogMapLifecycles() map[string]string {
+	return map[string]string{
+		commandCatalogMapList:             commandCatalogLifecycleInspect,
+		commandCatalogMapWorkflows:        commandCatalogLifecycleInspect,
+		commandCatalogMapCoverage:         commandCatalogLifecycleInspect,
+		commandCatalogMapPlans:            commandCatalogLifecycleInspect,
+		commandCatalogMapVersions:         commandCatalogLifecycleInspect,
+		commandCatalogMapImportWorkflows:  commandCatalogLifecycleMaintain,
+		commandCatalogMapDoctor:           commandCatalogLifecycleMaintain,
+		commandCatalogMapDiff:             commandCatalogLifecycleMaintain,
+		commandCatalogMapValidationList:   commandCatalogLifecycleMaintain,
+		commandCatalogMapValidationAttach: commandCatalogLifecycleMaintain,
+		commandCatalogMapUpdate:           commandCatalogLifecycleMaintain,
+		commandCatalogMapSnapshot:         commandCatalogLifecycleMaintain,
+		commandCatalogMapPublish:          commandCatalogLifecycleMaintain,
+		commandCatalogMapExplain:          commandCatalogLifecyclePlan,
+		commandCatalogMapPlanInspect:      commandCatalogLifecyclePlan,
+		commandCatalogMapRunExplain:       commandCatalogLifecyclePlan,
+		commandCatalogMapRun:              commandCatalogLifecycleExecute,
+		commandCatalogMapGate:             commandCatalogLifecycleExecute,
+		commandCatalogMapAtlas:            commandCatalogLifecycleReview,
+	}
+}
+
+func commandCatalogTaskRank(command string) int {
+	return commandCatalogTaskRanks()[command]
+}
+
+func commandCatalogTaskRanks() map[string]int {
+	return map[string]int{
+		commandCatalogMapDoctor:           10,
+		commandCatalogMapCoverage:         20,
+		commandCatalogMapDiff:             30,
+		commandCatalogMapValidationList:   40,
+		commandCatalogMapValidationAttach: 50,
+		commandCatalogMapUpdate:           60,
+		commandCatalogMapSnapshot:         70,
+		commandCatalogMapPublish:          80,
+		commandCatalogMapVersions:         90,
+		commandCatalogMapImportWorkflows:  100,
+		commandCatalogMapList:             110,
+		commandCatalogMapWorkflows:        120,
+		commandCatalogMapExplain:          210,
+		commandCatalogMapPlanInspect:      220,
+		commandCatalogMapRun:              230,
+		commandCatalogMapGate:             240,
+		commandCatalogMapRunExplain:       250,
+		commandCatalogMapPlans:            260,
+		commandCatalogMapAtlas:            310,
+	}
+}
+
+func commandCatalogDailyAdmissionReason(command string) string {
+	switch command {
+	case cliCommandStatus, cliCommandDoctor, cliCommandCommands:
+		return "orientation: first commands for status, diagnosis, and command discovery"
+	case "store current", "store status":
+		return "store: identifies the active SQL Store and its health"
+	case "environment discover", "environment inspect", commandCatalogEnvironmentRestore, commandCatalogEnvironmentStatus, commandCatalogEnvironmentStop, commandCatalogEnvironmentRestart:
+		return "environment lifecycle: inspect, restore, check, stop, or restart a registered environment"
+	case "task catalog", "task suggest", commandCatalogTaskPlan, "task run":
+		return "task intent: lets agents discover, plan, and run repeatable operator tasks"
+	case commandCatalogMapList, commandCatalogMapCoverage, commandCatalogMapDoctor, commandCatalogMapExplain, commandCatalogMapGate, commandCatalogMapRun, commandCatalogMapAtlas:
+		return "map lifecycle: inspect, plan, execute, gate, and review a test scenario map"
+	case "case discover", "case suite report", "case runs", "case evidence", commandCatalogCaseDiagnose, commandCatalogCaseGate, commandCatalogCaseRun:
+		return "case lifecycle: discover, run, inspect evidence, diagnose, and gate API or MQ cases"
+	case commandCatalogWorkflowGate:
+		return "workflow compatibility: keeps existing workflow gates visible while map-first flows converge"
+	default:
+		return "daily operator path: commonly needed for local Store-first testing"
+	}
+}

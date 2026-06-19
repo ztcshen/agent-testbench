@@ -62,6 +62,18 @@ AgentTestBench follows the same operator pattern as mature local CLIs: start
 with a status summary, run diagnostics when something looks wrong, then use a
 searchable command catalog instead of scrolling the full help page.
 
+Command discovery has three tiers:
+
+- `daily`: first-choice operator and agent entrypoints for Store health,
+  environment lifecycle, task intent, map lifecycle, case execution/diagnosis,
+  and gates. `agent-testbench commands --json` includes `dailyReason` so an
+  agent can explain why each command is on the default surface.
+- `advanced`: lower-frequency construction, migration, import/export, or
+  compatibility support commands. They remain callable and visible through
+  `agent-testbench commands --all`.
+- `compat`: legacy aliases or file-package compatibility paths. Prefer the
+  `replacement` hint when a Store-first or map-first path exists.
+
 ```sh
 # Show checkout, runtime binary, active Store, and next suggested commands.
 ./bin/agent-testbench.sh status

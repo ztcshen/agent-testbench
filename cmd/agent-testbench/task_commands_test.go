@@ -232,6 +232,193 @@ func TestNotifyTestWritesJSONLine(t *testing.T) {
 	}
 }
 
+type taskCatalogTestReport struct {
+	OK    bool `json:"ok"`
+	Count int  `json:"count"`
+	Tasks []struct {
+		ID             string   `json:"id"`
+		Goal           string   `json:"goal"`
+		Tags           []string `json:"tags"`
+		RequiredInputs []struct {
+			Name     string `json:"name"`
+			Flag     string `json:"flag"`
+			Required bool   `json:"required"`
+		} `json:"requiredInputs"`
+		Steps []struct {
+			ID       string `json:"id"`
+			Command  string `json:"command"`
+			ReadOnly bool   `json:"readOnly"`
+		} `json:"steps"`
+	} `json:"tasks"`
+}
+
+func TestTaskCatalogExposesBuiltInTasks(t *testing.T) {
+	catalog := decodeTaskCatalogTestReport(t, runCLI(t, "task", "catalog", "--json"))
+	if !catalog.OK || catalog.Count < 4 {
+		t.Fatalf("task catalog should expose built-in tasks: %#v", catalog)
+	}
+	tasks := taskCatalogEntriesByID(catalog)
+	maintain := tasks["map-maintain"]
+	if maintain.Goal == "" || !stringSliceContains(maintain.Tags, "maintain map") {
+		t.Fatalf("map-maintain catalog entry = %#v", maintain)
+	}
+	if len(maintain.RequiredInputs) == 0 || maintain.RequiredInputs[0].Flag != "--map" || len(maintain.Steps) < 3 {
+		t.Fatalf("map-maintain catalog inputs/steps = %#v", maintain)
+	}
+	if _, ok := tasks["map-execute"]; !ok {
+		t.Fatalf("task catalog missing map-execute: %#v", tasks)
+	}
+}
+
+func TestTaskSuggestBuiltInTasks(t *testing.T) {
+	suggestOut := runCLI(t, "task", "suggest", "--goal", "maintain map", "--json")
+	var suggest struct {
+		OK          bool `json:"ok"`
+		Suggestions []struct {
+			ID     string `json:"id"`
+			Reason string `json:"reason"`
+		} `json:"suggestions"`
+	}
+	if err := json.Unmarshal([]byte(suggestOut), &suggest); err != nil {
+		t.Fatalf("decode task suggest: %v\n%s", err, suggestOut)
+	}
+	if !suggest.OK || len(suggest.Suggestions) == 0 || suggest.Suggestions[0].ID != "map-maintain" || suggest.Suggestions[0].Reason == "" {
+		t.Fatalf("maintain map suggestion = %#v", suggest)
+	}
+	executeSuggest := runCLI(t, "task", "suggest", "--goal", "execute map", "--json")
+	if !strings.Contains(executeSuggest, `"id": "map-execute"`) {
+		t.Fatalf("execute map suggestion should include map-execute:\n%s", executeSuggest)
+	}
+}
+
+func TestTaskPlanBuiltInMapMaintain(t *testing.T) {
+	planOut := runCLI(t, "task", "plan", "map-maintain", "--map", "map.demo", "--json")
+	var plan struct {
+		OK      bool              `json:"ok"`
+		DryRun  bool              `json:"dryRun"`
+		Inputs  map[string]string `json:"inputs"`
+		Missing []string          `json:"missing"`
+		Task    struct {
+			ID string `json:"id"`
+		} `json:"task"`
+		Steps []struct {
+			ID      string `json:"id"`
+			Command string `json:"command"`
+			Execute bool   `json:"execute"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal([]byte(planOut), &plan); err != nil {
+		t.Fatalf("decode task plan: %v\n%s", err, planOut)
+	}
+	if !plan.OK || plan.Task.ID != "map-maintain" || plan.Inputs["map"] != "map.demo" || len(plan.Missing) != 0 || len(plan.Steps) < 4 {
+		t.Fatalf("map-maintain plan = %#v", plan)
+	}
+	wantCommands := []string{
+		"map doctor --map map.demo",
+		"map coverage --map map.demo",
+		"map diff --map map.demo --from published",
+		"map validation list --map map.demo",
+	}
+	for i, want := range wantCommands {
+		if plan.Steps[i].Command != want || plan.Steps[i].Execute {
+			t.Fatalf("plan step %d = %#v, want command %q and execute=false", i, plan.Steps[i], want)
+		}
+	}
+
+	missingOut := runCLIFails(t, "task", "plan", "map-maintain", "--json")
+	if !strings.Contains(missingOut, "--map") || !strings.Contains(missingOut, "missing") {
+		t.Fatalf("task plan should explain missing inputs:\n%s", missingOut)
+	}
+}
+
+func decodeTaskCatalogTestReport(t *testing.T, raw string) taskCatalogTestReport {
+	t.Helper()
+	var report taskCatalogTestReport
+	if err := json.Unmarshal([]byte(raw), &report); err != nil {
+		t.Fatalf("decode task catalog: %v\n%s", err, raw)
+	}
+	return report
+}
+
+func taskCatalogEntriesByID(report taskCatalogTestReport) map[string]struct {
+	Goal           string
+	Tags           []string
+	RequiredInputs []struct {
+		Name     string `json:"name"`
+		Flag     string `json:"flag"`
+		Required bool   `json:"required"`
+	}
+	Steps []struct {
+		ID       string `json:"id"`
+		Command  string `json:"command"`
+		ReadOnly bool   `json:"readOnly"`
+	}
+} {
+	out := map[string]struct {
+		Goal           string
+		Tags           []string
+		RequiredInputs []struct {
+			Name     string `json:"name"`
+			Flag     string `json:"flag"`
+			Required bool   `json:"required"`
+		}
+		Steps []struct {
+			ID       string `json:"id"`
+			Command  string `json:"command"`
+			ReadOnly bool   `json:"readOnly"`
+		}
+	}{}
+	for _, task := range report.Tasks {
+		out[task.ID] = struct {
+			Goal           string
+			Tags           []string
+			RequiredInputs []struct {
+				Name     string `json:"name"`
+				Flag     string `json:"flag"`
+				Required bool   `json:"required"`
+			}
+			Steps []struct {
+				ID       string `json:"id"`
+				Command  string `json:"command"`
+				ReadOnly bool   `json:"readOnly"`
+			}
+		}{Goal: task.Goal, Tags: task.Tags, RequiredInputs: task.RequiredInputs, Steps: task.Steps}
+	}
+	return out
+}
+
+func TestTaskRunBuiltInMapTasksDryRun(t *testing.T) {
+	out := runCLI(t, "task", "run", "map-maintain", "--map", "map.demo", "--dry-run", "--json")
+	var report struct {
+		OK     bool `json:"ok"`
+		DryRun bool `json:"dryRun"`
+		Task   struct {
+			ID string `json:"id"`
+		} `json:"task"`
+		Steps []struct {
+			Command  string `json:"command"`
+			Execute  bool   `json:"execute"`
+			ReadOnly bool   `json:"readOnly"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode task run dry-run: %v\n%s", err, out)
+	}
+	if !report.OK || !report.DryRun || report.Task.ID != "map-maintain" || len(report.Steps) < 4 {
+		t.Fatalf("task run map-maintain dry-run = %#v", report)
+	}
+	for _, step := range report.Steps {
+		if step.Execute || !step.ReadOnly {
+			t.Fatalf("map-maintain dry-run should only plan read-only steps: %#v", step)
+		}
+	}
+
+	executePlan := runCLI(t, "task", "run", "map-execute", "--map", "map.demo", "--dry-run", "--json")
+	if !strings.Contains(executePlan, `"id": "map-execute"`) || !strings.Contains(executePlan, "map explain --map map.demo") || !strings.Contains(executePlan, "map run --map map.demo") {
+		t.Fatalf("task run map-execute dry-run should plan execution lifecycle:\n%s", executePlan)
+	}
+}
+
 func taskIDFromJSONReport(t *testing.T, raw string) string {
 	t.Helper()
 	var report struct {
