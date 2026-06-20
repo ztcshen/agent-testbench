@@ -234,6 +234,85 @@ func TestCommandDescriptorsDeclareCommandPaths(t *testing.T) {
 	}
 }
 
+func TestCommandDescriptorRegistryOwnsCatalogMetadata(t *testing.T) {
+	catalogSource, err := os.ReadFile("command_catalog.go")
+	if err != nil {
+		t.Fatalf("read command catalog source: %v", err)
+	}
+	for _, forbidden := range []string{
+		"func commandCatalogInternalCommands",
+		"func commandCatalogReplacementHints",
+		"func commandCatalogCompatibilityReplacements",
+	} {
+		if strings.Contains(string(catalogSource), forbidden) {
+			t.Fatalf("command catalog metadata should live in descriptor registry, found %q", forbidden)
+		}
+	}
+
+	lines := commandDescriptorRegistryLinesByCommand()
+	for _, command := range []string{
+		"gate baseline get",
+		"gate baseline set",
+		"notify test",
+		"runtime mysql endpoints",
+		"replay evidence",
+		"template-package catalog list",
+		"template-package catalog restore",
+		"trace topology collect",
+	} {
+		if !strings.Contains(lines[command], "surface=internal") {
+			t.Fatalf("descriptor for %q should declare surface=internal, line=%q", command, lines[command])
+		}
+	}
+
+	for command, replacement := range map[string]string{
+		commandCatalogExecutorPlan:                 "agent-testbench map explain",
+		"runtime mysql endpoints":                  "agent-testbench store status --json",
+		"trace topology collect":                   "agent-testbench evidence inspect --view tasks --run RUN_ID --json",
+		"replay evidence":                          "agent-testbench evidence inspect --view list --run RUN_ID --json",
+		commandCatalogEvidenceList:                 "agent-testbench evidence inspect --view list",
+		commandCatalogEvidenceTasks:                "agent-testbench evidence inspect --view tasks",
+		commandCatalogEnvironmentRepoSet:           "agent-testbench environment configure --view repos ENV_ID",
+		commandCatalogEnvironmentStartupFilePut:    "agent-testbench environment configure --view startup-files ENV_ID",
+		commandCatalogEnvironmentComponentsInspect: "agent-testbench environment configure --view components ENV_ID",
+		commandCatalogEnvironmentComponentsReplace: "agent-testbench environment configure --view components ENV_ID --file COMPONENT_GRAPH_JSON",
+		commandCatalogMapList:                      "agent-testbench map inspect --view list",
+		commandCatalogMapWorkflows:                 "agent-testbench map inspect --view workflows --map MAP_ID",
+		commandCatalogMapCoverage:                  "agent-testbench map inspect --view coverage --map MAP_ID",
+		commandCatalogMapPlans:                     "agent-testbench map inspect --view plans --map MAP_ID",
+		commandCatalogMapPlanInspect:               "agent-testbench map inspect --view plan --plan PLAN_ID",
+		"workflow discover":                        "agent-testbench map inspect --view list --json or agent-testbench map inspect --view workflows --map MAP_ID --json",
+		"workflow register":                        workflowToMapImportReplacement,
+		"workflow upsert":                          workflowToMapImportReplacement,
+		"workflow binding register":                workflowToMapImportReplacement,
+		"workflow binding upsert":                  workflowToMapImportReplacement,
+		"workflow plan":                            "agent-testbench map explain --map MAP_ID --workflow WORKFLOW_ID",
+		"workflow audit":                           "agent-testbench map doctor --map MAP_ID",
+		commandCatalogCaseDiagnose:                 "agent-testbench case inspect --view diagnose",
+		"case runs":                                "agent-testbench case inspect --view runs",
+		"case evidence":                            "agent-testbench case inspect --view evidence",
+		"case timing":                              "agent-testbench case inspect --view timing",
+		"workflow task run":                        "agent-testbench task run NAME --command COMMAND or agent-testbench map run --plan PLAN_ID --rerun-task TASK_ID",
+	} {
+		needle := "replacement=" + replacement
+		if !strings.Contains(lines[command], needle) {
+			t.Fatalf("descriptor for %q should declare %q, line=%q", command, needle, lines[command])
+		}
+	}
+}
+
+func commandDescriptorRegistryLinesByCommand() map[string]string {
+	lines := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(commandDescriptorRegistryText), "\n") {
+		fields := strings.Split(line, "\t")
+		if len(fields) < 2 {
+			continue
+		}
+		lines[strings.TrimSpace(fields[0])] = line
+	}
+	return lines
+}
+
 func TestCompletionRootCommandsUseDescriptorPaths(t *testing.T) {
 	source, err := os.ReadFile("operator_commands.go")
 	if err != nil {

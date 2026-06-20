@@ -126,7 +126,7 @@ func commandCatalogItemFromDescriptor(descriptor commandDescriptor) commandCatal
 	if len(path) > 0 {
 		area = path[0]
 	}
-	metadata := commandCatalogMetadata(command, area, usage)
+	metadata := commandCatalogMetadata(descriptor, area)
 	tags := commandCatalogTags(command, area, usage)
 	if metadata.Lifecycle != "" {
 		tags = append(tags, metadata.Lifecycle)
@@ -187,7 +187,9 @@ type commandCatalogMetadataReport struct {
 	Reason      string
 }
 
-func commandCatalogMetadata(command string, area string, usage string) commandCatalogMetadataReport {
+func commandCatalogMetadata(descriptor commandDescriptor, area string) commandCatalogMetadataReport {
+	command := descriptor.Command
+	usage := descriptor.Usage
 	metadata := commandCatalogMetadataReport{Surface: commandCatalogSurfaceExtended}
 	if area == "map" {
 		metadata.Lifecycle = commandCatalogMapLifecycle(command)
@@ -197,25 +199,19 @@ func commandCatalogMetadata(command string, area string, usage string) commandCa
 		metadata.Surface = commandCatalogSurfaceCompatibility
 		return metadata
 	}
-	if commandCatalogInternalCommands()[command] {
-		metadata.Surface = commandCatalogSurfaceInternal
-		if replacement, ok := commandCatalogReplacementHints()[command]; ok {
-			metadata.Replacement = replacement
-		}
+	if descriptor.Surface != "" {
+		metadata.Surface = descriptor.Surface
+	}
+	if descriptor.Replacement != "" {
+		metadata.Replacement = descriptor.Replacement
+	}
+	if metadata.Surface == commandCatalogSurfaceInternal {
 		return metadata
 	}
 	if commandCatalogDefaultCommands()[command] {
 		metadata.Surface = commandCatalogSurfaceDefault
 		metadata.Reason = commandCatalogDefaultInclusionReason(command)
 		return metadata
-	}
-	if replacement, ok := commandCatalogCompatibilityReplacements()[command]; ok {
-		metadata.Surface = commandCatalogSurfaceCompatibility
-		metadata.Replacement = replacement
-		return metadata
-	}
-	if replacement, ok := commandCatalogReplacementHints()[command]; ok {
-		metadata.Replacement = replacement
 	}
 	return metadata
 }
@@ -275,59 +271,6 @@ func commandCatalogDefaultCommands() map[string]bool {
 		"task suggest":                     true,
 		commandCatalogTaskPlan:             true,
 		"task run":                         true,
-	}
-}
-
-func commandCatalogInternalCommands() map[string]bool {
-	return map[string]bool{
-		"gate baseline get":                true,
-		"gate baseline set":                true,
-		"notify test":                      true,
-		"runtime mysql endpoints":          true,
-		"replay evidence":                  true,
-		"template-package catalog list":    true,
-		"template-package catalog restore": true,
-		"trace topology collect":           true,
-	}
-}
-
-func commandCatalogCompatibilityReplacements() map[string]string {
-	return map[string]string{}
-}
-
-func commandCatalogReplacementHints() map[string]string {
-	return map[string]string{
-		commandCatalogExecutorPlan:                 "agent-testbench map explain",
-		"runtime mysql endpoints":                  "agent-testbench store status --json",
-		"trace topology collect":                   "agent-testbench evidence inspect --view tasks --run RUN_ID --json",
-		"replay evidence":                          "agent-testbench evidence inspect --view list --run RUN_ID --json",
-		commandCatalogEvidenceList:                 "agent-testbench evidence inspect --view list",
-		commandCatalogEvidenceTasks:                "agent-testbench evidence inspect --view tasks",
-		commandCatalogEnvironmentRepoSet:           "agent-testbench environment configure --view repos ENV_ID",
-		commandCatalogEnvironmentStartupFilePut:    "agent-testbench environment configure --view startup-files ENV_ID",
-		commandCatalogEnvironmentComponentsInspect: "agent-testbench environment configure --view components ENV_ID",
-		commandCatalogEnvironmentComponentsReplace: "agent-testbench environment configure --view components ENV_ID --file COMPONENT_GRAPH_JSON",
-		commandCatalogMapList:                      "agent-testbench map inspect --view list",
-		commandCatalogMapWorkflows:                 "agent-testbench map inspect --view workflows --map MAP_ID",
-		commandCatalogMapCoverage:                  "agent-testbench map inspect --view coverage --map MAP_ID",
-		commandCatalogMapPlans:                     "agent-testbench map inspect --view plans --map MAP_ID",
-		commandCatalogMapPlanInspect:               "agent-testbench map inspect --view plan --plan PLAN_ID",
-		"workflow discover":                        "agent-testbench map inspect --view list --json or agent-testbench map inspect --view workflows --map MAP_ID --json",
-		"workflow register":                        workflowToMapImportReplacement,
-		"workflow upsert":                          workflowToMapImportReplacement,
-		"workflow binding register":                workflowToMapImportReplacement,
-		"workflow binding upsert":                  workflowToMapImportReplacement,
-		"workflow plan":                            "agent-testbench map explain --map MAP_ID --workflow WORKFLOW_ID",
-		"workflow audit":                           "agent-testbench map doctor --map MAP_ID",
-		"workflow runs":                            "agent-testbench map inspect --view plans --map MAP_ID",
-		"workflow run":                             "agent-testbench map inspect --view plan --plan PLAN_ID",
-		"workflow step":                            "agent-testbench map inspect --view plan --plan PLAN_ID",
-		"workflow latest-step":                     "agent-testbench map inspect --view plan --plan PLAN_ID",
-		commandCatalogCaseDiagnose:                 "agent-testbench case inspect --view diagnose",
-		"case runs":                                "agent-testbench case inspect --view runs",
-		"case evidence":                            "agent-testbench case inspect --view evidence",
-		"case timing":                              "agent-testbench case inspect --view timing",
-		"workflow task run":                        "agent-testbench task run NAME --command COMMAND or agent-testbench map run --plan PLAN_ID --rerun-task TASK_ID",
 	}
 }
 
