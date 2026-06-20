@@ -318,22 +318,7 @@ func commandCatalogDailyCommands() map[string]bool {
 }
 
 func commandCatalogCompatReplacements() map[string]string {
-	return map[string]string{
-		commandCatalogCaseSuiteCoverage: "agent-testbench case suite report --view coverage",
-		"case suite stability":          "agent-testbench case suite report --view stability",
-		"case suite priority":           "agent-testbench case suite report --view priority",
-		"case suite brief":              "agent-testbench case suite report --view brief",
-		"case suite quality":            "agent-testbench case suite report --view quality",
-		"case suite quality-plan":       "agent-testbench case suite report --view quality-plan",
-		"case suite quality-report":     "agent-testbench case suite report --view quality-report",
-		"case suite impact":             "agent-testbench case suite report --view impact",
-		"case suite impact-report":      "agent-testbench case suite report --view impact-report",
-		"workflow acceptance start":     "agent-testbench environment acceptance start",
-		"workflow acceptance report":    "agent-testbench environment acceptance report",
-		"baseline get":                  "agent-testbench gate baseline get",
-		"baseline set":                  "agent-testbench gate baseline set",
-		commandCatalogMapRunExplain:     "agent-testbench map plan inspect",
-	}
+	return map[string]string{}
 }
 
 func commandCatalogAdvancedReplacements() map[string]string {
@@ -353,8 +338,8 @@ func commandCatalogAdvancedReplacements() map[string]string {
 		"workflow audit":             "agent-testbench map doctor --map MAP_ID",
 		"workflow runs":              "agent-testbench map plans --map MAP_ID",
 		"workflow run":               "agent-testbench map plan inspect --plan PLAN_ID",
-		"workflow step":              "agent-testbench map run explain --plan PLAN_ID",
-		"workflow latest-step":       "agent-testbench map run explain --plan PLAN_ID",
+		"workflow step":              "agent-testbench map plan inspect --plan PLAN_ID",
+		"workflow latest-step":       "agent-testbench map plan inspect --plan PLAN_ID",
 		"workflow task run":          "agent-testbench task run NAME --command COMMAND or agent-testbench map run --plan PLAN_ID --rerun-task TASK_ID",
 		"workflow report":            "agent-testbench map atlas --map MAP_ID",
 	}
@@ -407,7 +392,7 @@ func commandCatalogTaskTags(command string) []string {
 	case commandCatalogMapImportWorkflows, commandCatalogMapList, commandCatalogMapCoverage, commandCatalogMapDoctor, commandCatalogMapWorkflows, commandCatalogMapAtlas,
 		commandCatalogMapUpdate, commandCatalogMapSnapshot, commandCatalogMapPublish, commandCatalogMapVersions, commandCatalogMapDiff, commandCatalogMapValidationList, commandCatalogMapValidationAttach:
 		return []string{"maintain map", "map maintenance"}
-	case commandCatalogMapPlans, commandCatalogMapExplain, commandCatalogMapGate, commandCatalogMapRun, commandCatalogMapPlanInspect, commandCatalogMapRunExplain:
+	case commandCatalogMapPlans, commandCatalogMapExplain, commandCatalogMapGate, commandCatalogMapRun, commandCatalogMapPlanInspect:
 		return []string{"execute map", "map execution"}
 	case "environment restore", "environment status", "environment stop", "environment service restart", "environment discover", "environment inspect":
 		return []string{"restore environment", "environment operations"}

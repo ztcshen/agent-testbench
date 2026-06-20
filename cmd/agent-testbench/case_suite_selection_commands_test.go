@@ -71,7 +71,7 @@ func seedCaseSuiteCoverageLatestRuns(t *testing.T, storeRef string, label string
 
 func runCaseSuiteCoverageJSON(t *testing.T, label string, profileDir string) caseSuiteCoverageCommandReport {
 	t.Helper()
-	out := runCLI(t, "case", "suite", "coverage", "--profile", profileDir, "--tag", "regression", "--status", "active", "--json")
+	out := runCLI(t, "case", "suite", "report", "--view", "coverage", "--profile", profileDir, "--tag", "regression", "--status", "active", "--json")
 	var report caseSuiteCoverageCommandReport
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode %s suite coverage json: %v\n%s", label, err, out)
@@ -106,7 +106,7 @@ func caseSuiteCoverageItemsByCase(report caseSuiteCoverageCommandReport) map[str
 
 func requireCaseSuiteCoverageText(t *testing.T, label string, profileDir string, fixture caseSuiteCoverageFixture, runIDs caseSuiteCoverageRunIDs) {
 	t.Helper()
-	textOut := runCLI(t, "case", "suite", "coverage", "--profile", profileDir, "--tag", "regression")
+	textOut := runCLI(t, "case", "suite", "report", "--view", "coverage", "--profile", profileDir, "--tag", "regression")
 	wants := []string{"Case Suite Coverage", "Total: 3 Passed: 1 Failed: 1 Not Run: 1", fixture.variantCaseID, runIDs.latestVariant + ".case"}
 	for _, want := range wants {
 		if !strings.Contains(textOut, want) {
@@ -157,7 +157,7 @@ type caseSuiteInspectReportItem struct {
 
 func runCaseSuiteInspectJSON(t *testing.T, label string, profileDir string) caseSuiteInspectReport {
 	t.Helper()
-	out := runCLI(t, "case", "suite", "inspect", "--profile", profileDir, "--tag", "regression", "--status", "active", "--json")
+	out := runCLI(t, "case", "suite", "report", "--view", "inspect", "--profile", profileDir, "--tag", "regression", "--status", "active", "--json")
 	var report caseSuiteInspectReport
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode %s suite inspection json: %v\n%s", label, err, out)
@@ -192,7 +192,7 @@ func caseSuiteInspectItemsByCase(report caseSuiteInspectReport) map[string]caseS
 
 func requireCaseSuiteInspectText(t *testing.T, label string, profileDir string, unrunCaseID string) {
 	t.Helper()
-	textOut := runCLI(t, "case", "suite", "inspect", "--profile", profileDir, "--tag", "regression")
+	textOut := runCLI(t, "case", "suite", "report", "--view", "inspect", "--profile", profileDir, "--tag", "regression")
 	for _, want := range []string{"Case Suite Inspection", "Total: 3 Ready: 2 Blocked: 1", unrunCaseID, "add-runnable-source"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("%s inspection text missing %q:\n%s", label, want, textOut)
@@ -215,7 +215,7 @@ func runCaseSuitePlanBuildsExecutableBatchRequest(t *testing.T, storeRef string,
 	fixture := publishCaseSuiteReadinessHistory(t, storeRef, label)
 
 	out := runCLI(t,
-		"case", "suite", "plan",
+		"case", "suite", "report", "--view", "plan",
 		"--profile", fixture.profileDir,
 		"--tag", "regression",
 		"--status", "active",
@@ -256,7 +256,7 @@ func runCaseSuitePlanBuildsExecutableBatchRequest(t *testing.T, storeRef string,
 		t.Fatalf("%s batch request = %#v", label, report.BatchRequest)
 	}
 
-	textOut := runCLI(t, "case", "suite", "plan", "--profile", fixture.profileDir, "--tag", "regression", "--action", "rerun")
+	textOut := runCLI(t, "case", "suite", "report", "--view", "plan", "--profile", fixture.profileDir, "--tag", "regression", "--action", "rerun")
 	for _, want := range []string{"Case Suite Plan", "Selected: 1", fixture.variantCaseID} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("%s plan text missing %q:\n%s", label, want, textOut)

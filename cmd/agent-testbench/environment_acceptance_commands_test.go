@@ -2,27 +2,26 @@ package main
 
 import "testing"
 
-func TestWorkflowAcceptanceCLIStartsAndReadsAsyncReport(t *testing.T) {
+func TestEnvironmentAcceptanceCLIAcceptsLeadingEnvironmentID(t *testing.T) {
 	var startPayload map[string]any
-	server := newWorkflowAcceptanceCLIServer(t, &startPayload)
+	server := newEnvironmentAcceptanceCLIServer(t, &startPayload)
 	defer server.Close()
 
-	startOut := runCLI(t, "workflow", "acceptance", "start",
+	startOut := runCLI(t, "environment", "acceptance", "start", "env.team",
 		"--server-url", server.URL,
-		"--workflow", "workflow.core-10",
-		"--request-id", "acceptance-001",
+		"--request-id", "env-acceptance-001",
 		"--base-url", "http://127.0.0.1:18080",
 		"--timeout-seconds", "30",
 		"--json",
 	)
-	assertWorkflowAcceptanceStart(t, decodeCLIJSON[workflowAcceptanceStart](t, startOut), startPayload)
+	assertEnvironmentAcceptanceStart(t, decodeCLIJSON[environmentAcceptanceStart](t, startOut), startPayload)
 
-	reportOut := runCLI(t, "workflow", "acceptance", "report",
+	reportOut := runCLI(t, "environment", "acceptance", "report", "env.team",
 		"--server-url", server.URL,
-		"--run", "batch.acceptance.001",
+		"--run", "batch.env.acceptance.001",
 		"--json",
 	)
-	assertWorkflowAcceptanceReport(t, decodeCLIJSON[workflowAcceptanceReport](t, reportOut))
+	assertEnvironmentAcceptanceReport(t, decodeCLIJSON[environmentAcceptanceReport](t, reportOut))
 }
 
 func TestCaseBatchCLIStartsAndReadsAsyncReport(t *testing.T) {

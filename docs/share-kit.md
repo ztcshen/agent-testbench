@@ -130,16 +130,16 @@ AgentTestBench 是一个面向 Agent 的 API 工作流测试环境。它让 agen
 ## Demo Talking Points / 演示提纲
 
 1. Open `demo-gallery.html` and let the CLI automation animation play once.
-2. Point out `environment restore`, `case suite priority`, `case run`,
-   `workflow report`, `evidence tasks`, and `case suite quality-report`.
+2. Point out `environment restore`, `case suite report --view priority`, `case run`,
+   `workflow report`, `evidence tasks`, and `case suite report --view quality-report`.
 3. Start `npm run demo:services -- --port 49190`.
 4. Run the generic API case demo or one neutral scenario case.
 5. Open the generated Evidence bundle and connect it back to the Root cause panel.
 6. Show that private team examples live outside the generic core.
 
 1. 打开 `demo-gallery.html`，先完整播放一遍 CLI 自动化动画。
-2. 指出 `environment restore`、`case suite priority`、`case run`、
-   `workflow report`、`evidence tasks` 和 `case suite quality-report`。
+2. 指出 `environment restore`、`case suite report --view priority`、`case run`、
+   `workflow report`、`evidence tasks` 和 `case suite report --view quality-report`。
 3. 启动 `npm run demo:services -- --port 49190`。
 4. 运行通用 API case demo 或一个通用场景 case。
 5. 打开生成的 Evidence，并对应到页面里的 Root cause 面板。

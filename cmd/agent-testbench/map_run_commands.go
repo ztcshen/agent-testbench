@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,9 +38,6 @@ type mapRunOptions struct {
 }
 
 func runMapRun(ctx context.Context, args []string) error {
-	if len(args) > 0 && args[0] == "explain" {
-		return runMapRunExplain(ctx, args[1:])
-	}
 	options, err := parseMapRunOptions(args)
 	if err != nil {
 		return err
@@ -105,6 +103,9 @@ func parseMapRunOptions(args []string) (mapRunOptions, error) {
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return mapRunOptions{}, err
+	}
+	if flags.NArg() > 0 {
+		return mapRunOptions{}, fmt.Errorf("map run does not accept positional arguments: %s", strings.Join(flags.Args(), " "))
 	}
 	options.storeRef = *storeRef
 	options.storeURL = *storeURL
@@ -333,8 +334,8 @@ func mapRunKeepRetryStatusUntilExecution(task store.TestMapPlanTask, options map
 	return options.retryFailed && !options.resumeRun && !options.skipPassed && len(options.rerunTaskIDs) == 0 && mapRunTaskFailedOrBlocked(task.Status)
 }
 
-func runMapRunExplain(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("map run explain", flag.ContinueOnError)
+func runMapPlanInspect(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("map plan inspect", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)

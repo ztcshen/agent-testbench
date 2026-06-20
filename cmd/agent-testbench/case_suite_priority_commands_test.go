@@ -71,7 +71,7 @@ func seedCaseSuiteStabilityTransitions(t *testing.T, storeRef string, label stri
 
 func runCaseSuiteStabilityJSON(t *testing.T, label string, profileDir string) caseSuiteStabilityReport {
 	t.Helper()
-	out := runCLI(t, "case", "suite", "stability", "--profile", profileDir, "--tag", "regression", "--status", "active", "--limit", "3", "--json")
+	out := runCLI(t, "case", "suite", "report", "--view", "stability", "--profile", profileDir, "--tag", "regression", "--status", "active", "--limit", "3", "--json")
 	var report caseSuiteStabilityReport
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode %s suite stability json: %v\n%s", label, err, out)
@@ -101,7 +101,7 @@ func caseSuiteStabilityItemsByCase(report caseSuiteStabilityReport) map[string]c
 
 func requireCaseSuiteStabilityText(t *testing.T, label string, profileDir string, variantCaseID string) {
 	t.Helper()
-	textOut := runCLI(t, "case", "suite", "stability", "--profile", profileDir, "--tag", "regression", "--limit", "3")
+	textOut := runCLI(t, "case", "suite", "report", "--view", "stability", "--profile", profileDir, "--tag", "regression", "--limit", "3")
 	for _, want := range []string{"Case Suite Stability", "Unstable: 1", variantCaseID} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("%s stability text missing %q:\n%s", label, want, textOut)
@@ -124,7 +124,7 @@ func runCaseSuitePriorityBuildsRankedBatchRequest(t *testing.T, storeRef string,
 	fixture := publishCaseSuitePriorityHistory(t, storeRef, label)
 
 	out := runCLI(t,
-		"case", "suite", "priority",
+		"case", "suite", "report", "--view", "priority",
 		"--profile", fixture.profileDir,
 		"--tag", "regression",
 		"--status", "active",
@@ -167,7 +167,7 @@ func runCaseSuitePriorityBuildsRankedBatchRequest(t *testing.T, storeRef string,
 		t.Fatalf("%s suite priority batch = %#v", label, report.BatchRequest)
 	}
 
-	textOut := runCLI(t, "case", "suite", "priority", "--profile", fixture.profileDir, "--tag", "regression", "--signal", "Variant", "--limit", "1")
+	textOut := runCLI(t, "case", "suite", "report", "--view", "priority", "--profile", fixture.profileDir, "--tag", "regression", "--signal", "Variant", "--limit", "1")
 	for _, want := range []string{"Case Suite Priority", "Selected: 1", fixture.variantCaseID} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("%s priority text missing %q:\n%s", label, want, textOut)
@@ -190,7 +190,7 @@ func runCaseSuiteBriefSummarizesMaintainedSuiteForAgents(t *testing.T, storeRef 
 	fixture := publishCaseSuitePriorityHistory(t, storeRef, label)
 
 	out := runCLI(t,
-		"case", "suite", "brief",
+		"case", "suite", "report", "--view", "brief",
 		"--profile", fixture.profileDir,
 		"--tag", "regression",
 		"--status", "active",
@@ -232,7 +232,7 @@ func runCaseSuiteBriefSummarizesMaintainedSuiteForAgents(t *testing.T, storeRef 
 		t.Fatalf("%s suite brief batch = %#v", label, report.BatchRequest)
 	}
 
-	textOut := runCLI(t, "case", "suite", "brief", "--profile", fixture.profileDir, "--tag", "regression", "--signal", "Variant")
+	textOut := runCLI(t, "case", "suite", "report", "--view", "brief", "--profile", fixture.profileDir, "--tag", "regression", "--signal", "Variant")
 	for _, want := range []string{"Case Suite Brief", "Ready: 2", "Recommended: 2", fixture.variantCaseID} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("%s brief text missing %q:\n%s", label, want, textOut)

@@ -257,11 +257,11 @@ cases continue through the built-in catalog runner. Cases marked with non-HTTP
 executors such as MQ are not silently treated as HTTP; they fail with an
 unsupported runner reason until a matching pluggable runner is registered.
 
-Use `map run explain` to inspect a completed or failed run plan without
+Use `map plan inspect` to inspect a completed or failed run plan without
 re-running it:
 
 ```bash
-agent-testbench map run explain --store STORE_NAME --plan PLAN_ID --json
+agent-testbench map plan inspect --store STORE_NAME --plan PLAN_ID --json
 ```
 
 Gate a persisted map run before accepting it as map-level evidence:

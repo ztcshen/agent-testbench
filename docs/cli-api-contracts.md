@@ -48,20 +48,20 @@ Verification baseline: this page was checked against `cmd/agent-testbench/main.g
 | --- | --- |
 | General | `version`, `help`, `setup`, `onboard`, `status`, `doctor`, `update`, `commands`, `completion`, `logs`, `config path/show/edit` |
 | Store | `store config set/list/remove`, `store use`, `store current`, `store status`, `store provision`, `store upgrade`, `store ddl`, `store copy` |
-| Tasks and notifications | `task run`, `task schedule`, `task watch`, `task list`, `task status`, `task logs`, `task stop`, `watch`, `notify test` |
+| Tasks and notifications | `task run`, `task schedule`, `task watch`, `task list`, `task status`, `task logs`, `task stop`, `notify test` |
 | Environment catalog | `environment register`, `environment discover`, `environment inspect`, `environment bootstrap`, `environment restore`, `environment migration ...`, `environment verify`, `environment publish-verified` |
 | Sandbox runtime | `sandbox start`, `sandbox service list`, `sandbox service register`, `sandbox interface register` |
-| Template package lifecycle | `template-package ...` / `template-packages ...` aliases for `profile init`, `profile install`, `profile pack`, `profile list`, `profile inspect`, `profile audit`, `profile audit-plan`, `profile doctor`, `profile repair`, `profile catalog list`, `profile catalog restore`, `profile verify`, `profile import` |
+| Template package lifecycle | `template-package ...` commands for `profile init`, `profile install`, `profile pack`, `profile list`, `profile inspect`, `profile audit`, `profile audit-plan`, `profile doctor`, `profile repair`, `profile catalog list`, `profile catalog restore`, `profile verify`, `profile import` |
 | Template package generation/import planning | `template-package generation-plan openapi`, `template-package import-plan openapi`, `template-package import-plan http-capture` aliases for the legacy `profile ...` commands |
 | Config publication | `config publish` (`config apply` alias) |
 | Executor planning | `executor plan` |
 | Evidence | `evidence import`, `evidence list`, `evidence tasks`, `replay evidence` |
 | Workflow | `workflow discover`, `workflow plan`, `workflow audit`, `workflow report` |
-| Baseline | `baseline get`, `baseline set` |
+| Baseline | `gate baseline get`, `gate baseline set` |
 | Template | `template render` |
 | Interface node | `interface-node discover`, `interface-node case audit`, `interface-node case draft`, `interface-node case apply`, `interface-node case report` |
 | API case | `case discover`, `case run`, `case batch start`, `case batch report`, `case incomplete-batches` |
-| Case suite | `case suite report`, `case suite coverage`, `case suite stability`, `case suite priority`, `case suite brief`, `case suite quality`, `case suite quality-plan`, `case suite quality-report`, `case suite inspect`, `case suite plan`, `case suite impact`, `case suite impact-report` |
+| Case suite | `case suite report`, `case suite report --view coverage`, `case suite report --view stability`, `case suite report --view priority`, `case suite report --view brief`, `case suite report --view quality`, `case suite report --view quality-plan`, `case suite report --view quality-report`, `case suite report --view inspect`, `case suite report --view plan`, `case suite report --view impact`, `case suite report --view impact-report` |
 | Server | `serve` |
 
 ## Common CLI Flow
@@ -81,7 +81,7 @@ agent-testbench commands --all --filter "profile import"
 agent-testbench config show --json
 agent-testbench logs agent-testbench -n 80
 agent-testbench task run catalog-smoke --command "commands --json" --store local --json
-agent-testbench watch catalog-smoke --command "commands --json" --store local --interval 5m --limit 3
+agent-testbench task watch catalog-smoke --command "commands --json" --store local --interval 5m --limit 3
 agent-testbench notify test --file .runtime/notifications.jsonl --message "AgentTestBench ready"
 ```
 
@@ -107,8 +107,8 @@ a task definition, executes one AgentTestBench command, records the run output,
 exit code, status, and duration in `agent_task_runs`, then emits configured
 file or webhook notifications. `task schedule` records durable schedule metadata
 for external schedulers or future runners; it does not start a background
-daemon. `task watch` and the top-level `watch` alias run a foreground loop and
-record every attempt. `task list`, `task status`, `task logs`, and `task stop`
+daemon. `task watch` runs a foreground loop and records every attempt. `task list`,
+`task status`, `task logs`, and `task stop`
 read or update the same Store records.
 
 ## API Surface
@@ -322,17 +322,17 @@ and writes only when `--apply` is supplied.
 | Case quality gate | `case gate` | None | CLI-only CI gate. It reads Store case-run facts and Evidence indexes, reports counts, failed case runs, missing Evidence, gate booleans, and next actions, then exits non-zero when selected requirements such as `--require-no-failures`, `--require-evidence`, or `--min-passed` are not met. |
 | Case timing | `case timing` | `/api/case/timing` | Paired. CLI reuses the control-plane timing summary payload and accepts active Store or `--store NAME_OR_DSN`. |
 | Incomplete case batches | `case incomplete-batches` | `/api/case/incomplete-batches` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
-| Suite coverage | `case suite coverage` | `/api/case/suite-coverage` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
-| Suite inspection | `case suite inspect` | `/api/case/suite-inspection` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
-| Suite plan | `case suite plan` | `/api/case/suite-plan` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
-| Suite stability | `case suite stability` | `/api/case/suite-stability` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
-| Suite priority | `case suite priority` | `/api/case/suite-priority` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
-| Suite brief | `case suite brief` | `/api/case/suite-brief` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
-| Suite quality | `case suite quality` | `/api/case/suite-quality` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
-| Suite quality plan | `case suite quality-plan` | `/api/case/suite-quality-plan` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
-| Suite quality HTML/JSON report | `case suite quality-report` | None | CLI-only artifact generation; CLI accepts active Store or `--store NAME_OR_DSN`. |
-| Suite impact plan | `case suite impact` | `/api/case/suite-impact` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
-| Suite impact run/report | `case suite impact-report` | `/api/case/suite-impact-runs` | Partial. CLI is synchronous report generation; API starts async execution. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Suite coverage | `case suite report --view coverage` | `/api/case/suite-coverage` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Suite inspection | `case suite report --view inspect` | `/api/case/suite-inspection` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Suite plan | `case suite report --view plan` | `/api/case/suite-plan` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Suite stability | `case suite report --view stability` | `/api/case/suite-stability` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Suite priority | `case suite report --view priority` | `/api/case/suite-priority` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Suite brief | `case suite report --view brief` | `/api/case/suite-brief` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Suite quality | `case suite report --view quality` | `/api/case/suite-quality` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Suite quality plan | `case suite report --view quality-plan` | `/api/case/suite-quality-plan` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Suite quality HTML/JSON report | `case suite report --view quality-report` | None | CLI-only artifact generation; CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Suite impact plan | `case suite report --view impact` | `/api/case/suite-impact` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Suite impact run/report | `case suite report --view impact-report` | `/api/case/suite-impact-runs` | Partial. CLI is synchronous report generation; API starts async execution. CLI accepts active Store or `--store NAME_OR_DSN`. |
 | Workflow discovery | `workflow discover` | `/api/workflows` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`; local and remote SQL Stores use the same command. API and CLI both expose filtered workflow discovery with Store catalog precedence. |
 | Workflow plan | `workflow plan` | `/api/workflow-plan` | Paired. CLI and API share the same workflow-bound step payload; CLI accepts active Store or `--store NAME_OR_DSN`. |
 | Workflow audit | `workflow audit` | `/api/workflow-audit` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
@@ -345,7 +345,7 @@ and writes only when `--apply` is supplied.
 | Evidence import | `evidence import` | `/api/evidence/import` | Paired. Imports a legacy runtime SQLite Evidence index into the active or named Store. This is a migration/compatibility path, not a normal daily SQLite execution path. |
 | Evidence list | `evidence list` | `/api/evidence/list` | Paired. CLI and API share the same Store Evidence listing helper; CLI accepts active Store or `--store NAME_OR_DSN`. Use `--run RUN_ID --json` as the first run-scoped Evidence check before falling back to local file or container inspection. |
 | Executor plan | `executor plan` | `/api/executor/plan` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`; API prefers the active Store catalog and uses the served template package only when no Store catalog is available. |
-| Baseline get/set | `baseline get`, `baseline set` | `/api/baseline/gate` | Paired. CLI and API read/write the same Store baseline gate through active Store or `--store NAME_OR_DSN`. |
+| Baseline get/set | `gate baseline get`, `gate baseline set` | `/api/baseline/gate` | Paired. CLI and API read/write the same Store baseline gate through active Store or `--store NAME_OR_DSN`. |
 | Template render | `template render` | `/api/template/render` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`; API renders against the active served Store-backed template package. |
 
 ## Main Differences
@@ -367,7 +367,7 @@ classes of mismatch:
    several CLI commands synchronously produce local reports, while the API starts
    async runs and exposes process-local polling/report URLs. This affects
    `case suite report`, `interface-node case report`, `workflow report`, and
-   `case suite impact-report`.
+   `case suite report --view impact-report`.
 
 There are also naming and selector differences:
 

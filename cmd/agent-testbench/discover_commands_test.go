@@ -308,8 +308,8 @@ func requireDailyWorkflowPlan(t *testing.T, label string) {
 
 func requireDailyWorkflowBaseline(t *testing.T, label string) {
 	t.Helper()
-	runCLI(t, "baseline", "set", "--profile", "sample", "--subject", "workflow.alpha", "--status", "passed", "--required")
-	baselineOut := runCLI(t, "baseline", "get", "--profile", "sample", "--subject", "workflow.alpha")
+	runCLI(t, "gate", "baseline", "set", "--profile", "sample", "--subject", "workflow.alpha", "--status", "passed", "--required")
+	baselineOut := runCLI(t, "gate", "baseline", "get", "--profile", "sample", "--subject", "workflow.alpha")
 	if !strings.Contains(baselineOut, "Status: passed") || !strings.Contains(baselineOut, "Required: true") {
 		t.Fatalf("%s baseline get via active SQL Store = %q", label, baselineOut)
 	}

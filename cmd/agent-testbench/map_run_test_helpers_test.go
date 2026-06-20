@@ -152,13 +152,13 @@ func assertMapRunExplainCommandReport(t *testing.T, out string, planID string) {
 	t.Helper()
 	var explain mapRunExplainCommandReport
 	if err := json.Unmarshal([]byte(out), &explain); err != nil {
-		t.Fatalf("decode map run explain json: %v\n%s", err, out)
+		t.Fatalf("decode map plan inspect json: %v\n%s", err, out)
 	}
 	if !explain.OK || explain.PlanID != planID || explain.Status != "passed" || explain.Summary.TotalTasks != 3 || explain.Summary.PassedTasks != 3 || explain.Summary.SkippedTasks != 0 {
-		t.Fatalf("map run explain = %#v", explain)
+		t.Fatalf("map plan inspect = %#v", explain)
 	}
-	if len(explain.NextActions) == 0 || !strings.Contains(strings.Join(explain.NextActions, "\n"), "map run explain --plan '"+planID+"'") {
-		t.Fatalf("map run explain next actions = %#v", explain.NextActions)
+	if len(explain.NextActions) == 0 || !strings.Contains(strings.Join(explain.NextActions, "\n"), "map plan inspect --plan '"+planID+"'") {
+		t.Fatalf("map plan inspect next actions = %#v", explain.NextActions)
 	}
 }
 

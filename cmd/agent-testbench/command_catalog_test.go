@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -106,7 +107,7 @@ func TestGroupedHelpShowsAreaAndExactCommandUsage(t *testing.T) {
 	}
 }
 
-func TestTemplatePackageAliasHelpUsesCatalog(t *testing.T) {
+func TestTemplatePackageHelpUsesCanonicalCatalog(t *testing.T) {
 	initHelp := runCLI(t, "template-package", "init", "--help")
 	if !strings.Contains(initHelp, "Command: template-package init") || !strings.Contains(initHelp, "agent-testbench template-package init --output PATH") {
 		t.Fatalf("template-package init help should be catalog-backed:\n%s", initHelp)
@@ -115,9 +116,9 @@ func TestTemplatePackageAliasHelpUsesCatalog(t *testing.T) {
 		t.Fatalf("template-package init help should not fail before dispatcher fallback:\n%s", initHelp)
 	}
 
-	verifyHelp := runCLI(t, "template-packages", "verify", "--help")
-	if !strings.Contains(verifyHelp, "Command: template-packages verify") || !strings.Contains(verifyHelp, "agent-testbench template-packages verify --template-package PATH_OR_ID") {
-		t.Fatalf("template-packages verify alias help should be catalog-backed:\n%s", verifyHelp)
+	verifyHelp := runCLI(t, "template-package", "verify", "--help")
+	if !strings.Contains(verifyHelp, "Command: template-package verify") || !strings.Contains(verifyHelp, "agent-testbench template-package verify --template-package PATH_OR_ID") {
+		t.Fatalf("template-package verify help should be catalog-backed:\n%s", verifyHelp)
 	}
 }
 
@@ -193,6 +194,89 @@ func TestCommandsCommandEmitsSearchableCommandCatalog(t *testing.T) {
 	taskOut := runCLI(t, "commands", "--all", "--filter", "workflow task run", "--json")
 	if !strings.Contains(taskOut, `"command": "workflow task run"`) || !strings.Contains(taskOut, `STEP=TASK_NAME_OR_ID`) {
 		t.Fatalf("command catalog missing workflow task run: %s", taskOut)
+	}
+}
+
+func TestCommandsAllOmitsDuplicateCompatibilityEntrypoints(t *testing.T) {
+	out := runCLI(t, "commands", "--all", "--json")
+
+	var report struct {
+		OK       bool `json:"ok"`
+		Commands []struct {
+			Command string `json:"command"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode all commands json: %v\n%s", err, out)
+	}
+	if !report.OK {
+		t.Fatalf("all command catalog should be ok: %#v", report)
+	}
+	commands := map[string]bool{}
+	for _, item := range report.Commands {
+		commands[item.Command] = true
+	}
+	for _, canonical := range []string{
+		"case suite report",
+		"environment acceptance start",
+		"environment acceptance report",
+		"gate baseline get",
+		"gate baseline set",
+		"map plan inspect",
+		"task watch",
+		"template-package verify",
+	} {
+		if !commands[canonical] {
+			t.Fatalf("canonical command %q should remain in catalog; commands=%#v", canonical, commands)
+		}
+	}
+	for _, duplicate := range []string{
+		"case suite coverage",
+		"case suite stability",
+		"case suite priority",
+		"case suite brief",
+		"case suite quality",
+		"case suite quality-plan",
+		"case suite quality-report",
+		"case suite inspect",
+		"case suite plan",
+		"case suite impact",
+		"case suite impact-report",
+		"workflow acceptance start",
+		"workflow acceptance report",
+		"baseline get",
+		"baseline set",
+		"map run explain",
+		"watch",
+		"template-packages verify",
+	} {
+		if commands[duplicate] {
+			t.Fatalf("duplicate compatibility entrypoint %q should not remain in catalog", duplicate)
+		}
+	}
+}
+
+func TestDuplicateRootEntrypointsAreRemoved(t *testing.T) {
+	for _, args := range [][]string{
+		{"baseline", "get"},
+		{"watch", "catalog-smoke", "--command", "commands --json"},
+		{"template-packages", "verify", "--template-package", "sample"},
+	} {
+		err := runRootCommand(args)
+		if err == nil {
+			t.Fatalf("duplicate root entrypoint %q unexpectedly succeeded", strings.Join(args, " "))
+		}
+		var unknown unknownRootCommandError
+		if !errors.As(err, &unknown) {
+			t.Fatalf("duplicate root entrypoint %q should be removed from root commands, got %T %v", strings.Join(args, " "), err, err)
+		}
+	}
+}
+
+func TestDuplicateMapRunExplainSubcommandIsRejected(t *testing.T) {
+	out := runCLIFails(t, "map", "run", "explain", "--plan", "plan.demo")
+	if !strings.Contains(out, "map run does not accept positional arguments: explain") {
+		t.Fatalf("map run explain should be rejected as a removed duplicate subcommand:\n%s", out)
 	}
 }
 
@@ -327,7 +411,6 @@ func TestMapCommandsExposeLifecycleMetadata(t *testing.T) {
 		"map publish":           "maintain",
 		"map explain":           "plan",
 		"map plan inspect":      "plan",
-		"map run explain":       "plan",
 		"map run":               "execute",
 		"map gate":              "execute",
 		"map atlas":             "review",
@@ -453,8 +536,8 @@ func TestNonDailyWorkflowCommandsHaveReplacementHints(t *testing.T) {
 	}
 }
 
-func TestCommandsAllExposesAdvancedAndCompatibilityMetadata(t *testing.T) {
-	out := runCLI(t, "commands", "--all", "--filter", "case suite coverage", "--json")
+func TestCommandsAllExposesAdvancedReplacementMetadata(t *testing.T) {
+	out := runCLI(t, "commands", "--all", "--filter", "executor plan", "--json")
 
 	var report struct {
 		OK       bool `json:"ok"`
@@ -473,9 +556,17 @@ func TestCommandsAllExposesAdvancedAndCompatibilityMetadata(t *testing.T) {
 	if !report.OK || !report.All || len(report.Commands) == 0 {
 		t.Fatalf("all command catalog = %#v", report)
 	}
-	item := report.Commands[0]
-	if item.Command != "case suite coverage" || item.Tier != "compat" || item.Audience != "agent" || item.Stability != "legacy" || !strings.Contains(item.Replacement, "case suite report --view coverage") {
-		t.Fatalf("case suite coverage metadata = %#v", item)
+	foundExecutorPlan := false
+	for _, item := range report.Commands {
+		if item.Command == "executor plan" {
+			foundExecutorPlan = true
+			if item.Tier != "advanced" || item.Audience != "developer" || item.Stability != "stable" || !strings.Contains(item.Replacement, "map explain") {
+				t.Fatalf("executor plan metadata = %#v", item)
+			}
+		}
+	}
+	if !foundExecutorPlan {
+		t.Fatalf("executor plan missing from filtered catalog: %#v", report.Commands)
 	}
 
 	textOut := runCLI(t, "commands", "--all", "--filter", "executor plan")
@@ -485,7 +576,7 @@ func TestCommandsAllExposesAdvancedAndCompatibilityMetadata(t *testing.T) {
 }
 
 func TestCommandsCanFilterByTierAndAudience(t *testing.T) {
-	out := runCLI(t, "commands", "--tier", "compat", "--audience", "agent", "--filter", "workflow acceptance", "--json")
+	out := runCLI(t, "commands", "--tier", "advanced", "--audience", "developer", "--filter", "executor plan", "--json")
 
 	var report struct {
 		OK       bool   `json:"ok"`
@@ -501,12 +592,12 @@ func TestCommandsCanFilterByTierAndAudience(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode tier/audience commands json: %v\n%s", err, out)
 	}
-	if !report.OK || report.Tier != "compat" || report.Audience != "agent" || len(report.Commands) == 0 {
+	if !report.OK || report.Tier != "advanced" || report.Audience != "developer" || len(report.Commands) == 0 {
 		t.Fatalf("tier/audience command catalog = %#v", report)
 	}
 	for _, item := range report.Commands {
-		if item.Tier != "compat" || item.Audience != "agent" || !strings.Contains(item.Replacement, "environment acceptance") {
-			t.Fatalf("workflow acceptance metadata = %#v", item)
+		if item.Tier != "advanced" || item.Audience != "developer" || item.Command != "executor plan" {
+			t.Fatalf("executor plan tier/audience metadata = %#v", item)
 		}
 	}
 }

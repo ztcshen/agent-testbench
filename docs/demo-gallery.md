@@ -65,11 +65,11 @@ loop:
 
 ```sh
 agent-testbench environment restore retail-demo --store local-personal --workspace .demo/runtime --execute --json
-agent-testbench case suite priority --filter retail --changed-service payment --store local-personal --json
+agent-testbench case suite report --view priority --filter retail --changed-service payment --store local-personal --json
 agent-testbench case run --case examples/demo-services/retail-fulfillment-mesh/create-order.json --base-url http://127.0.0.1:49190 --store local-personal --evidence-dir .agent-testbench/evidence --json
 agent-testbench workflow report --workflow workflow.retail.fulfillment --base-url http://127.0.0.1:49190 --store local-personal --html --json
 agent-testbench evidence tasks --run retail-demo-run --failed-only --store local-personal --json
-agent-testbench case suite quality-report --filter retail --run retail-demo-run --store local-personal --format html --json
+agent-testbench case suite report --view quality-report --filter retail --run retail-demo-run --store local-personal --format html --json
 ```
 
 That sequence is meant to be shown as an animated runbook: restore the target,
@@ -118,7 +118,7 @@ report.
 3. Use the demo service catalog as the public replacement for private business
    examples.
 4. Record the CLI automation animation as the primary short video: one loop
-   should show `environment restore`, `case suite priority`, `case run`,
-   `workflow report`, `evidence tasks`, and `case suite quality-report`.
+   should show `environment restore`, `case suite report --view priority`, `case run`,
+   `workflow report`, `evidence tasks`, and `case suite report --view quality-report`.
 5. Keep the examples runnable with SQLite compatibility for local exploration,
    but present PostgreSQL/MySQL as the team Store path.
