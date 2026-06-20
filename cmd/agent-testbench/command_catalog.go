@@ -287,6 +287,7 @@ func commandCatalogInternalCommands() map[string]bool {
 		"replay evidence":                  true,
 		"template-package catalog list":    true,
 		"template-package catalog restore": true,
+		"trace topology collect":           true,
 	}
 }
 

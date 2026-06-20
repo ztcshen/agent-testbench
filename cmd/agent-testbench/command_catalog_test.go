@@ -434,6 +434,7 @@ func TestInternalCommandsRequireExplicitCatalogSurface(t *testing.T) {
 		"replay evidence",
 		"template-package catalog list",
 		"template-package catalog restore",
+		"trace topology collect",
 	}
 
 	publicOut := runCLI(t, "commands", "--all", "--json")
