@@ -192,8 +192,16 @@ func TestCommandUsageLinesComeFromDescriptorRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read command catalog source: %v", err)
 	}
-	if strings.Contains(string(source), "helpText()") || strings.Contains(string(source), "commandCatalogItemFromUsage") {
-		t.Fatalf("command catalog should be backed by descriptors instead of parsing Usage text")
+	sourceText := string(source)
+	for _, forbidden := range []string{
+		"helpText()",
+		"commandCatalogItemFromUsage",
+		`strings.TrimPrefix(usage, "agent-testbench ")`,
+		"commandUsagePathStops",
+	} {
+		if strings.Contains(sourceText, forbidden) {
+			t.Fatalf("command catalog should be backed by explicit descriptors instead of usage inference %q", forbidden)
+		}
 	}
 	commands := map[string]bool{}
 	for _, item := range commandCatalogForAreaWithOptions("", "", commandCatalogOptions{All: true}).Commands {
@@ -202,6 +210,42 @@ func TestCommandUsageLinesComeFromDescriptorRegistry(t *testing.T) {
 	for _, want := range []string{"version", "commands", "map explain", "case inspect", "environment restore"} {
 		if !commands[want] {
 			t.Fatalf("descriptor-backed catalog missing %q in %#v", want, commands)
+		}
+	}
+}
+
+func TestCommandDescriptorsDeclareCommandPaths(t *testing.T) {
+	descriptors := commandCatalogDescriptors()
+	if len(descriptors) == 0 {
+		t.Fatal("command descriptors should not be empty")
+	}
+	for _, descriptor := range descriptors {
+		if strings.TrimSpace(descriptor.Command) == "" {
+			t.Fatalf("descriptor should declare command path explicitly: %#v", descriptor)
+		}
+		wantPrefix := "agent-testbench " + descriptor.Command
+		if !strings.HasPrefix(descriptor.Usage, wantPrefix) {
+			t.Fatalf("descriptor usage should start with its declared command %q, got %q", descriptor.Command, descriptor.Usage)
+		}
+		item := commandCatalogItemFromDescriptor(descriptor)
+		if item.Command != descriptor.Command || strings.Join(item.Path, " ") != descriptor.Command {
+			t.Fatalf("catalog item should use explicit descriptor command, descriptor=%#v item=%#v", descriptor, item)
+		}
+	}
+}
+
+func TestCompletionRootCommandsUseDescriptorPaths(t *testing.T) {
+	source, err := os.ReadFile("operator_commands.go")
+	if err != nil {
+		t.Fatalf("read operator commands source: %v", err)
+	}
+	if strings.Contains(string(source), `strings.TrimPrefix(usage, "agent-testbench ")`) {
+		t.Fatal("completion root command discovery should use descriptor command paths instead of usage inference")
+	}
+	names := rootCommandNames()
+	for _, want := range []string{"case", "commands", "environment", "map", "template-package"} {
+		if !containsString(names, want) {
+			t.Fatalf("root command names missing %q in %#v", want, names)
 		}
 	}
 }

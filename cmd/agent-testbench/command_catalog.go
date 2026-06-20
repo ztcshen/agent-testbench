@@ -113,20 +113,12 @@ func commandUsageLines() []string {
 
 func commandCatalogItemFromDescriptor(descriptor commandDescriptor) commandCatalogItem {
 	usage := descriptor.Usage
-	rest := strings.TrimSpace(strings.TrimPrefix(usage, "agent-testbench "))
-	fields := strings.Fields(rest)
-	path := []string{}
-	for _, field := range fields {
-		if commandUsagePathStops(field) {
-			break
-		}
-		path = append(path, strings.Trim(field, ","))
-	}
+	command := strings.TrimSpace(descriptor.Command)
+	path := strings.Fields(command)
 	area := ""
 	if len(path) > 0 {
 		area = path[0]
 	}
-	command := strings.Join(path, " ")
 	metadata := commandCatalogMetadata(command, area, usage)
 	tags := commandCatalogTags(command, area, usage)
 	if metadata.Lifecycle != "" {
@@ -305,27 +297,6 @@ func commandCatalogReplacementHints() map[string]string {
 		"case timing":                              "agent-testbench case inspect --view timing",
 		"workflow task run":                        "agent-testbench task run NAME --command COMMAND or agent-testbench map run --plan PLAN_ID --rerun-task TASK_ID",
 	}
-}
-
-func commandUsagePathStops(token string) bool {
-	token = strings.TrimSpace(token)
-	if token == "" || strings.HasPrefix(token, "[") || strings.HasPrefix(token, "(") || strings.HasPrefix(token, "--") || strings.Contains(token, "|") {
-		return true
-	}
-	trimmed := strings.Trim(token, ".,")
-	if strings.Contains(trimmed, "=") || strings.Contains(trimmed, ":") || strings.Contains(trimmed, "/") {
-		return true
-	}
-	hasLetter := false
-	for _, item := range trimmed {
-		if item >= 'a' && item <= 'z' {
-			return false
-		}
-		if item >= 'A' && item <= 'Z' {
-			hasLetter = true
-		}
-	}
-	return hasLetter
 }
 
 func commandCatalogTags(command string, area string, usage string) []string {
