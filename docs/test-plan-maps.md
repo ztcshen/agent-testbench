@@ -61,7 +61,7 @@ writes `test_maps`, `test_map_nodes`, `test_map_edges`, `test_map_paths`,
 List Store-backed maps before choosing an atlas or execution target:
 
 ```bash
-agent-testbench map list --store STORE_NAME --json
+agent-testbench map inspect --view list --store STORE_NAME --json
 ```
 
 Each row reports the map id, profile id, display name, status, and graph counts
@@ -93,7 +93,7 @@ Atlas snapshots for audit, acceptance, and future diff work.
 Validate workflow convergence after migrating existing workflow assets:
 
 ```bash
-agent-testbench map coverage --store STORE_NAME --map MAP_ID --json
+agent-testbench map inspect --view coverage --store STORE_NAME --map MAP_ID --json
 ```
 
 The coverage report compares catalog workflows with mapped paths, counts unique
@@ -104,7 +104,7 @@ environment map.
 Inspect recent planner/run history for one map:
 
 ```bash
-agent-testbench map plans --store STORE_NAME --map MAP_ID --limit 20 --json
+agent-testbench map inspect --view plans --store STORE_NAME --map MAP_ID --limit 20 --json
 ```
 
 Each plan row includes status, mode, scope, environment, timestamps, and
@@ -116,13 +116,13 @@ copyable `atlasCommand`/`gateCommand` values. Use this before opening
 List all workflow paths in a map:
 
 ```bash
-agent-testbench map workflows --store STORE_NAME --map MAP_ID --json
+agent-testbench map inspect --view workflows --store STORE_NAME --map MAP_ID --json
 ```
 
 Search by path id, workflow id, or display name:
 
 ```bash
-agent-testbench map workflows --store STORE_NAME --map MAP_ID --filter cancel --json
+agent-testbench map inspect --view workflows --store STORE_NAME --map MAP_ID --filter cancel --json
 ```
 
 Each row reports the path id, workflow id, display name, step count, first node,
@@ -257,11 +257,11 @@ cases continue through the built-in catalog runner. Cases marked with non-HTTP
 executors such as MQ are not silently treated as HTTP; they fail with an
 unsupported runner reason until a matching pluggable runner is registered.
 
-Use `map plan inspect` to inspect a completed or failed run plan without
+Use `map inspect --view plan` to inspect a completed or failed run plan without
 re-running it:
 
 ```bash
-agent-testbench map plan inspect --store STORE_NAME --plan PLAN_ID --json
+agent-testbench map inspect --view plan --store STORE_NAME --plan PLAN_ID --json
 ```
 
 Gate a persisted map run before accepting it as map-level evidence:

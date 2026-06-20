@@ -157,7 +157,7 @@ func assertMapRunExplainCommandReport(t *testing.T, out string, planID string) {
 	if !explain.OK || explain.PlanID != planID || explain.Status != "passed" || explain.Summary.TotalTasks != 3 || explain.Summary.PassedTasks != 3 || explain.Summary.SkippedTasks != 0 {
 		t.Fatalf("map plan inspect = %#v", explain)
 	}
-	if len(explain.NextActions) == 0 || !strings.Contains(strings.Join(explain.NextActions, "\n"), "map plan inspect --plan '"+planID+"'") {
+	if len(explain.NextActions) == 0 || !strings.Contains(strings.Join(explain.NextActions, "\n"), "map inspect --view plan --plan '"+planID+"'") {
 		t.Fatalf("map plan inspect next actions = %#v", explain.NextActions)
 	}
 }

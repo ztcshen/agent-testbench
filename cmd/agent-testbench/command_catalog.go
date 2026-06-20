@@ -247,8 +247,7 @@ func commandCatalogDefaultCommands() map[string]bool {
 		commandCatalogEnvironmentStatus:  true,
 		commandCatalogEnvironmentStop:    true,
 		commandCatalogEnvironmentRestart: true,
-		commandCatalogMapList:            true,
-		commandCatalogMapCoverage:        true,
+		commandCatalogMapInspect:         true,
 		commandCatalogMapDoctor:          true,
 		commandCatalogMapExplain:         true,
 		commandCatalogMapGate:            true,
@@ -273,28 +272,33 @@ func commandCatalogCompatibilityReplacements() map[string]string {
 
 func commandCatalogReplacementHints() map[string]string {
 	return map[string]string{
-		commandCatalogExecutorPlan:  "agent-testbench map explain",
-		"runtime mysql endpoints":   "agent-testbench store status --json",
-		"trace topology collect":    "agent-testbench evidence inspect --view tasks --run RUN_ID --json",
-		"replay evidence":           "agent-testbench evidence inspect --view list --run RUN_ID --json",
-		commandCatalogEvidenceList:  "agent-testbench evidence inspect --view list",
-		commandCatalogEvidenceTasks: "agent-testbench evidence inspect --view tasks",
-		"workflow discover":         "agent-testbench map list --json or agent-testbench map workflows --map MAP_ID --json",
-		"workflow register":         workflowToMapImportReplacement,
-		"workflow upsert":           workflowToMapImportReplacement,
-		"workflow binding register": workflowToMapImportReplacement,
-		"workflow binding upsert":   workflowToMapImportReplacement,
-		"workflow plan":             "agent-testbench map explain --map MAP_ID --workflow WORKFLOW_ID",
-		"workflow audit":            "agent-testbench map doctor --map MAP_ID",
-		"workflow runs":             "agent-testbench map plans --map MAP_ID",
-		"workflow run":              "agent-testbench map plan inspect --plan PLAN_ID",
-		"workflow step":             "agent-testbench map plan inspect --plan PLAN_ID",
-		"workflow latest-step":      "agent-testbench map plan inspect --plan PLAN_ID",
-		commandCatalogCaseDiagnose:  "agent-testbench case inspect --view diagnose",
-		"case runs":                 "agent-testbench case inspect --view runs",
-		"case evidence":             "agent-testbench case inspect --view evidence",
-		"case timing":               "agent-testbench case inspect --view timing",
-		"workflow task run":         "agent-testbench task run NAME --command COMMAND or agent-testbench map run --plan PLAN_ID --rerun-task TASK_ID",
+		commandCatalogExecutorPlan:   "agent-testbench map explain",
+		"runtime mysql endpoints":    "agent-testbench store status --json",
+		"trace topology collect":     "agent-testbench evidence inspect --view tasks --run RUN_ID --json",
+		"replay evidence":            "agent-testbench evidence inspect --view list --run RUN_ID --json",
+		commandCatalogEvidenceList:   "agent-testbench evidence inspect --view list",
+		commandCatalogEvidenceTasks:  "agent-testbench evidence inspect --view tasks",
+		commandCatalogMapList:        "agent-testbench map inspect --view list",
+		commandCatalogMapWorkflows:   "agent-testbench map inspect --view workflows --map MAP_ID",
+		commandCatalogMapCoverage:    "agent-testbench map inspect --view coverage --map MAP_ID",
+		commandCatalogMapPlans:       "agent-testbench map inspect --view plans --map MAP_ID",
+		commandCatalogMapPlanInspect: "agent-testbench map inspect --view plan --plan PLAN_ID",
+		"workflow discover":          "agent-testbench map inspect --view list --json or agent-testbench map inspect --view workflows --map MAP_ID --json",
+		"workflow register":          workflowToMapImportReplacement,
+		"workflow upsert":            workflowToMapImportReplacement,
+		"workflow binding register":  workflowToMapImportReplacement,
+		"workflow binding upsert":    workflowToMapImportReplacement,
+		"workflow plan":              "agent-testbench map explain --map MAP_ID --workflow WORKFLOW_ID",
+		"workflow audit":             "agent-testbench map doctor --map MAP_ID",
+		"workflow runs":              "agent-testbench map inspect --view plans --map MAP_ID",
+		"workflow run":               "agent-testbench map inspect --view plan --plan PLAN_ID",
+		"workflow step":              "agent-testbench map inspect --view plan --plan PLAN_ID",
+		"workflow latest-step":       "agent-testbench map inspect --view plan --plan PLAN_ID",
+		commandCatalogCaseDiagnose:   "agent-testbench case inspect --view diagnose",
+		"case runs":                  "agent-testbench case inspect --view runs",
+		"case evidence":              "agent-testbench case inspect --view evidence",
+		"case timing":                "agent-testbench case inspect --view timing",
+		"workflow task run":          "agent-testbench task run NAME --command COMMAND or agent-testbench map run --plan PLAN_ID --rerun-task TASK_ID",
 	}
 }
 
@@ -342,7 +346,7 @@ func commandCatalogTags(command string, area string, usage string) []string {
 
 func commandCatalogTaskTags(command string) []string {
 	switch command {
-	case commandCatalogMapImportWorkflows, commandCatalogMapList, commandCatalogMapCoverage, commandCatalogMapDoctor, commandCatalogMapWorkflows, commandCatalogMapAtlas,
+	case commandCatalogMapImportWorkflows, commandCatalogMapInspect, commandCatalogMapList, commandCatalogMapCoverage, commandCatalogMapDoctor, commandCatalogMapWorkflows, commandCatalogMapAtlas,
 		commandCatalogMapUpdate, commandCatalogMapSnapshot, commandCatalogMapPublish, commandCatalogMapVersions, commandCatalogMapDiff, commandCatalogMapValidationList, commandCatalogMapValidationAttach:
 		return []string{"maintain map", "map maintenance"}
 	case commandCatalogMapPlans, commandCatalogMapExplain, commandCatalogMapGate, commandCatalogMapRun, commandCatalogMapPlanInspect:
@@ -436,7 +440,7 @@ func commandParentNavigationItems(command string, prefix []string, matches []com
 		return matches
 	}
 	switch command {
-	case "case", "environment":
+	case "case", "environment", "map":
 		return commandParentDefaultItems(matches)
 	case "evidence":
 		visible := map[string]bool{

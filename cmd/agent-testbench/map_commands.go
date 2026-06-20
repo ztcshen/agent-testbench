@@ -182,6 +182,8 @@ func runMap(ctx context.Context, args []string) error {
 		return runMapValidation(ctx, args[1:])
 	case "workflows":
 		return runMapWorkflows(ctx, args[1:])
+	case "inspect":
+		return runMapInspect(ctx, args[1:])
 	case "explain":
 		return runMapExplain(ctx, args[1:])
 	case "gate":
@@ -206,6 +208,86 @@ func runMapPlan(ctx context.Context, args []string) error {
 		return runMapPlanInspect(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown map plan command: %s", args[0])
+	}
+}
+
+type mapInspectOptions struct {
+	StoreRef   string
+	StoreURL   string
+	MapID      string
+	PlanID     string
+	View       string
+	Filter     string
+	Limit      int
+	JSONOutput bool
+}
+
+func runMapInspect(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("map inspect", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	view := flags.String("view", "list", "Map inspection view: list, workflows, coverage, plans, or plan")
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
+	mapID := flags.String("map", "", "Plan map id")
+	planID := flags.String("plan", "", "Planner run instance id")
+	filter := flags.String("filter", "", "Filter path id, workflow id, or display name")
+	limit := flags.Int("limit", 20, "Maximum number of plan history rows")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() > 0 {
+		return fmt.Errorf("map inspect does not accept positional arguments: %s", strings.Join(flags.Args(), " "))
+	}
+	options := mapInspectOptions{
+		StoreRef:   *storeRef,
+		StoreURL:   *storeURL,
+		MapID:      *mapID,
+		PlanID:     *planID,
+		View:       *view,
+		Filter:     *filter,
+		Limit:      *limit,
+		JSONOutput: *jsonOutput,
+	}
+	switch strings.TrimSpace(options.View) {
+	case "", "list":
+		return runMapListWithOptions(ctx, mapListOptions{
+			StoreRef:   options.StoreRef,
+			StoreURL:   options.StoreURL,
+			JSONOutput: options.JSONOutput,
+		})
+	case "workflows":
+		return runMapWorkflowsWithOptions(ctx, mapWorkflowsOptions{
+			StoreRef:   options.StoreRef,
+			StoreURL:   options.StoreURL,
+			MapID:      options.MapID,
+			Filter:     options.Filter,
+			JSONOutput: options.JSONOutput,
+		})
+	case "coverage":
+		return runMapCoverageWithOptions(ctx, mapCoverageOptions{
+			StoreRef:   options.StoreRef,
+			StoreURL:   options.StoreURL,
+			MapID:      options.MapID,
+			JSONOutput: options.JSONOutput,
+		})
+	case "plans":
+		return runMapPlansWithOptions(ctx, mapPlansOptions{
+			StoreRef:   options.StoreRef,
+			StoreURL:   options.StoreURL,
+			MapID:      options.MapID,
+			Limit:      options.Limit,
+			JSONOutput: options.JSONOutput,
+		})
+	case "plan":
+		return runMapPlanInspectWithOptions(ctx, mapPlanInspectOptions{
+			StoreRef:   options.StoreRef,
+			StoreURL:   options.StoreURL,
+			PlanID:     options.PlanID,
+			JSONOutput: options.JSONOutput,
+		})
+	default:
+		return fmt.Errorf("unknown map inspect view: %s", options.View)
 	}
 }
 
@@ -346,6 +428,12 @@ func runMapVersions(ctx context.Context, args []string) error {
 	return nil
 }
 
+type mapListOptions struct {
+	StoreRef   string
+	StoreURL   string
+	JSONOutput bool
+}
+
 func runMapList(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("map list", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
@@ -358,7 +446,15 @@ func runMapList(ctx context.Context, args []string) error {
 	if flags.NArg() > 0 {
 		return fmt.Errorf("map list does not accept positional arguments: %s", strings.Join(flags.Args(), " "))
 	}
-	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	return runMapListWithOptions(ctx, mapListOptions{
+		StoreRef:   *storeRef,
+		StoreURL:   *storeURL,
+		JSONOutput: *jsonOutput,
+	})
+}
+
+func runMapListWithOptions(ctx context.Context, options mapListOptions) error {
+	runtime, cleanup, err := openRequiredCLIStore(ctx, options.StoreRef, options.StoreURL)
 	if err != nil {
 		return err
 	}
@@ -368,11 +464,19 @@ func runMapList(ctx context.Context, args []string) error {
 		return err
 	}
 	report := buildMapListReport(maps)
-	if *jsonOutput {
+	if options.JSONOutput {
 		return writeIndentedJSON(report)
 	}
 	printMapListReport(report)
 	return nil
+}
+
+type mapPlansOptions struct {
+	StoreRef   string
+	StoreURL   string
+	MapID      string
+	Limit      int
+	JSONOutput bool
 }
 
 func runMapPlans(ctx context.Context, args []string) error {
@@ -389,20 +493,30 @@ func runMapPlans(ctx context.Context, args []string) error {
 	if flags.NArg() > 0 {
 		return fmt.Errorf("map plans does not accept positional arguments: %s", strings.Join(flags.Args(), " "))
 	}
-	if strings.TrimSpace(*mapID) == "" {
+	return runMapPlansWithOptions(ctx, mapPlansOptions{
+		StoreRef:   *storeRef,
+		StoreURL:   *storeURL,
+		MapID:      *mapID,
+		Limit:      *limit,
+		JSONOutput: *jsonOutput,
+	})
+}
+
+func runMapPlansWithOptions(ctx context.Context, options mapPlansOptions) error {
+	if strings.TrimSpace(options.MapID) == "" {
 		return errors.New("--map is required")
 	}
-	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	runtime, cleanup, err := openRequiredCLIStore(ctx, options.StoreRef, options.StoreURL)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
-	plans, err := runtime.ListTestMapPlans(ctx, *mapID, *limit)
+	plans, err := runtime.ListTestMapPlans(ctx, options.MapID, options.Limit)
 	if err != nil {
 		return err
 	}
-	report := buildMapPlansReport(*mapID, plans)
-	if *jsonOutput {
+	report := buildMapPlansReport(options.MapID, plans)
+	if options.JSONOutput {
 		return writeIndentedJSON(report)
 	}
 	printMapPlansReport(report)
@@ -459,6 +573,14 @@ func runMapImportWorkflows(ctx context.Context, args []string) error {
 	return nil
 }
 
+type mapWorkflowsOptions struct {
+	StoreRef   string
+	StoreURL   string
+	MapID      string
+	Filter     string
+	JSONOutput bool
+}
+
 func runMapWorkflows(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("map workflows", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
@@ -470,16 +592,26 @@ func runMapWorkflows(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if strings.TrimSpace(*mapID) == "" {
+	return runMapWorkflowsWithOptions(ctx, mapWorkflowsOptions{
+		StoreRef:   *storeRef,
+		StoreURL:   *storeURL,
+		MapID:      *mapID,
+		Filter:     *filter,
+		JSONOutput: *jsonOutput,
+	})
+}
+
+func runMapWorkflowsWithOptions(ctx context.Context, options mapWorkflowsOptions) error {
+	if strings.TrimSpace(options.MapID) == "" {
 		return errors.New("--map is required")
 	}
-	_, graph, cleanup, err := openMapGraphForCLI(ctx, *storeRef, *storeURL, *mapID)
+	_, graph, cleanup, err := openMapGraphForCLI(ctx, options.StoreRef, options.StoreURL, options.MapID)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
-	report := buildMapWorkflowsReport(graph, *filter)
-	if *jsonOutput {
+	report := buildMapWorkflowsReport(graph, options.Filter)
+	if options.JSONOutput {
 		return writeIndentedJSON(report)
 	}
 	printMapWorkflowsReport(report)

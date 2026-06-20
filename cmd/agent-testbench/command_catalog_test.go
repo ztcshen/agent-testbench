@@ -118,13 +118,22 @@ func TestParentCommandsDefaultToCatalogNavigation(t *testing.T) {
 		{
 			args:       []string{"map"},
 			title:      "Commands: map",
-			wantUsages: []string{"agent-testbench map explain", "agent-testbench map run", "agent-testbench map atlas"},
+			wantUsages: []string{"agent-testbench map inspect", "agent-testbench map explain", "agent-testbench map run", "agent-testbench map atlas"},
 			wantHeadings: []string{
 				"Inspect:",
 				"Maintain:",
 				"Plan:",
 				"Execute:",
 				"Review:",
+			},
+			hiddenUsages: []string{
+				"agent-testbench map list",
+				"agent-testbench map workflows",
+				"agent-testbench map coverage",
+				"agent-testbench map plans",
+				"agent-testbench map plan inspect",
+				"agent-testbench map import-workflows",
+				"agent-testbench map validation",
 			},
 		},
 		{
@@ -528,6 +537,7 @@ func TestMapCommandsExposeLifecycleMetadata(t *testing.T) {
 		"map workflows":         "inspect",
 		"map coverage":          "inspect",
 		"map plans":             "inspect",
+		"map inspect":           "inspect",
 		"map doctor":            "maintain",
 		"map diff":              "maintain",
 		"map validation list":   "maintain",
@@ -700,6 +710,64 @@ func TestEvidenceInspectConsolidatesListAndTasksInCatalog(t *testing.T) {
 	}
 	if !strings.Contains(commands[commandCatalogEvidenceTasks], "evidence inspect --view tasks") {
 		t.Fatalf("evidence tasks should point users to inspect tasks view: %#v", commands)
+	}
+}
+
+func TestMapInspectConsolidatesReadOnlyMapViewsInCatalog(t *testing.T) {
+	defaultOut := runCLI(t, "commands", "--json")
+	var defaultReport struct {
+		Commands []struct {
+			Command string `json:"command"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(defaultOut), &defaultReport); err != nil {
+		t.Fatalf("decode default command catalog: %v\n%s", err, defaultOut)
+	}
+	defaultCommands := map[string]bool{}
+	for _, item := range defaultReport.Commands {
+		defaultCommands[item.Command] = true
+	}
+	if !defaultCommands[commandCatalogMapInspect] {
+		t.Fatalf("default catalog should promote map inspect: %#v", defaultCommands)
+	}
+	for _, hidden := range []string{commandCatalogMapList, commandCatalogMapCoverage} {
+		if defaultCommands[hidden] {
+			t.Fatalf("default catalog should not promote %q after map inspect consolidation: %#v", hidden, defaultCommands)
+		}
+	}
+
+	helpOut := runCLI(t, "map", "inspect", "--help")
+	if !strings.Contains(helpOut, "Command: map inspect") || !strings.Contains(helpOut, "--view list|workflows|coverage|plans|plan") {
+		t.Fatalf("map inspect help should expose inspect views:\n%s", helpOut)
+	}
+
+	out := runCLI(t, "commands", "--all", "--filter", "map inspect", "--json")
+	var report struct {
+		Commands []struct {
+			Command     string `json:"command"`
+			Replacement string `json:"replacement"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode map inspect catalog: %v\n%s", err, out)
+	}
+	commands := map[string]string{}
+	for _, item := range report.Commands {
+		commands[item.Command] = item.Replacement
+	}
+	if _, ok := commands[commandCatalogMapInspect]; !ok {
+		t.Fatalf("map inspect missing from full catalog: %#v", commands)
+	}
+	for command, replacement := range map[string]string{
+		commandCatalogMapList:        "map inspect --view list",
+		commandCatalogMapWorkflows:   "map inspect --view workflows",
+		commandCatalogMapCoverage:    "map inspect --view coverage",
+		commandCatalogMapPlans:       "map inspect --view plans",
+		commandCatalogMapPlanInspect: "map inspect --view plan",
+	} {
+		if !strings.Contains(commands[command], replacement) {
+			t.Fatalf("%s should point users to %s: %#v", command, replacement, commands)
+		}
 	}
 }
 

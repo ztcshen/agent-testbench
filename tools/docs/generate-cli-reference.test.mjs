@@ -27,10 +27,11 @@ test("CLI reference generator renders the current command catalog", async () => 
 
     assert.match(markdown, /# AgentTestBench CLI Reference/);
     assert.match(markdown, /Generated from `agent-testbench commands --all --json`/);
-    assert.match(markdown, /Total commands: `123`/);
+    assert.match(markdown, /Total commands: `124`/);
     assert.match(markdown, /## Default Commands/);
     assert.match(markdown, /## Command Areas/);
     assert.match(markdown, /### `map`/);
+    assert.match(markdown, /\| `map inspect` \| yes \|/);
     assert.match(markdown, /\| `map run` \| yes \|/);
     assert.match(markdown, /\| `case inspect` \| yes \|/);
     assert.match(markdown, /\| `evidence inspect` \| yes \|/);

@@ -315,7 +315,7 @@ func TestTaskPlanBuiltInMapMaintain(t *testing.T) {
 	}
 	wantCommands := []string{
 		"map doctor --map map.demo",
-		"map coverage --map map.demo",
+		"map inspect --view coverage --map map.demo",
 		"map diff --map map.demo --from published",
 		"map validation list --map map.demo",
 	}

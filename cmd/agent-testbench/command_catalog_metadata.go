@@ -34,6 +34,7 @@ const (
 	commandCatalogMapUpdate           = "map update"
 	commandCatalogMapSnapshot         = "map snapshot"
 	commandCatalogMapPublish          = "map publish"
+	commandCatalogMapInspect          = "map inspect"
 	commandCatalogMapExplain          = "map explain"
 	commandCatalogMapPlanInspect      = "map plan inspect"
 	commandCatalogMapRun              = "map run"
@@ -73,6 +74,7 @@ func commandCatalogMapLifecycles() map[string]string {
 		commandCatalogMapUpdate:           commandCatalogLifecycleMaintain,
 		commandCatalogMapSnapshot:         commandCatalogLifecycleMaintain,
 		commandCatalogMapPublish:          commandCatalogLifecycleMaintain,
+		commandCatalogMapInspect:          commandCatalogLifecycleInspect,
 		commandCatalogMapExplain:          commandCatalogLifecyclePlan,
 		commandCatalogMapPlanInspect:      commandCatalogLifecyclePlan,
 		commandCatalogMapRun:              commandCatalogLifecycleExecute,
@@ -97,6 +99,7 @@ func commandCatalogTaskRanks() map[string]int {
 		commandCatalogMapPublish:          80,
 		commandCatalogMapVersions:         90,
 		commandCatalogMapImportWorkflows:  100,
+		commandCatalogMapInspect:          105,
 		commandCatalogMapList:             110,
 		commandCatalogMapWorkflows:        120,
 		commandCatalogMapExplain:          210,
@@ -118,7 +121,7 @@ func commandCatalogDefaultInclusionReason(command string) string {
 		return "environment lifecycle: inspect, restore, check, stop, or restart a registered environment"
 	case "task catalog", "task suggest", commandCatalogTaskPlan, "task run":
 		return "task intent: lets agents discover, plan, and run repeatable operator tasks"
-	case commandCatalogMapList, commandCatalogMapCoverage, commandCatalogMapDoctor, commandCatalogMapExplain, commandCatalogMapGate, commandCatalogMapRun, commandCatalogMapAtlas:
+	case commandCatalogMapInspect, commandCatalogMapDoctor, commandCatalogMapExplain, commandCatalogMapGate, commandCatalogMapRun, commandCatalogMapAtlas:
 		return "map lifecycle: inspect, plan, execute, gate, and review a test scenario map"
 	case "case discover", commandCatalogCaseSuiteReport, commandCatalogCaseInspect, commandCatalogCaseGate, commandCatalogCaseRun:
 		return "case lifecycle: discover, run, inspect evidence, and gate API or MQ cases"

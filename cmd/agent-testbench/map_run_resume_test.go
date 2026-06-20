@@ -11,7 +11,7 @@ import (
 
 func TestMapRunNextActionsQuotePlanID(t *testing.T) {
 	actions := mapRunNextActions("plan with space")
-	if len(actions) != 1 || !strings.Contains(actions[0], "--plan 'plan with space'") {
+	if len(actions) != 1 || !strings.Contains(actions[0], "map inspect --view plan --plan 'plan with space'") {
 		t.Fatalf("next actions should quote plan id = %#v", actions)
 	}
 }

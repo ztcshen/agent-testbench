@@ -231,7 +231,7 @@ func builtInTaskDescriptors() []builtInTaskDescriptor {
 			},
 			Steps: []builtInTaskStepPattern{
 				{ID: "doctor", Title: "Check map health", Command: "map doctor --map {{map}}", ReadOnly: true},
-				{ID: "coverage", Title: "Inspect map coverage", Command: "map coverage --map {{map}}", ReadOnly: true},
+				{ID: "coverage", Title: "Inspect map coverage", Command: "map inspect --view coverage --map {{map}}", ReadOnly: true},
 				{ID: "diff", Title: "Compare working map to published version", Command: "map diff --map {{map}} --from published", ReadOnly: true},
 				{ID: "validation-list", Title: "List validation cases attached to the map", Command: "map validation list --map {{map}}", ReadOnly: true},
 			},
