@@ -598,7 +598,7 @@ containers or temporary files directly:
 
 ```sh
 ./bin/agent-testbench.sh runtime mysql endpoints --include-tables --json
-./bin/agent-testbench.sh evidence list --run RUN_ID --json
+./bin/agent-testbench.sh evidence inspect --view list --run RUN_ID --json
 ./bin/agent-testbench.sh case diagnose --case-run CASE_RUN_ID --json
 ./bin/agent-testbench.sh sandbox service list --store NAME_OR_DSN --json
 ./bin/agent-testbench.sh sandbox start --store NAME_OR_DSN --dry-run --json
@@ -609,7 +609,7 @@ containers or temporary files directly:
 assertion, runtime-log, dependency-probe, and post-process task signals, and
 attempts bounded runtime-log collection for failed workflow steps when topology
 and request correlation data are present. When logs or dependency probes are
-still absent, it prints exact step-detail and `evidence tasks` follow-up
+still absent, it prints exact step-detail and `evidence inspect --view tasks` follow-up
 commands instead of leaving the operator to inspect containers manually.
 
 `sandbox service list` shows the registered profile-service catalog without

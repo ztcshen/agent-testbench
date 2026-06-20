@@ -91,6 +91,7 @@ agent-testbench template-package verify --template-package PATH_OR_ID [--profile
 agent-testbench template-package import --from PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--json] [--audit] [--require-audit-ok] [--force]
 agent-testbench executor plan [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--json]
 agent-testbench evidence import --from PATH --profile ID [--store NAME_OR_DSN]
+agent-testbench evidence inspect [--view list|tasks] [--store NAME_OR_DSN] [--run ID] [--step ID] [--case ID] [--kind KIND] [--status STATUS] [--json]
 agent-testbench evidence list [--store NAME_OR_DSN] [--run ID] [--json]
 agent-testbench evidence tasks [--store NAME_OR_DSN] --run ID [--step ID] [--case ID] [--kind KIND] [--status STATUS] [--json]
 agent-testbench trace topology collect --run ID [--store NAME_OR_DSN] --trace-graphql-url URL [--step ID] [--case ID] [--request ID] [--endpoint TEXT] [--trace-id ID] [--json]

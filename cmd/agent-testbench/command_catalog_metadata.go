@@ -17,6 +17,9 @@ const (
 	commandCatalogCaseRun            = "case run"
 	commandCatalogCaseSuiteReport    = "case suite report"
 	commandCatalogExecutorPlan       = "executor plan"
+	commandCatalogEvidenceInspect    = "evidence inspect"
+	commandCatalogEvidenceList       = "evidence list"
+	commandCatalogEvidenceTasks      = "evidence tasks"
 
 	commandCatalogMapList             = "map list"
 	commandCatalogMapWorkflows        = "map workflows"

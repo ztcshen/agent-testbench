@@ -415,9 +415,9 @@ func caseDiagnosisNextActions(report caseDiagnosisReport, httpStatus int, errorC
 	if !report.OK && diagnostics.LogRecords == 0 && report.RunID != "" {
 		if report.StepID != "" {
 			actions = append(actions, "agent-testbench workflow step --run "+report.RunID+" --step "+report.StepID+" --json")
-			actions = append(actions, "agent-testbench evidence tasks --run "+report.RunID+" --step "+report.StepID+" --kind "+caseDiagnosisRuntimeLogTaskKind+" --json")
+			actions = append(actions, "agent-testbench evidence inspect --view tasks --run "+report.RunID+" --step "+report.StepID+" --kind "+caseDiagnosisRuntimeLogTaskKind+" --json")
 		} else {
-			actions = append(actions, "agent-testbench evidence tasks --run "+report.RunID+" --kind "+caseDiagnosisRuntimeLogTaskKind+" --json")
+			actions = append(actions, "agent-testbench evidence inspect --view tasks --run "+report.RunID+" --kind "+caseDiagnosisRuntimeLogTaskKind+" --json")
 		}
 	}
 	if len(missingLocalEvidence) > 0 {
@@ -430,7 +430,7 @@ func caseDiagnosisNextActions(report caseDiagnosisReport, httpStatus int, errorC
 		actions = append(actions, "Compare the planned request with the target service contract and expected status codes")
 	}
 	if !report.OK && diagnostics.DependencyProbes == 0 {
-		actions = append(actions, "Add Store-backed dependency probes for this case, then rerun and inspect agent-testbench evidence list --run "+report.RunID+" --json")
+		actions = append(actions, "Add Store-backed dependency probes for this case, then rerun and inspect agent-testbench evidence inspect --view list --run "+report.RunID+" --json")
 	}
 	if len(actions) == 0 {
 		actions = append(actions, "No failure action needed")

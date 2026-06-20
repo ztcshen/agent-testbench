@@ -17,11 +17,13 @@ import (
 
 func runEvidence(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("missing evidence command")
+		return printCommandHelp([]string{"evidence"})
 	}
 	switch args[0] {
 	case "import":
 		return runEvidenceImport(ctx, args[1:])
+	case "inspect":
+		return runEvidenceInspect(ctx, args[1:])
 	case "list":
 		return runEvidenceList(ctx, args[1:])
 	case "tasks":
@@ -29,6 +31,13 @@ func runEvidence(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown evidence command: %s", args[0])
 	}
+}
+
+type evidenceListCommandOptions struct {
+	StoreRef   string
+	StoreURL   string
+	RunID      string
+	JSONOutput bool
 }
 
 func runEvidenceList(ctx context.Context, args []string) error {
@@ -41,17 +50,26 @@ func runEvidenceList(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	s, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	return runEvidenceListWithOptions(ctx, evidenceListCommandOptions{
+		StoreRef:   *storeRef,
+		StoreURL:   *storeURL,
+		RunID:      *runID,
+		JSONOutput: *jsonOutput,
+	})
+}
+
+func runEvidenceListWithOptions(ctx context.Context, options evidenceListCommandOptions) error {
+	s, cleanup, err := openRequiredCLIStore(ctx, options.StoreRef, options.StoreURL)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
 
-	report, err := controlplane.EvidenceList(ctx, s, *runID)
+	report, err := controlplane.EvidenceList(ctx, s, options.RunID)
 	if err != nil {
 		return err
 	}
-	if *jsonOutput {
+	if options.JSONOutput {
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(report)
@@ -126,39 +144,112 @@ type evidenceTaskFilter struct {
 	Status string
 }
 
+type evidenceTaskCommandOptions struct {
+	StoreRef   string
+	StoreURL   string
+	RunID      string
+	StepID     string
+	CaseID     string
+	Kind       string
+	Status     string
+	JSONOutput bool
+}
+
+type evidenceTaskCommandFlagValues struct {
+	storeRef   *string
+	storeURL   *string
+	runID      *string
+	stepID     *string
+	caseID     *string
+	kind       *string
+	status     *string
+	jsonOutput *bool
+}
+
+func registerEvidenceTaskCommandFlags(flags *flag.FlagSet) evidenceTaskCommandFlagValues {
+	return evidenceTaskCommandFlagValues{
+		storeRef:   flags.String("store", "", "Named Store config or Store DSN"),
+		storeURL:   flags.String("store-url", "", legacyStoreURLFlagHelp),
+		runID:      flags.String("run", "", "Run id"),
+		stepID:     flags.String("step", "", "Workflow step id"),
+		caseID:     flags.String("case", "", "API case id"),
+		kind:       flags.String("kind", "", "Post-process task kind"),
+		status:     flags.String("status", "", "Post-process task status"),
+		jsonOutput: flags.Bool("json", false, "Emit a machine-readable JSON report"),
+	}
+}
+
+func (values evidenceTaskCommandFlagValues) taskOptions() evidenceTaskCommandOptions {
+	return evidenceTaskCommandOptions{
+		StoreRef:   *values.storeRef,
+		StoreURL:   *values.storeURL,
+		RunID:      *values.runID,
+		StepID:     *values.stepID,
+		CaseID:     *values.caseID,
+		Kind:       *values.kind,
+		Status:     *values.status,
+		JSONOutput: *values.jsonOutput,
+	}
+}
+
+func (values evidenceTaskCommandFlagValues) listOptions() evidenceListCommandOptions {
+	return evidenceListCommandOptions{
+		StoreRef:   *values.storeRef,
+		StoreURL:   *values.storeURL,
+		RunID:      *values.runID,
+		JSONOutput: *values.jsonOutput,
+	}
+}
+
 func runEvidenceTasks(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("evidence tasks", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	runID := flags.String("run", "", "Run id")
-	stepID := flags.String("step", "", "Workflow step id")
-	caseID := flags.String("case", "", "API case id")
-	kind := flags.String("kind", "", "Post-process task kind")
-	status := flags.String("status", "", "Post-process task status")
-	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	values := registerEvidenceTaskCommandFlags(flags)
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if strings.TrimSpace(*runID) == "" {
+	return runEvidenceTasksWithOptions(ctx, values.taskOptions())
+}
+
+func runEvidenceInspect(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("evidence inspect", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	view := flags.String("view", "list", "Evidence view to inspect: list or tasks")
+	values := registerEvidenceTaskCommandFlags(flags)
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+
+	switch strings.TrimSpace(*view) {
+	case "", "list":
+		return runEvidenceListWithOptions(ctx, values.listOptions())
+	case "tasks":
+		return runEvidenceTasksWithOptions(ctx, values.taskOptions())
+	default:
+		return fmt.Errorf("unknown evidence inspect view: %s", *view)
+	}
+}
+
+func runEvidenceTasksWithOptions(ctx context.Context, options evidenceTaskCommandOptions) error {
+	if strings.TrimSpace(options.RunID) == "" {
 		return errors.New("--run is required")
 	}
-	s, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	s, cleanup, err := openRequiredCLIStore(ctx, options.StoreRef, options.StoreURL)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
 	report, err := evidenceTasks(ctx, s, evidenceTaskFilter{
-		RunID:  *runID,
-		StepID: *stepID,
-		CaseID: *caseID,
-		Kind:   *kind,
-		Status: *status,
+		RunID:  options.RunID,
+		StepID: options.StepID,
+		CaseID: options.CaseID,
+		Kind:   options.Kind,
+		Status: options.Status,
 	})
 	if err != nil {
 		return err
 	}
-	if *jsonOutput {
+	if options.JSONOutput {
 		return writeIndentedJSON(report)
 	}
 	printEvidenceTasks(report)

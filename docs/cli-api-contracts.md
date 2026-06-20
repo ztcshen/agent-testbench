@@ -53,7 +53,7 @@ Verification baseline: this page was checked against `cmd/agent-testbench/main.g
 | Sandbox runtime | `sandbox start`, `sandbox service list` |
 | Template package lifecycle | `template-package init`, `template-package install`, `template-package pack`, `template-package list`, `template-package inspect`, `template-package export`, `template-package catalog list --active`, `template-package catalog list`, `template-package catalog restore`, `template-package verify`, `template-package import` |
 | Executor planning | `executor plan` |
-| Evidence | `evidence import`, `evidence list`, `evidence tasks`, `replay evidence` |
+| Evidence | `evidence import`, `evidence inspect`, `evidence list`, `evidence tasks`, `replay evidence` |
 | Workflow | `workflow discover`, `workflow plan`, `workflow audit`, `workflow task run`, `workflow gate` |
 | Baseline | `gate baseline get`, `gate baseline set` |
 | Template | `template render` |
@@ -330,9 +330,9 @@ a Store diff summary for API cases and per-node case counts; `--audit` and
 | Workflow quality gate | `workflow gate` | None | CLI-only orchestration gate. It reads a persisted workflow run, summary steps, linked case runs, and indexed Evidence, then reports run status, step status counts, failed steps, missing Evidence, next actions, and exits non-zero when selected requirements such as `--require-passed`, `--require-steps`, or `--require-evidence` are not met. |
 | Trace topology collection | `trace topology collect` | `/api/trace-topology/collect` | Paired. CLI and API share the same SkyWalking GraphQL collection path. CLI writes topology rows through active Store or `--store NAME_OR_DSN`. Real topology proof requires a configured SkyWalking GraphQL endpoint and real trace ids. When the provider is missing or the trace cannot be queried, both surfaces must expose unavailable, failed, or skipped collection status instead of a generated topology. |
 | Replay evidence shell | `replay evidence` | `/api/replay/evidence` | Paired. CLI and API share the same replay shell payload. |
-| Post-process task lookup | `evidence tasks` | `/api/post-process-tasks` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
+| Post-process task lookup | `evidence inspect --view tasks` | `/api/post-process-tasks` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`; `evidence tasks` remains as a compatibility shortcut. |
 | Evidence import | `evidence import` | `/api/evidence/import` | Paired. Imports a legacy runtime SQLite Evidence index into the active or named Store. This is a migration/compatibility path, not the normal Store-backed execution path. |
-| Evidence list | `evidence list` | `/api/evidence/list` | Paired. CLI and API share the same Store Evidence listing helper; CLI accepts active Store or `--store NAME_OR_DSN`. Use `--run RUN_ID --json` as the first run-scoped Evidence check before falling back to local file or container inspection. |
+| Evidence list | `evidence inspect --view list` | `/api/evidence/list` | Paired. CLI and API share the same Store Evidence listing helper; CLI accepts active Store or `--store NAME_OR_DSN`. Use `--run RUN_ID --json` as the first run-scoped Evidence check before falling back to local file or container inspection; `evidence list` remains as a compatibility shortcut. |
 | Executor plan | `executor plan` | `/api/executor/plan` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`; API prefers the active Store catalog and uses the served template package only when no Store catalog is available. |
 | Baseline get/set | `gate baseline get`, `gate baseline set` | `/api/baseline/gate` | Paired. CLI and API read/write the same Store baseline gate through active Store or `--store NAME_OR_DSN`. |
 | Template render | `template render` | `/api/template/render` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`; API renders against the active served Store-backed template package. |

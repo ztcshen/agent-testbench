@@ -275,8 +275,10 @@ func commandCatalogReplacementHints() map[string]string {
 	return map[string]string{
 		commandCatalogExecutorPlan:  "agent-testbench map explain",
 		"runtime mysql endpoints":   "agent-testbench store status --json",
-		"trace topology collect":    "agent-testbench evidence tasks --run RUN_ID --json",
-		"replay evidence":           "agent-testbench evidence list --run RUN_ID --json",
+		"trace topology collect":    "agent-testbench evidence inspect --view tasks --run RUN_ID --json",
+		"replay evidence":           "agent-testbench evidence inspect --view list --run RUN_ID --json",
+		commandCatalogEvidenceList:  "agent-testbench evidence inspect --view list",
+		commandCatalogEvidenceTasks: "agent-testbench evidence inspect --view tasks",
 		"workflow discover":         "agent-testbench map list --json or agent-testbench map workflows --map MAP_ID --json",
 		"workflow register":         workflowToMapImportReplacement,
 		"workflow upsert":           workflowToMapImportReplacement,
@@ -347,7 +349,7 @@ func commandCatalogTaskTags(command string) []string {
 		return []string{"execute map", "map execution"}
 	case "environment restore", "environment status", "environment stop", "environment service restart", "environment discover", "environment inspect":
 		return []string{"restore environment", "environment operations"}
-	case commandCatalogCaseInspect, "case diagnose", "case evidence", "case gate", "workflow gate", "evidence list", "evidence tasks", cliCommandDoctor:
+	case commandCatalogCaseInspect, "case diagnose", "case evidence", "case gate", "workflow gate", commandCatalogEvidenceInspect, commandCatalogEvidenceList, commandCatalogEvidenceTasks, cliCommandDoctor:
 		return []string{"diagnose evidence", "evidence diagnosis"}
 	default:
 		return nil
@@ -435,9 +437,28 @@ func commandParentNavigationItems(command string, prefix []string, matches []com
 	}
 	switch command {
 	case "case", "environment":
+		return commandParentDefaultItems(matches)
+	case "evidence":
+		visible := map[string]bool{
+			"evidence import":             true,
+			commandCatalogEvidenceInspect: true,
+		}
+		filtered := make([]commandCatalogItem, 0, len(matches))
+		for _, item := range matches {
+			if visible[item.Command] {
+				filtered = append(filtered, item)
+			}
+		}
+		if len(filtered) > 0 {
+			return filtered
+		}
+		return matches
 	default:
 		return matches
 	}
+}
+
+func commandParentDefaultItems(matches []commandCatalogItem) []commandCatalogItem {
 	defaults := make([]commandCatalogItem, 0, len(matches))
 	for _, item := range matches {
 		if item.surface == commandCatalogSurfaceDefault {

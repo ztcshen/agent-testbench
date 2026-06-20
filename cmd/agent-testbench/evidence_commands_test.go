@@ -320,6 +320,32 @@ func TestEvidenceTasksCommandListsPostProcessTasks(t *testing.T) {
 	requireEvidenceCommandsUseExplicitStore(t, storePath)
 }
 
+func TestEvidenceInspectCommandRoutesListAndTasksViews(t *testing.T) {
+	storePath := createPostProcessTaskStore(t)
+	storeRef := "sqlite://" + storePath
+
+	listOut := runCLI(t, "evidence", "inspect", "--view", "list", "--store", storeRef, "--run", "run.tasks", "--json")
+	var listReport evidenceListCommandReport
+	if err := json.Unmarshal([]byte(listOut), &listReport); err != nil {
+		t.Fatalf("decode evidence inspect list json: %v\n%s", err, listOut)
+	}
+	if len(listReport.Runs) != 1 || listReport.Runs[0].ID != "run.tasks" {
+		t.Fatalf("evidence inspect list report = %#v", listReport)
+	}
+
+	tasksOut := runCLI(t, "evidence", "inspect", "--view", "tasks", "--store", storeRef, "--run", "run.tasks", "--step", "step-a", "--kind", "trace_topology_collect", "--json")
+	var tasksReport evidenceTasksCommandReport
+	if err := json.Unmarshal([]byte(tasksOut), &tasksReport); err != nil {
+		t.Fatalf("decode evidence inspect tasks json: %v\n%s", err, tasksOut)
+	}
+	requireEvidenceTasksReport(t, tasksReport)
+
+	out := runCLIFails(t, "evidence", "inspect", "--view", "unknown", "--store", storeRef, "--run", "run.tasks")
+	if !strings.Contains(out, "unknown evidence inspect view") {
+		t.Fatalf("unknown evidence inspect view should fail clearly:\n%s", out)
+	}
+}
+
 func runEvidenceTasksJSON(t *testing.T, storePath string) evidenceTasksCommandReport {
 	t.Helper()
 

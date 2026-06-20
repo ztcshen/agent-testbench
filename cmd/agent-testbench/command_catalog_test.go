@@ -660,6 +660,49 @@ func TestCaseDiagnoseIsCompatibilitySurfaceForInspect(t *testing.T) {
 	}
 }
 
+func TestEvidenceInspectConsolidatesListAndTasksInCatalog(t *testing.T) {
+	helpOut := runCLI(t, "evidence")
+	for _, want := range []string{"Commands: evidence", "agent-testbench evidence import", "agent-testbench evidence inspect"} {
+		if !strings.Contains(helpOut, want) {
+			t.Fatalf("evidence parent help missing %q:\n%s", want, helpOut)
+		}
+	}
+	for _, hidden := range []string{"agent-testbench evidence list", "agent-testbench evidence tasks"} {
+		if strings.Contains(helpOut, hidden) {
+			t.Fatalf("evidence parent help should hide compatibility command %q:\n%s", hidden, helpOut)
+		}
+	}
+
+	defaultOut := runCLI(t, "commands", "--filter", "evidence list", "--json")
+	if strings.Contains(defaultOut, `"command": "evidence list"`) {
+		t.Fatalf("default catalog should not promote evidence list after inspect gained --view list:\n%s", defaultOut)
+	}
+
+	out := runCLI(t, "commands", "--all", "--filter", "evidence", "--json")
+	var report struct {
+		Commands []struct {
+			Command     string `json:"command"`
+			Replacement string `json:"replacement"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode evidence catalog: %v\n%s", err, out)
+	}
+	commands := map[string]string{}
+	for _, item := range report.Commands {
+		commands[item.Command] = item.Replacement
+	}
+	if _, ok := commands[commandCatalogEvidenceInspect]; !ok {
+		t.Fatalf("evidence inspect missing from full catalog: %#v", commands)
+	}
+	if !strings.Contains(commands[commandCatalogEvidenceList], "evidence inspect --view list") {
+		t.Fatalf("evidence list should point users to inspect list view: %#v", commands)
+	}
+	if !strings.Contains(commands[commandCatalogEvidenceTasks], "evidence inspect --view tasks") {
+		t.Fatalf("evidence tasks should point users to inspect tasks view: %#v", commands)
+	}
+}
+
 func TestSpecializedWorkflowCommandsHaveReplacementHints(t *testing.T) {
 	defaultOut := runCLI(t, "commands", "--area", "workflow", "--json")
 	var defaultReport struct {
