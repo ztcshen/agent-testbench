@@ -467,44 +467,39 @@ func TestMapCommandsExposeLifecycleMetadata(t *testing.T) {
 	}
 }
 
-func TestCommandsDefaultSurfaceShowsDailyCommandsOnly(t *testing.T) {
+func TestCommandsDefaultCatalogHidesSpecializedCommands(t *testing.T) {
 	out := runCLI(t, "commands", "--json")
+	for _, hiddenField := range []string{`"tier"`, `"audience"`, `"stability"`, `"dailyReason"`} {
+		if strings.Contains(out, hiddenField) {
+			t.Fatalf("command catalog should not expose classification field %s:\n%s", hiddenField, out)
+		}
+	}
 
 	var report struct {
-		OK       bool   `json:"ok"`
-		Tier     string `json:"tier"`
-		All      bool   `json:"all"`
-		Count    int    `json:"count"`
+		OK       bool `json:"ok"`
+		All      bool `json:"all"`
+		Count    int  `json:"count"`
 		Commands []struct {
-			Command     string `json:"command"`
-			Area        string `json:"area"`
-			Tier        string `json:"tier"`
-			Audience    string `json:"audience"`
-			Stability   string `json:"stability"`
-			Replacement string `json:"replacement,omitempty"`
+			Command     string   `json:"command"`
+			Area        string   `json:"area"`
+			Tags        []string `json:"tags"`
+			Replacement string   `json:"replacement,omitempty"`
 		} `json:"commands"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode default commands json: %v\n%s", err, out)
 	}
-	if !report.OK || report.All || report.Tier != "daily" || report.Count == 0 || report.Count > 40 {
-		t.Fatalf("default command catalog should be a focused daily surface: %#v", report)
+	if !report.OK || report.All || report.Count == 0 || report.Count > 40 {
+		t.Fatalf("default command catalog should be focused without public classification labels: %#v", report)
 	}
-	commands := map[string]struct {
-		Tier        string
-		Audience    string
-		Stability   string
-		Replacement string
-	}{}
+	commands := map[string]string{}
+	blockedTags := map[string]bool{"daily": true, "advanced": true, "compat": true, "deprecated": true}
 	for _, item := range report.Commands {
-		commands[item.Command] = struct {
-			Tier        string
-			Audience    string
-			Stability   string
-			Replacement string
-		}{Tier: item.Tier, Audience: item.Audience, Stability: item.Stability, Replacement: item.Replacement}
-		if item.Tier != "daily" || item.Audience == "" || item.Stability == "" {
-			t.Fatalf("default catalog returned non-daily or unclassified command: %#v", item)
+		commands[item.Command] = item.Replacement
+		for _, tag := range item.Tags {
+			if blockedTags[tag] {
+				t.Fatalf("command %q should not expose classification tag %q: %#v", item.Command, tag, item.Tags)
+			}
 		}
 	}
 	if report.Count > 30 {
@@ -512,7 +507,7 @@ func TestCommandsDefaultSurfaceShowsDailyCommandsOnly(t *testing.T) {
 	}
 	for _, want := range []string{"status", "doctor", "store current", "environment restore", "task suggest", "task plan", "map explain", "map run", "case inspect", "case run", "case suite report"} {
 		if _, ok := commands[want]; !ok {
-			t.Fatalf("default catalog missing daily command %q in %#v", want, commands)
+			t.Fatalf("default catalog missing command %q in %#v", want, commands)
 		}
 	}
 	for _, hidden := range []string{"profile import", "config publish", "template-package catalog-index", "template-package import", "runtime mysql endpoints", commandCatalogExecutorPlan, "case runs", "case evidence", "case timing", "case suite coverage", "workflow acceptance start", "baseline get", "workflow report", "case suite plan", "map plan inspect"} {
@@ -522,39 +517,52 @@ func TestCommandsDefaultSurfaceShowsDailyCommandsOnly(t *testing.T) {
 	}
 }
 
-func TestCommandsDailySurfaceExplainsAdmission(t *testing.T) {
+func TestCommandsDefaultCatalogExplainsInclusion(t *testing.T) {
 	out := runCLI(t, "commands", "--json")
 
 	var report struct {
 		Commands []struct {
-			Command     string `json:"command"`
-			DailyReason string `json:"dailyReason"`
+			Command string `json:"command"`
+			Reason  string `json:"reason"`
 		} `json:"commands"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode daily command catalog: %v\n%s", err, out)
+		t.Fatalf("decode default command catalog: %v\n%s", err, out)
 	}
 	reasons := map[string]string{}
 	for _, item := range report.Commands {
-		reasons[item.Command] = item.DailyReason
-		if item.DailyReason == "" {
-			t.Fatalf("daily command %q missing dailyReason: %#v", item.Command, item)
+		reasons[item.Command] = item.Reason
+		if item.Reason == "" {
+			t.Fatalf("default command %q missing inclusion reason: %#v", item.Command, item)
 		}
 	}
 	for _, command := range []string{"map run", "case run", "task plan", "workflow gate"} {
 		if reasons[command] == "" {
-			t.Fatalf("daily command %q should explain admission: %#v", command, reasons)
+			t.Fatalf("default command %q should explain inclusion: %#v", command, reasons)
 		}
 	}
 }
 
-func TestNonDailyWorkflowCommandsHaveReplacementHints(t *testing.T) {
+func TestSpecializedWorkflowCommandsHaveReplacementHints(t *testing.T) {
+	defaultOut := runCLI(t, "commands", "--area", "workflow", "--json")
+	var defaultReport struct {
+		Commands []struct {
+			Command string `json:"command"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(defaultOut), &defaultReport); err != nil {
+		t.Fatalf("decode default workflow command catalog: %v\n%s", err, defaultOut)
+	}
+	defaultCommands := map[string]bool{}
+	for _, item := range defaultReport.Commands {
+		defaultCommands[item.Command] = true
+	}
+
 	out := runCLI(t, "commands", "--area", "workflow", "--all", "--json")
 
 	var report struct {
 		Commands []struct {
 			Command     string `json:"command"`
-			Tier        string `json:"tier"`
 			Replacement string `json:"replacement"`
 		} `json:"commands"`
 	}
@@ -562,26 +570,28 @@ func TestNonDailyWorkflowCommandsHaveReplacementHints(t *testing.T) {
 		t.Fatalf("decode workflow command catalog: %v\n%s", err, out)
 	}
 	for _, item := range report.Commands {
-		if item.Tier == "daily" {
+		if defaultCommands[item.Command] {
 			continue
 		}
 		if item.Replacement == "" {
-			t.Fatalf("non-daily workflow command should have a replacement hint: %#v", item)
+			t.Fatalf("specialized workflow command should have a replacement hint: %#v", item)
 		}
 	}
 }
 
-func TestCommandsAllExposesAdvancedReplacementMetadata(t *testing.T) {
+func TestCommandsAllExposesReplacementMetadataWithoutClassificationLabels(t *testing.T) {
 	out := runCLI(t, "commands", "--all", "--filter", commandCatalogExecutorPlan, "--json")
+	for _, hiddenField := range []string{`"tier"`, `"audience"`, `"stability"`, `"dailyReason"`, `"reason"`} {
+		if strings.Contains(out, hiddenField) {
+			t.Fatalf("all command catalog should not expose classification field %s:\n%s", hiddenField, out)
+		}
+	}
 
 	var report struct {
 		OK       bool `json:"ok"`
 		All      bool `json:"all"`
 		Commands []struct {
 			Command     string `json:"command"`
-			Tier        string `json:"tier"`
-			Audience    string `json:"audience"`
-			Stability   string `json:"stability"`
 			Replacement string `json:"replacement,omitempty"`
 		} `json:"commands"`
 	}
@@ -595,7 +605,7 @@ func TestCommandsAllExposesAdvancedReplacementMetadata(t *testing.T) {
 	for _, item := range report.Commands {
 		if item.Command == commandCatalogExecutorPlan {
 			foundExecutorPlan = true
-			if item.Tier != "advanced" || item.Audience != "developer" || item.Stability != "stable" || !strings.Contains(item.Replacement, "map explain") {
+			if !strings.Contains(item.Replacement, "map explain") {
 				t.Fatalf("executor plan metadata = %#v", item)
 			}
 		}
@@ -605,34 +615,24 @@ func TestCommandsAllExposesAdvancedReplacementMetadata(t *testing.T) {
 	}
 
 	textOut := runCLI(t, "commands", "--all", "--filter", commandCatalogExecutorPlan)
-	if !strings.Contains(textOut, "Tier: advanced") || !strings.Contains(textOut, "Replacement: agent-testbench map explain") {
-		t.Fatalf("text command catalog should show tier and replacement:\n%s", textOut)
+	for _, hiddenLabel := range []string{"Tier:", "Audience:", "Stability:", "Daily:"} {
+		if strings.Contains(textOut, hiddenLabel) {
+			t.Fatalf("text command catalog should not expose classification label %q:\n%s", hiddenLabel, textOut)
+		}
+	}
+	if !strings.Contains(textOut, "Replacement: agent-testbench map explain") {
+		t.Fatalf("text command catalog should show replacement:\n%s", textOut)
 	}
 }
 
-func TestCommandsCanFilterByTierAndAudience(t *testing.T) {
-	out := runCLI(t, "commands", "--tier", "advanced", "--audience", "developer", "--filter", commandCatalogExecutorPlan, "--json")
-
-	var report struct {
-		OK       bool   `json:"ok"`
-		Tier     string `json:"tier"`
-		Audience string `json:"audience"`
-		Commands []struct {
-			Command     string `json:"command"`
-			Tier        string `json:"tier"`
-			Audience    string `json:"audience"`
-			Replacement string `json:"replacement,omitempty"`
-		} `json:"commands"`
-	}
-	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode tier/audience commands json: %v\n%s", err, out)
-	}
-	if !report.OK || report.Tier != "advanced" || report.Audience != "developer" || len(report.Commands) == 0 {
-		t.Fatalf("tier/audience command catalog = %#v", report)
-	}
-	for _, item := range report.Commands {
-		if item.Tier != "advanced" || item.Audience != "developer" || item.Command != commandCatalogExecutorPlan {
-			t.Fatalf("executor plan tier/audience metadata = %#v", item)
+func TestCommandsRejectsRemovedClassificationFilters(t *testing.T) {
+	for _, args := range [][]string{
+		{"commands", "--tier", "advanced", "--json"},
+		{"commands", "--audience", "developer", "--json"},
+	} {
+		out := runCLIFails(t, args...)
+		if !strings.Contains(out, "flag provided but not defined") {
+			t.Fatalf("removed classification filter should fail clearly for %v:\n%s", args, out)
 		}
 	}
 }

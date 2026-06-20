@@ -60,7 +60,7 @@ Usage:
   agent-testbench status [--deep] [--json]
   agent-testbench doctor [--fix] [--deep] [--trace-graphql-url URL] [--json]
   agent-testbench update [--repo PATH] [--remote NAME] [--branch NAME] [--release TAG|latest] [--channel main|release] [--check] [--force] [--output PATH] [--json]
-  agent-testbench commands [--area AREA] [--filter TEXT] [--tier daily|advanced|compat|deprecated] [--audience agent|operator|developer|internal] [--all] [--json]
+  agent-testbench commands [--area AREA] [--filter TEXT] [--all] [--json]
   agent-testbench completion [bash|zsh]
   agent-testbench logs [NAME|list] [-n N] [--json]
   agent-testbench task catalog [--filter TEXT] [--json]

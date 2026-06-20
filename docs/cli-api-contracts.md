@@ -9,18 +9,18 @@ Verification baseline: this page was checked against `cmd/agent-testbench/main.g
 ## Scope
 
 - CLI means `agent-testbench ...`.
-- CLI is the primary operator surface for daily local testing workflows.
+- CLI is the primary operator surface for local testing workflows.
 - API means local control-plane routes exposed by `agent-testbench serve` for the
   workbench, automation, and agents; it is not a separate cloud product surface.
 - Static HTML pages under `control-plane/static/` are UI entrypoints, not API
   contracts, so they are not counted as API parity targets here.
-- SQL Store is the active source of truth for new daily testing workflows.
+- SQL Store is the active source of truth for new testing workflows.
   SQLite, PostgreSQL, and MySQL are supported Store engines; users should choose
   the engine that matches their operational boundary. Profile packages are
-  import/export and review artifacts, not the daily maintenance surface.
+  import/export and review artifacts, not the normal maintenance surface.
 - SQLite is useful for local and personal Stores; PostgreSQL and MySQL are
   better fits for shared, remote, and multi-user Stores.
-- Daily CLI/API commands read and write the active Store by default, or the
+- CLI/API commands read and write the active Store by default, or the
   Store named by `--store NAME_OR_DSN` for a single command.
 - Environment Catalog operations are Store-first: register, discover, inspect,
   bootstrap, restore, verify, and publish-verified must share the selected
@@ -33,12 +33,12 @@ Verification baseline: this page was checked against `cmd/agent-testbench/main.g
   complete Evidence indexes and stored real SkyWalking topology.
 - Docker runtime management is local-only for now. The parity target is local
   workflow operation, not remote Docker orchestration.
-- API parity is required for daily testing operations: Store configuration
+- API parity is required for common testing operations: Store configuration
   visibility, local service registration, interface and workflow discovery,
   case registration/execution, run reports, Evidence, post-process status, and
   real topology lookup. Offline package authoring commands may remain CLI-only
   when they are review/migration utilities rather than workbench operations.
-- Daily execution and report commands use the selected Store engine end to end.
+- Execution and report commands use the selected Store engine end to end.
   Commands must not create hidden runtime databases for another engine; missing
   Store configuration fails with clear guidance instead of switching engines.
 
@@ -162,7 +162,7 @@ rows first. In mixed migration rows, structured entries replace matching legacy
 entries by file path, service id, health-check id, or equivalent health probe,
 while unmatched legacy entries remain compatibility inputs.
 Legacy package repositories remain compatibility inputs and are not the SQL
-Store daily restore source.
+Store restore source.
 An `environment_files` row is considered a materialized file only when it carries
 inline content, including an explicitly stored empty string. Referenced file
 rows without materialized content remain projection gaps; restore must not treat
@@ -282,7 +282,7 @@ a Store diff summary for API cases and per-node case counts; `--audit` and
 | Capability | CLI | API | Parity |
 | --- | --- | --- | --- |
 | Serve control plane | `serve` | Not applicable | CLI-only bootstrap. |
-| Version/help/operator diagnostics | `version`, `help`, `setup`, `status`, `doctor`, `update`, `commands`, `completion`, `logs`, `config path/show/edit` | None | CLI-only. `commands --json` emits the daily agent command catalog by default, derived from the same Usage source as `help`, including command path, area, usage, Store awareness, tags, tier, audience, stability, and replacement guidance; `commands --all` exposes advanced and compatibility commands, `commands --tier TIER` narrows to daily/advanced/compat/deprecated, and `commands --area AREA` restricts discovery to one command family. `status --deep` and `doctor --deep` can inspect Store schema state, `doctor --fix` applies only low-risk local setup repairs, and `logs` is limited to `.runtime/logs` files. |
+| Version/help/operator diagnostics | `version`, `help`, `setup`, `status`, `doctor`, `update`, `commands`, `completion`, `logs`, `config path/show/edit` | None | CLI-only. `commands --json` emits the default command catalog, derived from the same Usage source as `help`, including command path, area, usage, Store awareness, semantic tags, lifecycle, inclusion reason, and replacement guidance; `commands --all` exposes the full catalog, and `commands --area AREA` restricts discovery to one command family. `status --deep` and `doctor --deep` can inspect Store schema state, `doctor --fix` applies only low-risk local setup repairs, and `logs` is limited to `.runtime/logs` files. |
 | Store selection visibility | `store current` | `/api/store/current` | Paired as read-only visibility. CLI reports the active named Store; API reports the Store selected when `serve` started. Neither surface exposes raw DSN passwords. |
 | Store status, schema upgrade, DDL, and migration | `store status`, `store provision`, `store upgrade`, `store ddl`, `store copy` | None | CLI-only. `store status --json` emits masked, machine-readable backend/version/pending status for migration scripts; when a Store cannot be reached it still writes `ok=false` plus the masked target and error before exiting non-zero. `store provision --store NAME_OR_DSN --json` creates the named MySQL Store database when the server account is reachable and authorized; it does not host the sandbox Store in Docker and does not copy Store data. `store ddl --backend postgres` and `store ddl --backend mysql` print schema DDL for externally provisioned control-plane databases. `store copy --from SOURCE --to TARGET` promotes current restore-critical Store metadata from a local Store into a shared PostgreSQL or MySQL Store; `--require-environment ENV_ID --require-verification-workflow WORKFLOW_ID --require-verified-environment` turns the expected verified environment and acceptance workflow into a built-in copy gate, and optional component/dependency/asset minimum flags can gate the copied component graph size. Its JSON report lists copied environment ids, verification workflow ids, verification flags, component graph counts, asset counts, and inline asset bytes so operators can prove the restore catalog was copied. Historical runs, Evidence indexes, and topology rows are intentionally rerun on the target Store. |
 | Environment catalog lifecycle | `environment register`, `environment startup-file put`, `environment discover`, `environment inspect`, `environment bootstrap`, `environment restore`, `environment status`, `environment stop`, `environment verify`, `environment publish-verified` | `/api/environments`, `/api/environments/{environmentId}`, `GET /api/environments/{environmentId}/bootstrap`, `/api/environments/{environmentId}/verify`, `/api/environments/{environmentId}/publish-verified` | Mostly paired. CLI and API use the active Store or `--store NAME_OR_DSN`; `startup-file put` updates compact Store-backed startup files for an existing environment without re-registering its workflow, services, repositories, or health checks; inspect and bootstrap expose component graph restore-readiness, including blocking dependency order, cycle status, health gate counts, and remote asset readiness; bootstrap and restore also expose `componentStartupPlan`, grouping components into provider-before-consumer startup batches with static health gates derived from Store component checks; `restore` is currently CLI-only local machine preparation anchored to the environment verification workflow. It dry-runs by default, can clone remote component repositories into a workspace with `--execute`, can lock cloned or clean existing repos to recorded `--repo-ref SERVICE=REF` values, gives recorded refs precedence over `--pull` for existing checkouts, validates existing checkouts against the recorded `origin` and clean work tree state, can generate compact Store-backed startup files and component-owned assets under the workspace before Docker starts, rewrites generated Compose host bind sources to recorded component repo checkouts when the source path identifies that service, rejects remaining missing absolute host bind-mount sources from generated Compose files, reports unavailable image manifests before pull during `--execute`, reports a readiness gate for Store boundary, remote component repositories, Store startup files/assets, Compose services/middleware, existing container-name conflicts, health probes, cleanup review, and operator pause, runs the recorded Docker Compose pull/build/up plan or recorded start command only after repository preparation and non-destructive preflight succeed, emits `docker.compose.execute` waiting observations for long-running startup commands with `--output-format stream-json`, or explicitly adopts already-running fixed-name containers with `--use-existing-containers`, waits for recorded health checks, and can run the recorded verification workflow with `--execute --run-workflow`. Compose-managed one-shot object-storage seed services can satisfy object-storage edge assets without a separate seed command. Plain MySQL bootstrap SQL is projected into Store-backed initdb files before clean Docker startup; secret-like or sensitive projection files use owner-only permissions; versioned migration assets still use TestBench migration history/checksum execution. When existing containers are adopted, plain MySQL SQL bootstrap assets are skipped with a migration/clean-restore hint instead of being reapplied to an already-started database. `environment status` materializes Store-backed compose files/env files, inspects recorded Compose services with `docker compose ps`, reports per-service container state plus a health summary, and does not pull/build/up/down; `environment stop` defaults to `docker compose stop SERVICE...` and persists `summary.lastStop`, with `--down --remove-orphans` available only as an explicit destructive mode that is blocked unless the Store-to-Compose cleanup linkage proof passes. Each restore attempt writes `summary.lastRestore` back to the selected Environment Catalog entry for inspect/API visibility, including readiness status. CLI restore can also plan Compose-scoped target cleanup with `--clean-docker-state`/`--clean-docker-images`; execution is blocked unless `--allow-destructive-docker-cleanup` is supplied and a Store-to-Compose cleanup linkage proof passes for project name, component graph, required component services, Store-backed Compose env injection, and a complete `fileProjection` report for compose/env/native Compose file references. Failed cleanup linkage includes `docker.cleanup.linkage.envInjection` plus `docker.cleanup.linkage.repairPlan`, a Store-backed list of blocking repair items with missing facts and command hints. Cleanup is a local CLI operation only, not an API execution surface. `verify` records run status and completeness flags, while `publish-verified` inspects the selected Store for a passed run, indexed Evidence, and complete SkyWalking topology before verified discovery. |
@@ -331,7 +331,7 @@ a Store diff summary for API cases and per-node case counts; `--audit` and
 | Trace topology collection | `trace topology collect` | `/api/trace-topology/collect` | Paired. CLI and API share the same SkyWalking GraphQL collection path. CLI writes topology rows through active Store or `--store NAME_OR_DSN`. Real topology proof requires a configured SkyWalking GraphQL endpoint and real trace ids. When the provider is missing or the trace cannot be queried, both surfaces must expose unavailable, failed, or skipped collection status instead of a generated topology. |
 | Replay evidence shell | `replay evidence` | `/api/replay/evidence` | Paired. CLI and API share the same replay shell payload. |
 | Post-process task lookup | `evidence tasks` | `/api/post-process-tasks` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
-| Evidence import | `evidence import` | `/api/evidence/import` | Paired. Imports a legacy runtime SQLite Evidence index into the active or named Store. This is a migration/compatibility path, not a normal daily SQLite execution path. |
+| Evidence import | `evidence import` | `/api/evidence/import` | Paired. Imports a legacy runtime SQLite Evidence index into the active or named Store. This is a migration/compatibility path, not the normal Store-backed execution path. |
 | Evidence list | `evidence list` | `/api/evidence/list` | Paired. CLI and API share the same Store Evidence listing helper; CLI accepts active Store or `--store NAME_OR_DSN`. Use `--run RUN_ID --json` as the first run-scoped Evidence check before falling back to local file or container inspection. |
 | Executor plan | `executor plan` | `/api/executor/plan` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`; API prefers the active Store catalog and uses the served template package only when no Store catalog is available. |
 | Baseline get/set | `gate baseline get`, `gate baseline set` | `/api/baseline/gate` | Paired. CLI and API read/write the same Store baseline gate through active Store or `--store NAME_OR_DSN`. |
@@ -378,11 +378,11 @@ parity in this order:
 1. Add read CLI commands for API-only Store views:
    currently none in the first Store-view parity set.
 
-2. Add API endpoints for CLI-only daily testing helpers:
-   currently none in the first daily helper parity set.
+2. Add API endpoints for CLI-only testing helpers:
+   currently none in the first helper parity set.
 
 3. Keep offline package-authoring commands explicitly CLI-only unless they
-   become part of the daily workbench surface:
+   become part of the workbench surface:
    `template-package init/pack` and `interface-node case draft/apply` are
    review/migration utilities, not mandatory runtime operations.
 
@@ -399,5 +399,5 @@ parity in this order:
   mark it API-only in this document.
 - Keep selector names aligned where possible. If aliases are necessary, document
   both names.
-- Prefer Store-first APIs and UI paths for new daily testing behavior; keep
+- Prefer Store-first APIs and UI paths for new testing behavior; keep
   legacy `profile` flows as import/export or compatibility bridges.

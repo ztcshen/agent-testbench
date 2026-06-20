@@ -44,17 +44,10 @@ const (
 
 	workflowToMapImportReplacement = "agent-testbench map import-workflows --workflow WORKFLOW_ID --map MAP_ID"
 
-	commandCatalogTierDaily      = "daily"
-	commandCatalogTierAdvanced   = "advanced"
-	commandCatalogTierCompat     = "compat"
-	commandCatalogTierDeprecated = "deprecated"
-
-	commandCatalogAudienceAgent     = "agent"
-	commandCatalogAudienceOperator  = "operator"
-	commandCatalogAudienceDeveloper = "developer"
-
-	commandCatalogStabilityStable = "stable"
-	commandCatalogStabilityLegacy = "legacy"
+	commandCatalogSurfaceDefault       = "default"
+	commandCatalogSurfaceExtended      = "extended"
+	commandCatalogSurfaceCompatibility = "compatibility"
+	commandCatalogSurfaceDeprecated    = "deprecated"
 )
 
 func commandCatalogMapLifecycle(command string) string {
@@ -111,7 +104,7 @@ func commandCatalogTaskRanks() map[string]int {
 	}
 }
 
-func commandCatalogDailyAdmissionReason(command string) string {
+func commandCatalogDefaultInclusionReason(command string) string {
 	switch command {
 	case cliCommandStatus, cliCommandDoctor, cliCommandCommands:
 		return "orientation: first commands for status, diagnosis, and command discovery"
@@ -128,6 +121,6 @@ func commandCatalogDailyAdmissionReason(command string) string {
 	case commandCatalogWorkflowGate:
 		return "workflow compatibility: keeps existing workflow gates visible while map-first flows converge"
 	default:
-		return "daily operator path: commonly needed for local Store-first testing"
+		return "default operator path: commonly needed for local Store-first testing"
 	}
 }

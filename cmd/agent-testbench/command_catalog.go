@@ -12,8 +12,6 @@ type commandCatalogReport struct {
 	OK       bool                 `json:"ok"`
 	Filter   string               `json:"filter,omitempty"`
 	Area     string               `json:"area,omitempty"`
-	Tier     string               `json:"tier,omitempty"`
-	Audience string               `json:"audience,omitempty"`
 	All      bool                 `json:"all,omitempty"`
 	Count    int                  `json:"count"`
 	Commands []commandCatalogItem `json:"commands"`
@@ -26,19 +24,15 @@ type commandCatalogItem struct {
 	Usage       string   `json:"usage"`
 	StoreAware  bool     `json:"storeAware"`
 	Tags        []string `json:"tags"`
-	Tier        string   `json:"tier"`
-	Audience    string   `json:"audience"`
-	Stability   string   `json:"stability"`
 	Replacement string   `json:"replacement,omitempty"`
 	Lifecycle   string   `json:"lifecycle,omitempty"`
 	Rank        int      `json:"rank,omitempty"`
-	DailyReason string   `json:"dailyReason,omitempty"`
+	Reason      string   `json:"reason,omitempty"`
+	surface     string
 }
 
 type commandCatalogOptions struct {
-	All      bool
-	Tier     string
-	Audience string
+	All bool
 }
 
 func runCommands(args []string) error {
@@ -46,21 +40,12 @@ func runCommands(args []string) error {
 	flags.SetOutput(os.Stderr)
 	filter := flags.String("filter", "", "Filter command catalog by command, area, usage, or tag")
 	area := flags.String("area", "", "Restrict command catalog to one area, such as store, case, workflow, or environment")
-	all := flags.Bool("all", false, "Show daily, advanced, compatibility, and deprecated commands")
-	tier := flags.String("tier", "", "Restrict command catalog to daily, advanced, compat, or deprecated")
-	audience := flags.String("audience", "", "Restrict command catalog to agent, operator, developer, or internal")
+	all := flags.Bool("all", false, "Show the full command catalog beyond the default surface")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable command catalog")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	options := commandCatalogOptions{
-		All:      *all,
-		Tier:     strings.TrimSpace(*tier),
-		Audience: strings.TrimSpace(*audience),
-	}
-	if !options.All && options.Tier == "" {
-		options.Tier = commandCatalogTierDaily
-	}
+	options := commandCatalogOptions{All: *all}
 	report := commandCatalogForAreaWithOptions(*filter, *area, options)
 	if *jsonOutput {
 		return writeIndentedJSON(report)
@@ -74,20 +59,16 @@ func commandCatalog(filter string) commandCatalogReport {
 }
 
 func commandCatalogForArea(filter string, area string) commandCatalogReport {
-	return commandCatalogForAreaWithOptions(filter, area, commandCatalogOptions{Tier: commandCatalogTierDaily})
+	return commandCatalogForAreaWithOptions(filter, area, commandCatalogOptions{})
 }
 
 func commandCatalogForAreaWithOptions(filter string, area string, options commandCatalogOptions) commandCatalogReport {
 	filter = strings.TrimSpace(filter)
 	area = strings.TrimSpace(area)
-	options.Tier = strings.TrimSpace(options.Tier)
-	options.Audience = strings.TrimSpace(options.Audience)
 	report := commandCatalogReport{
 		OK:       true,
 		Filter:   filter,
 		Area:     area,
-		Tier:     options.Tier,
-		Audience: options.Audience,
 		All:      options.All,
 		Commands: []commandCatalogItem{},
 	}
@@ -100,11 +81,11 @@ func commandCatalogForAreaWithOptions(filter string, area string, options comman
 		if area != "" && item.Area != area {
 			continue
 		}
-		if options.Tier != "" && item.Tier != options.Tier {
+		if !options.All && item.surface != commandCatalogSurfaceDefault {
 			continue
 		}
-		if options.Audience != "" && item.Audience != options.Audience {
-			continue
+		if options.All {
+			item.Reason = ""
 		}
 		if !commandCatalogMatches(item, filter) {
 			continue
@@ -170,22 +151,20 @@ func commandCatalogItemFromUsage(usage string) commandCatalogItem {
 		Path:        path,
 		Usage:       usage,
 		StoreAware:  strings.Contains(usage, "--store NAME_OR_DSN"),
-		Tags:        normalizeStringList(append(tags, metadata.Tier, metadata.Audience, metadata.Stability)),
-		Tier:        metadata.Tier,
-		Audience:    metadata.Audience,
-		Stability:   metadata.Stability,
+		Tags:        normalizeStringList(tags),
 		Replacement: metadata.Replacement,
 		Lifecycle:   metadata.Lifecycle,
 		Rank:        metadata.Rank,
-		DailyReason: metadata.DailyReason,
+		Reason:      metadata.Reason,
+		surface:     metadata.Surface,
 	}
 }
 
 func preferredCommandCatalogItem(left commandCatalogItem, right commandCatalogItem) commandCatalogItem {
-	if commandCatalogTierRank(right.Tier) < commandCatalogTierRank(left.Tier) {
+	if commandCatalogSurfaceRank(right.surface) < commandCatalogSurfaceRank(left.surface) {
 		return right
 	}
-	if commandCatalogTierRank(right.Tier) > commandCatalogTierRank(left.Tier) {
+	if commandCatalogSurfaceRank(right.surface) > commandCatalogSurfaceRank(left.surface) {
 		return left
 	}
 	if right.StoreAware && !left.StoreAware {
@@ -194,15 +173,15 @@ func preferredCommandCatalogItem(left commandCatalogItem, right commandCatalogIt
 	return left
 }
 
-func commandCatalogTierRank(tier string) int {
-	switch tier {
-	case commandCatalogTierDaily:
+func commandCatalogSurfaceRank(surface string) int {
+	switch surface {
+	case commandCatalogSurfaceDefault:
 		return 0
-	case commandCatalogTierAdvanced:
+	case commandCatalogSurfaceExtended:
 		return 1
-	case commandCatalogTierCompat:
+	case commandCatalogSurfaceCompatibility:
 		return 2
-	case commandCatalogTierDeprecated:
+	case commandCatalogSurfaceDeprecated:
 		return 3
 	default:
 		return 4
@@ -210,49 +189,35 @@ func commandCatalogTierRank(tier string) int {
 }
 
 type commandCatalogMetadataReport struct {
-	Tier        string
-	Audience    string
-	Stability   string
+	Surface     string
 	Replacement string
 	Lifecycle   string
 	Rank        int
-	DailyReason string
+	Reason      string
 }
 
 func commandCatalogMetadata(command string, area string, usage string) commandCatalogMetadataReport {
-	metadata := commandCatalogMetadataReport{Tier: commandCatalogTierAdvanced, Audience: commandCatalogAudienceOperator, Stability: commandCatalogStabilityStable}
+	metadata := commandCatalogMetadataReport{Surface: commandCatalogSurfaceExtended}
 	if area == "map" {
-		metadata.Audience = commandCatalogAudienceAgent
 		metadata.Lifecycle = commandCatalogMapLifecycle(command)
 		metadata.Rank = commandCatalogTaskRank(command)
 	}
 	if strings.Contains(usage, "--offline-template-package") || strings.Contains(usage, "--case PATH") {
-		metadata.Tier = commandCatalogTierCompat
-		metadata.Audience = commandCatalogAudienceAgent
-		metadata.Stability = commandCatalogStabilityLegacy
+		metadata.Surface = commandCatalogSurfaceCompatibility
 		return metadata
 	}
-	if commandCatalogDailyCommands()[command] {
-		metadata.Tier = commandCatalogTierDaily
-		metadata.Audience = commandCatalogAudienceAgent
-		metadata.DailyReason = commandCatalogDailyAdmissionReason(command)
+	if commandCatalogDefaultCommands()[command] {
+		metadata.Surface = commandCatalogSurfaceDefault
+		metadata.Reason = commandCatalogDefaultInclusionReason(command)
 		return metadata
 	}
-	if replacement, ok := commandCatalogCompatReplacements()[command]; ok {
-		metadata.Tier = commandCatalogTierCompat
-		metadata.Audience = commandCatalogAudienceAgent
-		metadata.Stability = commandCatalogStabilityLegacy
+	if replacement, ok := commandCatalogCompatibilityReplacements()[command]; ok {
+		metadata.Surface = commandCatalogSurfaceCompatibility
 		metadata.Replacement = replacement
 		return metadata
 	}
-	if replacement, ok := commandCatalogAdvancedReplacements()[command]; ok {
+	if replacement, ok := commandCatalogReplacementHints()[command]; ok {
 		metadata.Replacement = replacement
-	}
-	if area == "profile" || area == "template-package" || area == "runtime" || area == "executor" || area == "trace" || area == "replay" {
-		metadata.Audience = commandCatalogAudienceDeveloper
-	}
-	if area == "completion" || command == "notify test" || command == "logs" || command == "config edit" {
-		metadata.Audience = commandCatalogAudienceOperator
 	}
 	return metadata
 }
@@ -282,7 +247,7 @@ func commandCatalogSortRank(item commandCatalogItem) int {
 	return 100000
 }
 
-func commandCatalogDailyCommands() map[string]bool {
+func commandCatalogDefaultCommands() map[string]bool {
 	return map[string]bool{
 		cliCommandStatus:                 true,
 		cliCommandDoctor:                 true,
@@ -316,11 +281,11 @@ func commandCatalogDailyCommands() map[string]bool {
 	}
 }
 
-func commandCatalogCompatReplacements() map[string]string {
+func commandCatalogCompatibilityReplacements() map[string]string {
 	return map[string]string{}
 }
 
-func commandCatalogAdvancedReplacements() map[string]string {
+func commandCatalogReplacementHints() map[string]string {
 	return map[string]string{
 		commandCatalogExecutorPlan:  "agent-testbench map explain",
 		"runtime mysql endpoints":   "agent-testbench store status --json",
@@ -425,12 +390,11 @@ func printCommandCatalog(report commandCatalogReport) {
 	}
 	for _, item := range report.Commands {
 		fmt.Printf("- %s [%s]\n", item.Command, item.Area)
-		fmt.Printf("  Tier: %s Audience: %s Stability: %s\n", item.Tier, item.Audience, item.Stability)
 		if item.Lifecycle != "" {
 			fmt.Printf("  Lifecycle: %s\n", item.Lifecycle)
 		}
-		if item.DailyReason != "" {
-			fmt.Printf("  Daily: %s\n", item.DailyReason)
+		if item.Reason != "" {
+			fmt.Printf("  Reason: %s\n", item.Reason)
 		}
 		if item.Replacement != "" {
 			fmt.Printf("  Replacement: %s\n", item.Replacement)
