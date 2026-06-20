@@ -27,7 +27,8 @@ test("CLI reference generator renders the current command catalog", async () => 
 
     assert.match(markdown, /# AgentTestBench CLI Reference/);
     assert.match(markdown, /Generated from `agent-testbench commands --all --json`/);
-    assert.match(markdown, /Total commands: `125`/);
+    assert.match(markdown, /Internal maintenance and diagnostics commands are intentionally excluded/);
+    assert.match(markdown, /Total commands: `118`/);
     assert.match(markdown, /Default commands: `28`/);
     assert.match(markdown, /## Default Commands/);
     assert.match(markdown, /## Command Areas/);
@@ -44,7 +45,11 @@ test("CLI reference generator renders the current command catalog", async () => 
     assert.doesNotMatch(markdown, /\bdaily\b/);
     assert.doesNotMatch(markdown, /\badvanced\b/);
     assert.doesNotMatch(markdown, /config publish/);
+    assert.doesNotMatch(markdown, /gate baseline get/);
+    assert.doesNotMatch(markdown, /notify test/);
+    assert.doesNotMatch(markdown, /runtime mysql endpoints/);
     assert.doesNotMatch(markdown, /template-package catalog-index/);
+    assert.doesNotMatch(markdown, /template-package catalog restore/);
     assert.doesNotMatch(markdown, /workflow report/);
     assert.doesNotMatch(markdown, /workflow latest-step/);
   } finally {

@@ -56,6 +56,7 @@ const (
 
 	commandCatalogSurfaceDefault       = "default"
 	commandCatalogSurfaceExtended      = "extended"
+	commandCatalogSurfaceInternal      = "internal"
 	commandCatalogSurfaceCompatibility = "compatibility"
 	commandCatalogSurfaceDeprecated    = "deprecated"
 )

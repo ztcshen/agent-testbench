@@ -363,8 +363,6 @@ func TestCommandsAllOmitsDuplicateCompatibilityEntrypoints(t *testing.T) {
 		commandCatalogCaseSuiteReport,
 		"environment acceptance start",
 		"environment acceptance report",
-		"gate baseline get",
-		"gate baseline set",
 		"map plan inspect",
 		"task watch",
 		"template-package verify",
@@ -423,6 +421,73 @@ func TestCommandsAllOmitsDuplicateCompatibilityEntrypoints(t *testing.T) {
 	} {
 		if commands[duplicate] {
 			t.Fatalf("historical compatibility entrypoint %q should not remain in catalog", duplicate)
+		}
+	}
+}
+
+func TestInternalCommandsRequireExplicitCatalogSurface(t *testing.T) {
+	internalCommands := []string{
+		"gate baseline get",
+		"gate baseline set",
+		"notify test",
+		"runtime mysql endpoints",
+		"replay evidence",
+		"template-package catalog list",
+		"template-package catalog restore",
+	}
+
+	publicOut := runCLI(t, "commands", "--all", "--json")
+	var publicReport struct {
+		OK       bool `json:"ok"`
+		All      bool `json:"all"`
+		Internal bool `json:"internal,omitempty"`
+		Commands []struct {
+			Command string `json:"command"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(publicOut), &publicReport); err != nil {
+		t.Fatalf("decode public command catalog: %v\n%s", err, publicOut)
+	}
+	if !publicReport.OK || !publicReport.All || publicReport.Internal {
+		t.Fatalf("public command catalog should be full but non-internal: %#v", publicReport)
+	}
+	publicCommands := map[string]bool{}
+	for _, item := range publicReport.Commands {
+		publicCommands[item.Command] = true
+	}
+	for _, command := range internalCommands {
+		if publicCommands[command] {
+			t.Fatalf("public --all catalog should hide internal command %q", command)
+		}
+	}
+
+	internalOut := runCLI(t, "commands", "--all", "--internal", "--json")
+	var internalReport struct {
+		OK       bool `json:"ok"`
+		All      bool `json:"all"`
+		Internal bool `json:"internal"`
+		Commands []struct {
+			Command string   `json:"command"`
+			Tags    []string `json:"tags"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(internalOut), &internalReport); err != nil {
+		t.Fatalf("decode internal command catalog: %v\n%s", err, internalOut)
+	}
+	if !internalReport.OK || !internalReport.All || !internalReport.Internal {
+		t.Fatalf("internal command catalog should acknowledge internal surface: %#v", internalReport)
+	}
+	internalItems := map[string][]string{}
+	for _, item := range internalReport.Commands {
+		internalItems[item.Command] = item.Tags
+	}
+	for _, command := range internalCommands {
+		tags, ok := internalItems[command]
+		if !ok {
+			t.Fatalf("internal --all catalog missing internal command %q", command)
+		}
+		if !stringSliceContains(tags, "internal") {
+			t.Fatalf("internal command %q should expose internal tag: %#v", command, tags)
 		}
 	}
 }

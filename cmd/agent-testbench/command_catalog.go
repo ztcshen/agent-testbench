@@ -13,6 +13,7 @@ type commandCatalogReport struct {
 	Filter   string               `json:"filter,omitempty"`
 	Area     string               `json:"area,omitempty"`
 	All      bool                 `json:"all,omitempty"`
+	Internal bool                 `json:"internal,omitempty"`
 	Count    int                  `json:"count"`
 	Commands []commandCatalogItem `json:"commands"`
 }
@@ -32,7 +33,8 @@ type commandCatalogItem struct {
 }
 
 type commandCatalogOptions struct {
-	All bool
+	All      bool
+	Internal bool
 }
 
 func runCommands(args []string) error {
@@ -41,11 +43,12 @@ func runCommands(args []string) error {
 	filter := flags.String("filter", "", "Filter command catalog by command, area, usage, or tag")
 	area := flags.String("area", "", "Restrict command catalog to one area, such as store, case, workflow, or environment")
 	all := flags.Bool("all", false, "Show the full command catalog beyond the default surface")
+	internal := flags.Bool("internal", false, "Include internal maintenance and diagnostics commands; use with --all")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable command catalog")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	options := commandCatalogOptions{All: *all}
+	options := commandCatalogOptions{All: *all, Internal: *internal}
 	report := commandCatalogForAreaWithOptions(*filter, *area, options)
 	if *jsonOutput {
 		return writeIndentedJSON(report)
@@ -70,6 +73,7 @@ func commandCatalogForAreaWithOptions(filter string, area string, options comman
 		Filter:   filter,
 		Area:     area,
 		All:      options.All,
+		Internal: options.Internal,
 		Commands: []commandCatalogItem{},
 	}
 	seen := map[string]int{}
@@ -79,6 +83,9 @@ func commandCatalogForAreaWithOptions(filter string, area string, options comman
 			continue
 		}
 		if area != "" && item.Area != area {
+			continue
+		}
+		if item.surface == commandCatalogSurfaceInternal && !(options.All && options.Internal) {
 			continue
 		}
 		if !options.All && item.surface != commandCatalogSurfaceDefault {
@@ -124,6 +131,9 @@ func commandCatalogItemFromDescriptor(descriptor commandDescriptor) commandCatal
 	if metadata.Lifecycle != "" {
 		tags = append(tags, metadata.Lifecycle)
 	}
+	if metadata.Surface == commandCatalogSurfaceInternal {
+		tags = append(tags, commandCatalogSurfaceInternal)
+	}
 	return commandCatalogItem{
 		Command:     command,
 		Area:        area,
@@ -158,12 +168,14 @@ func commandCatalogSurfaceRank(surface string) int {
 		return 0
 	case commandCatalogSurfaceExtended:
 		return 1
-	case commandCatalogSurfaceCompatibility:
+	case commandCatalogSurfaceInternal:
 		return 2
-	case commandCatalogSurfaceDeprecated:
+	case commandCatalogSurfaceCompatibility:
 		return 3
-	default:
+	case commandCatalogSurfaceDeprecated:
 		return 4
+	default:
+		return 5
 	}
 }
 
@@ -183,6 +195,13 @@ func commandCatalogMetadata(command string, area string, usage string) commandCa
 	}
 	if strings.Contains(usage, "--offline-template-package") || strings.Contains(usage, "--case PATH") {
 		metadata.Surface = commandCatalogSurfaceCompatibility
+		return metadata
+	}
+	if commandCatalogInternalCommands()[command] {
+		metadata.Surface = commandCatalogSurfaceInternal
+		if replacement, ok := commandCatalogReplacementHints()[command]; ok {
+			metadata.Replacement = replacement
+		}
 		return metadata
 	}
 	if commandCatalogDefaultCommands()[command] {
@@ -256,6 +275,18 @@ func commandCatalogDefaultCommands() map[string]bool {
 		"task suggest":                     true,
 		commandCatalogTaskPlan:             true,
 		"task run":                         true,
+	}
+}
+
+func commandCatalogInternalCommands() map[string]bool {
+	return map[string]bool{
+		"gate baseline get":                true,
+		"gate baseline set":                true,
+		"notify test":                      true,
+		"runtime mysql endpoints":          true,
+		"replay evidence":                  true,
+		"template-package catalog list":    true,
+		"template-package catalog restore": true,
 	}
 }
 
@@ -356,6 +387,9 @@ func printCommandCatalog(report commandCatalogReport) {
 	}
 	if report.Area != "" {
 		fmt.Printf("Area: %s\n", report.Area)
+	}
+	if report.Internal {
+		fmt.Println("Internal: true")
 	}
 	for _, item := range report.Commands {
 		fmt.Printf("- %s [%s]\n", item.Command, item.Area)

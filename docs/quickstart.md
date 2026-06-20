@@ -62,17 +62,18 @@ AgentTestBench follows the same operator pattern as mature local CLIs: start
 with a status summary, run diagnostics when something looks wrong, then use a
 searchable command catalog instead of scrolling the full help page.
 
-Command discovery has three tiers:
+Command discovery has three explicit surfaces:
 
-- `daily`: first-choice operator and agent entrypoints for Store health,
+- Default catalog: first-choice operator and agent entrypoints for Store health,
   environment lifecycle, task intent, map lifecycle, case execution/diagnosis,
-  and gates. `agent-testbench commands --json` includes `dailyReason` so an
-  agent can explain why each command is on the default surface.
-- `advanced`: lower-frequency construction, migration, import/export, or
-  compatibility support commands. They remain callable and visible through
+  and gates. `agent-testbench commands --json` explains why each command is on
+  the default surface.
+- Public full catalog: lower-frequency construction, migration, import/export,
+  and compatibility support commands. They remain callable and visible through
   `agent-testbench commands --all`.
-- `compat`: legacy aliases or file-package compatibility paths. Prefer the
-  `replacement` hint when a Store-first or map-first path exists.
+- Internal catalog: maintenance and low-level diagnostics commands. They remain
+  callable, but only appear in discovery through
+  `agent-testbench commands --all --internal`.
 
 ```sh
 # Show checkout, runtime binary, active Store, and next suggested commands.
@@ -87,12 +88,12 @@ Command discovery has three tiers:
 ./bin/agent-testbench.sh doctor --deep --json
 ./bin/agent-testbench.sh doctor --json
 
-# Find daily commands by area, flag, or tag. Use --all for advanced and
-# compatibility commands.
+# Find commands by area, flag, or tag. Use --all for the public full catalog.
 ./bin/agent-testbench.sh commands --filter "store"
 ./bin/agent-testbench.sh commands --area workflow --filter "gate"
 ./bin/agent-testbench.sh commands --filter "case gate" --json
 ./bin/agent-testbench.sh commands --all --filter "template-package import"
+./bin/agent-testbench.sh commands --all --internal --filter "runtime"
 ```
 
 On a clean workstation, `onboard` wraps the common first-run sequence:
@@ -722,8 +723,9 @@ template_dir="$(mktemp -d)/template-package"
 The core repository intentionally ships without bundled team template packages.
 Template packages are optional import/export/review/migration artifacts for
 services, workflows, interface nodes, API cases, templates, fixtures, and
-bindings. They are not the normal daily maintenance surface; daily testing uses
-the active SQL Store, Environment Catalog, CLI/API discovery, and the workbench.
+bindings. They are not the normal operator maintenance surface; Store-first
+testing uses the active SQL Store, Environment Catalog, CLI/API discovery, and
+the workbench.
 
 ## Start the Workbench
 
@@ -736,7 +738,7 @@ the active SQL Store, Environment Catalog, CLI/API discovery, and the workbench.
 
 Open `http://127.0.0.1:18191/`.
 
-SQL Store is the target for daily testing workflows. The same CLI commands work
+SQL Store is the target for Store-first testing workflows. The same CLI commands work
 for a local SQLite/PostgreSQL/MySQL Store or a remote team PostgreSQL/MySQL
 Store; switch the selected Store with `store use NAME` or override one
 command with `--store NAME_OR_DSN`.

@@ -29,7 +29,7 @@ onboard	agent-testbench onboard [--repo PATH] [--store NAME] [--url DSN | --sqli
 status	agent-testbench status [--deep] [--json]
 doctor	agent-testbench doctor [--fix] [--deep] [--trace-graphql-url URL] [--json]
 update	agent-testbench update [--repo PATH] [--remote NAME] [--branch NAME] [--release TAG|latest] [--channel main|release] [--check] [--force] [--output PATH] [--json]
-commands	agent-testbench commands [--area AREA] [--filter TEXT] [--all] [--json]
+commands	agent-testbench commands [--area AREA] [--filter TEXT] [--all] [--internal] [--json]
 completion	agent-testbench completion [bash|zsh]
 logs	agent-testbench logs [NAME|list] [-n N] [--json]
 task catalog	agent-testbench task catalog [--filter TEXT] [--json]
