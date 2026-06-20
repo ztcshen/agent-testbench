@@ -41,30 +41,6 @@ func postReportMapWithContext(ctx context.Context, endpoint string, payload map[
 	return result, nil
 }
 
-func workflowStepMissingInputs(step map[string]any, contextValues map[string]any) []string {
-	missing := []string{}
-	for _, rawInput := range listFromReportAny(step["inputs"]) {
-		item := mapFromReportAny(rawInput)
-		name := valueString(item["name"])
-		if name == "" || !workflowInputRequired(item) {
-			continue
-		}
-		value, ok := contextValues[name]
-		if !ok || value == nil {
-			missing = append(missing, name)
-		}
-	}
-	return missing
-}
-
-func workflowInputRequired(item map[string]any) bool {
-	raw, ok := item["required"]
-	if !ok {
-		return true
-	}
-	return boolFromReportAny(raw)
-}
-
 func workflowExportedValues(step map[string]any, result map[string]any) map[string]any {
 	out := map[string]any{}
 	for _, rawExport := range listFromReportAny(step["exports"]) {

@@ -89,7 +89,7 @@ home under the package `id`. It accepts either a package directory or a
 source-focused: generated runtime state, local compatibility database files,
 logs, and VCS directories are skipped. Use `--force` to replace an already
 installed package. Commands that accept template packages (`inspect`, `audit`,
-`verify`, `import`, and `config publish`) accept either a filesystem path or an
+`verify` and `import`) accept either a filesystem path or an
 installed package id.
 
 `template-package list` and `GET /api/template-packages/installed` are tolerant
@@ -105,7 +105,7 @@ either a filesystem path or an installed package id, uses the same runtime/VCS
 filtering as `template-package install`, and writes files under an archive root
 named after the package id. Archive installation is path-safe: entries that
 would escape the archive root are rejected. `template-package audit`,
-`template-package import`, `template-package verify`, and `config publish` can
+`template-package import` and `template-package verify` can
 also accept a packed archive directly; they install the archive into the
 configured package home before auditing or writing Store/read-model data. Pass
 `--force` when a matching installed package should be replaced.
@@ -138,7 +138,7 @@ Add `--store NAME_OR_DSN` to include the selected Store template package index a
 API Case run status in the report. Add `--json` when another tool needs a stable
 machine-readable report.
 
-Use `--require-audit-ok` with `template-package import` or `config publish` when the
+Use `--require-audit-ok` with `template-package import` when the
 publish step must fail before Store/read-model writes if reference integrity
 issues are found. The Control plane import API exposes the same behavior with
 `requireAuditOk: true`.

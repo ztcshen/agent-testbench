@@ -82,13 +82,13 @@ func TestTemplatePackageCommandAliasesProfileLifecycle(t *testing.T) {
 	}
 }
 
-func TestTemplatePackageCatalogIndexCommandReadsStoreCatalog(t *testing.T) {
+func TestTemplatePackageCatalogListActiveReadsStoreCatalog(t *testing.T) {
 	profileDir := filepath.Join(t.TempDir(), "template-package")
 	writeWorkflowProfile(t, profileDir)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	runCLI(t, "template-package", "import", "--from", profileDir, "--store", "sqlite://"+storePath)
 
-	out := runCLI(t, "template-package", "catalog-index", "--store", "sqlite://"+storePath, "--json")
+	out := runCLI(t, "template-package", "catalog", "list", "--active", "--store", "sqlite://"+storePath, "--json")
 
 	var report struct {
 		ProfileID string `json:"profileId"`
@@ -104,13 +104,13 @@ func TestTemplatePackageCatalogIndexCommandReadsStoreCatalog(t *testing.T) {
 		} `json:"configVersion"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode catalog-index json: %v\n%s", err, out)
+		t.Fatalf("decode active catalog list json: %v\n%s", err, out)
 	}
 	if report.ProfileID != "sample" || report.Counts.Services != 0 || report.Counts.Workflows != 1 || report.Counts.InterfaceNodes != 1 || report.Counts.APICases != 1 {
-		t.Fatalf("catalog-index report = %#v", report)
+		t.Fatalf("active catalog list report = %#v", report)
 	}
 	if report.ConfigVersion == nil || report.ConfigVersion.ProfileID != "sample" || !report.ConfigVersion.Active {
-		t.Fatalf("catalog-index config version = %#v", report.ConfigVersion)
+		t.Fatalf("active catalog list config version = %#v", report.ConfigVersion)
 	}
 }
 

@@ -24,8 +24,6 @@ func runConfig(ctx context.Context, args []string) error {
 		return runConfigShow(args[1:])
 	case "edit":
 		return runConfigEdit(ctx, args[1:])
-	case "publish", "apply":
-		return runConfigPublish(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown config command: %s", args[0])
 	}
@@ -44,7 +42,7 @@ func runExecutor(ctx context.Context, args []string) error {
 }
 
 func runExecutorPlan(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("executor plan", flag.ContinueOnError)
+	flags := flag.NewFlagSet(commandCatalogExecutorPlan, flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	profilePath := flags.String("profile", "", "Template package path or installed template package id")
 	profileHome := flags.String("profile-home", "", "Installed template package home")

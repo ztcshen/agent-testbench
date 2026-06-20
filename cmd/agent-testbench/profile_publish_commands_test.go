@@ -7,11 +7,11 @@ import (
 	"testing"
 )
 
-func TestConfigPublishCommandIndexesBundleInStore(t *testing.T) {
+func TestTemplatePackageImportCommandIndexesBundleInStore(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
 	profileDir := writeEmptyProfileBundle(t)
 
-	out := runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+dbPath, "--json")
+	out := runCLI(t, "template-package", "import", "--from", profileDir, "--store", "sqlite://"+dbPath, "--json")
 
 	var report struct {
 		ProfileID     string   `json:"profileId"`
@@ -28,16 +28,16 @@ func TestConfigPublishCommandIndexesBundleInStore(t *testing.T) {
 		} `json:"catalogIndex"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode config publish report: %v\n%s", err, out)
+		t.Fatalf("decode template-package import report: %v\n%s", err, out)
 	}
 	if report.ProfileID != "empty" || report.CatalogIndex.ProfileID != "empty" || !strings.HasPrefix(report.BundleDigest, "sha256:") {
-		t.Fatalf("config publish report = %#v", report)
+		t.Fatalf("template-package import report = %#v", report)
 	}
 	if report.ConfigVersion.ID == "" || report.ConfigVersion.ProfileID != "empty" || report.ConfigVersion.BundleDigest != report.BundleDigest || !report.ConfigVersion.Active {
 		t.Fatalf("config version = %#v", report.ConfigVersion)
 	}
 	if strings.Join(report.ReadModels, ",") != "interface-nodes,catalog,dashboard" {
-		t.Fatalf("config publish read models = %#v", report.ReadModels)
+		t.Fatalf("template-package import read models = %#v", report.ReadModels)
 	}
 	if got := sqliteScalar(t, dbPath, "select profile_id from config_versions where active = 1;"); got != "empty" {
 		t.Fatalf("active config profile = %q", got)
@@ -53,11 +53,11 @@ func TestConfigPublishCommandIndexesBundleInStore(t *testing.T) {
 	}
 }
 
-func TestConfigPublishRejectsGoTestFixtureProfileForSharedMySQLStore(t *testing.T) {
+func TestTemplatePackageImportRejectsGoTestFixtureProfileForSharedMySQLStore(t *testing.T) {
 	fixture := writeUniqueWorkflowBatchReportProfile(t)
 
 	out := runCLIFails(t,
-		"config", "publish",
+		"template-package", "import",
 		"--from", fixture.profileDir,
 		"--store", "mysql://agent:secret@127.0.0.1:1/business_catalog?tls=false",
 	)
@@ -69,7 +69,7 @@ func TestConfigPublishRejectsGoTestFixtureProfileForSharedMySQLStore(t *testing.
 		"dedicated sandbox/smoke/test/ci database",
 	} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("config publish safety error missing %q:\n%s", want, out)
+			t.Fatalf("template-package import safety error missing %q:\n%s", want, out)
 		}
 	}
 }
@@ -87,11 +87,11 @@ func TestProfilePublishSafetyRecognizesOnlyAgentTestBenchFixtureDatabases(t *tes
 	}
 }
 
-func TestConfigPublishCommandMaterializesInterfaceNodeDetailReadModels(t *testing.T) {
+func TestTemplatePackageImportCommandMaterializesInterfaceNodeDetailReadModels(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
 	profileDir := writeInterfaceNodeCaseProfile(t)
 
-	out := runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+dbPath, "--json")
+	out := runCLI(t, "template-package", "import", "--from", profileDir, "--store", "sqlite://"+dbPath, "--json")
 
 	var report struct {
 		ConfigVersion struct {
@@ -99,7 +99,7 @@ func TestConfigPublishCommandMaterializesInterfaceNodeDetailReadModels(t *testin
 		} `json:"configVersion"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode config publish report: %v\n%s", err, out)
+		t.Fatalf("decode template-package import report: %v\n%s", err, out)
 	}
 	if got := sqliteScalar(t, dbPath, "select config_version_id from config_read_model where profile_id = 'sample' and model_key = 'interface-node:node.alpha';"); got != report.ConfigVersion.ID {
 		t.Fatalf("interface node detail read model version = %q, want %q", got, report.ConfigVersion.ID)
@@ -109,11 +109,11 @@ func TestConfigPublishCommandMaterializesInterfaceNodeDetailReadModels(t *testin
 	}
 }
 
-func TestConfigPublishCommandMaterializesInterfaceNodeCoverageReadModels(t *testing.T) {
+func TestTemplatePackageImportCommandMaterializesInterfaceNodeCoverageReadModels(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
 	profileDir := writeInterfaceNodeCoverageProfile(t)
 
-	out := runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+dbPath, "--json")
+	out := runCLI(t, "template-package", "import", "--from", profileDir, "--store", "sqlite://"+dbPath, "--json")
 
 	var report struct {
 		ConfigVersion struct {
@@ -121,7 +121,7 @@ func TestConfigPublishCommandMaterializesInterfaceNodeCoverageReadModels(t *test
 		} `json:"configVersion"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode config publish report: %v\n%s", err, out)
+		t.Fatalf("decode template-package import report: %v\n%s", err, out)
 	}
 	if got := sqliteScalar(t, dbPath, "select config_version_id from config_read_model where profile_id = 'sample' and model_key = 'interface-node-coverage:workflow.alpha';"); got != report.ConfigVersion.ID {
 		t.Fatalf("interface node coverage read model version = %q, want %q", got, report.ConfigVersion.ID)

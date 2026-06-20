@@ -17,22 +17,6 @@ import (
 	"agent-testbench/internal/store"
 )
 
-func runTemplatePackageCatalogIndex(ctx context.Context, args []string) error {
-	options, err := parseProfileCatalogReadOptions("template-package catalog-index", args)
-	if err != nil {
-		return err
-	}
-	report, err := readProfileCatalogIndex(ctx, options.StoreURL)
-	if err != nil {
-		return err
-	}
-	if options.JSONOutput {
-		return writeIndentedJSON(report)
-	}
-	printProfileCatalogIndex(report)
-	return nil
-}
-
 func runTemplatePackageVerify(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("template-package verify", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
@@ -94,12 +78,6 @@ func runTemplatePackageImport(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("template-package import", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	return runConfigPublishWithFlags(ctx, flags, args, "Imported template package")
-}
-
-func runConfigPublish(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("config publish", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	return runConfigPublishWithFlags(ctx, flags, args, "Published config")
 }
 
 func runConfigPublishWithFlags(ctx context.Context, flags *flag.FlagSet, args []string, textPrefix string) error {

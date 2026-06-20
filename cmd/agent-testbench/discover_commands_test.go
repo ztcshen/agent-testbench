@@ -23,7 +23,7 @@ func TestCaseDiscoverUsesNamedMySQLActiveStore(t *testing.T) {
 func runCaseDiscoverFiltersByMaintenanceMetadata(t *testing.T, _ string, label string) {
 	t.Helper()
 	fixture := writeUniqueInterfaceNodeBatchReportProfile(t)
-	runCLI(t, "config", "publish", "--from", fixture.profileDir)
+	runCLI(t, "template-package", "import", "--from", fixture.profileDir)
 
 	out := runCLI(t,
 		"case", "discover",
@@ -102,7 +102,7 @@ func TestCaseDiscoverRequiresStoreUnlessOfflineTemplatePackage(t *testing.T) {
 func TestDiscoverCommandsAcceptStoreFlagAsLocationAgnosticStoreSelector(t *testing.T) {
 	profileDir := writeInterfaceNodeBatchReportProfile(t)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
+	runCLI(t, "template-package", "import", "--from", profileDir, "--store", "sqlite://"+storePath)
 	storeRef := "sqlite://" + storePath
 
 	caseOut := runCLI(t, "case", "discover", "--store", storeRef, "--filter", "variant", "--json")
@@ -133,7 +133,7 @@ func TestDiscoverCommandsAcceptStoreFlagAsLocationAgnosticStoreSelector(t *testi
 
 	workflowProfileDir := writeWorkflowBatchReportProfile(t)
 	workflowStorePath := filepath.Join(t.TempDir(), "workflow-store.sqlite")
-	runCLI(t, "config", "publish", "--from", workflowProfileDir, "--store", "sqlite://"+workflowStorePath)
+	runCLI(t, "template-package", "import", "--from", workflowProfileDir, "--store", "sqlite://"+workflowStorePath)
 	workflowOut := runCLI(t, "workflow", "discover", "--store", "sqlite://"+workflowStorePath, "--filter", "Workflow Alpha", "--json")
 	var workflowReport struct {
 		Items []struct {
@@ -182,7 +182,7 @@ func TestDiscoverCommandsUseNamedMySQLActiveStore(t *testing.T) {
 func runDiscoverCommandsUseNamedActiveStore(t *testing.T, label string) {
 	t.Helper()
 	profileDir := writeInterfaceNodeBatchReportProfile(t)
-	runCLI(t, "config", "publish", "--from", profileDir)
+	runCLI(t, "template-package", "import", "--from", profileDir)
 
 	caseOut := runCLI(t, "case", "discover", "--filter", "variant", "--json")
 	var caseReport struct {
@@ -231,7 +231,7 @@ func runDailyWorkflowCommandsUseNamedActiveStore(t *testing.T, runLabel string, 
 	defer provider.Close()
 
 	profileDir := writeWorkflowBatchReportProfile(t)
-	runCLI(t, "config", "publish", "--from", profileDir)
+	runCLI(t, "template-package", "import", "--from", profileDir)
 
 	requireDailyWorkflowDiscover(t, label)
 	requireDailyWorkflowPlan(t, label)

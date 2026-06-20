@@ -33,8 +33,6 @@ func runTemplatePackage(args []string) error {
 		return runTemplatePackageInspect(args[1:])
 	case "export":
 		return runTemplatePackageExport(context.Background(), args[1:])
-	case "catalog-index":
-		return runTemplatePackageCatalogIndex(context.Background(), args[1:])
 	case "catalog":
 		return runTemplatePackageCatalog(context.Background(), args[1:])
 	case "import":

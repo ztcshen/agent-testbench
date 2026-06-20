@@ -31,6 +31,17 @@ func runTemplatePackageCatalogList(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if options.ActiveOnly {
+		report, err := readProfileCatalogIndex(ctx, options.StoreURL)
+		if err != nil {
+			return err
+		}
+		if options.JSONOutput {
+			return writeIndentedJSON(report)
+		}
+		printProfileCatalogIndex(report)
+		return nil
+	}
 	report, err := listProfileCatalogs(ctx, options.StoreURL)
 	if err != nil {
 		return err
@@ -135,6 +146,7 @@ func restoreProfileCatalog(ctx context.Context, storeURL string, profileID strin
 type profileCatalogReadOptions struct {
 	StoreURL   string
 	JSONOutput bool
+	ActiveOnly bool
 }
 
 func parseProfileCatalogReadOptions(command string, args []string) (profileCatalogReadOptions, error) {
@@ -142,6 +154,7 @@ func parseProfileCatalogReadOptions(command string, args []string) (profileCatal
 	flags.SetOutput(os.Stderr)
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
+	activeOnly := flags.Bool("active", false, "Show only the active Store catalog index")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return profileCatalogReadOptions{}, err
@@ -150,5 +163,5 @@ func parseProfileCatalogReadOptions(command string, args []string) (profileCatal
 	if err != nil {
 		return profileCatalogReadOptions{}, err
 	}
-	return profileCatalogReadOptions{StoreURL: resolvedStoreURL, JSONOutput: *jsonOutput}, nil
+	return profileCatalogReadOptions{StoreURL: resolvedStoreURL, JSONOutput: *jsonOutput, ActiveOnly: *activeOnly}, nil
 }

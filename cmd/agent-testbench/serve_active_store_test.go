@@ -29,7 +29,7 @@ func runServeAndEvidenceTasksUseNamedActiveStore(t *testing.T, storeRef string, 
 	ctx := context.Background()
 	runID := "run.tasks." + runLabel + "." + time.Now().UTC().Format("20060102150405.000000000")
 	seedNamedActiveServeStore(t, ctx, storeRef, runID, label)
-	runCLI(t, "config", "publish", "--from", writeInterfaceNodeBatchReportProfile(t))
+	runCLI(t, "template-package", "import", "--from", writeInterfaceNodeBatchReportProfile(t))
 
 	requireNamedActiveEvidenceList(t, runID, label)
 	requireNamedActiveEvidenceTasks(t, runID, label)

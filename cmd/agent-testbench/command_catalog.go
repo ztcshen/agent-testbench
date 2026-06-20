@@ -323,7 +323,7 @@ func commandCatalogCompatReplacements() map[string]string {
 
 func commandCatalogAdvancedReplacements() map[string]string {
 	return map[string]string{
-		"executor plan":             "agent-testbench map explain",
+		commandCatalogExecutorPlan:  "agent-testbench map explain",
 		"runtime mysql endpoints":   "agent-testbench store status --json",
 		"trace topology collect":    "agent-testbench evidence tasks --run RUN_ID --json",
 		"replay evidence":           "agent-testbench evidence list --run RUN_ID --json",

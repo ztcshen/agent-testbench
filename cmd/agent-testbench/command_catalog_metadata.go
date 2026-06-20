@@ -14,6 +14,7 @@ const (
 	commandCatalogCaseDiagnose       = "case diagnose"
 	commandCatalogCaseGate           = "case gate"
 	commandCatalogCaseRun            = "case run"
+	commandCatalogExecutorPlan       = "executor plan"
 
 	commandCatalogMapList             = "map list"
 	commandCatalogMapWorkflows        = "map workflows"

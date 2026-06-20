@@ -55,7 +55,7 @@ func publishTemplateRenderProfile(t *testing.T) {
 
 	dir := t.TempDir()
 	writeTemplateProfile(t, dir)
-	runCLI(t, "config", "publish", "--from", dir)
+	runCLI(t, "template-package", "import", "--from", dir)
 }
 
 func requireFileTemplateRenderOutput(t *testing.T, label string) {

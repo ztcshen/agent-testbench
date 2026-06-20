@@ -265,6 +265,8 @@ func TestCommandsAllOmitsDuplicateCompatibilityEntrypoints(t *testing.T) {
 		"profile catalog restore",
 		"profile verify",
 		"profile import",
+		"config publish",
+		"template-package catalog-index",
 		"sandbox service register",
 		"sandbox interface register",
 		"case batch start",
@@ -284,6 +286,8 @@ func TestHistoricalEntrypointsAreRemoved(t *testing.T) {
 		{"template-packages", "verify", "--template-package", "sample"},
 		{"profile", "list"},
 		{"profile", "audit", "--profile", "sample", "--offline-template-package"},
+		{"config", "publish", "--from", "sample"},
+		{"template-package", "catalog-index", "--store", "sqlite://demo.sqlite"},
 		{"case", "batch", "start", "--server-url", "http://127.0.0.1"},
 		{"case", "batch", "report", "--server-url", "http://127.0.0.1", "--run", "run.demo"},
 		{"sandbox", "service", "register", "--id", "svc.demo"},
@@ -507,7 +511,7 @@ func TestCommandsDefaultSurfaceShowsDailyCommandsOnly(t *testing.T) {
 			t.Fatalf("default catalog missing daily command %q in %#v", want, commands)
 		}
 	}
-	for _, hidden := range []string{"profile import", "template-package import", "runtime mysql endpoints", "executor plan", "case suite coverage", "workflow acceptance start", "baseline get", "workflow report", "case suite plan", "map plan inspect"} {
+	for _, hidden := range []string{"profile import", "config publish", "template-package catalog-index", "template-package import", "runtime mysql endpoints", commandCatalogExecutorPlan, "case suite coverage", "workflow acceptance start", "baseline get", "workflow report", "case suite plan", "map plan inspect"} {
 		if _, ok := commands[hidden]; ok {
 			t.Fatalf("default catalog should hide %q: %#v", hidden, commands[hidden])
 		}
@@ -564,7 +568,7 @@ func TestNonDailyWorkflowCommandsHaveReplacementHints(t *testing.T) {
 }
 
 func TestCommandsAllExposesAdvancedReplacementMetadata(t *testing.T) {
-	out := runCLI(t, "commands", "--all", "--filter", "executor plan", "--json")
+	out := runCLI(t, "commands", "--all", "--filter", commandCatalogExecutorPlan, "--json")
 
 	var report struct {
 		OK       bool `json:"ok"`
@@ -585,7 +589,7 @@ func TestCommandsAllExposesAdvancedReplacementMetadata(t *testing.T) {
 	}
 	foundExecutorPlan := false
 	for _, item := range report.Commands {
-		if item.Command == "executor plan" {
+		if item.Command == commandCatalogExecutorPlan {
 			foundExecutorPlan = true
 			if item.Tier != "advanced" || item.Audience != "developer" || item.Stability != "stable" || !strings.Contains(item.Replacement, "map explain") {
 				t.Fatalf("executor plan metadata = %#v", item)
@@ -596,14 +600,14 @@ func TestCommandsAllExposesAdvancedReplacementMetadata(t *testing.T) {
 		t.Fatalf("executor plan missing from filtered catalog: %#v", report.Commands)
 	}
 
-	textOut := runCLI(t, "commands", "--all", "--filter", "executor plan")
+	textOut := runCLI(t, "commands", "--all", "--filter", commandCatalogExecutorPlan)
 	if !strings.Contains(textOut, "Tier: advanced") || !strings.Contains(textOut, "Replacement: agent-testbench map explain") {
 		t.Fatalf("text command catalog should show tier and replacement:\n%s", textOut)
 	}
 }
 
 func TestCommandsCanFilterByTierAndAudience(t *testing.T) {
-	out := runCLI(t, "commands", "--tier", "advanced", "--audience", "developer", "--filter", "executor plan", "--json")
+	out := runCLI(t, "commands", "--tier", "advanced", "--audience", "developer", "--filter", commandCatalogExecutorPlan, "--json")
 
 	var report struct {
 		OK       bool   `json:"ok"`
@@ -623,7 +627,7 @@ func TestCommandsCanFilterByTierAndAudience(t *testing.T) {
 		t.Fatalf("tier/audience command catalog = %#v", report)
 	}
 	for _, item := range report.Commands {
-		if item.Tier != "advanced" || item.Audience != "developer" || item.Command != "executor plan" {
+		if item.Tier != "advanced" || item.Audience != "developer" || item.Command != commandCatalogExecutorPlan {
 			t.Fatalf("executor plan tier/audience metadata = %#v", item)
 		}
 	}

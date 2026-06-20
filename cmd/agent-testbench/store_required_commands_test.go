@@ -205,7 +205,7 @@ func TestExecutorAndTemplateCommandsRequireStoreBeforeProfileLoad(t *testing.T) 
 		args []string
 	}{
 		{
-			name: "executor plan",
+			name: commandCatalogExecutorPlan,
 			args: []string{"executor", "plan", "--profile", missingProfile, "--json"},
 		},
 		{
