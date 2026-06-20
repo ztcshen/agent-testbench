@@ -9,16 +9,6 @@ import (
 	"testing"
 )
 
-func jsonID(raw json.RawMessage) string {
-	var payload struct {
-		ID string `json:"id"`
-	}
-	if json.Unmarshal(raw, &payload) != nil {
-		return ""
-	}
-	return strings.TrimSpace(payload.ID)
-}
-
 func writeAPICaseFile(t *testing.T, path string) {
 	t.Helper()
 	raw := []byte(`{
@@ -176,81 +166,6 @@ func writeProfileWithCatalogCases(t *testing.T, caseIDs []string) string {
 	}
 	writeFile(t, filepath.Join(dir, "catalog.json"), string(rawCases))
 	return dir
-}
-
-func writeProfileRepairManifest(t *testing.T, profileDir string, caseIDs []string) string {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(profileDir, "catalog.json"))
-	if err != nil {
-		t.Fatalf("read catalog: %v", err)
-	}
-	var catalog struct {
-		InterfaceNodeCases []json.RawMessage `json:"interfaceNodeCases"`
-	}
-	if err := json.Unmarshal(raw, &catalog); err != nil {
-		t.Fatalf("decode catalog: %v", err)
-	}
-	want := map[string]bool{}
-	for _, id := range caseIDs {
-		want[id] = true
-	}
-	var selected []json.RawMessage
-	caseFiles := map[string]string{}
-	for _, item := range catalog.InterfaceNodeCases {
-		if !want[jsonID(item)] {
-			continue
-		}
-		selected = append(selected, item)
-		casePath := filepath.Join(profileDir, "cases", jsonID(item)+".json")
-		content, err := os.ReadFile(casePath)
-		if err != nil {
-			t.Fatalf("read case file: %v", err)
-		}
-		caseFiles[casePath] = string(content)
-	}
-	manifest := map[string]any{
-		"profilePath":  profileDir,
-		"catalogPath":  filepath.Join(profileDir, "catalog.json"),
-		"caseIds":      caseIDs,
-		"catalogCases": selected,
-		"caseFiles":    caseFiles,
-	}
-	rawManifest, err := json.MarshalIndent(manifest, "", "  ")
-	if err != nil {
-		t.Fatalf("marshal manifest: %v", err)
-	}
-	path := filepath.Join(t.TempDir(), "repair-manifest.json")
-	writeFile(t, path, string(rawManifest))
-	return path
-}
-
-func removeProfileCatalogCase(t *testing.T, profileDir string, caseID string) {
-	t.Helper()
-	path := filepath.Join(profileDir, "catalog.json")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read catalog: %v", err)
-	}
-	var catalog map[string]any
-	if err := json.Unmarshal(raw, &catalog); err != nil {
-		t.Fatalf("decode catalog: %v", err)
-	}
-	var kept []any
-	for _, item := range catalog["interfaceNodeCases"].([]any) {
-		rawItem, err := json.Marshal(item)
-		if err != nil {
-			t.Fatalf("marshal case: %v", err)
-		}
-		if jsonID(rawItem) != caseID {
-			kept = append(kept, item)
-		}
-	}
-	catalog["interfaceNodeCases"] = kept
-	out, err := json.MarshalIndent(catalog, "", "  ")
-	if err != nil {
-		t.Fatalf("marshal catalog: %v", err)
-	}
-	writeFile(t, path, string(out))
 }
 
 func writeWorkflowBatchReportProfile(t *testing.T) string {

@@ -268,7 +268,7 @@ func commandCatalogDefaultCommands() map[string]bool {
 		commandCatalogMapRun:             true,
 		commandCatalogMapAtlas:           true,
 		"case discover":                  true,
-		"case suite report":              true,
+		commandCatalogCaseSuiteReport:    true,
 		commandCatalogCaseInspect:        true,
 		commandCatalogCaseDiagnose:       true,
 		commandCatalogCaseGate:           true,

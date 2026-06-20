@@ -216,7 +216,7 @@ func TestCommandsAllOmitsDuplicateCompatibilityEntrypoints(t *testing.T) {
 		commands[item.Command] = true
 	}
 	for _, canonical := range []string{
-		"case suite report",
+		commandCatalogCaseSuiteReport,
 		"environment acceptance start",
 		"environment acceptance report",
 		"gate baseline get",
@@ -505,7 +505,7 @@ func TestCommandsDefaultCatalogHidesSpecializedCommands(t *testing.T) {
 	if report.Count > 30 {
 		t.Fatalf("default command catalog should stay at or below the first target of 30 commands, got %d", report.Count)
 	}
-	for _, want := range []string{"status", "doctor", "store current", "environment restore", "task suggest", "task plan", "map explain", "map run", "case inspect", "case run", "case suite report"} {
+	for _, want := range []string{"status", "doctor", "store current", "environment restore", "task suggest", "task plan", "map explain", "map run", "case inspect", "case run", commandCatalogCaseSuiteReport} {
 		if _, ok := commands[want]; !ok {
 			t.Fatalf("default catalog missing command %q in %#v", want, commands)
 		}
