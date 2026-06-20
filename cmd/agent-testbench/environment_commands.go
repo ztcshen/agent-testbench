@@ -18,6 +18,8 @@ func runEnvironment(ctx context.Context, args []string) error {
 		return runEnvironmentInspect(ctx, args[1:])
 	case "bootstrap":
 		return runEnvironmentBootstrap(ctx, args[1:])
+	case "configure":
+		return runEnvironmentConfigure(ctx, args[1:])
 	case "repo":
 		return runEnvironmentRepo(ctx, args[1:])
 	case "startup-file":

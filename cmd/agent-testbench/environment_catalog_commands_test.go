@@ -173,6 +173,46 @@ func TestEnvironmentRepoSetPreservesMixedLegacyServices(t *testing.T) {
 	}
 }
 
+func TestEnvironmentConfigureReposUpdatesStructuredRepository(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	storeRef := "sqlite://" + storePath
+	runCLI(t, "environment", "register",
+		"--store", storeRef,
+		"--id", "env.configure.repos",
+		"--service", "app",
+		"--repo", "app=https://example.invalid/app.git",
+		"--checkout", "app=app",
+		"--verification-workflow", "workflow.core-10",
+		"--json",
+	)
+
+	out := runCLI(t, "environment", "configure",
+		"--view", "repos",
+		"--store", storeRef,
+		"--repo-ref", "app=v2.0.0",
+		"--checkout", "app=app-v2",
+		"--json",
+		"env.configure.repos",
+	)
+	var payload struct {
+		OK          bool `json:"ok"`
+		Environment struct {
+			Services []map[string]any `json:"services"`
+			Repos    map[string]any   `json:"repos"`
+		} `json:"environment"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("decode environment configure repos json: %v\n%s", err, out)
+	}
+	appRepo, _ := payload.Environment.Repos["app"].(map[string]any)
+	if !payload.OK || appRepo["ref"] != "v2.0.0" || appRepo["checkout"] != "app-v2" {
+		t.Fatalf("configure repos should update structured repository metadata: %#v", payload)
+	}
+	if len(payload.Environment.Services) != 1 || payload.Environment.Services[0]["ref"] != "v2.0.0" || payload.Environment.Services[0]["checkout"] != "app-v2" {
+		t.Fatalf("configure repos should update structured service projection: %#v", payload.Environment.Services)
+	}
+}
+
 func seedLegacyEnvironmentRepositoryMetadata(t *testing.T, storePath string) {
 	t.Helper()
 	ctx := context.Background()

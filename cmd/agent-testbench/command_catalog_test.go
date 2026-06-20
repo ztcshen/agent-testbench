@@ -152,7 +152,7 @@ func TestParentCommandsDefaultToCatalogNavigation(t *testing.T) {
 		{
 			args:       []string{"environment"},
 			title:      "Commands: environment",
-			wantUsages: []string{"agent-testbench environment discover", "agent-testbench environment restore", "agent-testbench environment status", "agent-testbench environment stop"},
+			wantUsages: []string{"agent-testbench environment discover", "agent-testbench environment configure", "agent-testbench environment restore", "agent-testbench environment status", "agent-testbench environment stop"},
 			hiddenUsages: []string{
 				"agent-testbench environment migration",
 				"agent-testbench environment components",
@@ -614,6 +614,60 @@ func TestCommandsDefaultCatalogHidesSpecializedCommands(t *testing.T) {
 	for _, hidden := range []string{"profile import", "config publish", "template-package catalog-index", "template-package import", "runtime mysql endpoints", commandCatalogExecutorPlan, commandCatalogCaseDiagnose, "case runs", "case evidence", "case timing", "case suite coverage", "workflow acceptance start", "baseline get", "workflow report", "case suite plan", "map plan inspect"} {
 		if _, ok := commands[hidden]; ok {
 			t.Fatalf("default catalog should hide %q: %#v", hidden, commands[hidden])
+		}
+	}
+}
+
+func TestEnvironmentConfigureConsolidatesConfigurationCommandsInCatalog(t *testing.T) {
+	defaultOut := runCLI(t, "commands", "--area", "environment", "--json")
+	var defaultReport struct {
+		Commands []struct {
+			Command string `json:"command"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(defaultOut), &defaultReport); err != nil {
+		t.Fatalf("decode default environment catalog: %v\n%s", err, defaultOut)
+	}
+	defaultCommands := map[string]bool{}
+	for _, item := range defaultReport.Commands {
+		defaultCommands[item.Command] = true
+	}
+	if !defaultCommands[commandCatalogEnvironmentConfigure] {
+		t.Fatalf("default environment catalog should promote configure: %#v", defaultCommands)
+	}
+	for _, hidden := range []string{
+		commandCatalogEnvironmentRepoSet,
+		commandCatalogEnvironmentStartupFilePut,
+		commandCatalogEnvironmentComponentsInspect,
+		commandCatalogEnvironmentComponentsReplace,
+	} {
+		if defaultCommands[hidden] {
+			t.Fatalf("default environment catalog should hide specialized config command %q: %#v", hidden, defaultCommands)
+		}
+	}
+
+	out := runCLI(t, "commands", "--all", "--area", "environment", "--json")
+	var report struct {
+		Commands []struct {
+			Command     string `json:"command"`
+			Replacement string `json:"replacement"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode full environment catalog: %v\n%s", err, out)
+	}
+	commands := map[string]string{}
+	for _, item := range report.Commands {
+		commands[item.Command] = item.Replacement
+	}
+	for command, replacement := range map[string]string{
+		commandCatalogEnvironmentRepoSet:           "environment configure --view repos",
+		commandCatalogEnvironmentStartupFilePut:    "environment configure --view startup-files",
+		commandCatalogEnvironmentComponentsInspect: "environment configure --view components",
+		commandCatalogEnvironmentComponentsReplace: "environment configure --view components",
+	} {
+		if !strings.Contains(commands[command], replacement) {
+			t.Fatalf("%s should point users to %s: %#v", command, replacement, commands)
 		}
 	}
 }

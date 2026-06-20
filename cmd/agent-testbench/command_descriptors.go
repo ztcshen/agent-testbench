@@ -59,6 +59,7 @@ agent-testbench environment register --id ID [--store NAME_OR_DSN] [--display-na
 agent-testbench environment discover [--store NAME_OR_DSN] [--all] [--json]
 agent-testbench environment inspect ENV_ID [--store NAME_OR_DSN] [--json]
 agent-testbench environment bootstrap ENV_ID [--store NAME_OR_DSN] [--json]
+agent-testbench environment configure ENV_ID --view components|repos|startup-files [--repo SERVICE=URL] [--branch SERVICE=BRANCH] [--repo-ref SERVICE=REF] [--checkout SERVICE=PATH] [--file TARGET=SOURCE_FILE|COMPONENT_GRAPH_JSON] [--store NAME_OR_DSN] [--json]
 agent-testbench environment repo set ENV_ID [--repo SERVICE=URL] [--branch SERVICE=BRANCH] [--repo-ref SERVICE=REF] [--checkout SERVICE=PATH] [--store NAME_OR_DSN] [--json]
 agent-testbench environment startup-file put ENV_ID --file TARGET=SOURCE_FILE [--store NAME_OR_DSN] [--json]
 agent-testbench environment components inspect ENV_ID [--store NAME_OR_DSN] [--json]
