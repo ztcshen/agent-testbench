@@ -130,9 +130,9 @@ func buildCaseGateReport(ctx context.Context, runtime store.Store, options caseG
 func caseGateNextActions(report caseGateReport, options caseGateOptions) []string {
 	actions := []string{}
 	if !report.Gates.HasCaseRuns {
-		base := "agent-testbench case runs --json"
+		base := "agent-testbench case inspect --view runs --json"
 		if report.RunID != "" {
-			base = "agent-testbench case runs --run " + report.RunID + " --json"
+			base = "agent-testbench case inspect --view runs --run " + report.RunID + " --json"
 		}
 		return []string{base}
 	}
@@ -147,7 +147,7 @@ func caseGateNextActions(report caseGateReport, options caseGateOptions) []strin
 			if index >= 3 {
 				break
 			}
-			actions = append(actions, "agent-testbench case evidence --case-run "+item.ID+" --json")
+			actions = append(actions, "agent-testbench case inspect --view evidence --case-run "+item.ID+" --json")
 		}
 	}
 	if options.MinPassed > 0 && !report.Gates.MinPassed {

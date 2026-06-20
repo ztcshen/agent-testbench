@@ -247,7 +247,7 @@ func runCaseSuiteImpactReportRunsImpactedCases(t *testing.T, _ string, runLabel 
 	t.Helper()
 	serverURL := newCaseSuiteImpactReportServer(t)
 	fixture := writeUniqueInterfaceNodeBatchReportProfile(t)
-	runCLI(t, "config", "publish", "--from", fixture.profileDir)
+	runCLI(t, "template-package", "import", "--from", fixture.profileDir)
 	outputDir := filepath.Join(t.TempDir(), "impact-report")
 	report := runCaseSuiteImpactReportJSON(t, label, fixture, runLabel, serverURL, outputDir)
 	requireCaseSuiteImpactReport(t, label, report, fixture, runLabel, outputDir)

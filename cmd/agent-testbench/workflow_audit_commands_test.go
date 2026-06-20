@@ -60,7 +60,7 @@ func runWorkflowAuditCommandEmitsJSONWithScopedStoreState(t *testing.T, storeRef
 	t.Helper()
 	ctx := context.Background()
 	fixture := writeWorkflowAuditProfile(t)
-	runCLI(t, "config", "publish", "--from", fixture.profileDir)
+	runCLI(t, "template-package", "import", "--from", fixture.profileDir)
 	s, err := openStore(ctx, storeRef)
 	if err != nil {
 		t.Fatalf("open %s store: %v", label, err)
@@ -225,7 +225,7 @@ func TestWorkflowAuditCommandPrintsTextSummaryWithMySQLStore(t *testing.T) {
 func runWorkflowAuditCommandPrintsTextSummary(t *testing.T, label string) {
 	t.Helper()
 	fixture := writeWorkflowAuditTextProfile(t)
-	runCLI(t, "config", "publish", "--from", fixture.profileDir)
+	runCLI(t, "template-package", "import", "--from", fixture.profileDir)
 
 	out := runCLI(t, "workflow", "audit", "--workflow", fixture.workflowID)
 

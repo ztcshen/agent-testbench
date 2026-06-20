@@ -18,7 +18,7 @@ import (
 func runCaseIncompleteBatches(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("case incomplete-batches", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path")
+	profilePath := flags.String("profile", "", "Template package path")
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
 	jsonOutput := flags.Bool("json", false, "Print JSON")

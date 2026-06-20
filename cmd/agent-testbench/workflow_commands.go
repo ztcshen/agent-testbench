@@ -40,8 +40,6 @@ func runWorkflow(args []string) error {
 		return runWorkflowTask(context.Background(), args[1:])
 	case "gate":
 		return runWorkflowGate(context.Background(), args[1:])
-	case "report":
-		return runWorkflowReport(context.Background(), args[1:])
 	default:
 		return fmt.Errorf("unknown workflow command: %s", args[0])
 	}
@@ -528,7 +526,7 @@ func workflowGateNextActions(report workflowGateReport, options workflowGateOpti
 				break
 			}
 			if item.CaseRunID != "" {
-				actions = append(actions, "agent-testbench case evidence --case-run "+commandline.ShellQuote(item.CaseRunID)+" --json")
+				actions = append(actions, "agent-testbench case inspect --view evidence --case-run "+commandline.ShellQuote(item.CaseRunID)+" --json")
 				continue
 			}
 			if item.StepID != "" {

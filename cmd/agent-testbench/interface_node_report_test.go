@@ -18,7 +18,7 @@ func TestInterfaceNodeCaseReportRunsAllCasesByTargetName(t *testing.T) {
 	defer server.Close()
 	profileDir := writeInterfaceNodeBatchReportProfile(t)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
-	runCLI(t, "config", "publish", "--from", profileDir, "--store", "sqlite://"+storePath)
+	runCLI(t, "template-package", "import", "--from", profileDir, "--store", "sqlite://"+storePath)
 	nodeID := requireDiscoveredInterfaceNode(t, "sqlite://"+storePath, "Result Lookup", "node.alpha", "interface-node discover")
 
 	outputDir := filepath.Join(t.TempDir(), "report")
@@ -69,7 +69,7 @@ func runCaseExecutionAndInterfaceReportUseNamedActiveStore(t *testing.T, runLabe
 	runFileBackedCaseThroughActiveStore(t, label, runLabel, suffix, dir, server.URL)
 
 	profileDir := writeInterfaceNodeBatchReportProfile(t)
-	runCLI(t, "config", "publish", "--from", profileDir)
+	runCLI(t, "template-package", "import", "--from", profileDir)
 	runCatalogCaseThroughActiveStore(t, label, runLabel, suffix, dir, server.URL)
 	nodeID := requireDiscoveredInterfaceNode(t, "", "Result Lookup", "node.alpha", label+" interface-node discover")
 	outputDir := filepath.Join(t.TempDir(), runLabel+"-interface-report")

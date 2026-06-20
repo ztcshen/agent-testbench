@@ -17,34 +17,18 @@ import (
 	"agent-testbench/internal/store"
 )
 
-func runProfileCatalogIndex(ctx context.Context, args []string) error {
-	options, err := parseProfileCatalogReadOptions("profile catalog-index", args)
-	if err != nil {
-		return err
-	}
-	report, err := readProfileCatalogIndex(ctx, options.StoreURL)
-	if err != nil {
-		return err
-	}
-	if options.JSONOutput {
-		return writeIndentedJSON(report)
-	}
-	printProfileCatalogIndex(report)
-	return nil
-}
-
-func runProfileVerify(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("profile verify", flag.ContinueOnError)
+func runTemplatePackageVerify(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("template-package verify", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path")
+	profilePath := flags.String("profile", "", "Template package path")
 	templatePackagePath := flags.String("template-package", "", "Template package path or installed template package id")
-	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	profileHome := flags.String("profile-home", "", "Installed template package home")
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	requireCaseRuns := flags.Bool("require-case-runs", false, "Require every API Case in the profile to have a latest passed Store run")
-	requireWorkflowRuns := flags.Bool("require-workflow-runs", false, "Require every Workflow in the profile to have a latest passed Store run")
+	requireCaseRuns := flags.Bool("require-case-runs", false, "Require every API Case in the template package to have a latest passed Store run")
+	requireWorkflowRuns := flags.Bool("require-workflow-runs", false, "Require every Workflow in the template package to have a latest passed Store run")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	force := flags.Bool("force", false, "Replace an installed profile when --profile points to a packed archive")
+	force := flags.Bool("force", false, "Replace an installed template package when --profile points to a packed archive")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -90,27 +74,21 @@ func runProfileVerify(ctx context.Context, args []string) error {
 	return nil
 }
 
-func runProfileImport(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("profile import", flag.ContinueOnError)
+func runTemplatePackageImport(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("template-package import", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	return runConfigPublishWithFlags(ctx, flags, args, "Imported profile")
-}
-
-func runConfigPublish(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("config publish", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	return runConfigPublishWithFlags(ctx, flags, args, "Published config")
+	return runConfigPublishWithFlags(ctx, flags, args, "Imported template package")
 }
 
 func runConfigPublishWithFlags(ctx context.Context, flags *flag.FlagSet, args []string, textPrefix string) error {
-	from := flags.String("from", "", "Profile bundle path")
-	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	from := flags.String("from", "", "Template package path")
+	profileHome := flags.String("profile-home", "", "Installed template package home")
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	auditOutput := flags.Bool("audit", false, "Run profile audit after import")
-	requireAuditOK := flags.Bool("require-audit-ok", false, "Fail before writing the Store unless profile audit has no issues")
-	force := flags.Bool("force", false, "Replace an installed profile when --from points to a packed archive")
+	auditOutput := flags.Bool("audit", false, "Run template package audit after import")
+	requireAuditOK := flags.Bool("require-audit-ok", false, "Fail before writing the Store unless template package audit has no issues")
+	force := flags.Bool("force", false, "Replace an installed template package when --from points to a packed archive")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -196,7 +174,7 @@ func verifyProfileBundle(ctx context.Context, s store.Store, profilePath string,
 		return profileVerifyReport{}, err
 	}
 	if !auditReport.OK {
-		return profileVerifyReport{}, fmt.Errorf("profile audit failed for profile %q: %s", bundle.ID, profileaudit.FailureSummary(auditReport))
+		return profileVerifyReport{}, fmt.Errorf("template package audit failed for %q: %s", bundle.ID, profileaudit.FailureSummary(auditReport))
 	}
 	publishReport, err := publishProfileBundleToStore(ctx, s, profilePath, storePath, true, true)
 	if err != nil {
@@ -220,8 +198,8 @@ func verifyProfileBundle(ctx context.Context, s store.Store, profilePath string,
 		Checks:    checks,
 	}
 	if !report.OK {
-		report.Error = fmt.Sprintf("profile verification failed for profile %q: %s", bundle.ID, profileverify.FirstFailed(checks))
-		return report, fmt.Errorf("profile verification failed for profile %q: %s", bundle.ID, profileverify.FirstFailed(checks))
+		report.Error = fmt.Sprintf("template package verification failed for %q: %s", bundle.ID, profileverify.FirstFailed(checks))
+		return report, fmt.Errorf("template package verification failed for %q: %s", bundle.ID, profileverify.FirstFailed(checks))
 	}
 	return report, nil
 }

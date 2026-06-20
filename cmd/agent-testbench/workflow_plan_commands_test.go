@@ -22,7 +22,7 @@ func TestWorkflowPlanCommandPrintsBoundStepsWithMySQLStore(t *testing.T) {
 
 func runWorkflowPlanCommandPrintsBoundSteps(t *testing.T, dir string, label string) {
 	t.Helper()
-	runCLI(t, "config", "publish", "--from", dir)
+	runCLI(t, "template-package", "import", "--from", dir)
 
 	out := runCLI(t, "workflow", "plan", "--workflow", "workflow.alpha")
 
@@ -55,7 +55,7 @@ func TestWorkflowPlanCommandCanEmitJSONFromMySQLStore(t *testing.T) {
 
 func runWorkflowPlanCommandCanEmitJSONFromStore(t *testing.T, profileDir string, label string) {
 	t.Helper()
-	runCLI(t, "config", "publish", "--from", profileDir)
+	runCLI(t, "template-package", "import", "--from", profileDir)
 
 	out := runCLI(t, "workflow", "plan", "--workflow", "workflow.alpha", "--json")
 
@@ -100,7 +100,7 @@ func TestWorkflowPlanCommandRejectsMissingWorkflowWithMySQLStore(t *testing.T) {
 
 func runWorkflowPlanCommandRejectsMissingWorkflow(t *testing.T, dir string, label string) {
 	t.Helper()
-	runCLI(t, "config", "publish", "--from", dir)
+	runCLI(t, "template-package", "import", "--from", dir)
 
 	out := runCLIFails(t, "workflow", "plan", "--workflow", "workflow.missing")
 	if !strings.Contains(out, "workflow not found") || !strings.Contains(out, "workflow.missing") {

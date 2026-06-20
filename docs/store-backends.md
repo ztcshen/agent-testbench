@@ -224,7 +224,7 @@ SQL Store.
 Restore attempt summaries are Store-first diagnostics kept in Environment
 Catalog `summary.lastRestore` and `summary.restoreAttempts`; they are not
 portable template package data and not a replacement for full Evidence or
-workflow reports.
+workflow run details.
 
 Commands may also use `--store NAME_OR_DSN` for a one-off override. Daily
 CLI/API commands read and write the active Store unless that explicit override

@@ -30,7 +30,7 @@ type caseSuiteCoverageRun struct {
 func publishUniqueCaseSuiteCoverageProfile(t *testing.T) caseSuiteCoverageFixture {
 	t.Helper()
 	fixture := writeUniqueCaseSuiteCoverageProfile(t)
-	runCLI(t, "config", "publish", "--from", fixture.profileDir)
+	runCLI(t, "template-package", "import", "--from", fixture.profileDir)
 	return fixture
 }
 
@@ -74,7 +74,7 @@ func recordCaseSuiteCoverageRuns(t *testing.T, storeRef string, label string, ru
 func publishUniqueCaseSuiteQualityProfile(t *testing.T) caseSuiteQualityFixture {
 	t.Helper()
 	fixture := writeUniqueCaseSuiteQualityProfile(t)
-	runCLI(t, "config", "publish", "--from", fixture.profileDir)
+	runCLI(t, "template-package", "import", "--from", fixture.profileDir)
 	return fixture
 }
 

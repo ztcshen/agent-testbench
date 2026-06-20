@@ -45,7 +45,7 @@ SkyWalking gate after supplying real endpoint values:
 
 For public release notes, record only non-secret evidence: the exact command or
 CI run URL, Store database name, masked DSN, SkyWalking endpoint host, and
-configured workflow report summary.
+configured workflow/map run summary.
 
 The public GitHub Actions CI runs this same gate against a temporary MySQL 8.0
 service container and the `agent_testbench_ci_smoke` Store database. That proves the
@@ -120,8 +120,8 @@ of these items:
   PostgreSQL and MySQL;
 - deprecated `--store-url` does not appear as a normal daily path and bare local
   paths are not accepted by daily commands;
-- local execution paths, including `environment bootstrap`, `sandbox service
-  register`, `sandbox interface register`, and `sandbox start`, have named
+- local execution paths, including `environment bootstrap`, `environment restore`,
+  `sandbox service list`, and `sandbox start`, have named
   SQL Store evidence;
 - the core workbench smoke enters from the UI, runs the workflow, shows
   all configured nodes green, and opens Evidence for the steps;

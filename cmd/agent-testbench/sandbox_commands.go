@@ -15,8 +15,6 @@ func runSandbox(ctx context.Context, args []string) error {
 		return runSandboxStart(ctx, args[1:])
 	case "service":
 		return runSandboxService(ctx, args[1:])
-	case "interface":
-		return runSandboxInterface(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown sandbox command: %s", args[0])
 	}

@@ -11,7 +11,7 @@ func TestWorkflowRegisterAndBindingUpsertStoreCatalog(t *testing.T) {
 	profileDir := writeWorkflowBatchReportProfile(t)
 	storePath := filepath.Join(t.TempDir(), "workflow-upsert.sqlite")
 	storeRef := "sqlite://" + storePath
-	runCLI(t, "config", "publish", "--from", profileDir, "--store", storeRef)
+	runCLI(t, "template-package", "import", "--from", profileDir, "--store", storeRef)
 
 	requireWorkflowRegisterReport(t, runWorkflowRegisterJSON(t, storeRef))
 	requireWorkflowBindingRegisterReport(t, runWorkflowBindingRegisterJSON(t, storeRef))
@@ -228,7 +228,7 @@ func TestWorkflowBindingAuditReportsMissingReferences(t *testing.T) {
 	profileDir := writeWorkflowBatchReportProfile(t)
 	storePath := filepath.Join(t.TempDir(), "workflow-binding-audit.sqlite")
 	storeRef := "sqlite://" + storePath
-	runCLI(t, "config", "publish", "--from", profileDir, "--store", storeRef)
+	runCLI(t, "template-package", "import", "--from", profileDir, "--store", storeRef)
 	runCLI(t, "workflow", "register", "--store", storeRef, "--id", "workflow.audit", "--json")
 
 	out := runCLI(t,
@@ -269,7 +269,7 @@ func TestWorkflowBindingRegisterRejectsUnexpectedPositionalArgs(t *testing.T) {
 	profileDir := writeWorkflowBatchReportProfile(t)
 	storePath := filepath.Join(t.TempDir(), "workflow-binding-positional.sqlite")
 	storeRef := "sqlite://" + storePath
-	runCLI(t, "config", "publish", "--from", profileDir, "--store", storeRef)
+	runCLI(t, "template-package", "import", "--from", profileDir, "--store", storeRef)
 	runCLI(t, "workflow", "register", "--store", storeRef, "--id", "workflow.positional", "--json")
 
 	out := runCLIFails(t,

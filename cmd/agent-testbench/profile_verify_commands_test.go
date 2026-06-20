@@ -51,7 +51,7 @@ func TestProfileVerifyCommandAuditsPublishesAndChecksReadModels(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
 	profileDir := writeEmptyProfileBundle(t)
 
-	out := runCLI(t, "profile", "verify", "--profile", profileDir, "--store", "sqlite://"+dbPath, "--json")
+	out := runCLI(t, "template-package", "verify", "--profile", profileDir, "--store", "sqlite://"+dbPath, "--json")
 
 	var report struct {
 		OK    bool `json:"ok"`
@@ -95,10 +95,10 @@ func TestProfileVerifyCommandAcceptsPackedArchive(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
 	profileDir := writeEmptyProfileBundle(t)
 	archivePath := filepath.Join(t.TempDir(), "empty-profile.tgz")
-	runCLI(t, "profile", "pack", "--profile", profileDir, "--output", archivePath)
+	runCLI(t, "template-package", "pack", "--profile", profileDir, "--output", archivePath)
 	profileHome := filepath.Join(t.TempDir(), "profile-home")
 
-	out := runCLI(t, "profile", "verify", "--profile", archivePath, "--profile-home", profileHome, "--store", "sqlite://"+dbPath, "--json")
+	out := runCLI(t, "template-package", "verify", "--profile", archivePath, "--profile-home", profileHome, "--store", "sqlite://"+dbPath, "--json")
 
 	var report struct {
 		OK      bool `json:"ok"`
@@ -136,8 +136,8 @@ func TestProfileVerifyCommandStopsBeforePublishWhenAuditFails(t *testing.T) {
 }`)
 	storePath := filepath.Join(dir, "store.sqlite")
 
-	out := runCLIFails(t, "profile", "verify", "--profile", profileDir, "--store", "sqlite://"+storePath)
-	if !strings.Contains(out, "profile audit failed") || !strings.Contains(out, "api-case-node-missing") {
+	out := runCLIFails(t, "template-package", "verify", "--profile", profileDir, "--store", "sqlite://"+storePath)
+	if !strings.Contains(out, "template package audit failed") || !strings.Contains(out, "api-case-node-missing") {
 		t.Fatalf("profile verify failure output = %q", out)
 	}
 
@@ -160,7 +160,7 @@ func TestProfileVerifyCommandCanRequirePassedAPICaseRuns(t *testing.T) {
 	requireProfileVerifyMissingCaseRun(t, profileDir, dbPath)
 	seedProfileVerifyPassedCaseRun(t, dbPath, "run-beta", "case-run-beta", "case.beta", "2026-05-14T01:01:00Z")
 
-	report := runProfileVerifyCaseRunsJSON(t, profileDir, dbPath)
+	report := runTemplatePackageVerifyCaseRunsJSON(t, profileDir, dbPath)
 	requireProfileVerifyCaseRunReport(t, report)
 }
 
@@ -205,11 +205,11 @@ func seedProfileVerifyPassedCaseRun(t *testing.T, dbPath string, runID string, c
 func requireProfileVerifyMissingCaseRun(t *testing.T, profileDir string, dbPath string) {
 	t.Helper()
 
-	missing := runCLIFails(t, "profile", "verify", "--profile", profileDir, "--store", "sqlite://"+dbPath, "--require-case-runs")
+	missing := runCLIFails(t, "template-package", "verify", "--profile", profileDir, "--store", "sqlite://"+dbPath, "--require-case-runs")
 	if !strings.Contains(missing, "api-case-run:case.beta") || !strings.Contains(missing, "no passed run") {
 		t.Fatalf("missing case run verify output = %q", missing)
 	}
-	missingJSON := runCLIFails(t, "profile", "verify", "--profile", profileDir, "--store", "sqlite://"+dbPath, "--require-case-runs", "--json")
+	missingJSON := runCLIFails(t, "template-package", "verify", "--profile", profileDir, "--store", "sqlite://"+dbPath, "--require-case-runs", "--json")
 	for _, want := range []string{`"ok": false`, `"firstFailed": "api-case-run:case.beta"`, `"name": "api-case-run:case.beta"`} {
 		if !strings.Contains(missingJSON, want) {
 			t.Fatalf("missing case run json output does not contain %q:\n%s", want, missingJSON)
@@ -217,10 +217,10 @@ func requireProfileVerifyMissingCaseRun(t *testing.T, profileDir string, dbPath 
 	}
 }
 
-func runProfileVerifyCaseRunsJSON(t *testing.T, profileDir string, dbPath string) profileVerifyRuntimeReport {
+func runTemplatePackageVerifyCaseRunsJSON(t *testing.T, profileDir string, dbPath string) profileVerifyRuntimeReport {
 	t.Helper()
 
-	out := runCLI(t, "profile", "verify", "--profile", profileDir, "--store", "sqlite://"+dbPath, "--require-case-runs", "--json")
+	out := runCLI(t, "template-package", "verify", "--profile", profileDir, "--store", "sqlite://"+dbPath, "--require-case-runs", "--json")
 	var report profileVerifyRuntimeReport
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode profile verify runtime report: %v\n%s", err, out)
@@ -241,7 +241,7 @@ func TestProfileVerifyCommandCanRequirePassedWorkflowRuns(t *testing.T) {
 	profileDir := filepath.Join(t.TempDir(), "profile")
 	writeWorkflowProfile(t, profileDir)
 
-	missing := runCLIFails(t, "profile", "verify", "--profile", profileDir, "--store", "sqlite://"+dbPath, "--require-workflow-runs")
+	missing := runCLIFails(t, "template-package", "verify", "--profile", profileDir, "--store", "sqlite://"+dbPath, "--require-workflow-runs")
 	if !strings.Contains(missing, "workflow-run:workflow.alpha") || !strings.Contains(missing, "no passed run") {
 		t.Fatalf("missing workflow run verify output = %q", missing)
 	}
@@ -267,7 +267,7 @@ func TestProfileVerifyCommandCanRequirePassedWorkflowRuns(t *testing.T) {
 		t.Fatalf("close store: %v", err)
 	}
 
-	out := runCLI(t, "profile", "verify", "--profile", profileDir, "--store", "sqlite://"+dbPath, "--require-workflow-runs", "--json")
+	out := runCLI(t, "template-package", "verify", "--profile", profileDir, "--store", "sqlite://"+dbPath, "--require-workflow-runs", "--json")
 	var report profileVerifyRuntimeReport
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode profile verify workflow report: %v\n%s", err, out)
@@ -285,15 +285,15 @@ func TestProfileVerifyCommandCanRequirePassedWorkflowRuns(t *testing.T) {
 
 func TestProfileImportAndVerifyUseNamedPostgreSQLActiveStore(t *testing.T) {
 	storeRef := configureNamedPostgreSQLActiveStore(t, "daily-profile-pg")
-	runProfileImportAndVerifyUseNamedActiveStore(t, storeRef, "pg", "PostgreSQL")
+	runTemplatePackageImportAndVerifyUseNamedActiveStore(t, storeRef, "pg", "PostgreSQL")
 }
 
 func TestProfileImportAndVerifyUseNamedMySQLActiveStore(t *testing.T) {
 	storeRef := configureNamedMySQLActiveStore(t, "daily-profile-mysql")
-	runProfileImportAndVerifyUseNamedActiveStore(t, storeRef, "mysql", "MySQL")
+	runTemplatePackageImportAndVerifyUseNamedActiveStore(t, storeRef, "mysql", "MySQL")
 }
 
-func runProfileImportAndVerifyUseNamedActiveStore(t *testing.T, storeRef string, runLabel string, label string) {
+func runTemplatePackageImportAndVerifyUseNamedActiveStore(t *testing.T, storeRef string, runLabel string, label string) {
 	t.Helper()
 	importDir := importProfileAndRequireNamedStoreIndex(t, storeRef, label)
 	verifyDir := seedNamedProfileVerifyCaseRuns(t, storeRef, runLabel, label)
@@ -306,7 +306,7 @@ func importProfileAndRequireNamedStoreIndex(t *testing.T, storeRef string, label
 	t.Helper()
 
 	importDir := writeEmptyProfileBundle(t)
-	importOut := runCLI(t, "profile", "import", "--from", importDir, "--json")
+	importOut := runCLI(t, "template-package", "import", "--from", importDir, "--json")
 	var importReport profileImportCommandReport
 	if err := json.Unmarshal([]byte(importOut), &importReport); err != nil {
 		t.Fatalf("decode %s profile import json: %v\n%s", label, err, importOut)
@@ -362,7 +362,7 @@ func seedNamedProfileVerifyCaseRuns(t *testing.T, storeRef string, runLabel stri
 func runNamedProfileVerifyJSON(t *testing.T, verifyDir string, label string) namedProfileVerifyReport {
 	t.Helper()
 
-	verifyOut := runCLI(t, "profile", "verify", "--profile", verifyDir, "--require-case-runs", "--json")
+	verifyOut := runCLI(t, "template-package", "verify", "--profile", verifyDir, "--require-case-runs", "--json")
 	var verifyReport namedProfileVerifyReport
 	if err := json.Unmarshal([]byte(verifyOut), &verifyReport); err != nil {
 		t.Fatalf("decode %s profile verify json: %v\n%s", label, err, verifyOut)

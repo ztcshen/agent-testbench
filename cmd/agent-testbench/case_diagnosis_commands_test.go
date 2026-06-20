@@ -206,7 +206,7 @@ func TestCaseDiagnoseReportsNoEvidenceForFailedRunWithoutCaseRuns(t *testing.T) 
 	if strings.Contains(joinedActions, "case batch report --run") {
 		t.Fatalf("no-evidence next actions should not suggest unrunnable batch report command: %#v", report.NextActions)
 	}
-	if !strings.Contains(joinedActions, "agent-testbench case runs --run run.no-evidence --json") {
+	if !strings.Contains(joinedActions, "agent-testbench case inspect --view runs --run run.no-evidence --json") {
 		t.Fatalf("no-evidence next actions = %#v", report.NextActions)
 	}
 }

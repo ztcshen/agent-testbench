@@ -9,6 +9,8 @@
     "build:frontend": "node control-plane/frontend/build.mjs",
     "demo:api-case": "node tools/examples/api-case-demo.mjs",
     "demo:services": "node tools/examples/demo-service-server.mjs",
+    "docs:cli-reference": "node tools/docs/generate-cli-reference.mjs",
+    "docs:cli-reference:check": "node tools/docs/generate-cli-reference.mjs --check",
     "guard:dependencies": "bash tools/guardrails/check_dependency_baseline.sh",
     "guard:duplicates": "bash tools/guardrails/check_duplicate_code.sh",
     "guard:secrets": "bash tools/guardrails/check_secrets.sh",

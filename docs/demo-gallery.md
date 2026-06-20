@@ -3,7 +3,7 @@
 AgentTestBench needs demos that show the product instead of only describing it.
 This gallery gives maintainers, conference talks, README links, and social
 posts a neutral way to explain the CLI surface, Evidence model, and Store-first
-workflow.
+scenario maps.
 
 The design follows a pattern used by mature developer-tool projects: keep a
 small runnable target, show the exact command sequence, and make the produced
@@ -58,7 +58,7 @@ The demo services are intentionally lightweight. They are not a full product
 runtime; they are a visible target that explains how AgentTestBench thinks.
 The installed wrapper is `agent-testbench`; from this checkout, `./bin/agent-testbench.sh`
 uses the same command shape, for example `agent-testbench case run` and
-`agent-testbench workflow report`.
+`agent-testbench map atlas`.
 
 The gallery animation compresses the strongest CLI path into one reviewable
 loop:
@@ -67,7 +67,7 @@ loop:
 agent-testbench environment restore retail-demo --store local-personal --workspace .demo/runtime --execute --json
 agent-testbench case suite report --view priority --filter retail --changed-service payment --store local-personal --json
 agent-testbench case run --case examples/demo-services/retail-fulfillment-mesh/create-order.json --base-url http://127.0.0.1:49190 --store local-personal --evidence-dir .agent-testbench/evidence --json
-agent-testbench workflow report --workflow workflow.retail.fulfillment --base-url http://127.0.0.1:49190 --store local-personal --html --json
+agent-testbench map atlas --map map.retail.fulfillment --store local-personal --json
 agent-testbench evidence tasks --run retail-demo-run --failed-only --store local-personal --json
 agent-testbench case suite report --view quality-report --filter retail --run retail-demo-run --store local-personal --format html --json
 ```
@@ -95,9 +95,8 @@ report.
   --case examples/demo-services/retail-fulfillment-mesh/create-order.json \
   --base-url http://127.0.0.1:49190 \
   --json
-./bin/agent-testbench.sh workflow report \
-  --workflow workflow.retail.fulfillment \
-  --base-url http://127.0.0.1:49190 \
+./bin/agent-testbench.sh map atlas \
+  --map map.retail.fulfillment \
   --json
 ./bin/agent-testbench.sh evidence list --json
 ```
@@ -119,6 +118,6 @@ report.
    examples.
 4. Record the CLI automation animation as the primary short video: one loop
    should show `environment restore`, `case suite report --view priority`, `case run`,
-   `workflow report`, `evidence tasks`, and `case suite report --view quality-report`.
+   `map atlas`, `evidence tasks`, and `case suite report --view quality-report`.
 5. Keep the examples runnable with SQLite compatibility for local exploration,
    but present PostgreSQL/MySQL as the team Store path.

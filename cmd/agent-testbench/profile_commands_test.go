@@ -16,8 +16,8 @@ import (
 func TestProfileInitCommandWritesExternalBundle(t *testing.T) {
 	profileDir := filepath.Join(t.TempDir(), "external-profile")
 
-	out := runCLI(t, "profile", "init", "--output", profileDir, "--id", "sample", "--display-name", "Sample Profile")
-	if !strings.Contains(out, "Initialized external profile bundle: sample") || !strings.Contains(out, profileDir) {
+	out := runCLI(t, "template-package", "init", "--output", profileDir, "--id", "sample", "--display-name", "Sample Profile")
+	if !strings.Contains(out, "Initialized template package: sample") || !strings.Contains(out, profileDir) {
 		t.Fatalf("profile init output = %q", out)
 	}
 	for _, path := range []string{
@@ -54,8 +54,8 @@ func TestProfileInitCommandWritesExternalBundle(t *testing.T) {
 		t.Fatalf("generated readme should use Store-first commands:\n%s", readme)
 	}
 
-	inspect := runCLI(t, "profile", "inspect", "--profile", profileDir)
-	if !strings.Contains(inspect, "Profile: sample") || !strings.Contains(inspect, "Display Name: Sample Profile") {
+	inspect := runCLI(t, "template-package", "inspect", "--profile", profileDir)
+	if !strings.Contains(inspect, "Template Package: sample") || !strings.Contains(inspect, "Display Name: Sample Profile") {
 		t.Fatalf("inspect generated profile = %q", inspect)
 	}
 }
@@ -82,13 +82,13 @@ func TestTemplatePackageCommandAliasesProfileLifecycle(t *testing.T) {
 	}
 }
 
-func TestTemplatePackageCatalogIndexCommandReadsStoreCatalog(t *testing.T) {
+func TestTemplatePackageCatalogListActiveReadsStoreCatalog(t *testing.T) {
 	profileDir := filepath.Join(t.TempDir(), "template-package")
 	writeWorkflowProfile(t, profileDir)
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	runCLI(t, "template-package", "import", "--from", profileDir, "--store", "sqlite://"+storePath)
 
-	out := runCLI(t, "template-package", "catalog-index", "--store", "sqlite://"+storePath, "--json")
+	out := runCLI(t, "template-package", "catalog", "list", "--active", "--store", "sqlite://"+storePath, "--json")
 
 	var report struct {
 		ProfileID string `json:"profileId"`
@@ -104,13 +104,13 @@ func TestTemplatePackageCatalogIndexCommandReadsStoreCatalog(t *testing.T) {
 		} `json:"configVersion"`
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode catalog-index json: %v\n%s", err, out)
+		t.Fatalf("decode active catalog list json: %v\n%s", err, out)
 	}
 	if report.ProfileID != "sample" || report.Counts.Services != 0 || report.Counts.Workflows != 1 || report.Counts.InterfaceNodes != 1 || report.Counts.APICases != 1 {
-		t.Fatalf("catalog-index report = %#v", report)
+		t.Fatalf("active catalog list report = %#v", report)
 	}
 	if report.ConfigVersion == nil || report.ConfigVersion.ProfileID != "sample" || !report.ConfigVersion.Active {
-		t.Fatalf("catalog-index config version = %#v", report.ConfigVersion)
+		t.Fatalf("active catalog list config version = %#v", report.ConfigVersion)
 	}
 }
 
@@ -119,7 +119,7 @@ func TestProfileCatalogListShowsHistoricalCatalogs(t *testing.T) {
 	storeRef := "sqlite://" + dbPath
 	seedProfileCatalogRestoreFixture(t, dbPath)
 
-	out := runCLI(t, "profile", "catalog", "list", "--store", storeRef, "--json")
+	out := runCLI(t, "template-package", "catalog", "list", "--store", storeRef, "--json")
 
 	var report struct {
 		OK    bool `json:"ok"`
@@ -160,7 +160,7 @@ func TestProfileCatalogRestorePromotesHistoricalCatalogAndActiveConfig(t *testin
 		t.Fatalf("workflow discover should not see primary flow before restore: %#v", beforeWorkflowReport)
 	}
 
-	restoreOut := runCLI(t, "profile", "catalog", "restore", "--store", storeRef, "--profile", "profile.integration-catalog", "--json")
+	restoreOut := runCLI(t, "template-package", "catalog", "restore", "--store", storeRef, "--profile", "profile.integration-catalog", "--json")
 	var restoreReport struct {
 		OK     bool `json:"ok"`
 		Before struct {
@@ -204,7 +204,7 @@ func TestProfileCatalogRestorePromotesHistoricalCatalogAndActiveConfig(t *testin
 }
 
 func TestProfileInitCommandRejectsCoreProfilesPath(t *testing.T) {
-	out := runCLIFails(t, "profile", "init", "--output", "profiles/sample")
+	out := runCLIFails(t, "template-package", "init", "--output", "profiles/sample")
 	if !strings.Contains(out, "outside this core repository") {
 		t.Fatalf("profile init rejection output = %q", out)
 	}
@@ -212,35 +212,11 @@ func TestProfileInitCommandRejectsCoreProfilesPath(t *testing.T) {
 
 func TestProfileInspectCommand(t *testing.T) {
 	profileDir := writeEmptyProfileBundle(t)
-	out := runCLI(t, "profile", "inspect", "--profile", profileDir)
-	for _, want := range []string{"Profile: empty", "Display Name: Empty Profile", "Workflows: 0", "API Cases: 0", "Request Templates: 0", "Case Dependencies: 0", "Workflow Bindings: 0"} {
+	out := runCLI(t, "template-package", "inspect", "--profile", profileDir)
+	for _, want := range []string{"Template Package: empty", "Display Name: Empty Profile", "Workflows: 0", "API Cases: 0", "Request Templates: 0", "Case Dependencies: 0", "Workflow Bindings: 0"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("profile inspect output missing %q: %q", want, out)
 		}
-	}
-}
-
-func TestProfileAuditCommandAcceptsPackedArchive(t *testing.T) {
-	profileDir := writeEmptyProfileBundle(t)
-	archivePath := filepath.Join(t.TempDir(), "empty-profile.tgz")
-	runCLI(t, "profile", "pack", "--profile", profileDir, "--output", archivePath)
-	profileHome := filepath.Join(t.TempDir(), "profile-home")
-
-	out := runCLI(t, "profile", "audit", "--profile", archivePath, "--offline-template-package", "--profile-home", profileHome, "--json")
-
-	var report struct {
-		ProfileID string `json:"profileId"`
-		OK        bool   `json:"ok"`
-	}
-	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode profile audit archive report: %v\n%s", err, out)
-	}
-	targetPath := filepath.Join(profileHome, "empty")
-	if report.ProfileID != "empty" || !report.OK {
-		t.Fatalf("profile audit archive report = %#v", report)
-	}
-	if _, err := os.Stat(filepath.Join(targetPath, "profile.json")); err != nil {
-		t.Fatalf("installed audit archive manifest missing: %v", err)
 	}
 }
 
@@ -248,8 +224,8 @@ func TestProfileImportCommandIndexesBundleInStore(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
 	profileDir := writeEmptyProfileBundle(t)
 
-	out := runCLI(t, "profile", "import", "--from", profileDir, "--store", "sqlite://"+dbPath)
-	if !strings.Contains(out, "Imported profile: empty") {
+	out := runCLI(t, "template-package", "import", "--from", profileDir, "--store", "sqlite://"+dbPath)
+	if !strings.Contains(out, "Imported template package: empty") {
 		t.Fatalf("profile import output = %q", out)
 	}
 
@@ -273,10 +249,10 @@ func TestProfileImportCommandIndexesBundleInStore(t *testing.T) {
 func TestProfileImportReportsNodeCaseDiff(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
 	profileDir := writeProfileWithCatalogCases(t, []string{"case.alpha"})
-	runCLI(t, "profile", "import", "--from", profileDir, "--store", "sqlite://"+dbPath)
+	runCLI(t, "template-package", "import", "--from", profileDir, "--store", "sqlite://"+dbPath)
 
 	profileDir = writeProfileWithCatalogCases(t, []string{"case.alpha", "case.beta"})
-	out := runCLI(t, "profile", "import", "--from", profileDir, "--store", "sqlite://"+dbPath, "--json")
+	out := runCLI(t, "template-package", "import", "--from", profileDir, "--store", "sqlite://"+dbPath, "--json")
 	var report struct {
 		Diff struct {
 			HasPreviousCatalog bool `json:"hasPreviousCatalog"`
@@ -304,59 +280,14 @@ func TestProfileImportReportsNodeCaseDiff(t *testing.T) {
 	}
 }
 
-func TestProfileDoctorAndRepairManifest(t *testing.T) {
-	profileDir := writeProfileWithCatalogCases(t, []string{"case.alpha", "case.beta"})
-	manifestPath := writeProfileRepairManifest(t, profileDir, []string{"case.beta"})
-	removeProfileCatalogCase(t, profileDir, "case.beta")
-	if err := os.Remove(filepath.Join(profileDir, "cases", "case.beta.json")); err != nil {
-		t.Fatalf("remove case file: %v", err)
-	}
-
-	out := runCLIFails(t, "profile", "doctor", "--profile", profileDir, "--case-id", "case.beta", "--json")
-	var doctorBefore profileDoctorReport
-	if err := json.Unmarshal([]byte(jsonPrefix(out)), &doctorBefore); err != nil {
-		t.Fatalf("decode doctor before repair: %v\n%s", err, out)
-	}
-	if doctorBefore.OK {
-		t.Fatalf("doctor should fail before repair: %#v", doctorBefore)
-	}
-
-	dryRunOut := runCLI(t, "profile", "repair", "--from-manifest", manifestPath, "--profile", profileDir, "--json")
-	var dryRun profileRepairReport
-	if err := json.Unmarshal([]byte(dryRunOut), &dryRun); err != nil {
-		t.Fatalf("decode dry-run repair: %v\n%s", err, dryRunOut)
-	}
-	if _, err := os.Stat(filepath.Join(profileDir, "cases", "case.beta.json")); dryRun.Applied || dryRun.Summary.CatalogCasesRestored != 1 || dryRun.Summary.CaseFilesRestored != 1 || err == nil {
-		t.Fatalf("dry-run repair = %#v", dryRun)
-	}
-
-	applyOut := runCLI(t, "profile", "repair", "--from-manifest", manifestPath, "--profile", profileDir, "--apply", "--json")
-	var applied profileRepairReport
-	if err := json.Unmarshal([]byte(applyOut), &applied); err != nil {
-		t.Fatalf("decode applied repair: %v\n%s", err, applyOut)
-	}
-	if !applied.Applied || applied.Summary.CatalogCasesRestored != 1 || applied.Summary.CaseFilesRestored != 1 {
-		t.Fatalf("applied repair = %#v", applied)
-	}
-
-	doctorOut := runCLI(t, "profile", "doctor", "--profile", profileDir, "--case-id", "case.beta", "--json")
-	var doctorAfter profileDoctorReport
-	if err := json.Unmarshal([]byte(doctorOut), &doctorAfter); err != nil {
-		t.Fatalf("decode doctor after repair: %v\n%s", err, doctorOut)
-	}
-	if !doctorAfter.OK {
-		t.Fatalf("doctor should pass after repair: %#v", doctorAfter)
-	}
-}
-
 func TestProfileImportCommandAcceptsPackedArchive(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
 	profileDir := writeEmptyProfileBundle(t)
 	archivePath := filepath.Join(t.TempDir(), "empty-profile.tar.gz")
-	runCLI(t, "profile", "pack", "--profile", profileDir, "--output", archivePath)
+	runCLI(t, "template-package", "pack", "--profile", profileDir, "--output", archivePath)
 	profileHome := filepath.Join(t.TempDir(), "profile-home")
 
-	out := runCLI(t, "profile", "import", "--from", archivePath, "--profile-home", profileHome, "--store", "sqlite://"+dbPath, "--json")
+	out := runCLI(t, "template-package", "import", "--from", archivePath, "--profile-home", profileHome, "--store", "sqlite://"+dbPath, "--json")
 
 	var report struct {
 		ProfileID  string `json:"profileId"`
@@ -381,7 +312,7 @@ func TestProfileImportCommandCanEmitJSONReport(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
 	profileDir := writeEmptyProfileBundle(t)
 
-	out := runCLI(t, "profile", "import", "--from", profileDir, "--store", "sqlite://"+dbPath, "--json")
+	out := runCLI(t, "template-package", "import", "--from", profileDir, "--store", "sqlite://"+dbPath, "--json")
 
 	var report struct {
 		ProfileID    string `json:"profileId"`

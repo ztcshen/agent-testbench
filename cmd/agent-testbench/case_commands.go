@@ -17,6 +17,8 @@ func runCase(ctx context.Context, args []string) error {
 		return runCaseSuite(ctx, args[1:])
 	case "run":
 		return runCaseRun(ctx, args[1:])
+	case "inspect":
+		return runCaseInspect(ctx, args[1:])
 	case "runs":
 		return runCaseRuns(ctx, args[1:])
 	case "evidence":
@@ -29,25 +31,9 @@ func runCase(ctx context.Context, args []string) error {
 		return runCaseConfig(ctx, args[1:])
 	case "timing":
 		return runCaseTiming(ctx, args[1:])
-	case "batch":
-		return runCaseBatch(ctx, args[1:])
 	case "incomplete-batches":
 		return runCaseIncompleteBatches(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown case command: %s", args[0])
-	}
-}
-
-func runCaseBatch(ctx context.Context, args []string) error {
-	if len(args) == 0 {
-		return errors.New("missing case batch command")
-	}
-	switch args[0] {
-	case "start":
-		return runCaseBatchStart(ctx, args[1:])
-	case "report":
-		return runCaseBatchReport(ctx, args[1:])
-	default:
-		return fmt.Errorf("unknown case batch command: %s", args[0])
 	}
 }

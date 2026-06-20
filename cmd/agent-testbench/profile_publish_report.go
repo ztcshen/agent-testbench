@@ -306,14 +306,14 @@ func printProfileCatalogIndex(report profileCatalogIndexReport) {
 }
 
 func printProfileCatalogList(report profileCatalogListReport) {
-	fmt.Printf("Profile Catalogs: %d\n", report.Count)
+	fmt.Printf("Template Package Catalogs: %d\n", report.Count)
 	for _, item := range report.Items {
 		fmt.Printf("%s\t%s\tworkflows=%d\tapiCases=%d\n", item.ProfileID, item.IndexedAt.Format(time.RFC3339), item.Counts.Workflows, item.Counts.APICases)
 	}
 }
 
 func printProfileCatalogRestore(report profileCatalogRestoreReport) {
-	fmt.Printf("Restored Profile Catalog: %s\n", report.ProfileID)
+	fmt.Printf("Restored Template Package Catalog: %s\n", report.ProfileID)
 	fmt.Printf("Before: %s\n", report.Before.ProfileID)
 	fmt.Printf("After: %s\n", report.After.ProfileID)
 	if report.ConfigVersion != nil {
@@ -325,7 +325,7 @@ func printProfileCatalogRestore(report profileCatalogRestoreReport) {
 }
 
 func printProfileVerify(report profileVerifyReport) {
-	fmt.Printf("Profile Verification: %s\n", report.ProfileID)
+	fmt.Printf("Template Package Verification: %s\n", report.ProfileID)
 	fmt.Printf("OK: %t\n", report.OK)
 	fmt.Printf("Audit OK: %t\n", report.Audit.OK)
 	fmt.Printf("Published Config: %s\n", report.Publish.ConfigVersion.ID)
@@ -348,7 +348,7 @@ func printProfileVerify(report profileVerifyReport) {
 
 func printProfile(bundle profile.Bundle) {
 	counts := bundle.Counts()
-	fmt.Printf("Profile: %s\n", bundle.ID)
+	fmt.Printf("Template Package: %s\n", bundle.ID)
 	fmt.Printf("Display Name: %s\n", bundle.DisplayName)
 	fmt.Printf("Services: %d\n", counts.Services)
 	fmt.Printf("Workflows: %d\n", counts.Workflows)

@@ -89,7 +89,7 @@ home under the package `id`. It accepts either a package directory or a
 source-focused: generated runtime state, local compatibility database files,
 logs, and VCS directories are skipped. Use `--force` to replace an already
 installed package. Commands that accept template packages (`inspect`, `audit`,
-`verify`, `import`, and `config publish`) accept either a filesystem path or an
+`verify` and `import`) accept either a filesystem path or an
 installed package id.
 
 `template-package list` and `GET /api/template-packages/installed` are tolerant
@@ -104,11 +104,11 @@ create a clean distributable archive for review or handoff. The command accepts
 either a filesystem path or an installed package id, uses the same runtime/VCS
 filtering as `template-package install`, and writes files under an archive root
 named after the package id. Archive installation is path-safe: entries that
-would escape the archive root are rejected. `template-package audit`,
-`template-package import`, `template-package verify`, and `config publish` can
-also accept a packed archive directly; they install the archive into the
-configured package home before auditing or writing Store/read-model data. Pass
-`--force` when a matching installed package should be replaced.
+would escape the archive root are rejected. `template-package import` and
+`template-package verify` can also accept a packed archive directly; they
+install the archive into the configured package home before checking integrity
+or writing Store/read-model data. Pass `--force` when a matching installed
+package should be replaced.
 
 The Control plane exposes the same local placement surface:
 
@@ -125,20 +125,19 @@ The Control plane exposes the same local placement surface:
 The workbench template package panel lists installed packages, can install a
 package from a local path, and can publish or verify the selected package id.
 
-## Audit
+## Verify
 
-Use `agent-testbench template-package audit --profile PATH --offline-template-package`
-to check a package before or after import. The audit verifies basic reference integrity across workflows, API
-Cases, request templates, fixtures, case dependencies, and workflow bindings.
+Use `agent-testbench template-package verify --template-package PATH --store NAME_OR_DSN`
+to check a package before or after import. Verification includes basic
+reference integrity across workflows, API Cases, request templates, fixtures,
+case dependencies, and workflow bindings.
 For example, it reports a workflow binding that points to a missing workflow,
 an API Case that points to a missing interface node, or a case dependency that
 points to a missing fixture.
 
-Add `--store NAME_OR_DSN` to include the selected Store template package index and
-API Case run status in the report. Add `--json` when another tool needs a stable
-machine-readable report.
+Add `--json` when another tool needs a stable machine-readable report.
 
-Use `--require-audit-ok` with `template-package import` or `config publish` when the
+Use `--require-audit-ok` with `template-package import` when the
 publish step must fail before Store/read-model writes if reference integrity
 issues are found. The Control plane import API exposes the same behavior with
 `requireAuditOk: true`.
@@ -215,16 +214,10 @@ into a bundle. The first planners are small JSON planners inspired by the
 reference backlog: Microcks and Schemathesis motivate schema/API asset import,
 while Keploy motivates record/replay import from captured traffic.
 
-Use the CLI to inspect the plan before copying any generated assets into a
-template package:
-
-```sh
-agent-testbench template-package import-plan openapi --from /path/to/openapi.json --service-id service.catalog --evidence-dir .runtime/openapi --json
-agent-testbench template-package import-plan http-capture --from /path/to/traffic.json --service-id service.catalog --evidence-dir .runtime/replay --json
-agent-testbench template-package generation-plan openapi --from /path/to/openapi.json --service-id service.catalog --evidence-dir .runtime/generated --json
-```
-
-Add `--output-dir PATH` to write the same plan as reviewable files:
+The planning engine is currently exposed through domain and control-plane API
+modules instead of top-level daily CLI commands. A generated plan should still
+be inspected before copying any assets into a template package. A reviewable
+plan writes files such as:
 
 - `import-plan.json`: full source, generated asset, and written-file summary.
 - `services/*.json`, `interface-nodes/*.json`, `request-templates/*.json`,

@@ -305,7 +305,7 @@ func TestServeHandlerPublishesInstalledProfileIDBeforeServing(t *testing.T) {
 	profileHome := filepath.Join(t.TempDir(), "profile-home")
 	sourceDir := filepath.Join(t.TempDir(), "external-profile")
 	writeWorkflowProfile(t, sourceDir)
-	runCLI(t, "profile", "install", "--from", sourceDir, "--profile-home", profileHome)
+	runCLI(t, "template-package", "install", "--from", sourceDir, "--profile-home", profileHome)
 
 	handler, cleanup, err := serveHandlerFromArgs([]string{
 		"--profile", "sample",

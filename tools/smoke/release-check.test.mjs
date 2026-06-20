@@ -127,6 +127,14 @@ test("release-check runs repository Go lint gate", () => {
   assert.match(script, /AGENT_TESTBENCH_SKIP_GO_LINT/);
 });
 
+test("release-check keeps generated CLI reference in sync", () => {
+  const script = readFileSync(path.join(rootDir, "tools", "release-check.sh"), "utf8");
+
+  assert.match(script, /step "checking generated CLI reference"/);
+  assert.match(script, /npm run docs:cli-reference:check/);
+  assert.match(script, /docs\/cli-reference\.md\|tools\/docs\/generate-cli-reference\.mjs\|tools\/docs\/generate-cli-reference\.test\.mjs/);
+});
+
 test("release-check runs dependency baseline gate before expensive smoke", () => {
   const script = readFileSync(path.join(rootDir, "tools", "release-check.sh"), "utf8");
 

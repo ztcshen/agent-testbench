@@ -92,7 +92,7 @@ Command discovery has three tiers:
 ./bin/agent-testbench.sh commands --filter "store"
 ./bin/agent-testbench.sh commands --area workflow --filter "gate"
 ./bin/agent-testbench.sh commands --filter "case gate" --json
-./bin/agent-testbench.sh commands --all --filter "profile import"
+./bin/agent-testbench.sh commands --all --filter "template-package import"
 ```
 
 On a clean workstation, `onboard` wraps the common first-run sequence:
@@ -282,7 +282,7 @@ npm run store:restore:mysql -- \
 This colleague command verifies the MySQL handshake, schema readiness, active
 Store selection, control-plane `/api/store/current`, verified environment
 catalog entry, component graph, Docker restore, and SkyWalking-backed
-acceptance workflow report.
+acceptance workflow run.
 
 To get a read-only status report for the whole shared MySQL Store objective,
 run:
@@ -539,7 +539,7 @@ Environment Catalog entry. `summary.lastRestore` is the quick pointer, and
 includes restore id, phase, preflight status, repository actions, readiness
 status, Docker action/cleanup status, health check counts, workflow action, and
 next actions. It is intentionally not full Evidence: full command output,
-workflow reports, and runtime logs stay in the existing local report/Evidence
+workflow run details, and runtime logs stay in the existing local report/Evidence
 paths, and the summary must not contain credentials, raw DSNs, or full logs.
 This keeps dry-runs, blocked cleanup attempts, readiness failures, and
 successful executions visible through `environment inspect` and the
@@ -609,7 +609,7 @@ containers or temporary files directly:
 assertion, runtime-log, dependency-probe, and post-process task signals, and
 attempts bounded runtime-log collection for failed workflow steps when topology
 and request correlation data are present. When logs or dependency probes are
-still absent, it prints exact `workflow step` and `evidence tasks` follow-up
+still absent, it prints exact step-detail and `evidence tasks` follow-up
 commands instead of leaving the operator to inspect containers manually.
 
 `sandbox service list` shows the registered profile-service catalog without

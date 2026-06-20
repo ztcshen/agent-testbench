@@ -26,7 +26,7 @@ func TestInterfaceNodeCoverageCommandUsesNamedMySQLActiveStore(t *testing.T) {
 
 func runInterfaceNodeCoverageCommandCanEmitJSON(t *testing.T, fixture interfaceNodeCoverageFixture, label string) {
 	t.Helper()
-	runCLI(t, "config", "publish", "--from", fixture.dir)
+	runCLI(t, "template-package", "import", "--from", fixture.dir)
 
 	out := runCLI(t, "interface-node", "coverage", "--workflow", fixture.workflowID, "--json")
 
@@ -68,7 +68,7 @@ func TestInterfaceNodeCoverageGapsCommandUsesNamedMySQLActiveStore(t *testing.T)
 
 func runInterfaceNodeCoverageGapsCommandCanEmitJSON(t *testing.T, fixture interfaceNodeCoverageFixture, label string) {
 	t.Helper()
-	runCLI(t, "config", "publish", "--from", fixture.dir)
+	runCLI(t, "template-package", "import", "--from", fixture.dir)
 
 	out := runCLI(t, "interface-node", "coverage-gaps", "--workflow", fixture.workflowID, "--json")
 

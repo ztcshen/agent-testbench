@@ -31,8 +31,8 @@ func newCaseSelectionCLIFlagsWithFilterHelp(commandName string, defaultStatus st
 	flags := flag.NewFlagSet(commandName, flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	out := &caseSelectionCLIFlags{flags: flags}
-	out.profilePath = flags.String("profile", "", "Profile bundle path or installed profile id")
-	out.profileHome = flags.String("profile-home", "", "Installed profile bundle home")
+	out.profilePath = flags.String("profile", "", "Template package path or installed template package id")
+	out.profileHome = flags.String("profile-home", "", "Installed template package home")
 	out.storeRef = flags.String("store", "", "Named Store config or Store DSN")
 	out.storeURL = flags.String("store-url", "", legacyStoreURLFlagHelp)
 	out.filter = flags.String("filter", "", filterHelp)

@@ -235,7 +235,7 @@ func addSandboxStartResult(report *sandboxStartReport, result sandboxStartServic
 
 func validateSandboxStartSelection(report sandboxStartReport, filters sandboxStartFilters) error {
 	if filters.ServiceID != "" && report.Counts.Total == 0 {
-		return fmt.Errorf("registered service not found in profile service registry: %s (sandbox start does not read the environment component graph; use environment restore for component-graph Docker startup or register the service with sandbox service register)", filters.ServiceID)
+		return fmt.Errorf("registered service not found in profile service registry: %s (sandbox start does not read the environment component graph; use environment restore for component-graph Docker startup or publish an updated template package)", filters.ServiceID)
 	}
 	if filters.WorkflowID != "" && report.Counts.Total == 0 {
 		return fmt.Errorf("workflow has no registered startable services: %s", filters.WorkflowID)

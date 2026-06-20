@@ -87,7 +87,7 @@ func printInterfaceNodeCaseAudit(report interfaceNodeCaseAuditReport) {
 func runInterfaceNodeCaseAudit(args []string) error {
 	flags := flag.NewFlagSet("interface-node case audit", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path")
+	profilePath := flags.String("profile", "", "Template package path")
 	nodeID := flags.String("node", "", "Interface node id")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
@@ -114,11 +114,11 @@ func runInterfaceNodeCaseAudit(args []string) error {
 func runInterfaceNodeCaseDraft(args []string) error {
 	flags := flag.NewFlagSet("interface-node case draft", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path")
+	profilePath := flags.String("profile", "", "Template package path")
 	nodeID := flags.String("node", "", "Interface node id")
 	caseID := flags.String("case-id", "", "Case id to create")
 	title := flags.String("title", "", "Case title")
-	casePath := flags.String("case-path", "", "Runnable case path inside the profile bundle")
+	casePath := flags.String("case-path", "", "Runnable case path inside the template package")
 	method := flags.String("method", "", "HTTP method; defaults to the interface node method")
 	requestPath := flags.String("path", "", "Request path; defaults to the interface node path")
 	priority := flags.String("priority", "", "Case priority metadata")

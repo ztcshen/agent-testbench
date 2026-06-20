@@ -79,7 +79,7 @@ func executeCaseSuiteQualityReport(ctx context.Context, bundle profile.Bundle, s
 		SourceStoreURL: sourceStoreURL,
 	}
 	if sourceStore == nil {
-		report.Warnings = append(report.Warnings, "source Store was not available; report used profile bundle only")
+		report.Warnings = append(report.Warnings, "source Store was not available; report used template package only")
 	}
 	if err := writeCaseSuiteQualityReportFiles(outputDir, &report); err != nil {
 		return caseSuiteQualityReport{}, err

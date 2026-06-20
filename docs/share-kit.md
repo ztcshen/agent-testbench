@@ -62,7 +62,7 @@ AGENT_TESTBENCH_SMOKE_STORE_DSN="mysql://user:pass@host:3306/agent_testbench_smo
 What to point out:
 
 - `/demo-gallery.html` now opens with a CLI automation animation: restore a
-  target runtime, rank risky cases, run a case, produce a workflow report,
+  target runtime, rank risky cases, run a case, produce a map atlas,
   process Evidence tasks, identify a Root cause, and publish a quality report.
 - `demo:services` starts neutral demo targets for retail fulfillment, IoT
   telemetry control, and content moderation. They are public-facing examples,
@@ -90,7 +90,7 @@ What to point out:
 讲解重点：
 
 - `/demo-gallery.html` 现在包含 CLI 自动化演示动画：恢复目标运行时、排序高风险用例、
-  执行用例、生成 workflow report、处理 Evidence tasks、定位 Root cause，并发布质量报告。
+  执行用例、生成 map atlas、处理 Evidence tasks、定位 Root cause，并发布质量报告。
 - `demo:services` 会启动零售履约、IoT 遥测控制和内容审核三个通用 demo target，
   用于公开展示，不包含私有业务流程。
 - `demo:api-case` 会启动临时本地 HTTP 服务，并把 Evidence 索引写入 active
@@ -131,7 +131,7 @@ AgentTestBench 是一个面向 Agent 的 API 工作流测试环境。它让 agen
 
 1. Open `demo-gallery.html` and let the CLI automation animation play once.
 2. Point out `environment restore`, `case suite report --view priority`, `case run`,
-   `workflow report`, `evidence tasks`, and `case suite report --view quality-report`.
+   `map atlas`, `evidence tasks`, and `case suite report --view quality-report`.
 3. Start `npm run demo:services -- --port 49190`.
 4. Run the generic API case demo or one neutral scenario case.
 5. Open the generated Evidence bundle and connect it back to the Root cause panel.
@@ -139,7 +139,7 @@ AgentTestBench 是一个面向 Agent 的 API 工作流测试环境。它让 agen
 
 1. 打开 `demo-gallery.html`，先完整播放一遍 CLI 自动化动画。
 2. 指出 `environment restore`、`case suite report --view priority`、`case run`、
-   `workflow report`、`evidence tasks` 和 `case suite report --view quality-report`。
+   `map atlas`、`evidence tasks` 和 `case suite report --view quality-report`。
 3. 启动 `npm run demo:services -- --port 49190`。
 4. 运行通用 API case demo 或一个通用场景 case。
 5. 打开生成的 Evidence，并对应到页面里的 Root cause 面板。

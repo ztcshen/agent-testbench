@@ -107,7 +107,7 @@ func runCaseSuiteReportRunsCasesByMaintenanceFilters(t *testing.T, _ string, lab
 	t.Helper()
 	serverURL := newCaseSuiteStatusServer(t)
 	fixture := writeUniqueInterfaceNodeBatchReportProfile(t)
-	runCLI(t, "config", "publish", "--from", fixture.profileDir)
+	runCLI(t, "template-package", "import", "--from", fixture.profileDir)
 
 	outputDir := filepath.Join(t.TempDir(), "suite-report")
 	report := runCaseSuiteReportJSON(t, label, serverURL, outputDir)
@@ -230,7 +230,7 @@ func runCaseSuiteCommandsUseNamedActiveStore(t *testing.T, runLabel string, labe
 	t.Helper()
 	serverURL := newCaseSuiteStatusServer(t)
 	profileDir := writeInterfaceNodeBatchReportProfile(t)
-	runCLI(t, "config", "publish", "--from", profileDir)
+	runCLI(t, "template-package", "import", "--from", profileDir)
 
 	requireCaseSuiteNamedActiveReport(t, runLabel, label, serverURL)
 	requireCaseSuiteNamedActiveVariant(t, runLabel, label, serverURL)
