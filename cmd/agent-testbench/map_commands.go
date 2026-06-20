@@ -155,7 +155,7 @@ func (input mapGraphCommandFlags) parse(args []string) error {
 
 func runMap(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("missing map command")
+		return printCommandHelp([]string{"map"})
 	}
 	switch args[0] {
 	case "import-workflows":

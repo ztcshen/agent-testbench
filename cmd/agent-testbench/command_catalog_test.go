@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 )
@@ -103,6 +104,95 @@ func TestGroupedHelpShowsAreaAndExactCommandUsage(t *testing.T) {
 	caseHelp := runCLI(t, "case", "--help")
 	if !strings.Contains(caseHelp, "Commands: case") || !strings.Contains(caseHelp, "agent-testbench case diagnose") || strings.Contains(caseHelp, "agent-testbench workflow run") {
 		t.Fatalf("case grouped help should show only case commands:\n%s", caseHelp)
+	}
+}
+
+func TestParentCommandsDefaultToCatalogNavigation(t *testing.T) {
+	tests := []struct {
+		args         []string
+		title        string
+		wantUsages   []string
+		wantHeadings []string
+		hiddenUsages []string
+	}{
+		{
+			args:       []string{"map"},
+			title:      "Commands: map",
+			wantUsages: []string{"agent-testbench map explain", "agent-testbench map run", "agent-testbench map atlas"},
+			wantHeadings: []string{
+				"Inspect:",
+				"Maintain:",
+				"Plan:",
+				"Execute:",
+				"Review:",
+			},
+		},
+		{
+			args:       []string{"case"},
+			title:      "Commands: case",
+			wantUsages: []string{"agent-testbench case discover", "agent-testbench case inspect", "agent-testbench case run", "agent-testbench case gate"},
+			hiddenUsages: []string{
+				"agent-testbench case runs",
+				"agent-testbench case evidence",
+				"agent-testbench case timing",
+				"agent-testbench case config upsert",
+				"agent-testbench case incomplete-batches",
+			},
+		},
+		{
+			args:       []string{"environment"},
+			title:      "Commands: environment",
+			wantUsages: []string{"agent-testbench environment discover", "agent-testbench environment restore", "agent-testbench environment status", "agent-testbench environment stop"},
+			hiddenUsages: []string{
+				"agent-testbench environment migration",
+				"agent-testbench environment components",
+				"agent-testbench environment repo set",
+				"agent-testbench environment startup-file put",
+			},
+		},
+	}
+	for _, tt := range tests {
+		out := runCLI(t, tt.args...)
+		if !strings.Contains(out, tt.title) {
+			t.Fatalf("%s should show parent navigation, got:\n%s", strings.Join(tt.args, " "), out)
+		}
+		for _, want := range tt.wantUsages {
+			if !strings.Contains(out, want) {
+				t.Fatalf("%s parent navigation missing %q:\n%s", strings.Join(tt.args, " "), want, out)
+			}
+		}
+		for _, heading := range tt.wantHeadings {
+			if !strings.Contains(out, heading) {
+				t.Fatalf("%s parent navigation missing heading %q:\n%s", strings.Join(tt.args, " "), heading, out)
+			}
+		}
+		for _, hidden := range tt.hiddenUsages {
+			if strings.Contains(out, hidden) {
+				t.Fatalf("%s parent navigation should hide specialized usage %q:\n%s", strings.Join(tt.args, " "), hidden, out)
+			}
+		}
+		if strings.Contains(out, "missing ") || strings.Contains(out, "unknown ") {
+			t.Fatalf("%s parent navigation should not be an error:\n%s", strings.Join(tt.args, " "), out)
+		}
+	}
+}
+
+func TestCommandUsageLinesComeFromDescriptorRegistry(t *testing.T) {
+	source, err := os.ReadFile("command_catalog.go")
+	if err != nil {
+		t.Fatalf("read command catalog source: %v", err)
+	}
+	if strings.Contains(string(source), "helpText()") || strings.Contains(string(source), "commandCatalogItemFromUsage") {
+		t.Fatalf("command catalog should be backed by descriptors instead of parsing Usage text")
+	}
+	commands := map[string]bool{}
+	for _, item := range commandCatalogForAreaWithOptions("", "", commandCatalogOptions{All: true}).Commands {
+		commands[item.Command] = true
+	}
+	for _, want := range []string{"version", "commands", "map explain", "case inspect", "environment restore"} {
+		if !commands[want] {
+			t.Fatalf("descriptor-backed catalog missing %q in %#v", want, commands)
+		}
 	}
 }
 

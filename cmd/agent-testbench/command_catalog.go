@@ -73,8 +73,8 @@ func commandCatalogForAreaWithOptions(filter string, area string, options comman
 		Commands: []commandCatalogItem{},
 	}
 	seen := map[string]int{}
-	for _, usage := range commandUsageLines() {
-		item := commandCatalogItemFromUsage(usage)
+	for _, descriptor := range commandCatalogDescriptors() {
+		item := commandCatalogItemFromDescriptor(descriptor)
 		if len(item.Path) == 0 {
 			continue
 		}
@@ -103,29 +103,16 @@ func commandCatalogForAreaWithOptions(filter string, area string, options comman
 }
 
 func commandUsageLines() []string {
-	lines := strings.Split(helpText(), "\n")
-	out := []string{}
-	inUsage := false
-	for _, line := range lines {
-		usage := strings.TrimSpace(line)
-		if usage == "Usage:" {
-			inUsage = true
-			continue
-		}
-		if inUsage && usage == "" {
-			break
-		}
-		if !inUsage {
-			continue
-		}
-		if strings.HasPrefix(usage, "agent-testbench ") {
-			out = append(out, usage)
-		}
+	descriptors := commandCatalogDescriptors()
+	out := make([]string, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		out = append(out, descriptor.Usage)
 	}
 	return out
 }
 
-func commandCatalogItemFromUsage(usage string) commandCatalogItem {
+func commandCatalogItemFromDescriptor(descriptor commandDescriptor) commandCatalogItem {
+	usage := descriptor.Usage
 	rest := strings.TrimSpace(strings.TrimPrefix(usage, "agent-testbench "))
 	fields := strings.Fields(rest)
 	path := []string{}
@@ -406,7 +393,7 @@ func printCommandCatalog(report commandCatalogReport) {
 func commandHelpText(prefix []string) (string, error) {
 	prefix = normalizeCommandHelpPrefix(prefix)
 	if len(prefix) == 0 {
-		return helpText(), nil
+		return fullHelpText(), nil
 	}
 	command := strings.Join(prefix, " ")
 	if usages := commandUsageLinesForCommand(command); len(usages) > 0 {
@@ -428,6 +415,7 @@ func commandHelpText(prefix []string) (string, error) {
 	if len(matches) == 0 {
 		return "", fmt.Errorf("unknown help target: %s", command)
 	}
+	matches = commandParentNavigationItems(command, prefix, matches)
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "Commands: %s\n\nUsage:\n", command)
 	if command == "map" && len(prefix) == 1 {
@@ -439,6 +427,27 @@ func commandHelpText(prefix []string) (string, error) {
 	}
 	fmt.Fprintf(&builder, "\nUse `agent-testbench commands --filter %q --all` for machine-readable metadata.", command)
 	return strings.TrimRight(builder.String(), "\n"), nil
+}
+
+func commandParentNavigationItems(command string, prefix []string, matches []commandCatalogItem) []commandCatalogItem {
+	if len(prefix) != 1 {
+		return matches
+	}
+	switch command {
+	case "case", "environment":
+	default:
+		return matches
+	}
+	defaults := make([]commandCatalogItem, 0, len(matches))
+	for _, item := range matches {
+		if item.surface == commandCatalogSurfaceDefault {
+			defaults = append(defaults, item)
+		}
+	}
+	if len(defaults) == 0 {
+		return matches
+	}
+	return defaults
 }
 
 func appendMapLifecycleHelp(builder *strings.Builder, matches []commandCatalogItem) {
@@ -496,10 +505,10 @@ func printCommandHelp(prefix []string) error {
 
 func commandUsageLinesForCommand(command string) []string {
 	lines := []string{}
-	for _, usage := range commandUsageLines() {
-		item := commandCatalogItemFromUsage(usage)
+	for _, descriptor := range commandCatalogDescriptors() {
+		item := commandCatalogItemFromDescriptor(descriptor)
 		if item.Command == command {
-			lines = append(lines, usage)
+			lines = append(lines, descriptor.Usage)
 		}
 	}
 	return lines

@@ -2,13 +2,12 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 )
 
 func runEnvironment(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("missing environment command")
+		return printCommandHelp([]string{"environment"})
 	}
 	switch args[0] {
 	case "register":

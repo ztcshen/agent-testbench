@@ -2,13 +2,12 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 )
 
 func runCase(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("missing case command")
+		return printCommandHelp([]string{"case"})
 	}
 	switch args[0] {
 	case "discover":
