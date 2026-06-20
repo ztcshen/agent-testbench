@@ -117,8 +117,8 @@ func commandCatalogDefaultInclusionReason(command string) string {
 		return "task intent: lets agents discover, plan, and run repeatable operator tasks"
 	case commandCatalogMapList, commandCatalogMapCoverage, commandCatalogMapDoctor, commandCatalogMapExplain, commandCatalogMapGate, commandCatalogMapRun, commandCatalogMapAtlas:
 		return "map lifecycle: inspect, plan, execute, gate, and review a test scenario map"
-	case "case discover", commandCatalogCaseSuiteReport, commandCatalogCaseInspect, commandCatalogCaseDiagnose, commandCatalogCaseGate, commandCatalogCaseRun:
-		return "case lifecycle: discover, run, inspect evidence, diagnose, and gate API or MQ cases"
+	case "case discover", commandCatalogCaseSuiteReport, commandCatalogCaseInspect, commandCatalogCaseGate, commandCatalogCaseRun:
+		return "case lifecycle: discover, run, inspect evidence, and gate API or MQ cases"
 	case commandCatalogWorkflowGate:
 		return "workflow compatibility: keeps existing workflow gates visible while map-first flows converge"
 	default:

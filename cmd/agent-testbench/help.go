@@ -16,7 +16,6 @@ Usage:
   agent-testbench task run TASK_ID [--map ID] [--store NAME_OR_DSN] [--dry-run] [--json]
   agent-testbench map --help
   agent-testbench case inspect [--view diagnose|evidence|runs|timing] [--store NAME_OR_DSN] [--case-run ID | --run ID [--case-id ID]] [--json]
-  agent-testbench case diagnose [--store NAME_OR_DSN] [--case-run ID | --run ID [--case-id ID]] [--json]
   agent-testbench case gate [--store NAME_OR_DSN] [--run ID] [--require-no-failures] [--json]
   agent-testbench workflow gate --run ID [--store NAME_OR_DSN] [--require-passed] [--json]
   agent-testbench workflow task run --workflow ID --step STEP=TASK_NAME_OR_ID [--store NAME_OR_DSN] [--json]

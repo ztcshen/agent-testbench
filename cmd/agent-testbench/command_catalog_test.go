@@ -32,8 +32,8 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	if !strings.Contains(out, "agent-testbench task suggest --goal \"maintain map\" --json") || !strings.Contains(out, "agent-testbench task plan map-maintain --map MAP_ID --json") {
 		t.Fatalf("top-level help should expose task-intent discovery:\n%s", out)
 	}
-	if !strings.Contains(out, "agent-testbench case diagnose") {
-		t.Fatalf("top-level help should expose case diagnosis:\n%s", out)
+	if !strings.Contains(out, "agent-testbench case inspect [--view diagnose|evidence|runs|timing]") {
+		t.Fatalf("top-level help should expose case diagnosis through case inspect:\n%s", out)
 	}
 	if !strings.Contains(out, "agent-testbench case gate") {
 		t.Fatalf("top-level help should expose CI-ready case gates:\n%s", out)
@@ -102,7 +102,7 @@ func TestGroupedHelpShowsAreaAndExactCommandUsage(t *testing.T) {
 	}
 
 	caseHelp := runCLI(t, "case", "--help")
-	if !strings.Contains(caseHelp, "Commands: case") || !strings.Contains(caseHelp, "agent-testbench case diagnose") || strings.Contains(caseHelp, "agent-testbench workflow run") {
+	if !strings.Contains(caseHelp, "Commands: case") || !strings.Contains(caseHelp, "agent-testbench case inspect") || strings.Contains(caseHelp, "agent-testbench workflow run") {
 		t.Fatalf("case grouped help should show only case commands:\n%s", caseHelp)
 	}
 }
@@ -137,6 +137,7 @@ func TestParentCommandsDefaultToCatalogNavigation(t *testing.T) {
 				"agent-testbench case timing",
 				"agent-testbench case config upsert",
 				"agent-testbench case incomplete-batches",
+				"agent-testbench case diagnose",
 			},
 		},
 		{
@@ -600,7 +601,7 @@ func TestCommandsDefaultCatalogHidesSpecializedCommands(t *testing.T) {
 			t.Fatalf("default catalog missing command %q in %#v", want, commands)
 		}
 	}
-	for _, hidden := range []string{"profile import", "config publish", "template-package catalog-index", "template-package import", "runtime mysql endpoints", commandCatalogExecutorPlan, "case runs", "case evidence", "case timing", "case suite coverage", "workflow acceptance start", "baseline get", "workflow report", "case suite plan", "map plan inspect"} {
+	for _, hidden := range []string{"profile import", "config publish", "template-package catalog-index", "template-package import", "runtime mysql endpoints", commandCatalogExecutorPlan, commandCatalogCaseDiagnose, "case runs", "case evidence", "case timing", "case suite coverage", "workflow acceptance start", "baseline get", "workflow report", "case suite plan", "map plan inspect"} {
 		if _, ok := commands[hidden]; ok {
 			t.Fatalf("default catalog should hide %q: %#v", hidden, commands[hidden])
 		}
@@ -630,6 +631,32 @@ func TestCommandsDefaultCatalogExplainsInclusion(t *testing.T) {
 		if reasons[command] == "" {
 			t.Fatalf("default command %q should explain inclusion: %#v", command, reasons)
 		}
+	}
+}
+
+func TestCaseDiagnoseIsCompatibilitySurfaceForInspect(t *testing.T) {
+	defaultOut := runCLI(t, "commands", "--filter", commandCatalogCaseDiagnose, "--json")
+	if strings.Contains(defaultOut, `"command": "`+commandCatalogCaseDiagnose+`"`) {
+		t.Fatalf("default catalog should not promote case diagnose after inspect gained --view diagnose:\n%s", defaultOut)
+	}
+
+	out := runCLI(t, "commands", "--all", "--filter", commandCatalogCaseDiagnose, "--json")
+	var report struct {
+		Commands []struct {
+			Command     string `json:"command"`
+			Replacement string `json:"replacement"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode case diagnose catalog: %v\n%s", err, out)
+	}
+	if len(report.Commands) != 1 || report.Commands[0].Command != commandCatalogCaseDiagnose || !strings.Contains(report.Commands[0].Replacement, "case inspect --view diagnose") {
+		t.Fatalf("case diagnose should point users to case inspect --view diagnose: %#v", report.Commands)
+	}
+
+	helpOut := runCLI(t, "case", "diagnose", "--help")
+	if !strings.Contains(helpOut, "Command: case diagnose") {
+		t.Fatalf("case diagnose should remain executable with exact help during compatibility window:\n%s", helpOut)
 	}
 }
 
