@@ -76,7 +76,7 @@ func TestTemplatePackageCommandAliasesProfileLifecycle(t *testing.T) {
 	}
 
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
-	verify := runCLI(t, "template-packages", "verify", "--template-package", "sample", "--profile-home", profileHome, "--store", "sqlite://"+dbPath)
+	verify := runCLI(t, "template-package", "verify", "--template-package", "sample", "--profile-home", profileHome, "--store", "sqlite://"+dbPath)
 	if !strings.Contains(verify, "OK: true") {
 		t.Fatalf("template-packages verify output = %q", verify)
 	}

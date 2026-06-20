@@ -20,7 +20,7 @@ func TestMapRunExecutesPlanTasksAndExplainReadsResult(t *testing.T) {
 	report := decodeMapRunCommandReport(t, runCLI(t, "map", "run", "--store", storeRef, "--map", "map.profile.flow", "--scope", "all", "--environment", "env.local", "--json"))
 	assertMapRunCommandReport(t, report)
 	assertStoredMapRunPlan(t, ctx, storeRef, report.PlanID)
-	assertMapRunExplainCommandReport(t, runCLI(t, "map", "run", "explain", "--store", storeRef, "--plan", report.PlanID, "--json"), report.PlanID)
+	assertMapRunExplainCommandReport(t, runCLI(t, "map", "plan", "inspect", "--store", storeRef, "--plan", report.PlanID, "--json"), report.PlanID)
 	assertMapRunExplainCommandReport(t, runCLI(t, "map", "plan", "inspect", "--store", storeRef, "--plan", report.PlanID, "--json"), report.PlanID)
 }
 
@@ -264,7 +264,7 @@ func TestMapRunExplainPreservesFailedStatus(t *testing.T) {
 	}
 	closeCLIStore(runtime)
 
-	out := runCLI(t, "map", "run", "explain", "--store", storeRef, "--plan", "plan.failed", "--json")
+	out := runCLI(t, "map", "plan", "inspect", "--store", storeRef, "--plan", "plan.failed", "--json")
 	var report mapRunExplainCommandReport
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode explain: %v\n%s", err, out)

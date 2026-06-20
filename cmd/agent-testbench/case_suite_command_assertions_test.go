@@ -36,7 +36,7 @@ type caseSuiteQualityReportOutput struct {
 
 func runCaseSuiteQualityReportJSON(t *testing.T, label string, profileDir string, outputDir string) caseSuiteQualityReportOutput {
 	t.Helper()
-	out := runCLI(t, "case", "suite", "quality-report", "--profile", profileDir, "--status", "active", "--output-dir", outputDir, "--json")
+	out := runCLI(t, "case", "suite", "report", "--view", "quality-report", "--profile", profileDir, "--status", "active", "--output-dir", outputDir, "--json")
 	var report caseSuiteQualityReportOutput
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode %s suite quality report json: %v\n%s", label, err, out)
@@ -80,7 +80,7 @@ func requireCaseSuiteQualityReportFiles(t *testing.T, label string, outputDir st
 func requireCaseSuiteQualityReportText(t *testing.T, label string, profileDir string) {
 	t.Helper()
 	outputDir := filepath.Join(t.TempDir(), "text-quality-report")
-	textOut := runCLI(t, "case", "suite", "quality-report", "--profile", profileDir, "--status", "active", "--output-dir", outputDir)
+	textOut := runCLI(t, "case", "suite", "report", "--view", "quality-report", "--profile", profileDir, "--status", "active", "--output-dir", outputDir)
 	for _, want := range []string{"Case Suite Quality Report", "Total Actions: 4", "Report:"} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("%s quality report text missing %q:\n%s", label, want, textOut)
@@ -129,7 +129,7 @@ func newCaseSuiteImpactReportServer(t *testing.T) string {
 func runCaseSuiteImpactReportJSON(t *testing.T, label string, fixture interfaceNodeBatchReportFixture, runLabel string, serverURL string, outputDir string) caseSuiteImpactReportOutput {
 	t.Helper()
 	out := runCLI(t,
-		"case", "suite", "impact-report",
+		"case", "suite", "report", "--view", "impact-report",
 		"--profile", fixture.profileDir,
 		"--signal", "/lookup",
 		"--tag", "smoke",

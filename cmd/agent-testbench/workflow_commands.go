@@ -42,15 +42,9 @@ func runWorkflow(args []string) error {
 		return runWorkflowGate(context.Background(), args[1:])
 	case "report":
 		return runWorkflowReport(context.Background(), args[1:])
-	case "acceptance":
-		return runWorkflowAcceptance(context.Background(), args[1:])
 	default:
 		return fmt.Errorf("unknown workflow command: %s", args[0])
 	}
-}
-
-func runWorkflowAcceptance(ctx context.Context, args []string) error {
-	return runWorkflowAcceptanceCommand(ctx, args)
 }
 
 func runWorkflowStep(ctx context.Context, args []string) error {

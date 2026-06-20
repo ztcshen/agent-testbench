@@ -134,12 +134,12 @@ func runBaselineGateCommandsSetAndGetState(t *testing.T, label string) {
 	t.Helper()
 	subjectID := uniqueTestID(t, "workflow.alpha")
 
-	out := runCLI(t, "baseline", "set", "--profile", "sample", "--subject", subjectID, "--status", "passed", "--required")
+	out := runCLI(t, "gate", "baseline", "set", "--profile", "sample", "--subject", subjectID, "--status", "passed", "--required")
 	if !strings.Contains(out, "Baseline Gate: sample "+subjectID) || !strings.Contains(out, "Status: passed") {
 		t.Fatalf("%s baseline set output = %q", label, out)
 	}
 
-	out = runCLI(t, "baseline", "get", "--profile", "sample", "--subject", subjectID)
+	out = runCLI(t, "gate", "baseline", "get", "--profile", "sample", "--subject", subjectID)
 	for _, want := range []string{"Baseline Gate: sample " + subjectID, "Status: passed", "Required: true"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("%s baseline get output missing %q: %q", label, want, out)
@@ -161,7 +161,7 @@ func runBaselineGetCommandRejectsMissingGate(t *testing.T, label string) {
 	t.Helper()
 	subjectID := uniqueTestID(t, "workflow.missing")
 
-	out := runCLIFails(t, "baseline", "get", "--profile", "sample", "--subject", subjectID)
+	out := runCLIFails(t, "gate", "baseline", "get", "--profile", "sample", "--subject", subjectID)
 	if !strings.Contains(out, "baseline gate not found") || !strings.Contains(out, "sample "+subjectID) {
 		t.Fatalf("%s missing baseline gate output = %q", label, out)
 	}

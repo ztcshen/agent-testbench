@@ -279,7 +279,7 @@ func requireCaseSuiteNamedActiveVariant(t *testing.T, runLabel string, label str
 func requireCaseSuiteNamedActiveCoverage(t *testing.T, label string) {
 	t.Helper()
 
-	coverageOut := runCLI(t, "case", "suite", "coverage", "--status", "active", "--json")
+	coverageOut := runCLI(t, "case", "suite", "report", "--view", "coverage", "--status", "active", "--json")
 	coverageViewOut := runCLI(t, "case", "suite", "report", "--view", "coverage", "--status", "active", "--json")
 	var coverage caseSuiteNamedActiveCoverage
 	if err := json.Unmarshal([]byte(coverageOut), &coverage); err != nil {
@@ -301,7 +301,7 @@ func requireCaseSuiteNamedActivePriority(t *testing.T, runLabel string, label st
 	t.Helper()
 
 	priorityOut := runCLI(t,
-		"case", "suite", "priority",
+		"case", "suite", "report", "--view", "priority",
 		"--signal", "Alpha",
 		"--limit", "2",
 		"--request-id", runLabel+"-change-001",
@@ -323,7 +323,7 @@ func requireCaseSuiteNamedActivePriority(t *testing.T, runLabel string, label st
 func requireCaseSuiteNamedActiveBrief(t *testing.T, label string, serverURL string) {
 	t.Helper()
 
-	briefOut := runCLI(t, "case", "suite", "brief", "--signal", "Alpha", "--limit", "2", "--base-url", serverURL, "--json")
+	briefOut := runCLI(t, "case", "suite", "report", "--view", "brief", "--signal", "Alpha", "--limit", "2", "--base-url", serverURL, "--json")
 	var brief caseSuiteNamedActiveBrief
 	if err := json.Unmarshal([]byte(briefOut), &brief); err != nil {
 		t.Fatalf("decode %s suite brief json: %v\n%s", label, err, briefOut)

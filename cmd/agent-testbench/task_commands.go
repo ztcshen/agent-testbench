@@ -42,10 +42,6 @@ func runTask(ctx context.Context, args []string) error {
 	}
 }
 
-func runWatch(ctx context.Context, args []string) error {
-	return runTaskWatch(ctx, args)
-}
-
 func runTaskRun(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("task run", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)

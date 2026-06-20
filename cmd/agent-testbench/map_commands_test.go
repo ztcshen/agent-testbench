@@ -235,7 +235,6 @@ func TestMapCommandsAreDiscoverable(t *testing.T) {
 		"map gate",
 		"map run",
 		"map plan inspect",
-		"map run explain",
 		"map atlas",
 	}
 	if report.Count != len(wantCommands) {

@@ -26,7 +26,6 @@ Usage:
   agent-testbench store config set NAME --url sqlite://PATH
   agent-testbench update [--repo PATH] [--remote NAME] [--branch NAME] [--release TAG|latest] [--channel main|release] [--check] [--force] [--output PATH] [--json]
   agent-testbench onboard [--repo PATH] [--store NAME] [--url DSN | --sqlite PATH] [--install-shell] [--json]
-  agent-testbench watch NAME --command COMMAND [--store NAME_OR_DSN] [--interval DURATION] [--limit N]
   agent-testbench notify test (--file PATH | --webhook URL) [--message TEXT] [--json]
 
 Recommended workflows:
@@ -49,7 +48,7 @@ Examples:
   agent-testbench commands --filter "case gate"
   agent-testbench workflow task run --workflow workflow.message-smoke --step trigger=publish-message --store local --json
   agent-testbench task run catalog-smoke --command "commands --json" --store local --json
-  agent-testbench watch catalog-smoke --command "commands --json" --store local --interval 5m --limit 3
+  agent-testbench task watch catalog-smoke --command "commands --json" --store local --interval 5m --limit 3
   agent-testbench notify test --file .runtime/notifications.jsonl --message "AgentTestBench ready"`
 
 const helpTextContent = `AgentTestBench
@@ -75,7 +74,6 @@ Usage:
   agent-testbench task status NAME [--store NAME_OR_DSN] [--json]
   agent-testbench task logs NAME [--store NAME_OR_DSN] [-n N] [--json]
   agent-testbench task stop NAME [--store NAME_OR_DSN] [--json]
-  agent-testbench watch NAME --command COMMAND [--store NAME_OR_DSN] [--interval DURATION] [--limit N] [--until always|success|failure] [--notify-file PATH] [--notify-webhook URL] [--json]
   agent-testbench notify test (--file PATH | --webhook URL) [--message TEXT] [--json]
   agent-testbench config path
   agent-testbench config show [--json]
@@ -123,7 +121,6 @@ Usage:
   agent-testbench template-package inspect --template-package PATH_OR_ID [--profile-home PATH]
   agent-testbench template-package catalog-index [--store NAME_OR_DSN] [--json]
   agent-testbench template-package verify --template-package PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--require-case-runs] [--require-workflow-runs] [--json] [--force]
-  agent-testbench template-packages verify --template-package PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--require-case-runs] [--require-workflow-runs] [--json] [--force]
   agent-testbench template-package import --from PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--json] [--audit] [--require-audit-ok] [--force]
   agent-testbench profile init --output PATH [--id ID] [--display-name NAME] [--force]
   agent-testbench profile install --from PATH [--profile-home PATH] [--force]
@@ -165,8 +162,6 @@ Usage:
   agent-testbench workflow task run --workflow ID --step STEP=TASK_NAME_OR_ID [--step STEP=TASK_NAME_OR_ID]... [--store NAME_OR_DSN] [--json]
   agent-testbench workflow gate --run ID [--store NAME_OR_DSN] [--require-passed] [--require-steps] [--require-evidence] [--json]
   agent-testbench workflow report --workflow ID [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--base-url URL] [--output-dir PATH] [--json]
-  agent-testbench workflow acceptance start --server-url URL --workflow ID --request-id ID [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
-  agent-testbench workflow acceptance report --server-url URL --run ID [--json]
   agent-testbench map import-workflows [--store NAME_OR_DSN] [--map ID] [--workflow ID] [--display-name NAME] [--description TEXT] [--json]
   agent-testbench map list [--store NAME_OR_DSN] [--json]
   agent-testbench map plans --map ID [--store NAME_OR_DSN] [--limit N] [--json]
@@ -184,12 +179,9 @@ Usage:
   agent-testbench map gate --plan PLAN_ID [--store NAME_OR_DSN] [--require-passed] [--require-tasks] [--require-evidence] [--json]
   agent-testbench map run [--map ID | --plan PLAN_ID] [--scope all|workflows|cases] [--case CASE_ID | --node NODE_ID | --path PATH_ID | --workflow WORKFLOW_ID] [--resume | --retry-failed | --skip-passed | --rerun-task TASK_ID] [--environment ENV_ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--store NAME_OR_DSN] [--json]
   agent-testbench map plan inspect --plan PLAN_ID [--store NAME_OR_DSN] [--json]
-  agent-testbench map run explain --plan PLAN_ID [--store NAME_OR_DSN] [--json]
   agent-testbench map atlas --map ID [--plan PLAN_ID] [--store NAME_OR_DSN] [--filter TEXT] [--output PATH] [--json]
   agent-testbench gate baseline get --profile ID --subject ID [--store NAME_OR_DSN]
   agent-testbench gate baseline set --profile ID --subject ID --status STATUS [--required] [--store NAME_OR_DSN]
-  agent-testbench baseline get --profile ID --subject ID [--store NAME_OR_DSN]
-  agent-testbench baseline set --profile ID --subject ID --status STATUS [--required] [--store NAME_OR_DSN]
   agent-testbench template render [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] --template ID [--fixture ID]
   agent-testbench interface-node discover [--store NAME_OR_DSN] [--filter TEXT] [--json]
   agent-testbench interface-node discover --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--filter TEXT] [--json]
@@ -201,18 +193,7 @@ Usage:
   agent-testbench interface-node case report --node ID [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
   agent-testbench case discover [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
   agent-testbench case discover --profile PATH_OR_ID --offline-template-package [--profile-home PATH] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
-  agent-testbench case suite report [--view run|coverage|stability|priority|brief|quality|quality-plan|quality-report|inspect|plan|impact|impact-report] [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
-  agent-testbench case suite coverage [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
-  agent-testbench case suite stability [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--json]
-  agent-testbench case suite priority [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
-  agent-testbench case suite brief [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--limit N] [--stability-limit N] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
-  agent-testbench case suite quality [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
-  agent-testbench case suite quality-plan [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
-  agent-testbench case suite quality-report [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--output-dir PATH] [--json]
-  agent-testbench case suite inspect [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--json]
-  agent-testbench case suite plan [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
-  agent-testbench case suite impact [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--timeout-seconds N] [--json]
-  agent-testbench case suite impact-report [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--signal TEXT] [--change TEXT] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--action ACTION] [--request-id ID] [--base-url URL] [--output-dir PATH] [--timeout-seconds N] [--json]
+  agent-testbench case suite report [--view run|coverage|stability|priority|brief|quality|quality-plan|quality-report|inspect|plan|impact|impact-report] [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--filter TEXT] [--node ID] [--tag TAG] [--status STATUS] [--owner OWNER] [--priority PRIORITY] [--signal TEXT] [--change TEXT] [--limit N] [--stability-limit N] [--action ACTION] [--request-id ID] [--base-url URL] [--evidence-dir PATH] [--output-dir PATH] [--timeout-seconds N] [--json]
   agent-testbench case runs [--store NAME_OR_DSN] [--run ID] [--json]
   agent-testbench case evidence [--store NAME_OR_DSN] [--case-run ID | --run ID [--case-id ID] [--step-id ID]] [--json]
   agent-testbench case timing [--store NAME_OR_DSN] [--kind KIND] [--max-age-minutes N] [--json]
@@ -240,7 +221,7 @@ Examples:
   agent-testbench workflow task run --workflow workflow.message-smoke --step trigger=publish-message --step postcondition=consumer-check --store local --json
   agent-testbench logs agent-testbench -n 80
   agent-testbench task run catalog-smoke --command "commands --json" --store local --json
-  agent-testbench watch catalog-smoke --command "commands --json" --store local --interval 5m --limit 3
+  agent-testbench task watch catalog-smoke --command "commands --json" --store local --interval 5m --limit 3
   agent-testbench notify test --file .runtime/notifications.jsonl --message "AgentTestBench ready"
   agent-testbench config show --json
   agent-testbench store config set local --url sqlite://$PWD/.runtime/agent-testbench-local.sqlite

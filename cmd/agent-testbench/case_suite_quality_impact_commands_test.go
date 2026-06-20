@@ -22,7 +22,7 @@ func runCaseSuiteQualityAuditsMaintainedCaseMetadata(t *testing.T, _ string, lab
 	fixture := publishUniqueCaseSuiteQualityProfile(t)
 
 	out := runCLI(t,
-		"case", "suite", "quality",
+		"case", "suite", "report", "--view", "quality",
 		"--profile", fixture.profileDir,
 		"--status", "active",
 		"--json",
@@ -84,7 +84,7 @@ func runCaseSuiteQualityAuditsMaintainedCaseMetadata(t *testing.T, _ string, lab
 	if len(report.Nodes) != 1 || report.Nodes[0].NodeID != fixture.nodeEmptyID {
 		t.Fatalf("%s suite quality nodes = %#v", label, report.Nodes)
 	}
-	textOut := runCLI(t, "case", "suite", "quality", "--profile", fixture.profileDir, "--status", "active")
+	textOut := runCLI(t, "case", "suite", "report", "--view", "quality", "--profile", fixture.profileDir, "--status", "active")
 	for _, want := range []string{"Case Suite Quality", "Incomplete: 1", fixture.nodeEmptyID, fixture.gapsCaseID} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("%s quality text missing %q:\n%s", label, want, textOut)
@@ -107,7 +107,7 @@ func runCaseSuiteQualityPlanSuggestsAuthoringActions(t *testing.T, _ string, lab
 	fixture := publishUniqueCaseSuiteQualityProfile(t)
 
 	out := runCLI(t,
-		"case", "suite", "quality-plan",
+		"case", "suite", "report", "--view", "quality-plan",
 		"--profile", fixture.profileDir,
 		"--status", "active",
 		"--json",
@@ -139,7 +139,7 @@ func runCaseSuiteQualityPlanSuggestsAuthoringActions(t *testing.T, _ string, lab
 	if len(report.Actions) != 4 || report.Actions[0].Type != "draft-case" || report.Actions[0].NodeID != fixture.nodeEmptyID || report.Actions[0].SuggestedCaseID != fixture.suggestedEmptyCaseID {
 		t.Fatalf("%s suite quality plan actions = %#v", label, report.Actions)
 	}
-	textOut := runCLI(t, "case", "suite", "quality-plan", "--profile", fixture.profileDir, "--status", "active")
+	textOut := runCLI(t, "case", "suite", "report", "--view", "quality-plan", "--profile", fixture.profileDir, "--status", "active")
 	for _, want := range []string{"Case Suite Quality Plan", "Draft Case: 1", fixture.suggestedEmptyCaseID, fixture.gapsCaseID} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("%s quality plan text missing %q:\n%s", label, want, textOut)
@@ -182,7 +182,7 @@ func runCaseSuiteImpactBuildsExecutableBatchRequest(t *testing.T, storeRef strin
 	fixture := publishCaseSuiteReadinessHistory(t, storeRef, label)
 
 	out := runCLI(t,
-		"case", "suite", "impact",
+		"case", "suite", "report", "--view", "impact",
 		"--profile", fixture.profileDir,
 		"--signal", "/alpha",
 		"--status", "active",
@@ -225,7 +225,7 @@ func runCaseSuiteImpactBuildsExecutableBatchRequest(t *testing.T, storeRef strin
 		t.Fatalf("%s impact cases = %#v", label, report.Cases)
 	}
 
-	textOut := runCLI(t, "case", "suite", "impact", "--profile", fixture.profileDir, "--signal", "/alpha", "--action", "rerun")
+	textOut := runCLI(t, "case", "suite", "report", "--view", "impact", "--profile", fixture.profileDir, "--signal", "/alpha", "--action", "rerun")
 	for _, want := range []string{"Case Suite Impact", "Selected: 1", fixture.variantCaseID} {
 		if !strings.Contains(textOut, want) {
 			t.Fatalf("%s impact text missing %q:\n%s", label, want, textOut)

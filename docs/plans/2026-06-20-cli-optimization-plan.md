@@ -17,6 +17,31 @@
 - Largest areas: case 23, environment 21, map 19, profile 17, workflow 16.
 - The first implementation should not delete commands. It should improve the recommended path and keep compatibility stable.
 
+## Follow-Up Baseline: Canonicalize Duplicate Entrypoints
+
+The first implementation reduced the default surface but left duplicate command
+paths callable. The follow-up goal is intentionally destructive: remove
+duplicate public CLI paths where one canonical command already covers the same
+capability. This follows the same shape as mature CLIs that prefer one
+object-oriented command path plus grouped help over many parallel aliases.
+
+- Baseline before this slice: `commands --all --json` exposed 163 commands.
+- Target after this slice: remove duplicate public entrypoints while preserving
+  the underlying execution capability through canonical commands.
+- Canonical substitutions:
+  - `case suite <view>` -> `case suite report --view <view>`
+  - `workflow acceptance start/report` -> `environment acceptance start/report`
+  - `baseline get/set` -> `gate baseline get/set`
+  - `map run explain` -> `map plan inspect`
+  - top-level `watch` -> `task watch`
+  - `template-packages verify` -> `template-package verify`
+- Verification:
+  - Add a regression test proving removed duplicate entrypoints no longer appear
+    in `commands --all --json`.
+  - Add a regression test proving removed root aliases fail as unknown commands.
+  - Update existing behavior tests to use the canonical commands.
+  - Run `go test ./...`, `make lint`, `make quality`, and duplicate-code scan.
+
 ## Slice Group 1: Shrink The Default Entry Surface
 
 ### Task 1: Document Daily Command Admission Rules

@@ -127,7 +127,7 @@ func TestTaskScheduleWatchStopAndRootAliases(t *testing.T) {
 	}
 
 	watchOut := runCLI(t,
-		"watch", "catalog-watch",
+		"task", "watch", "catalog-watch",
 		"--store", storeRef,
 		"--command", "commands --filter watch --json",
 		"--interval", "1ms",
@@ -193,7 +193,7 @@ func TestTaskWatchStopsWhenTaskIsPausedExternally(t *testing.T) {
 	storeRef := "sqlite://" + storePath
 
 	out := runCLI(t,
-		"watch", "stop-me",
+		"task", "watch", "stop-me",
 		"--store", storeRef,
 		"--command", "task stop stop-me --store "+storeRef+" --json",
 		"--interval", "1ms",
@@ -443,7 +443,7 @@ func TestCommandCatalogIncludesOnboardTaskWatchAndNotify(t *testing.T) {
 	for _, want := range []string{
 		"agent-testbench onboard",
 		"agent-testbench task run NAME --command",
-		"agent-testbench watch NAME --command",
+		"agent-testbench task watch catalog-smoke --command",
 		"agent-testbench notify test",
 	} {
 		if !strings.Contains(helpOut, want) {

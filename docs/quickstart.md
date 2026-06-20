@@ -112,8 +112,8 @@ run a small smoke check, and print the next commands.
 When a one-off command needs to become repeatable, use the Store-backed task
 surface. Task definitions and run history are stored in the selected SQL Store,
 so a colleague or agent can inspect status and logs later from the same Store.
-`task schedule` records schedule metadata; `task watch` and the top-level
-`watch` alias run a foreground retry loop and record each attempt.
+`task schedule` records schedule metadata; `task watch` runs a foreground retry
+loop and records each attempt.
 
 ```sh
 agent-testbench task run catalog-smoke \
@@ -128,7 +128,7 @@ agent-testbench task schedule nightly-cases \
   --store local \
   --json
 
-agent-testbench watch catalog-smoke \
+agent-testbench task watch catalog-smoke \
   --command "commands --json" \
   --store local \
   --interval 5m \

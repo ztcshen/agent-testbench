@@ -203,7 +203,7 @@ func runMapPlan(ctx context.Context, args []string) error {
 	}
 	switch args[0] {
 	case "inspect":
-		return runMapRunExplain(ctx, args[1:])
+		return runMapPlanInspect(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown map plan command: %s", args[0])
 	}

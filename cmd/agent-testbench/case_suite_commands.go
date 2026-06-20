@@ -18,28 +18,6 @@ func runCaseSuite(ctx context.Context, args []string) error {
 	switch args[0] {
 	case "report":
 		return runCaseSuiteReport(ctx, args[1:])
-	case "coverage":
-		return runCaseSuiteCoverage(ctx, args[1:])
-	case "stability":
-		return runCaseSuiteStability(ctx, args[1:])
-	case "priority":
-		return runCaseSuitePriority(ctx, args[1:])
-	case "brief":
-		return runCaseSuiteBrief(ctx, args[1:])
-	case "quality":
-		return runCaseSuiteQuality(ctx, args[1:])
-	case "quality-plan":
-		return runCaseSuiteQualityPlan(ctx, args[1:])
-	case "quality-report":
-		return runCaseSuiteQualityReport(ctx, args[1:])
-	case "inspect":
-		return runCaseSuiteInspect(ctx, args[1:])
-	case "plan":
-		return runCaseSuitePlan(ctx, args[1:])
-	case "impact":
-		return runCaseSuiteImpact(ctx, args[1:])
-	case "impact-report":
-		return runCaseSuiteImpactReport(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown case suite command: %s", args[0])
 	}

@@ -30,7 +30,6 @@ const (
 	commandCatalogMapPublish          = "map publish"
 	commandCatalogMapExplain          = "map explain"
 	commandCatalogMapPlanInspect      = "map plan inspect"
-	commandCatalogMapRunExplain       = "map run explain"
 	commandCatalogMapRun              = "map run"
 	commandCatalogMapGate             = "map gate"
 	commandCatalogMapAtlas            = "map atlas"
@@ -54,8 +53,6 @@ const (
 
 	commandCatalogStabilityStable = "stable"
 	commandCatalogStabilityLegacy = "legacy"
-
-	commandCatalogCaseSuiteCoverage = "case suite coverage"
 )
 
 func commandCatalogMapLifecycle(command string) string {
@@ -79,7 +76,6 @@ func commandCatalogMapLifecycles() map[string]string {
 		commandCatalogMapPublish:          commandCatalogLifecycleMaintain,
 		commandCatalogMapExplain:          commandCatalogLifecyclePlan,
 		commandCatalogMapPlanInspect:      commandCatalogLifecyclePlan,
-		commandCatalogMapRunExplain:       commandCatalogLifecyclePlan,
 		commandCatalogMapRun:              commandCatalogLifecycleExecute,
 		commandCatalogMapGate:             commandCatalogLifecycleExecute,
 		commandCatalogMapAtlas:            commandCatalogLifecycleReview,
@@ -108,7 +104,6 @@ func commandCatalogTaskRanks() map[string]int {
 		commandCatalogMapPlanInspect:      220,
 		commandCatalogMapRun:              230,
 		commandCatalogMapGate:             240,
-		commandCatalogMapRunExplain:       250,
 		commandCatalogMapPlans:            260,
 		commandCatalogMapAtlas:            310,
 	}
