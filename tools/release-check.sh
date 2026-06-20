@@ -253,6 +253,27 @@ if [[ "$full_release_check" -eq 1 ]]; then
   tools/guardrails/check_dependency_baseline.sh
 fi
 
+scope_touches_cli_reference() {
+  if [[ "$full_release_check" -eq 1 ]]; then
+    return 0
+  fi
+
+  local path
+  for path in "${scope_paths[@]}"; do
+    case "$path" in
+      docs/cli-reference.md|tools/docs/generate-cli-reference.mjs|tools/docs/generate-cli-reference.test.mjs|cmd/agent-testbench/*|package.json|package-lock.json)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+if scope_touches_cli_reference; then
+  step "checking generated CLI reference"
+  npm run docs:cli-reference:check
+fi
+
 step "checking source-domain guardrail"
 if [[ "$scoped_release_check" -eq 1 ]]; then
   tools/guardrails/check_no_source_domain_core.sh "${scope_paths[@]}"

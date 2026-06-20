@@ -50,10 +50,13 @@ which makes review and generated diffs predictable.
 
 2. Add services, workflows, interface nodes, cases, fixtures, and bindings.
 
-3. Audit locally:
+3. Verify locally:
 
    ```sh
-   agent-testbench template-package audit --profile /path/to/team-template-package --offline-template-package --json
+   agent-testbench template-package verify \
+     --template-package /path/to/team-template-package \
+     --store local-personal \
+     --json
    ```
 
 4. Publish and verify against a local Store:

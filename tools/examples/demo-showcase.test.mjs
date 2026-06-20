@@ -14,7 +14,7 @@ test('demo showcase publishes visual and CLI-facing assets', async () => {
 
   assert.match(docs, /Demo Gallery/);
   assert.match(docs, /agent-testbench case run/);
-  assert.match(docs, /agent-testbench workflow report/);
+  assert.match(docs, /agent-testbench map atlas/);
   assert.match(page, /CLI capability map/);
   assert.match(page, /Evidence timeline/);
   assert.match(page, /CLI automation animation/);
@@ -22,7 +22,7 @@ test('demo showcase publishes visual and CLI-facing assets', async () => {
   assert.match(page, /environment restore/);
   assert.match(page, /case suite priority/);
   assert.match(page, /case run/);
-  assert.match(page, /workflow report/);
+  assert.match(page, /map atlas/);
   assert.match(page, /evidence tasks/);
   assert.match(page, /case suite quality-report/);
   assert.match(page, /Root cause/);

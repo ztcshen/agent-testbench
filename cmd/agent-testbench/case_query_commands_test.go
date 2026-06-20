@@ -32,6 +32,13 @@ func TestCaseEvidenceCommandReadsCaseRunEvidence(t *testing.T) {
 	runCaseEvidenceCommandReadsCaseRunEvidence(t, storeRef, "PostgreSQL")
 }
 
+func TestCaseInspectEvidenceViewReadsCaseRunEvidence(t *testing.T) {
+	storeRef := configureNamedSQLiteActiveStore(t, "daily-case-inspect-evidence-sqlite")
+	fixture := seedCaseEvidenceCommandFixture(t, storeRef, "SQLite")
+	out := runCLI(t, "case", "inspect", "--view", "evidence", "--case-run", fixture.caseRunID, "--json")
+	assertCaseEvidencePayload(t, "SQLite", out, fixture)
+}
+
 func TestCaseEvidenceCommandUsesNamedMySQLActiveStore(t *testing.T) {
 	storeRef := configureNamedMySQLActiveStore(t, "daily-case-evidence-mysql")
 	runCaseEvidenceCommandReadsCaseRunEvidence(t, storeRef, "MySQL")

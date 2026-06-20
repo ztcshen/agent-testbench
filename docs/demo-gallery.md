@@ -3,7 +3,7 @@
 AgentTestBench needs demos that show the product instead of only describing it.
 This gallery gives maintainers, conference talks, README links, and social
 posts a neutral way to explain the CLI surface, Evidence model, and Store-first
-workflow.
+scenario maps.
 
 The design follows a pattern used by mature developer-tool projects: keep a
 small runnable target, show the exact command sequence, and make the produced

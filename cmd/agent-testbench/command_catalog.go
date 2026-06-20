@@ -304,8 +304,7 @@ func commandCatalogDailyCommands() map[string]bool {
 		commandCatalogMapAtlas:           true,
 		"case discover":                  true,
 		"case suite report":              true,
-		"case runs":                      true,
-		"case evidence":                  true,
+		commandCatalogCaseInspect:        true,
 		commandCatalogCaseDiagnose:       true,
 		commandCatalogCaseGate:           true,
 		commandCatalogCaseRun:            true,
@@ -338,6 +337,9 @@ func commandCatalogAdvancedReplacements() map[string]string {
 		"workflow run":              "agent-testbench map plan inspect --plan PLAN_ID",
 		"workflow step":             "agent-testbench map plan inspect --plan PLAN_ID",
 		"workflow latest-step":      "agent-testbench map plan inspect --plan PLAN_ID",
+		"case runs":                 "agent-testbench case inspect --view runs",
+		"case evidence":             "agent-testbench case inspect --view evidence",
+		"case timing":               "agent-testbench case inspect --view timing",
 		"workflow task run":         "agent-testbench task run NAME --command COMMAND or agent-testbench map run --plan PLAN_ID --rerun-task TASK_ID",
 	}
 }
@@ -393,7 +395,7 @@ func commandCatalogTaskTags(command string) []string {
 		return []string{"execute map", "map execution"}
 	case "environment restore", "environment status", "environment stop", "environment service restart", "environment discover", "environment inspect":
 		return []string{"restore environment", "environment operations"}
-	case "case diagnose", "case evidence", "case gate", "workflow gate", "evidence list", "evidence tasks", cliCommandDoctor:
+	case commandCatalogCaseInspect, "case diagnose", "case evidence", "case gate", "workflow gate", "evidence list", "evidence tasks", cliCommandDoctor:
 		return []string{"diagnose evidence", "evidence diagnosis"}
 	default:
 		return nil

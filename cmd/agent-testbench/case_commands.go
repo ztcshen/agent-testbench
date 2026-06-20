@@ -17,6 +17,8 @@ func runCase(ctx context.Context, args []string) error {
 		return runCaseSuite(ctx, args[1:])
 	case "run":
 		return runCaseRun(ctx, args[1:])
+	case "inspect":
+		return runCaseInspect(ctx, args[1:])
 	case "runs":
 		return runCaseRuns(ctx, args[1:])
 	case "evidence":

@@ -279,7 +279,7 @@ func builtInTaskDescriptors() []builtInTaskDescriptor {
 			},
 			Steps: []builtInTaskStepPattern{
 				{ID: "diagnose", Title: "Diagnose case run", Command: "case diagnose --case-run {{caseRun}}", ReadOnly: true},
-				{ID: builtInTaskStepEvidence, Title: "Inspect case evidence", Command: "case evidence --case-run {{caseRun}}", ReadOnly: true},
+				{ID: builtInTaskStepEvidence, Title: "Inspect case evidence", Command: "case inspect --view evidence --case-run {{caseRun}}", ReadOnly: true},
 			},
 		},
 	}

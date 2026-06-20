@@ -526,7 +526,7 @@ func workflowGateNextActions(report workflowGateReport, options workflowGateOpti
 				break
 			}
 			if item.CaseRunID != "" {
-				actions = append(actions, "agent-testbench case evidence --case-run "+commandline.ShellQuote(item.CaseRunID)+" --json")
+				actions = append(actions, "agent-testbench case inspect --view evidence --case-run "+commandline.ShellQuote(item.CaseRunID)+" --json")
 				continue
 			}
 			if item.StepID != "" {

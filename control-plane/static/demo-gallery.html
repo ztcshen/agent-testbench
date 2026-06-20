@@ -485,13 +485,13 @@
       <section class="top">
         <div class="panel intro">
           <span class="eyebrow">AgentTestBench demo gallery</span>
-          <h1>See the CLI path from target discovery to Evidence-rich reports.</h1>
-          <p class="lead">This page is a visual walkthrough for the public project: neutral demo services, Store-first commands, workflow reports, and reviewable Evidence without private business data.</p>
+          <h1>See the CLI path from target discovery to Evidence-rich scenario maps.</h1>
+          <p class="lead">This page is a visual walkthrough for the public project: neutral demo services, Store-first commands, scenario maps, and reviewable Evidence without private business data.</p>
         </div>
         <div class="panel terminal">
           <pre><strong>$</strong> agent-testbench case discover --filter retail --json
 <strong>$</strong> agent-testbench case run --case create-order.json --base-url :49190 --json
-<strong>$</strong> agent-testbench workflow report --workflow workflow.retail.fulfillment --json
+<strong>$</strong> agent-testbench map atlas --map map.retail.fulfillment --json
 <strong>$</strong> agent-testbench evidence list --run retail-demo-run --json</pre>
         </div>
       </section>
@@ -511,7 +511,7 @@
             <button class="runbook-step is-active" type="button" data-step="0"><span>01</span><div><b>Restore</b><small>environment restore</small></div></button>
             <button class="runbook-step" type="button" data-step="1"><span>02</span><div><b>Prioritize</b><small>case suite priority</small></div></button>
             <button class="runbook-step" type="button" data-step="2"><span>03</span><div><b>Execute</b><small>case run</small></div></button>
-            <button class="runbook-step" type="button" data-step="3"><span>04</span><div><b>Report</b><small>workflow report</small></div></button>
+            <button class="runbook-step" type="button" data-step="3"><span>04</span><div><b>Map</b><small>map atlas</small></div></button>
             <button class="runbook-step" type="button" data-step="4"><span>05</span><div><b>Analyze</b><small>evidence tasks</small></div></button>
             <button class="runbook-step" type="button" data-step="5"><span>06</span><div><b>Publish</b><small>case suite quality-report</small></div></button>
           </div>
@@ -633,11 +633,11 @@ Environment Evidence indexed: startup logs, ports, topology shell</pre>
             rootCause: 'Risk scorer returned review after payment latency exceeded the configured budget.'
           },
           {
-            command: 'agent-testbench workflow report --workflow workflow.retail.fulfillment --base-url http://127.0.0.1:49190 --store local-personal --html --json',
+            command: 'agent-testbench map atlas --map map.retail.fulfillment --store local-personal --json',
             log: [
-              'workflow plan expanded: checkout -> payment -> risk -> warehouse -> carrier',
+              'scenario map expanded: checkout -> payment -> risk -> warehouse -> carrier',
               'step 3 failed; downstream steps are marked blocked with Evidence links',
-              'HTML and JSON reports include timing, status, and artifact manifest'
+              'atlas view links the failing edge to timing, status, and Evidence'
             ],
             states: { store: 'ok', checkout: 'ok', payment: 'warn', risk: 'fail', warehouse: 'warn', carrier: 'warn' },
             labels: { checkout: 'passed', payment: 'budget warn', risk: 'failed', warehouse: 'blocked', carrier: 'blocked' },

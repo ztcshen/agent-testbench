@@ -183,6 +183,7 @@ Core packages stay generic:
 | Page | What it covers |
 | --- | --- |
 | [Quick Start](docs/quickstart.md) | First local run, Store setup, and workbench launch direction. |
+| [CLI Reference](docs/cli-reference.md) | Generated command catalog, daily surface, advanced entries, replacements, and usage. |
 | [Demo Gallery](docs/demo-gallery.md) | Visual CLI capability tour, neutral demo services, and exposure plan. |
 | [Backend Capabilities](docs/backend-capabilities.md) | Store, Environment Catalog, clean-machine restore, discovery, execution, reports, Evidence, APIs, and release guardrails. |
 | [Share Kit](docs/share-kit.md) | Project tagline, short descriptions, demo script, and announcement snippets for sharing the project. |

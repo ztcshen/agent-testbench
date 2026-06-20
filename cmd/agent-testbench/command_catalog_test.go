@@ -112,7 +112,7 @@ func TestTemplatePackageHelpUsesCanonicalCatalog(t *testing.T) {
 		t.Fatalf("template-package init help should be catalog-backed:\n%s", initHelp)
 	}
 	if strings.Contains(initHelp, "unknown help target") {
-		t.Fatalf("template-package init help should not fail before dispatcher fallback:\n%s", initHelp)
+		t.Fatalf("canonical template-package help should not hit dispatcher path:\n%s", initHelp)
 	}
 
 	verifyHelp := runCLI(t, "template-package", "verify", "--help")
@@ -272,6 +272,10 @@ func TestCommandsAllOmitsDuplicateCompatibilityEntrypoints(t *testing.T) {
 		"case batch start",
 		"case batch report",
 		"workflow report",
+		"workflow runs",
+		"workflow run",
+		"workflow step",
+		"workflow latest-step",
 	} {
 		if commands[duplicate] {
 			t.Fatalf("historical compatibility entrypoint %q should not remain in catalog", duplicate)
@@ -506,12 +510,12 @@ func TestCommandsDefaultSurfaceShowsDailyCommandsOnly(t *testing.T) {
 	if report.Count > 30 {
 		t.Fatalf("default command catalog should stay at or below the first target of 30 commands, got %d", report.Count)
 	}
-	for _, want := range []string{"status", "doctor", "store current", "environment restore", "task suggest", "task plan", "map explain", "map run", "case run", "case suite report"} {
+	for _, want := range []string{"status", "doctor", "store current", "environment restore", "task suggest", "task plan", "map explain", "map run", "case inspect", "case run", "case suite report"} {
 		if _, ok := commands[want]; !ok {
 			t.Fatalf("default catalog missing daily command %q in %#v", want, commands)
 		}
 	}
-	for _, hidden := range []string{"profile import", "config publish", "template-package catalog-index", "template-package import", "runtime mysql endpoints", commandCatalogExecutorPlan, "case suite coverage", "workflow acceptance start", "baseline get", "workflow report", "case suite plan", "map plan inspect"} {
+	for _, hidden := range []string{"profile import", "config publish", "template-package catalog-index", "template-package import", "runtime mysql endpoints", commandCatalogExecutorPlan, "case runs", "case evidence", "case timing", "case suite coverage", "workflow acceptance start", "baseline get", "workflow report", "case suite plan", "map plan inspect"} {
 		if _, ok := commands[hidden]; ok {
 			t.Fatalf("default catalog should hide %q: %#v", hidden, commands[hidden])
 		}

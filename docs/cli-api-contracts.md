@@ -54,11 +54,11 @@ Verification baseline: this page was checked against `cmd/agent-testbench/main.g
 | Template package lifecycle | `template-package init`, `template-package install`, `template-package pack`, `template-package list`, `template-package inspect`, `template-package export`, `template-package catalog list --active`, `template-package catalog list`, `template-package catalog restore`, `template-package verify`, `template-package import` |
 | Executor planning | `executor plan` |
 | Evidence | `evidence import`, `evidence list`, `evidence tasks`, `replay evidence` |
-| Workflow | `workflow discover`, `workflow plan`, `workflow audit`, `workflow runs`, `workflow run`, `workflow step`, `workflow latest-step`, `workflow task run`, `workflow gate` |
+| Workflow | `workflow discover`, `workflow plan`, `workflow audit`, `workflow task run`, `workflow gate` |
 | Baseline | `gate baseline get`, `gate baseline set` |
 | Template | `template render` |
 | Interface node | `interface-node discover`, `interface-node case audit`, `interface-node case draft`, `interface-node case apply`, `interface-node case report` |
-| API case | `case discover`, `case run`, `case runs`, `case evidence`, `case diagnose`, `case gate`, `case timing`, `case config upsert`, `case incomplete-batches` |
+| API case | `case discover`, `case run`, `case inspect`, `case diagnose`, `case gate`, `case config upsert`, `case incomplete-batches` |
 | Case suite | `case suite report`, `case suite report --view coverage`, `case suite report --view stability`, `case suite report --view priority`, `case suite report --view brief`, `case suite report --view quality`, `case suite report --view quality-plan`, `case suite report --view quality-report`, `case suite report --view inspect`, `case suite report --view plan`, `case suite report --view impact`, `case suite report --view impact-report` |
 | Server | `serve` |
 
@@ -75,7 +75,7 @@ agent-testbench doctor --fix
 agent-testbench update --check --channel release --json
 agent-testbench update --release latest
 agent-testbench commands --area workflow --filter "gate"
-agent-testbench commands --all --filter "profile import"
+agent-testbench commands --all --filter "template-package import"
 agent-testbench config show --json
 agent-testbench logs agent-testbench -n 80
 agent-testbench task run catalog-smoke --command "commands --json" --store local --json
@@ -306,11 +306,11 @@ a Store diff summary for API cases and per-node case counts; `--audit` and
 | Single case run by file | `case run --case PATH` | `/api/cases/run` with `casePath` | Paired for live execution. CLI writes Store records through the active Store or `--store NAME_OR_DSN`; local and remote SQL Stores use the same command. CLI also supports `--dry-run` as a local no-side-effect preflight that validates the file case, applies overrides, builds the planned request URL, and reports planned Evidence without sending HTTP or writing Store records. |
 | Single case run by catalog id | `case run --case-id ID` | `/api/test-kit/run` with `caseId` | Paired. CLI and API execute the Store catalog case through the same test-kit runner, write run/case/Evidence indexes to the active Store, and accept the same command shape for local and remote SQL Stores. |
 | Case batch run | `case suite report`, `interface-node case report` | `/api/cases/batch-runs`, `/api/test-kit/run-batch` | Partial. API keeps async batch execution; CLI exposes higher-level suite/interface report generators instead of a separate case-batch command pair. |
-| Case run list | `case runs` | `/api/case/runs` | Paired. CLI reads Store runs, API case runs, and Evidence counts through the active Store or `--store NAME_OR_DSN`. |
-| Case evidence detail | `case evidence` | `/api/case/evidence`, `/api/case-run/evidence` | Paired. CLI reuses the control-plane case Evidence payload and accepts active Store or `--store NAME_OR_DSN`. |
+| Case run list | `case inspect --view runs` | `/api/case/runs` | Paired. CLI reads Store runs, API case runs, and Evidence counts through the active Store or `--store NAME_OR_DSN`. |
+| Case evidence detail | `case inspect --view evidence` | `/api/case/evidence`, `/api/case-run/evidence` | Paired. CLI reuses the control-plane case Evidence payload and accepts active Store or `--store NAME_OR_DSN`. |
 | Case diagnosis | `case diagnose` | None | CLI-only Store-first triage. It reads case Evidence by `--case-run` or `--run`, parses assertion and response artifacts when available, classifies the failure, emits compact request/response/assertion/log/dependency signals, attempts bounded runtime-log collection for failed workflow steps when topology/correlation data exists, and suggests the next reproducible CLI action. |
 | Case quality gate | `case gate` | None | CLI-only CI gate. It reads Store case-run facts and Evidence indexes, reports counts, failed case runs, missing Evidence, gate booleans, and next actions, then exits non-zero when selected requirements such as `--require-no-failures`, `--require-evidence`, or `--min-passed` are not met. |
-| Case timing | `case timing` | `/api/case/timing` | Paired. CLI reuses the control-plane timing summary payload and accepts active Store or `--store NAME_OR_DSN`. |
+| Case timing | `case inspect --view timing` | `/api/case/timing` | Paired. CLI reuses the control-plane timing summary payload and accepts active Store or `--store NAME_OR_DSN`. |
 | Incomplete case batches | `case incomplete-batches` | `/api/case/incomplete-batches` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
 | Suite coverage | `case suite report --view coverage` | `/api/case/suite-coverage` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
 | Suite inspection | `case suite report --view inspect` | `/api/case/suite-inspection` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
@@ -326,7 +326,7 @@ a Store diff summary for API cases and per-node case counts; `--audit` and
 | Workflow discovery | `workflow discover` | `/api/workflows` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`; local and remote SQL Stores use the same command. API and CLI both expose filtered workflow discovery with Store catalog precedence. |
 | Workflow plan | `workflow plan` | `/api/workflow-plan` | Paired. CLI and API share the same workflow-bound step payload; CLI accepts active Store or `--store NAME_OR_DSN`. |
 | Workflow audit | `workflow audit` | `/api/workflow-audit` | Paired. CLI accepts active Store or `--store NAME_OR_DSN`. |
-| Workflow run lookup | `workflow runs`, `workflow run`, `workflow step`, `workflow latest-step` | `/api/runs`, `/api/workflow-runs/*` | Paired for run list/detail and step-level lookup. CLI accepts active Store or `--store NAME_OR_DSN`; local and remote SQL Stores use the same command. |
+| Workflow run lookup | `map plans`, `map plan inspect` | `/api/runs`, `/api/workflow-runs/*` | Map-first CLI inspection reads saved map plans and task details; raw workflow-run APIs remain available to the control plane for run list/detail and step-level lookup. |
 | Workflow quality gate | `workflow gate` | None | CLI-only orchestration gate. It reads a persisted workflow run, summary steps, linked case runs, and indexed Evidence, then reports run status, step status counts, failed steps, missing Evidence, next actions, and exits non-zero when selected requirements such as `--require-passed`, `--require-steps`, or `--require-evidence` are not met. |
 | Trace topology collection | `trace topology collect` | `/api/trace-topology/collect` | Paired. CLI and API share the same SkyWalking GraphQL collection path. CLI writes topology rows through active Store or `--store NAME_OR_DSN`. Real topology proof requires a configured SkyWalking GraphQL endpoint and real trace ids. When the provider is missing or the trace cannot be queried, both surfaces must expose unavailable, failed, or skipped collection status instead of a generated topology. |
 | Replay evidence shell | `replay evidence` | `/api/replay/evidence` | Paired. CLI and API share the same replay shell payload. |

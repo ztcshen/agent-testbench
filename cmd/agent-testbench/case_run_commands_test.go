@@ -228,7 +228,7 @@ func TestCaseDiagnoseCommandSummarizesFailedCaseRunEvidence(t *testing.T) {
 		t.Fatalf("diagnosis signals missing http.status=400: %#v", report.Signals)
 	}
 	joinedActions := strings.Join(report.NextActions, "\n")
-	if !strings.Contains(joinedActions, "agent-testbench case evidence --case-run case-run-diagnose.case") {
+	if !strings.Contains(joinedActions, "agent-testbench case inspect --view evidence --case-run case-run-diagnose.case") {
 		t.Fatalf("next actions = %#v", report.NextActions)
 	}
 }
