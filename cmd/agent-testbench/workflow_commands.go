@@ -40,8 +40,6 @@ func runWorkflow(args []string) error {
 		return runWorkflowTask(context.Background(), args[1:])
 	case "gate":
 		return runWorkflowGate(context.Background(), args[1:])
-	case "report":
-		return runWorkflowReport(context.Background(), args[1:])
 	default:
 		return fmt.Errorf("unknown workflow command: %s", args[0])
 	}

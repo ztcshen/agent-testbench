@@ -17,7 +17,7 @@ func TestSandboxStartSelectedServiceFailsWhenStartupCommandMissing(t *testing.T)
 		`"failed": 1`,
 		`"id": "documented-service"`,
 		sandboxStartupCommandEmpty,
-		"sandbox service register --id documented-service --startup-command",
+		"publish an updated template package for service documented-service",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("selected service missing startup command output should contain %q:\n%s", want, out)

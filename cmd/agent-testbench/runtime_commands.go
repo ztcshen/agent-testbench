@@ -46,8 +46,8 @@ func runExecutor(ctx context.Context, args []string) error {
 func runExecutorPlan(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("executor plan", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
-	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	profilePath := flags.String("profile", "", "Template package path or installed template package id")
+	profileHome := flags.String("profile-home", "", "Installed template package home")
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")

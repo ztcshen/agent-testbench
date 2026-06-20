@@ -21,8 +21,8 @@ func TestProfileInstallCommandCopiesBundleIntoProfileHome(t *testing.T) {
 	)
 	profileHome := filepath.Join(t.TempDir(), "profile-home")
 
-	out := runCLI(t, "profile", "install", "--from", sourceDir, "--profile-home", profileHome)
-	if !strings.Contains(out, "Installed profile: sample") || !strings.Contains(out, filepath.Join(profileHome, "sample")) {
+	out := runCLI(t, "template-package", "install", "--from", sourceDir, "--profile-home", profileHome)
+	if !strings.Contains(out, "Installed template package: sample") || !strings.Contains(out, filepath.Join(profileHome, "sample")) {
 		t.Fatalf("profile install output = %q", out)
 	}
 	for _, path := range []string{"profile.json", filepath.Join("workflows", "workflow.json"), filepath.Join("cases", "case.json")} {
@@ -42,14 +42,14 @@ func TestProfileInstallCommandCopiesBundleIntoProfileHome(t *testing.T) {
 		}
 	}
 
-	inspect := runCLI(t, "profile", "inspect", "--profile", "sample", "--profile-home", profileHome)
-	if !strings.Contains(inspect, "Profile: sample") || !strings.Contains(inspect, "Workflows: 1") {
+	inspect := runCLI(t, "template-package", "inspect", "--profile", "sample", "--profile-home", profileHome)
+	if !strings.Contains(inspect, "Template Package: sample") || !strings.Contains(inspect, "Workflows: 1") {
 		t.Fatalf("inspect installed profile = %q", inspect)
 	}
 
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
-	verify := runCLI(t, "profile", "verify", "--profile", "sample", "--profile-home", profileHome, "--store", "sqlite://"+dbPath)
-	if !strings.Contains(verify, "Profile Verification: sample") || !strings.Contains(verify, "OK: true") {
+	verify := runCLI(t, "template-package", "verify", "--profile", "sample", "--profile-home", profileHome, "--store", "sqlite://"+dbPath)
+	if !strings.Contains(verify, "Template Package Verification: sample") || !strings.Contains(verify, "OK: true") {
 		t.Fatalf("verify installed profile = %q", verify)
 	}
 }
@@ -64,7 +64,7 @@ func TestProfilePackCommandWritesCleanArchive(t *testing.T) {
 	)
 	outputPath := filepath.Join(t.TempDir(), "sample-profile.tar.gz")
 
-	out := runCLI(t, "profile", "pack", "--profile", sourceDir, "--output", outputPath, "--json")
+	out := runCLI(t, "template-package", "pack", "--profile", sourceDir, "--output", outputPath, "--json")
 
 	var report struct {
 		ID           string `json:"id"`
@@ -109,12 +109,12 @@ func TestProfilePackCommandResolvesInstalledProfileID(t *testing.T) {
 	sourceDir := filepath.Join(t.TempDir(), "source-profile")
 	writeWorkflowProfile(t, sourceDir)
 	profileHome := filepath.Join(t.TempDir(), "profile-home")
-	runCLI(t, "profile", "install", "--from", sourceDir, "--profile-home", profileHome)
+	runCLI(t, "template-package", "install", "--from", sourceDir, "--profile-home", profileHome)
 	outputPath := filepath.Join(t.TempDir(), "installed-profile.tar.gz")
 
-	out := runCLI(t, "profile", "pack", "--profile", "sample", "--profile-home", profileHome, "--output", outputPath)
+	out := runCLI(t, "template-package", "pack", "--profile", "sample", "--profile-home", profileHome, "--output", outputPath)
 
-	if !strings.Contains(out, "Packed profile: sample") || !strings.Contains(out, outputPath) {
+	if !strings.Contains(out, "Packed template package: sample") || !strings.Contains(out, outputPath) {
 		t.Fatalf("profile pack installed output = %q", out)
 	}
 	if !containsString(readTarGZEntries(t, outputPath), "sample/profile.json") {
@@ -126,10 +126,10 @@ func TestProfileInstallCommandAcceptsPackedArchive(t *testing.T) {
 	sourceDir := filepath.Join(t.TempDir(), "source-profile")
 	writeWorkflowProfile(t, sourceDir)
 	archivePath := filepath.Join(t.TempDir(), "sample-profile.tar.gz")
-	runCLI(t, "profile", "pack", "--profile", sourceDir, "--output", archivePath)
+	runCLI(t, "template-package", "pack", "--profile", sourceDir, "--output", archivePath)
 	profileHome := filepath.Join(t.TempDir(), "profile-home")
 
-	out := runCLI(t, "profile", "install", "--from", archivePath, "--profile-home", profileHome, "--json")
+	out := runCLI(t, "template-package", "install", "--from", archivePath, "--profile-home", profileHome, "--json")
 
 	var report struct {
 		ID         string `json:"id"`
@@ -147,8 +147,8 @@ func TestProfileInstallCommandAcceptsPackedArchive(t *testing.T) {
 		t.Fatalf("installed archive manifest missing: %v", err)
 	}
 	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
-	verify := runCLI(t, "profile", "verify", "--profile", "sample", "--profile-home", profileHome, "--store", "sqlite://"+dbPath)
-	if !strings.Contains(verify, "Profile Verification: sample") || !strings.Contains(verify, "OK: true") {
+	verify := runCLI(t, "template-package", "verify", "--profile", "sample", "--profile-home", profileHome, "--store", "sqlite://"+dbPath)
+	if !strings.Contains(verify, "Template Package Verification: sample") || !strings.Contains(verify, "OK: true") {
 		t.Fatalf("verify installed archive profile = %q", verify)
 	}
 }
@@ -161,7 +161,7 @@ func TestProfileInstallCommandRejectsUnsafeArchivePath(t *testing.T) {
 	})
 	profileHome := filepath.Join(t.TempDir(), "profile-home")
 
-	out := runCLIFails(t, "profile", "install", "--from", archivePath, "--profile-home", profileHome)
+	out := runCLIFails(t, "template-package", "install", "--from", archivePath, "--profile-home", profileHome)
 
 	if !strings.Contains(out, "escapes profile root") {
 		t.Fatalf("unsafe archive output = %q", out)
@@ -175,9 +175,9 @@ func TestProfileListCommandReportsInstalledBundles(t *testing.T) {
 	sourceDir := filepath.Join(t.TempDir(), "source-profile")
 	writeWorkflowProfile(t, sourceDir)
 	profileHome := filepath.Join(t.TempDir(), "profile-home")
-	runCLI(t, "profile", "install", "--from", sourceDir, "--profile-home", profileHome)
+	runCLI(t, "template-package", "install", "--from", sourceDir, "--profile-home", profileHome)
 
-	out := runCLI(t, "profile", "list", "--profile-home", profileHome, "--json")
+	out := runCLI(t, "template-package", "list", "--profile-home", profileHome, "--json")
 	var report struct {
 		ProfileHome string `json:"profileHome"`
 		Profiles    []struct {
@@ -216,7 +216,7 @@ func TestProfileListCommandReportsInvalidInstalledBundle(t *testing.T) {
 		t.Fatalf("write broken profile: %v", err)
 	}
 
-	out := runCLI(t, "profile", "list", "--profile-home", profileHome, "--json")
+	out := runCLI(t, "template-package", "list", "--profile-home", profileHome, "--json")
 	var report struct {
 		Profiles []struct {
 			ID    string `json:"id"`

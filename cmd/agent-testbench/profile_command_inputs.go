@@ -29,8 +29,8 @@ func parseProfileDiscoveryCommandOptions(command string, filterHelp string, args
 func parseProfileDiscoveryCommandOptionsWith(command string, filterHelp string, args []string, bindExtra func(*flag.FlagSet) func(*profileDiscoveryCommandOptions)) (profileDiscoveryCommandOptions, error) {
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
-	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	profilePath := flags.String("profile", "", "Template package path or installed template package id")
+	profileHome := flags.String("profile-home", "", "Installed template package home")
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
 	filter := flags.String("filter", "", filterHelp)
@@ -80,8 +80,8 @@ type profileWorkflowStoreCommandOptions struct {
 func parseProfileWorkflowStoreCommandOptions(command string, args []string, requireWorkflow bool) (profileWorkflowStoreCommandOptions, error) {
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
-	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	profilePath := flags.String("profile", "", "Template package path or installed template package id")
+	profileHome := flags.String("profile-home", "", "Installed template package home")
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
 	workflowID := flags.String("workflow", "", "Workflow id")

@@ -57,7 +57,7 @@ func writeCaseApplyBundle(path string, bundle interfaceNodeCaseApplyRequest) err
 func runInterfaceNodeCaseApply(args []string) error {
 	flags := flag.NewFlagSet("interface-node case apply", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path")
+	profilePath := flags.String("profile", "", "Template package path")
 	requestPath := flags.String("file", "", "Case execution config bundle")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
@@ -239,7 +239,7 @@ func safeBundleRelativePath(value string) (string, error) {
 		return "", errors.New("case file path is required")
 	}
 	if filepath.IsAbs(value) || strings.HasPrefix(value, "../") || strings.Contains(value, "/../") || value == ".." {
-		return "", fmt.Errorf("case file path %q must stay inside the profile bundle", value)
+		return "", fmt.Errorf("case file path %q must stay inside the template package", value)
 	}
 	return filepath.FromSlash(value), nil
 }

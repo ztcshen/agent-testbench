@@ -31,7 +31,7 @@ func TestProfileExportWritesActiveStoreCatalogAsProfileBundle(t *testing.T) {
 	seedProfileExportCatalog(t, storePath)
 
 	outputDir := filepath.Join(t.TempDir(), "exported-profile")
-	report := runProfileExportJSON(t, storePath, outputDir)
+	report := runTemplatePackageExportJSON(t, storePath, outputDir)
 	requireProfileExportReport(t, report, outputDir)
 	requireExportedProfileBundle(t, outputDir)
 }
@@ -87,10 +87,10 @@ func seedProfileExportCatalog(t *testing.T, storePath string) {
 	}
 }
 
-func runProfileExportJSON(t *testing.T, storePath string, outputDir string) profileExportCommandReport {
+func runTemplatePackageExportJSON(t *testing.T, storePath string, outputDir string) profileExportCommandReport {
 	t.Helper()
 
-	out := runCLI(t, "profile", "export", "--store", "sqlite://"+storePath, "--output", outputDir, "--json")
+	out := runCLI(t, "template-package", "export", "--store", "sqlite://"+storePath, "--output", outputDir, "--json")
 	var report profileExportCommandReport
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode export report: %v\n%s", err, out)

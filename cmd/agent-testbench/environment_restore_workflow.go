@@ -17,9 +17,15 @@ type environmentRestoreWorkflowRun struct {
 	RunID      string                               `json:"runId,omitempty"`
 	OutputDir  string                               `json:"outputDir,omitempty"`
 	ReportURL  string                               `json:"reportUrl,omitempty"`
-	Counts     workflowCaseReportCounts             `json:"counts,omitempty"`
+	Counts     environmentRestoreWorkflowCounts     `json:"counts,omitempty"`
 	Acceptance environmentRestoreWorkflowAcceptance `json:"acceptance,omitempty"`
 	Error      string                               `json:"error,omitempty"`
+}
+
+type environmentRestoreWorkflowCounts struct {
+	Total  int `json:"total"`
+	Passed int `json:"passed"`
+	Failed int `json:"failed"`
 }
 
 type environmentRestoreWorkflowAcceptance struct {
@@ -96,7 +102,7 @@ func environmentRestoreRunWorkflow(ctx context.Context, workflowID string, works
 	}
 	report.Acceptance = environmentRestoreAcceptanceFromPayload(finalPayload["acceptance"])
 	report.WorkflowID = firstNonEmpty(report.Acceptance.WorkflowID, workflowID)
-	report.Counts = workflowCaseReportCounts{
+	report.Counts = environmentRestoreWorkflowCounts{
 		Total:  report.Acceptance.ExpectedSteps,
 		Passed: report.Acceptance.PassedSteps,
 		Failed: report.Acceptance.FailedSteps,

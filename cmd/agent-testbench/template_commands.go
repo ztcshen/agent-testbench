@@ -28,8 +28,8 @@ func runTemplate(args []string) error {
 func runTemplateRender(args []string) error {
 	flags := flag.NewFlagSet("template render", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
-	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	profilePath := flags.String("profile", "", "Template package path or installed template package id")
+	profileHome := flags.String("profile-home", "", "Installed template package home")
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
 	templateID := flags.String("template", "", "Request template id")

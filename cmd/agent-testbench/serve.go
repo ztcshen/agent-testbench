@@ -58,8 +58,8 @@ func serveHandlerFromArgs(args []string) (http.Handler, func() error, error) {
 func serveConfigFromArgs(args []string) (serveConfig, error) {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path or installed profile id")
-	profileHome := flags.String("profile-home", "", "Installed profile bundle home")
+	profilePath := flags.String("profile", "", "Template package path or installed template package id")
+	profileHome := flags.String("profile-home", "", "Installed template package home")
 	host := flags.String("host", "127.0.0.1", "HTTP host")
 	port := flags.Int("port", 18191, "HTTP port")
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")

@@ -103,7 +103,7 @@ func runSandboxServiceStartup(ctx context.Context, service store.CatalogService,
 	if command == "" {
 		if strings.TrimSpace(requiredReason) != "" {
 			result.ExitCode = 1
-			result.Error = fmt.Sprintf("%s (%s); repair with: agent-testbench sandbox service register --id %s --startup-command '...'", sandboxStartupCommandEmpty, requiredReason, service.ID)
+			result.Error = fmt.Sprintf("%s (%s); repair the environment component or publish an updated template package for service %s", sandboxStartupCommandEmpty, requiredReason, service.ID)
 			return result
 		}
 		result.Skipped = true

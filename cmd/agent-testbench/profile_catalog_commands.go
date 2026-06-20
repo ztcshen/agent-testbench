@@ -12,22 +12,22 @@ import (
 	"agent-testbench/internal/store"
 )
 
-func runProfileCatalog(ctx context.Context, args []string) error {
+func runTemplatePackageCatalog(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("missing profile catalog command")
+		return errors.New("missing template-package catalog command")
 	}
 	switch args[0] {
 	case cliCommandList:
-		return runProfileCatalogList(ctx, args[1:])
+		return runTemplatePackageCatalogList(ctx, args[1:])
 	case "restore":
-		return runProfileCatalogRestore(ctx, args[1:])
+		return runTemplatePackageCatalogRestore(ctx, args[1:])
 	default:
-		return fmt.Errorf("unknown profile catalog command: %s", args[0])
+		return fmt.Errorf("unknown template-package catalog command: %s", args[0])
 	}
 }
 
-func runProfileCatalogList(ctx context.Context, args []string) error {
-	options, err := parseProfileCatalogReadOptions("profile catalog list", args)
+func runTemplatePackageCatalogList(ctx context.Context, args []string) error {
+	options, err := parseProfileCatalogReadOptions("template-package catalog list", args)
 	if err != nil {
 		return err
 	}
@@ -42,10 +42,10 @@ func runProfileCatalogList(ctx context.Context, args []string) error {
 	return nil
 }
 
-func runProfileCatalogRestore(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("profile catalog restore", flag.ContinueOnError)
+func runTemplatePackageCatalogRestore(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("template-package catalog restore", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	profileID := flags.String("profile", "", "Profile id to restore from the Store catalog history")
+	profileID := flags.String("profile", "", "Template package id to restore from the Store catalog history")
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
@@ -113,7 +113,7 @@ func restoreProfileCatalog(ctx context.Context, storeURL string, profileID strin
 		value := profileConfigVersionFromStore(version)
 		configVersion = &value
 	} else if errors.Is(err, store.ErrNotFound) {
-		notes = append(notes, "no config version found for restored profile; restored catalog only")
+		notes = append(notes, "no config version found for restored template package; restored catalog only")
 	} else {
 		return profileCatalogRestoreReport{}, err
 	}

@@ -8,7 +8,6 @@ import (
 	"os"
 	"strings"
 
-	"agent-testbench/internal/server/controlplane"
 	"agent-testbench/internal/store"
 )
 
@@ -50,22 +49,8 @@ func runSandboxService(ctx context.Context, args []string) error {
 	switch args[0] {
 	case cliCommandList, "discover":
 		return runSandboxServiceList(ctx, args[1:])
-	case "register":
-		return runSandboxServiceRegister(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown sandbox service command: %s", args[0])
-	}
-}
-
-func runSandboxInterface(ctx context.Context, args []string) error {
-	if len(args) == 0 {
-		return errors.New("missing sandbox interface command")
-	}
-	switch args[0] {
-	case "register":
-		return runSandboxInterfaceRegister(ctx, args[1:])
-	default:
-		return fmt.Errorf("unknown sandbox interface command: %s", args[0])
 	}
 }
 
@@ -129,62 +114,6 @@ func runSandboxServiceList(ctx context.Context, args []string) error {
 		return writeIndentedJSON(report)
 	}
 	printSandboxServiceListReport(report)
-	return nil
-}
-
-func runSandboxServiceRegister(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("sandbox service register", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	id := flags.String("id", "", "Service id")
-	fromEnvironment := flags.String("from-environment", "", "Copy missing service startup metadata from an environment component graph")
-	displayName := flags.String("display-name", "", "Service display name")
-	kind := flags.String("kind", "", "Service kind")
-	servicePort := flags.Int("service-port", 0, "Service port")
-	managementPort := flags.Int("management-port", 0, "Management port")
-	startupCommand := flags.String("startup-command", "", "Startup command")
-	healthURL := flags.String("health-url", "", "Health URL")
-	status := flags.String("status", "", "Service status")
-	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
-	if err != nil {
-		return err
-	}
-	runtime, err := openStore(ctx, resolvedStoreURL)
-	if err != nil {
-		return err
-	}
-	defer closeCLIStore(runtime)
-	request := controlplane.SandboxServiceRegistrationRequest{
-		ID:             *id,
-		DisplayName:    *displayName,
-		Kind:           *kind,
-		ServicePort:    *servicePort,
-		ManagementPort: *managementPort,
-		StartupCommand: *startupCommand,
-		HealthURL:      *healthURL,
-		Status:         *status,
-	}
-	if err := hydrateSandboxServiceRegistrationFromEnvironment(ctx, runtime, strings.TrimSpace(*fromEnvironment), &request); err != nil {
-		return err
-	}
-	response, err := controlplane.RegisterSandboxService(ctx, runtime, request)
-	if err != nil {
-		return err
-	}
-	if *jsonOutput {
-		return writeIndentedJSON(response)
-	}
-	fmt.Printf("Registered service: %s\n", response.Service.ID)
-	fmt.Printf("Store: %s\n", response.StoreID)
-	fmt.Printf("Kind: %s\n", response.Service.Kind)
-	if response.Service.ServicePort > 0 {
-		fmt.Printf("Port: %d\n", response.Service.ServicePort)
-	}
 	return nil
 }
 
@@ -281,67 +210,6 @@ func appendMissingString(values []string, value string) []string {
 		}
 	}
 	return append(values, value)
-}
-
-func runSandboxInterfaceRegister(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("sandbox interface register", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	id := flags.String("id", "", "Interface id")
-	displayName := flags.String("display-name", "", "Interface display name")
-	serviceID := flags.String("service-id", "", "Entry service id")
-	operation := flags.String("operation", "", "Operation name")
-	method := flags.String("method", "", "HTTP method")
-	path := flags.String("path", "", "HTTP path")
-	templateID := flags.String("template-id", "", "Request template id")
-	caseID := flags.String("case-id", "", "API case id")
-	caseTitle := flags.String("case-title", "", "API case title")
-	requiredForAdmission := flags.Bool("required-for-admission", false, "Require this case for interface admission")
-	timeoutMs := flags.Int("timeout-ms", 0, "Interface timeout in milliseconds")
-	timeoutSeconds := flags.Int("timeout-seconds", 0, "Case timeout in seconds")
-	status := flags.String("status", "", "Interface status")
-	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
-	if err != nil {
-		return err
-	}
-	runtime, err := openStore(ctx, resolvedStoreURL)
-	if err != nil {
-		return err
-	}
-	defer closeCLIStore(runtime)
-	response, err := controlplane.RegisterSandboxInterface(ctx, runtime, controlplane.SandboxInterfaceRegistrationRequest{
-		ID:          *id,
-		DisplayName: *displayName,
-		ServiceID:   *serviceID,
-		Operation:   *operation,
-		Method:      *method,
-		Path:        *path,
-		TemplateID:  *templateID,
-		TimeoutMs:   *timeoutMs,
-		Status:      *status,
-		Case: controlplane.SandboxInterfaceCase{
-			ID:                   *caseID,
-			DisplayName:          *caseTitle,
-			RequiredForAdmission: *requiredForAdmission,
-			TimeoutSeconds:       *timeoutSeconds,
-		},
-	})
-	if err != nil {
-		return err
-	}
-	if *jsonOutput {
-		return writeIndentedJSON(response)
-	}
-	fmt.Printf("Registered interface: %s\n", response.Interface.ID)
-	fmt.Printf("Store: %s\n", response.StoreID)
-	fmt.Printf("Service: %s\n", response.Interface.ServiceID)
-	fmt.Printf("Case: %s\n", response.Interface.CaseID)
-	return nil
 }
 
 func printSandboxServiceListReport(report sandboxServiceListReport) {

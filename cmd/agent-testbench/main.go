@@ -42,7 +42,6 @@ var rootCommands = map[string]rootCommand{
 	"sandbox":            func(args []string) error { return runSandbox(context.Background(), args) },
 	"environment":        func(args []string) error { return runEnvironment(context.Background(), args) },
 	"runtime":            func(args []string) error { return runRuntime(context.Background(), args) },
-	"profile":            runProfile,
 	"template-package":   runTemplatePackage,
 	"config":             func(args []string) error { return runConfig(context.Background(), args) },
 	"evidence":           func(args []string) error { return runEvidence(context.Background(), args) },

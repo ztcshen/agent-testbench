@@ -22,21 +22,6 @@ type workflowAcceptanceReport struct {
 	} `json:"acceptance"`
 }
 
-type caseBatchStart struct {
-	OK         bool   `json:"ok"`
-	BatchRunID string `json:"batchRunId"`
-	Status     string `json:"status"`
-	Total      int    `json:"total"`
-}
-
-type caseBatchReport struct {
-	OK     bool   `json:"ok"`
-	Status string `json:"status"`
-	Total  int    `json:"total"`
-	Passed int    `json:"passed"`
-	Failed int    `json:"failed"`
-}
-
 type environmentAcceptanceStart struct {
 	OK            bool   `json:"ok"`
 	EnvironmentID string `json:"environmentId"`
@@ -72,26 +57,6 @@ func newWorkflowAcceptanceCLIServer(t *testing.T, startPayload *map[string]any) 
 					"ok": true, "templateId": "environment.workflow.skywalking.v1", "workflowId": "workflow.core-10",
 					"expectedSteps": 10, "completedSteps": 10, "passedSteps": 10, "failedSteps": 0, "topologyProvider": "skywalking",
 				},
-			})
-		default:
-			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
-		}
-	}))
-}
-
-func newCaseBatchCLIServer(t *testing.T, startPayload *map[string]any) *httptest.Server {
-	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/api/cases/batch-runs":
-			decodeAsyncStartPayload(t, r, startPayload)
-			writeTestJSON(t, w, http.StatusAccepted, map[string]any{
-				"ok": true, "batchRunId": "batch.case.001", "requestId": "case-batch-001",
-				"status": "running", "total": 2, "reportUrl": "/api/cases/batch-runs/batch.case.001",
-			})
-		case r.Method == http.MethodGet && r.URL.Path == "/api/cases/batch-runs/batch.case.001":
-			writeTestJSON(t, w, http.StatusOK, map[string]any{
-				"ok": true, "batchRunId": "batch.case.001", "status": "passed", "total": 2, "passed": 2, "failed": 0,
 			})
 		default:
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
@@ -155,24 +120,6 @@ func assertWorkflowAcceptanceReport(t *testing.T, report workflowAcceptanceRepor
 	t.Helper()
 	if !report.Acceptance.OK || report.Acceptance.TemplateID != "environment.workflow.skywalking.v1" || report.Acceptance.TopologyProvider != "skywalking" {
 		t.Fatalf("workflow acceptance report = %#v", report.Acceptance)
-	}
-}
-
-func assertCaseBatchStart(t *testing.T, started caseBatchStart, startPayload map[string]any) {
-	t.Helper()
-	if !started.OK || started.BatchRunID != "batch.case.001" || started.Status != "running" || started.Total != 2 {
-		t.Fatalf("case batch start = %#v", started)
-	}
-	caseIDs, _ := startPayload["caseIds"].([]any)
-	if len(caseIDs) != 2 || caseIDs[0] != "case.alpha" || caseIDs[1] != "case.beta" || startPayload["requestId"] != "case-batch-001" || startPayload["baseUrl"] != "http://127.0.0.1:18080" || startPayload["timeoutSeconds"] != float64(30) {
-		t.Fatalf("case batch start payload = %#v", startPayload)
-	}
-}
-
-func assertCaseBatchReport(t *testing.T, report caseBatchReport) {
-	t.Helper()
-	if !report.OK || report.Status != "passed" || report.Total != 2 || report.Passed != 2 || report.Failed != 0 {
-		t.Fatalf("case batch report = %#v", report)
 	}
 }
 

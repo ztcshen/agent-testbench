@@ -55,7 +55,7 @@ object-oriented command path plus grouped help over many parallel aliases.
 1. Add a short daily/advanced/compat rule section to `docs/quickstart.md`.
 2. Add `commandCatalogDailyAdmissionReason(command string) string` in `cmd/agent-testbench/command_catalog.go`.
 3. Include the reason in `commandCatalogItem` JSON as `dailyReason,omitempty`.
-4. Add a failing test that `commands --json` explains at least `map run`, `case run`, and `workflow report`.
+4. Add a failing test that `commands --json` explains at least `map run`, `case run`, and `workflow gate`.
 5. Implement the minimal catalog field.
 6. Run: `go test ./cmd/agent-testbench -run TestCommands -count=1`.
 7. Commit: `docs: define cli command tier rules`.
@@ -90,7 +90,7 @@ object-oriented command path plus grouped help over many parallel aliases.
 2. Demote low-frequency daily commands to advanced:
    - `environment acceptance start`
    - `environment acceptance report`
-   - `workflow report`
+   - `workflow gate`
    - `case suite inspect`
    - `case suite plan`
    - selected `gate baseline` entries if replacement hints are ready

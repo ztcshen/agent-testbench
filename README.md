@@ -218,7 +218,7 @@ Current working areas:
 - Catalog maintenance: API case metadata, searchable case catalog, request
   templates, fixtures, dependencies, workflow bindings, and suite coverage.
 - Execution: single API case, maintained case suites, async batch surfaces,
-  interface-node reports, workflow reports, and persisted workflow run lookup.
+  interface-node reports, map execution, and persisted workflow run lookup.
 - Evidence: request, response, assertions, summaries, logs, topology, timing,
   artifact manifests, failure summaries, and redaction for sensitive fields.
 - Environment Catalog: Store-backed environment register/discover/inspect,

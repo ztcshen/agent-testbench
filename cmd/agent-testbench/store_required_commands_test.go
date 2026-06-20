@@ -19,7 +19,6 @@ import (
 func TestDailyReportExecutionsUseSelectedStoreWithoutSQLiteDefault(t *testing.T) {
 	fixture := newSelectedStoreReportFixture(t)
 	assertInterfaceNodeReportUsesSelectedStore(t, fixture)
-	assertWorkflowReportUsesSelectedStore(t, fixture)
 	assertCaseSuiteReportUsesSelectedStore(t, fixture)
 }
 
@@ -105,26 +104,6 @@ func assertInterfaceNodeReportUsesSelectedStore(t *testing.T, fixture selectedSt
 	}
 }
 
-func assertWorkflowReportUsesSelectedStore(t *testing.T, fixture selectedStoreReportFixture) {
-	t.Helper()
-
-	workflowBundle, err := profile.Load(writeWorkflowBatchReportProfile(t))
-	if err != nil {
-		t.Fatalf("load workflow bundle: %v", err)
-	}
-	workflowDir := filepath.Join(t.TempDir(), "workflow-report")
-	workflowReport, err := executeWorkflowCaseReport(fixture.ctx, workflowBundle, fixture.sourceStore, "workflow.alpha", workflowDir, fixture.serverURL)
-	if err != nil {
-		t.Fatalf("execute workflow report with selected store: %v", err)
-	}
-	if !workflowReport.OK || workflowReport.Counts.Total != 2 || workflowReport.Counts.Passed != 2 || workflowReport.RunID == "" {
-		t.Fatalf("workflow report = %#v", workflowReport)
-	}
-	if _, err := os.Stat(filepath.Join(workflowDir, "runtime.sqlite")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("workflow report created runtime.sqlite, stat err=%v", err)
-	}
-}
-
 func assertCaseSuiteReportUsesSelectedStore(t *testing.T, fixture selectedStoreReportFixture) {
 	t.Helper()
 
@@ -154,22 +133,6 @@ func TestInterfaceNodeCaseReportRequiresStoreBeforeProfileLoad(t *testing.T) {
 	}
 	if strings.Contains(out, "missing-profile") {
 		t.Fatalf("interface-node case report loaded profile before Store binding: %q", out)
-	}
-}
-
-func TestWorkflowReportRequiresStoreBeforeProfileLoad(t *testing.T) {
-	env := []string{"AGENT_TESTBENCH_CONFIG_HOME=" + t.TempDir()}
-	out := runCLIFailsWithEnv(t, env,
-		"workflow", "report",
-		"--workflow", "workflow.alpha",
-		"--profile", filepath.Join(t.TempDir(), "missing-profile"),
-		"--json",
-	)
-	if !strings.Contains(out, errNoActiveStoreConfigured.Error()) {
-		t.Fatalf("workflow report output = %q", out)
-	}
-	if strings.Contains(out, "missing-profile") {
-		t.Fatalf("workflow report loaded profile before Store binding: %q", out)
 	}
 }
 
@@ -277,16 +240,6 @@ func TestAuditCommandsRequireExplicitStoreOrOfflineReviewBeforeProfileLoad(t *te
 			args:       []string{"workflow", "audit", "--profile", missingProfile, "--workflow", "workflow.alpha", "--json"},
 			wantPieces: []string{"--offline-template-package", "--store"},
 		},
-		{
-			name:       "profile audit",
-			args:       []string{"profile", "audit", "--profile", missingProfile, "--json"},
-			wantPieces: []string{"--offline-template-package"},
-		},
-		{
-			name:       "profile audit-plan",
-			args:       []string{"profile", "audit-plan", "--profile", missingProfile, "--json"},
-			wantPieces: []string{"--offline-template-package"},
-		},
 	}
 
 	for _, tt := range tests {
@@ -317,8 +270,6 @@ func TestOfflineAuditCommandsIgnoreActiveStoreWithoutExplicitStoreFlag(t *testin
 		name string
 		args []string
 	}{
-		{name: "profile audit", args: []string{"profile", "audit", "--profile", profileDir, "--offline-template-package", "--json"}},
-		{name: "profile audit-plan", args: []string{"profile", "audit-plan", "--profile", profileDir, "--offline-template-package", "--json"}},
 		{name: "workflow audit", args: []string{"workflow", "audit", "--profile", profileDir, "--offline-template-package", "--workflow", "workflow.alpha", "--json"}},
 	}
 

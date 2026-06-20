@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 )
@@ -26,8 +25,8 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	if strings.Contains(exampleOut, `"command": "store config set local"`) {
 		t.Fatalf("command catalog should not index copyable examples as command definitions:\n%s", exampleOut)
 	}
-	if !strings.Contains(out, "case run --case PATH") || !strings.Contains(out, "--dry-run") {
-		t.Fatalf("top-level help should expose case run dry-run preflight:\n%s", out)
+	if strings.Contains(out, "case run --case PATH") {
+		t.Fatalf("top-level help should not promote file-based case run compatibility:\n%s", out)
 	}
 	if !strings.Contains(out, "agent-testbench task suggest --goal \"maintain map\" --json") || !strings.Contains(out, "agent-testbench task plan map-maintain --map MAP_ID --json") {
 		t.Fatalf("top-level help should expose task-intent discovery:\n%s", out)
@@ -249,26 +248,54 @@ func TestCommandsAllOmitsDuplicateCompatibilityEntrypoints(t *testing.T) {
 		"map run explain",
 		"watch",
 		"template-packages verify",
+		"profile init",
+		"profile install",
+		"profile pack",
+		"profile list",
+		"profile inspect",
+		"profile export",
+		"profile audit",
+		"profile audit-plan",
+		"profile doctor",
+		"profile repair",
+		"profile generation-plan openapi",
+		"profile import-plan openapi",
+		"profile import-plan http-capture",
+		"profile catalog list",
+		"profile catalog restore",
+		"profile verify",
+		"profile import",
+		"sandbox service register",
+		"sandbox interface register",
+		"case batch start",
+		"case batch report",
+		"workflow report",
 	} {
 		if commands[duplicate] {
-			t.Fatalf("duplicate compatibility entrypoint %q should not remain in catalog", duplicate)
+			t.Fatalf("historical compatibility entrypoint %q should not remain in catalog", duplicate)
 		}
 	}
 }
 
-func TestDuplicateRootEntrypointsAreRemoved(t *testing.T) {
+func TestHistoricalEntrypointsAreRemoved(t *testing.T) {
 	for _, args := range [][]string{
 		{"baseline", "get"},
 		{"watch", "catalog-smoke", "--command", "commands --json"},
 		{"template-packages", "verify", "--template-package", "sample"},
+		{"profile", "list"},
+		{"profile", "audit", "--profile", "sample", "--offline-template-package"},
+		{"case", "batch", "start", "--server-url", "http://127.0.0.1"},
+		{"case", "batch", "report", "--server-url", "http://127.0.0.1", "--run", "run.demo"},
+		{"sandbox", "service", "register", "--id", "svc.demo"},
+		{"sandbox", "interface", "register", "--id", "api.demo", "--service-id", "svc.demo", "--path", "/demo"},
+		{"workflow", "report", "--workflow", "workflow.demo"},
 	} {
 		err := runRootCommand(args)
 		if err == nil {
-			t.Fatalf("duplicate root entrypoint %q unexpectedly succeeded", strings.Join(args, " "))
+			t.Fatalf("historical entrypoint %q unexpectedly succeeded", strings.Join(args, " "))
 		}
-		var unknown unknownRootCommandError
-		if !errors.As(err, &unknown) {
-			t.Fatalf("duplicate root entrypoint %q should be removed from root commands, got %T %v", strings.Join(args, " "), err, err)
+		if !strings.Contains(err.Error(), "unknown") {
+			t.Fatalf("historical entrypoint %q should be removed from command dispatch, got %T %v", strings.Join(args, " "), err, err)
 		}
 	}
 }

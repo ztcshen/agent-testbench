@@ -18,7 +18,7 @@ import (
 func runWorkflowAudit(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("workflow audit", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	profilePath := flags.String("profile", "", "Profile bundle path")
+	profilePath := flags.String("profile", "", "Template package path")
 	workflowID := flags.String("workflow", "", "Workflow id")
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
