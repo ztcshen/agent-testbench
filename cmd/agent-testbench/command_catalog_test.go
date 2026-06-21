@@ -243,13 +243,56 @@ func TestCommandDescriptorRegistryOwnsCatalogMetadata(t *testing.T) {
 		"func commandCatalogInternalCommands",
 		"func commandCatalogReplacementHints",
 		"func commandCatalogCompatibilityReplacements",
+		"func commandCatalogDefaultCommands",
 	} {
 		if strings.Contains(string(catalogSource), forbidden) {
 			t.Fatalf("command catalog metadata should live in descriptor registry, found %q", forbidden)
 		}
 	}
+	metadataSource, err := os.ReadFile("command_catalog_metadata.go")
+	if err != nil {
+		t.Fatalf("read command catalog metadata source: %v", err)
+	}
+	if strings.Contains(string(metadataSource), "func commandCatalogDefaultInclusionReason") {
+		t.Fatal("default inclusion reasons should live in descriptor registry")
+	}
 
 	lines := commandDescriptorRegistryLinesByCommand()
+	for _, command := range []string{
+		cliCommandStatus,
+		cliCommandDoctor,
+		cliCommandCommands,
+		"store current",
+		"store status",
+		"environment discover",
+		"environment inspect",
+		commandCatalogEnvironmentConfigure,
+		commandCatalogEnvironmentRestore,
+		commandCatalogEnvironmentStatus,
+		commandCatalogEnvironmentStop,
+		commandCatalogEnvironmentRestart,
+		commandCatalogMapInspect,
+		commandCatalogMapDoctor,
+		commandCatalogMapExplain,
+		commandCatalogMapGate,
+		commandCatalogMapRun,
+		commandCatalogMapAtlas,
+		"case discover",
+		commandCatalogCaseSuiteReport,
+		commandCatalogCaseInspect,
+		commandCatalogCaseGate,
+		commandCatalogCaseRun,
+		commandCatalogWorkflowGate,
+		"task catalog",
+		"task suggest",
+		commandCatalogTaskPlan,
+		"task run",
+	} {
+		line := lines[command]
+		if !strings.Contains(line, "surface=default") || !strings.Contains(line, "reason=") {
+			t.Fatalf("descriptor for default command %q should declare surface=default and reason, line=%q", command, line)
+		}
+	}
 	for _, command := range []string{
 		"gate baseline get",
 		"gate baseline set",

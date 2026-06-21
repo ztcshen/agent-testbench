@@ -205,12 +205,10 @@ func commandCatalogMetadata(descriptor commandDescriptor, area string) commandCa
 	if descriptor.Replacement != "" {
 		metadata.Replacement = descriptor.Replacement
 	}
-	if metadata.Surface == commandCatalogSurfaceInternal {
-		return metadata
+	if descriptor.Reason != "" {
+		metadata.Reason = descriptor.Reason
 	}
-	if commandCatalogDefaultCommands()[command] {
-		metadata.Surface = commandCatalogSurfaceDefault
-		metadata.Reason = commandCatalogDefaultInclusionReason(command)
+	if metadata.Surface == commandCatalogSurfaceInternal {
 		return metadata
 	}
 	return metadata
@@ -239,39 +237,6 @@ func commandCatalogSortRank(item commandCatalogItem) int {
 		return item.Rank
 	}
 	return 100000
-}
-
-func commandCatalogDefaultCommands() map[string]bool {
-	return map[string]bool{
-		cliCommandStatus:                   true,
-		cliCommandDoctor:                   true,
-		cliCommandCommands:                 true,
-		"store current":                    true,
-		"store status":                     true,
-		"environment discover":             true,
-		"environment inspect":              true,
-		commandCatalogEnvironmentConfigure: true,
-		commandCatalogEnvironmentRestore:   true,
-		commandCatalogEnvironmentStatus:    true,
-		commandCatalogEnvironmentStop:      true,
-		commandCatalogEnvironmentRestart:   true,
-		commandCatalogMapInspect:           true,
-		commandCatalogMapDoctor:            true,
-		commandCatalogMapExplain:           true,
-		commandCatalogMapGate:              true,
-		commandCatalogMapRun:               true,
-		commandCatalogMapAtlas:             true,
-		"case discover":                    true,
-		commandCatalogCaseSuiteReport:      true,
-		commandCatalogCaseInspect:          true,
-		commandCatalogCaseGate:             true,
-		commandCatalogCaseRun:              true,
-		commandCatalogWorkflowGate:         true,
-		"task catalog":                     true,
-		"task suggest":                     true,
-		commandCatalogTaskPlan:             true,
-		"task run":                         true,
-	}
 }
 
 func commandCatalogTags(command string, area string, usage string) []string {

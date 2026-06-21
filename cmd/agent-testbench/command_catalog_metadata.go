@@ -116,24 +116,3 @@ func commandCatalogTaskRanks() map[string]int {
 		commandCatalogMapAtlas:            310,
 	}
 }
-
-func commandCatalogDefaultInclusionReason(command string) string {
-	switch command {
-	case cliCommandStatus, cliCommandDoctor, cliCommandCommands:
-		return "orientation: first commands for status, diagnosis, and command discovery"
-	case "store current", "store status":
-		return "store: identifies the active SQL Store and its health"
-	case "environment discover", "environment inspect", commandCatalogEnvironmentConfigure, commandCatalogEnvironmentRestore, commandCatalogEnvironmentStatus, commandCatalogEnvironmentStop, commandCatalogEnvironmentRestart:
-		return "environment lifecycle: inspect, restore, check, stop, or restart a registered environment"
-	case "task catalog", "task suggest", commandCatalogTaskPlan, "task run":
-		return "task intent: lets agents discover, plan, and run repeatable operator tasks"
-	case commandCatalogMapInspect, commandCatalogMapDoctor, commandCatalogMapExplain, commandCatalogMapGate, commandCatalogMapRun, commandCatalogMapAtlas:
-		return "map lifecycle: inspect, plan, execute, gate, and review a test scenario map"
-	case "case discover", commandCatalogCaseSuiteReport, commandCatalogCaseInspect, commandCatalogCaseGate, commandCatalogCaseRun:
-		return "case lifecycle: discover, run, inspect evidence, and gate API or MQ cases"
-	case commandCatalogWorkflowGate:
-		return "workflow compatibility: keeps existing workflow gates visible while map-first flows converge"
-	default:
-		return "default operator path: commonly needed for local Store-first testing"
-	}
-}
