@@ -5,11 +5,12 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-AgentTestBench is an agent-native test environment for API workflows,
-auditable Evidence, and quality gates. It helps test engineers and automation
-agents discover runnable targets, run API cases and workflows, record
-reproducible Evidence, and inspect compact HTML/JSON reports without
-hardcoding one business domain into the open-source core.
+AgentTestBench is an agent-native test environment for API workflows, reusable
+test scenario maps, auditable Evidence, and quality gates. It helps test
+engineers and automation agents discover runnable targets, run API cases,
+workflows, and map plans, record reproducible Evidence, and inspect compact
+HTML/JSON reports without hardcoding one business domain into the open-source
+core.
 
 ## Product Direction
 
@@ -44,6 +45,69 @@ the live source of truth; CLI, Control plane APIs, the React workbench, reports,
 and validation tools all read the same facts. Agents get a discover-then-run
 contract instead of guessing target ids from prompts or private notes.
 
+## Test Scenario Maps
+
+Most test workbenches stop at individual cases or linear workflows.
+AgentTestBench adds a Store-backed **Test Scenario Map** layer: a map is a
+reusable DAG of interface nodes, workflow paths, validation families, and
+fixture materializations. A workflow becomes a named path through the graph
+instead of a copied asset; a case remains the executable HTTP/MQ/API call or a
+validation anchored to a node.
+
+```mermaid
+flowchart LR
+  interfaceCases["Interface case nodes<br/>single HTTP/MQ/API calls"]
+  existingWorkflows["Existing workflows<br/>linear assets"]
+  scenarioMap["Test Scenario Map<br/>shared DAG in SQL Store"]
+  namedPaths["Named paths<br/>smoke, regression, release"]
+  validationFamilies["Validation families<br/>negative cases grouped by interface"]
+  materializations["Materializations<br/>fixtures and replay points"]
+  explainPlan["map explain<br/>planner"]
+  runPlan["map run<br/>resume, retry, rerun"]
+  gatePlan["map gate<br/>Evidence and status"]
+  atlasReview["map atlas<br/>interactive review"]
+
+  interfaceCases --> scenarioMap
+  existingWorkflows --> scenarioMap
+  scenarioMap --> namedPaths
+  scenarioMap --> validationFamilies
+  scenarioMap --> materializations
+  namedPaths --> explainPlan
+  validationFamilies --> explainPlan
+  materializations --> explainPlan
+  explainPlan --> runPlan
+  runPlan --> gatePlan
+  scenarioMap --> atlasReview
+```
+
+This is the layer that keeps test assets maintainable as a product grows:
+
+- import existing workflows into one graph instead of maintaining many
+  near-identical chains;
+- inspect workflow convergence, coverage, paths, and versions from the Store;
+- run `map explain` before execution to see the planned operations;
+- run all workflows, all cases, or a focused node/path/case with resume and
+  retry support;
+- attach large negative-case families to the interface node they validate
+  without flooding the main path;
+- review the graph and execution plan through a self-contained Test Scenario
+  Atlas HTML page.
+
+Design influences:
+
+- [Understand Anything](https://github.com/Egonex-AI/Understand-Anything)
+  influenced the Atlas review surface: the graph should teach the structure
+  instead of merely showing complexity. AgentTestBench applies that idea to test
+  assets with searchable nodes, focused details, grouped relationships, and
+  review-friendly graph navigation.
+- [TiDB](https://pingcap.github.io/tidb-dev-guide/understand-tidb/execution.html)
+  influenced the execution model: the planner returns a plan tree, the executor
+  runs that plan, and operators expose enough detail to make execution
+  understandable. AgentTestBench adapts that planner/executor split to test
+  maps through `map explain`, saved plan tasks, `map run`, and `map gate`.
+
+These are design influences, not vendored runtime dependencies.
+
 ## Current Shape
 
 - **Store engines**: SQLite, PostgreSQL, and MySQL are product SQL Store
@@ -69,6 +133,7 @@ contract instead of guessing target ids from prompts or private notes.
 | Agent-friendly discovery | Agents call discovery APIs first, then run reports with exact returned ids instead of hidden prompt knowledge. |
 | API case execution | Run one HTTP case, a maintained case suite, or only the failed/not-run part of a suite; render requests, assert responses, write Evidence, and index results into Store. |
 | Workflow execution | Run ordered workflow steps and keep per-step Evidence, timing, status, logs, and topology. |
+| Test Scenario Maps | Converge many workflows into one Store-backed DAG, explain a deterministic map plan, execute focused or full map scopes, gate the result, and generate an interactive Test Scenario Atlas for review. |
 | Environment restore | Store-backed Environment Catalog entries can plan or execute remote repository preparation, compact startup-file generation, Docker Compose pull/build/up, health checks, and the bound verification workflow. |
 | Evidence detail APIs | Query request, response, assertions, precondition context, stored topology, persisted logs, artifact manifests, failure summaries, status, and elapsed time by run or case run id. |
 | Real topology gate | Synthetic SkyWalking smoke is useful for wiring, but verified-environment publication and optional real-environment sign-off require a live SkyWalking endpoint and trace ids for every configured workflow step. |
@@ -185,6 +250,7 @@ Core packages stay generic:
 | [Quick Start](docs/quickstart.md) | First local run, Store setup, and workbench launch direction. |
 | [CLI Reference](docs/cli-reference.md) | Generated command catalog, daily surface, advanced entries, replacements, and usage. |
 | [Demo Gallery](docs/demo-gallery.md) | Visual CLI capability tour, neutral demo services, and exposure plan. |
+| [Test Scenario Maps](docs/test-plan-maps.md) | Map lifecycle, workflow convergence, validation families, planner explain, map execution, gates, and Atlas review. |
 | [Backend Capabilities](docs/backend-capabilities.md) | Store, Environment Catalog, clean-machine restore, discovery, execution, reports, Evidence, APIs, and release guardrails. |
 | [Share Kit](docs/share-kit.md) | Project tagline, short descriptions, demo script, and announcement snippets for sharing the project. |
 | [Roadmap](docs/roadmap.md) | Public development themes and contribution-friendly milestones. |
@@ -218,6 +284,9 @@ Current working areas:
   backend-specific DDL, schema status/upgrade, and contract tests.
 - Catalog maintenance: API case metadata, searchable case catalog, request
   templates, fixtures, dependencies, workflow bindings, and suite coverage.
+- Test Scenario Maps: workflow import, map inspection, coverage, versions,
+  validation families, SQL-style explain plans, map execution, gate checks, and
+  interactive Atlas review.
 - Execution: single API case, maintained case suites, async batch surfaces,
   interface-node reports, map execution, and persisted workflow run lookup.
 - Evidence: request, response, assertions, summaries, logs, topology, timing,
