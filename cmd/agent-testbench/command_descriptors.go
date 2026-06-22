@@ -118,7 +118,7 @@ template-package verify	agent-testbench template-package verify --template-packa
 template-package import	agent-testbench template-package import --from PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--json] [--audit] [--require-audit-ok] [--force]
 executor plan	agent-testbench executor plan [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--json]	replacement=agent-testbench map explain
 evidence import	agent-testbench evidence import --from PATH --profile ID [--store NAME_OR_DSN]
-evidence inspect	agent-testbench evidence inspect [--view list|tasks] [--store NAME_OR_DSN] [--run ID] [--step ID] [--case ID] [--kind KIND] [--status STATUS] [--json]
+evidence inspect	agent-testbench evidence inspect --view list [--store NAME_OR_DSN] [--run ID] [--json] | agent-testbench evidence inspect --view tasks --run ID [--store NAME_OR_DSN] [--step ID] [--case ID] [--kind KIND] [--status STATUS] [--json]
 evidence list	agent-testbench evidence list [--store NAME_OR_DSN] [--run ID] [--json]	replacement=agent-testbench evidence inspect --view list
 evidence tasks	agent-testbench evidence tasks [--store NAME_OR_DSN] --run ID [--step ID] [--case ID] [--kind KIND] [--status STATUS] [--json]	replacement=agent-testbench evidence inspect --view tasks
 trace topology collect	agent-testbench trace topology collect --run ID [--store NAME_OR_DSN] --trace-graphql-url URL [--step ID] [--case ID] [--request ID] [--endpoint TEXT] [--trace-id ID] [--json]	surface=internal	replacement=agent-testbench evidence inspect --view tasks --run RUN_ID --json

@@ -142,7 +142,7 @@ Default commands: `28`
 | Command | Store | Replacement | Usage |
 | --- | --- | --- | --- |
 | `evidence import` | yes |  | `agent-testbench evidence import --from PATH --profile ID [--store NAME_OR_DSN]` |
-| `evidence inspect` | yes |  | `agent-testbench evidence inspect [--view list\|tasks] [--store NAME_OR_DSN] [--run ID] [--step ID] [--case ID] [--kind KIND] [--status STATUS] [--json]` |
+| `evidence inspect` | yes |  | `agent-testbench evidence inspect --view list [--store NAME_OR_DSN] [--run ID] [--json] \| agent-testbench evidence inspect --view tasks --run ID [--store NAME_OR_DSN] [--step ID] [--case ID] [--kind KIND] [--status STATUS] [--json]` |
 | `evidence list` | yes | `agent-testbench evidence inspect --view list` | `agent-testbench evidence list [--store NAME_OR_DSN] [--run ID] [--json]` |
 | `evidence tasks` | yes | `agent-testbench evidence inspect --view tasks` | `agent-testbench evidence tasks [--store NAME_OR_DSN] --run ID [--step ID] [--case ID] [--kind KIND] [--status STATUS] [--json]` |
 

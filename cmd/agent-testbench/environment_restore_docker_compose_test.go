@@ -368,8 +368,62 @@ fi
 	if !strings.Contains(string(dockerCalls), "image inspect apache/kafka:3.7.0") || !strings.Contains(string(dockerCalls), wantComposeUp) {
 		t.Fatalf("restore should inspect local image and still run compose up:\n%s", dockerCalls)
 	}
+	if strings.Contains(string(dockerCalls), "manifest inspect") {
+		t.Fatalf("restore without --pull should not probe the registry:\n%s", dockerCalls)
+	}
 	if strings.Contains(string(dockerCalls), " pull kafka") {
-		t.Fatalf("restore should skip compose pull for image accepted from local cache:\n%s", dockerCalls)
+		t.Fatalf("restore without --pull should skip compose pull for image accepted from local cache:\n%s", dockerCalls)
+	}
+}
+
+func TestEnvironmentRestorePullsCachedComposeImageWhenPullRequested(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	fixture.writeDockerTool(t, `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
+if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
+  printf 'Docker Compose version v2.0.0\n'
+  exit 0
+fi
+if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
+  printf '[{"Id":"sha256:local"}]\n'
+  exit 0
+fi
+if [ "$1" = "manifest" ] && [ "$2" = "inspect" ]; then
+  printf '{"schemaVersion":2}\n'
+  exit 0
+fi
+if [ "$1" = "compose" ] && [[ "$*" == *" ps -a --format json "* ]]; then
+  service="${@: -1}"
+  printf '{"Name":"%s","Service":"%s","State":"running","Health":"healthy"}\n' "$service" "$service"
+fi
+`)
+	composeSource := filepath.Join(t.TempDir(), "compose.yml")
+	writeFile(t, composeSource, "services:\n  kafka:\n    image: apache/kafka:3.7.0\n")
+	runCLI(t, "environment", "register",
+		"--store", fixture.StoreDSN,
+		"--id", "env.compose.pull-cached",
+		"--compose-file", "compose.yml",
+		"--compose-generated-file", "compose.yml="+composeSource,
+		"--compose-service", "kafka",
+		"--compose-skip-build",
+		"--health-compose-service", "kafka",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIWithEnv(t, fixture.DockerEnv, "environment", "restore", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--execute", "--pull", "--json", "env.compose.pull-cached")
+	if !strings.Contains(out, `"ok": true`) {
+		t.Fatalf("explicit pull with local image should pass, got:\n%s", out)
+	}
+	dockerCalls, err := os.ReadFile(fixture.DockerCallsPath)
+	if err != nil {
+		t.Fatalf("read fake docker calls: %v", err)
+	}
+	calls := string(dockerCalls)
+	if !strings.Contains(calls, "image inspect apache/kafka:3.7.0") || !strings.Contains(calls, "manifest inspect apache/kafka:3.7.0") {
+		t.Fatalf("explicit pull should inspect local cache and probe the registry:\n%s", calls)
+	}
+	if !strings.Contains(calls, " pull kafka\n") {
+		t.Fatalf("explicit pull should still run compose pull for cached image services:\n%s", calls)
 	}
 }
 
@@ -421,6 +475,9 @@ fi
 	if !strings.Contains(string(dockerCalls), "image inspect apache/kafka:3.7.0") {
 		t.Fatalf("restore should still check the local image cache:\n%s", dockerCalls)
 	}
+	if strings.Contains(string(dockerCalls), " pull kafka") {
+		t.Fatalf("restore without --pull should not run compose pull:\n%s", dockerCalls)
+	}
 }
 
 func TestEnvironmentRestoreDoesNotPullComposeBuildServices(t *testing.T) {
@@ -459,7 +516,7 @@ fi
 		"--verification-workflow", "workflow.core-10",
 	)
 
-	out := runCLIWithEnv(t, fixture.DockerEnv, "environment", "restore", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--execute", "--json", "env.compose.build-filter")
+	out := runCLIWithEnv(t, fixture.DockerEnv, "environment", "restore", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--execute", "--pull", "--json", "env.compose.build-filter")
 	var report struct {
 		OK bool `json:"ok"`
 	}

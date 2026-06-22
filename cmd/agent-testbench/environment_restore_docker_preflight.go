@@ -104,7 +104,7 @@ func environmentRestorePreflightRequiresGit(packageSpec environmentRestorePackag
 func environmentRestoreAddComposePreflight(report *environmentRestorePreflight, compose map[string]any, specs []environmentRestoreRepoSpec, workspace string, execute bool, pull bool, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool) {
 	report.Tools = append(report.Tools, environmentRestoreTool("docker", true))
 	report.Tools = append(report.Tools, environmentRestoreCommandTool("docker compose", true, "docker", "compose", dockerComposeCommandVersion))
-	report.HeavySteps = append(report.HeavySteps, environmentRestoreComposeHeavySteps(compose, cleanupOptions)...)
+	report.HeavySteps = append(report.HeavySteps, environmentRestoreComposeHeavySteps(compose, cleanupOptions, pull)...)
 	environmentRestoreCheckComposeBindMounts(report, compose, workspace)
 	environmentRestoreCheckComposeImages(report, compose, workspace, execute, pull)
 	environmentRestoreCheckContainerConflicts(report, compose, workspace, cleanupOptions, prepareReposOnly)
@@ -157,7 +157,6 @@ func environmentRestoreCheckComposeImages(report *environmentRestorePreflight, c
 		if environmentRestoreLocalDockerImageExists(dockerPath, image) {
 			report.LocalImageServices = append(report.LocalImageServices, service)
 			report.Notes = append(report.Notes, "local Docker image is available for compose service "+service+": "+image)
-			continue
 		}
 		if !pull {
 			continue
@@ -189,9 +188,9 @@ func environmentRestoreLocalDockerImageExists(dockerPath string, image string) b
 	return exec.CommandContext(ctx, dockerPath, "image", "inspect", image).Run() == nil
 }
 
-func environmentRestoreComposeHeavySteps(compose map[string]any, cleanupOptions environmentRestoreDockerCleanupOptions) []string {
+func environmentRestoreComposeHeavySteps(compose map[string]any, cleanupOptions environmentRestoreDockerCleanupOptions, pull bool) []string {
 	steps := []string{}
-	if !boolFromReportAny(compose["skipPull"]) {
+	if pull && !boolFromReportAny(compose["skipPull"]) {
 		steps = append(steps, "docker compose pull may download images")
 	}
 	if !boolFromReportAny(compose["skipBuild"]) {
