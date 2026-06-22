@@ -15,10 +15,11 @@ agent-native, API-operated, Store-first, and local-first.
   not immediately fixed, register it with the local Codex skill
   `agent-testbench-feedback` instead of writing feedback ledgers into this
   repository or temporary notes under `/tmp`.
-- Agent/operator runbooks live outside this repository as local Codex skills.
-  Do not add private Store names, environment IDs, customer workflows, internal
-  service names, DSNs, ports, or business-domain examples to public source
-  files.
+- If `AGENTS.local.md` exists, read it for machine-local workflow notes. Never
+  commit that file.
+- Do not add private Store names, environment IDs, customer workflows, internal
+  service names, DSNs, ports, local remotes, or business-domain examples to
+  public source files.
 
 ## Core Rules
 
