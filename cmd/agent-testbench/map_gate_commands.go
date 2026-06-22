@@ -269,7 +269,7 @@ func mapGateTaskEvidenceExempt(item mapGateTaskItem) bool {
 func mapGateNextActions(report mapGateReport, options mapGateOptions) []string {
 	actions := []string{}
 	if !report.Gates.TasksPresent {
-		return []string{"agent-testbench map plan inspect --plan " + commandline.ShellQuote(report.PlanID) + " --json"}
+		return []string{"agent-testbench map inspect --view plan --plan " + commandline.ShellQuote(report.PlanID) + " --json"}
 	}
 	if len(report.FailedTasks) > 0 {
 		actions = append(actions, "agent-testbench map run --plan "+commandline.ShellQuote(report.PlanID)+" --retry-failed --json")

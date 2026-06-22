@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 )
@@ -31,8 +32,8 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	if !strings.Contains(out, "agent-testbench task suggest --goal \"maintain map\" --json") || !strings.Contains(out, "agent-testbench task plan map-maintain --map MAP_ID --json") {
 		t.Fatalf("top-level help should expose task-intent discovery:\n%s", out)
 	}
-	if !strings.Contains(out, "agent-testbench case diagnose") {
-		t.Fatalf("top-level help should expose case diagnosis:\n%s", out)
+	if !strings.Contains(out, "agent-testbench case inspect [--view diagnose|evidence|runs|timing]") {
+		t.Fatalf("top-level help should expose case diagnosis through case inspect:\n%s", out)
 	}
 	if !strings.Contains(out, "agent-testbench case gate") {
 		t.Fatalf("top-level help should expose CI-ready case gates:\n%s", out)
@@ -101,8 +102,278 @@ func TestGroupedHelpShowsAreaAndExactCommandUsage(t *testing.T) {
 	}
 
 	caseHelp := runCLI(t, "case", "--help")
-	if !strings.Contains(caseHelp, "Commands: case") || !strings.Contains(caseHelp, "agent-testbench case diagnose") || strings.Contains(caseHelp, "agent-testbench workflow run") {
+	if !strings.Contains(caseHelp, "Commands: case") || !strings.Contains(caseHelp, "agent-testbench case inspect") || strings.Contains(caseHelp, "agent-testbench workflow run") {
 		t.Fatalf("case grouped help should show only case commands:\n%s", caseHelp)
+	}
+}
+
+func TestParentCommandsDefaultToCatalogNavigation(t *testing.T) {
+	tests := []struct {
+		args         []string
+		title        string
+		wantUsages   []string
+		wantHeadings []string
+		hiddenUsages []string
+	}{
+		{
+			args:       []string{"map"},
+			title:      "Commands: map",
+			wantUsages: []string{"agent-testbench map inspect", "agent-testbench map explain", "agent-testbench map run", "agent-testbench map atlas"},
+			wantHeadings: []string{
+				"Inspect:",
+				"Maintain:",
+				"Plan:",
+				"Execute:",
+				"Review:",
+			},
+			hiddenUsages: []string{
+				"agent-testbench map list",
+				"agent-testbench map workflows",
+				"agent-testbench map coverage",
+				"agent-testbench map plans",
+				"agent-testbench map plan inspect",
+				"agent-testbench map import-workflows",
+				"agent-testbench map validation",
+			},
+		},
+		{
+			args:       []string{"case"},
+			title:      "Commands: case",
+			wantUsages: []string{"agent-testbench case discover", "agent-testbench case inspect", "agent-testbench case run", "agent-testbench case gate"},
+			hiddenUsages: []string{
+				"agent-testbench case runs",
+				"agent-testbench case evidence",
+				"agent-testbench case timing",
+				"agent-testbench case config upsert",
+				"agent-testbench case incomplete-batches",
+				"agent-testbench case diagnose",
+			},
+		},
+		{
+			args:       []string{"environment"},
+			title:      "Commands: environment",
+			wantUsages: []string{"agent-testbench environment discover", "agent-testbench environment configure", "agent-testbench environment restore", "agent-testbench environment status", "agent-testbench environment stop"},
+			hiddenUsages: []string{
+				"agent-testbench environment migration",
+				"agent-testbench environment components",
+				"agent-testbench environment repo set",
+				"agent-testbench environment startup-file put",
+			},
+		},
+	}
+	for _, tt := range tests {
+		out := runCLI(t, tt.args...)
+		if !strings.Contains(out, tt.title) {
+			t.Fatalf("%s should show parent navigation, got:\n%s", strings.Join(tt.args, " "), out)
+		}
+		for _, want := range tt.wantUsages {
+			if !strings.Contains(out, want) {
+				t.Fatalf("%s parent navigation missing %q:\n%s", strings.Join(tt.args, " "), want, out)
+			}
+		}
+		for _, heading := range tt.wantHeadings {
+			if !strings.Contains(out, heading) {
+				t.Fatalf("%s parent navigation missing heading %q:\n%s", strings.Join(tt.args, " "), heading, out)
+			}
+		}
+		for _, hidden := range tt.hiddenUsages {
+			if strings.Contains(out, hidden) {
+				t.Fatalf("%s parent navigation should hide specialized usage %q:\n%s", strings.Join(tt.args, " "), hidden, out)
+			}
+		}
+		if strings.Contains(out, "missing ") || strings.Contains(out, "unknown ") {
+			t.Fatalf("%s parent navigation should not be an error:\n%s", strings.Join(tt.args, " "), out)
+		}
+	}
+}
+
+func TestCommandUsageLinesComeFromDescriptorRegistry(t *testing.T) {
+	source, err := os.ReadFile("command_catalog.go")
+	if err != nil {
+		t.Fatalf("read command catalog source: %v", err)
+	}
+	sourceText := string(source)
+	for _, forbidden := range []string{
+		"helpText()",
+		"commandCatalogItemFromUsage",
+		`strings.TrimPrefix(usage, "agent-testbench ")`,
+		"commandUsagePathStops",
+	} {
+		if strings.Contains(sourceText, forbidden) {
+			t.Fatalf("command catalog should be backed by explicit descriptors instead of usage inference %q", forbidden)
+		}
+	}
+	commands := map[string]bool{}
+	for _, item := range commandCatalogForAreaWithOptions("", "", commandCatalogOptions{All: true}).Commands {
+		commands[item.Command] = true
+	}
+	for _, want := range []string{"version", "commands", "map explain", "case inspect", "environment restore"} {
+		if !commands[want] {
+			t.Fatalf("descriptor-backed catalog missing %q in %#v", want, commands)
+		}
+	}
+}
+
+func TestCommandDescriptorsDeclareCommandPaths(t *testing.T) {
+	descriptors := commandCatalogDescriptors()
+	if len(descriptors) == 0 {
+		t.Fatal("command descriptors should not be empty")
+	}
+	for _, descriptor := range descriptors {
+		if strings.TrimSpace(descriptor.Command) == "" {
+			t.Fatalf("descriptor should declare command path explicitly: %#v", descriptor)
+		}
+		wantPrefix := "agent-testbench " + descriptor.Command
+		if !strings.HasPrefix(descriptor.Usage, wantPrefix) {
+			t.Fatalf("descriptor usage should start with its declared command %q, got %q", descriptor.Command, descriptor.Usage)
+		}
+		item := commandCatalogItemFromDescriptor(descriptor)
+		if item.Command != descriptor.Command || strings.Join(item.Path, " ") != descriptor.Command {
+			t.Fatalf("catalog item should use explicit descriptor command, descriptor=%#v item=%#v", descriptor, item)
+		}
+	}
+}
+
+func TestCommandDescriptorRegistryOwnsCatalogMetadataSources(t *testing.T) {
+	catalogSource, err := os.ReadFile("command_catalog.go")
+	if err != nil {
+		t.Fatalf("read command catalog source: %v", err)
+	}
+	for _, forbidden := range []string{
+		"func commandCatalogInternalCommands",
+		"func commandCatalogReplacementHints",
+		"func commandCatalogCompatibilityReplacements",
+		"func commandCatalogDefaultCommands",
+	} {
+		if strings.Contains(string(catalogSource), forbidden) {
+			t.Fatalf("command catalog metadata should live in descriptor registry, found %q", forbidden)
+		}
+	}
+	metadataSource, err := os.ReadFile("command_catalog_metadata.go")
+	if err != nil {
+		t.Fatalf("read command catalog metadata source: %v", err)
+	}
+	if strings.Contains(string(metadataSource), "func commandCatalogDefaultInclusionReason") {
+		t.Fatal("default inclusion reasons should live in descriptor registry")
+	}
+}
+
+func TestCommandDescriptorRegistryDeclaresSurfaceMetadata(t *testing.T) {
+	lines := commandDescriptorRegistryLinesByCommand()
+	for _, command := range []string{
+		cliCommandStatus,
+		cliCommandDoctor,
+		cliCommandCommands,
+		"store current",
+		"store status",
+		"environment discover",
+		"environment inspect",
+		commandCatalogEnvironmentConfigure,
+		commandCatalogEnvironmentRestore,
+		commandCatalogEnvironmentStatus,
+		commandCatalogEnvironmentStop,
+		commandCatalogEnvironmentRestart,
+		commandCatalogMapInspect,
+		commandCatalogMapDoctor,
+		commandCatalogMapExplain,
+		commandCatalogMapGate,
+		commandCatalogMapRun,
+		commandCatalogMapAtlas,
+		"case discover",
+		commandCatalogCaseSuiteReport,
+		commandCatalogCaseInspect,
+		commandCatalogCaseGate,
+		commandCatalogCaseRun,
+		commandCatalogWorkflowGate,
+		"task catalog",
+		"task suggest",
+		commandCatalogTaskPlan,
+		"task run",
+	} {
+		line := lines[command]
+		if !strings.Contains(line, "surface=default") || !strings.Contains(line, "reason=") {
+			t.Fatalf("descriptor for default command %q should declare surface=default and reason, line=%q", command, line)
+		}
+	}
+	for _, command := range []string{
+		"gate baseline get",
+		"gate baseline set",
+		"notify test",
+		"runtime mysql endpoints",
+		"replay evidence",
+		"template-package catalog list",
+		"template-package catalog restore",
+		"trace topology collect",
+	} {
+		if !strings.Contains(lines[command], "surface=internal") {
+			t.Fatalf("descriptor for %q should declare surface=internal, line=%q", command, lines[command])
+		}
+	}
+}
+
+func TestCommandDescriptorRegistryDeclaresReplacementHints(t *testing.T) {
+	lines := commandDescriptorRegistryLinesByCommand()
+	for command, replacement := range map[string]string{
+		commandCatalogExecutorPlan:                 "agent-testbench map explain",
+		"runtime mysql endpoints":                  "agent-testbench store status --json",
+		"trace topology collect":                   "agent-testbench evidence inspect --view tasks --run RUN_ID --json",
+		"replay evidence":                          "agent-testbench evidence inspect --view list --run RUN_ID --json",
+		commandCatalogEvidenceList:                 "agent-testbench evidence inspect --view list",
+		commandCatalogEvidenceTasks:                "agent-testbench evidence inspect --view tasks",
+		commandCatalogEnvironmentRepoSet:           "agent-testbench environment configure --view repos ENV_ID",
+		commandCatalogEnvironmentStartupFilePut:    "agent-testbench environment configure --view startup-files ENV_ID",
+		commandCatalogEnvironmentComponentsInspect: "agent-testbench environment configure --view components ENV_ID",
+		commandCatalogEnvironmentComponentsReplace: "agent-testbench environment configure --view components ENV_ID --file COMPONENT_GRAPH_JSON",
+		commandCatalogMapList:                      "agent-testbench map inspect --view list",
+		commandCatalogMapWorkflows:                 "agent-testbench map inspect --view workflows --map MAP_ID",
+		commandCatalogMapCoverage:                  "agent-testbench map inspect --view coverage --map MAP_ID",
+		commandCatalogMapPlans:                     "agent-testbench map inspect --view plans --map MAP_ID",
+		commandCatalogMapPlanInspect:               "agent-testbench map inspect --view plan --plan PLAN_ID",
+		"workflow discover":                        "agent-testbench map inspect --view list --json or agent-testbench map inspect --view workflows --map MAP_ID --json",
+		"workflow register":                        workflowToMapImportReplacement,
+		"workflow upsert":                          workflowToMapImportReplacement,
+		"workflow binding register":                workflowToMapImportReplacement,
+		"workflow binding upsert":                  workflowToMapImportReplacement,
+		"workflow plan":                            "agent-testbench map explain --map MAP_ID --workflow WORKFLOW_ID",
+		"workflow audit":                           "agent-testbench map doctor --map MAP_ID",
+		commandCatalogCaseDiagnose:                 "agent-testbench case inspect --view diagnose",
+		"case runs":                                "agent-testbench case inspect --view runs",
+		"case evidence":                            "agent-testbench case inspect --view evidence",
+		"case timing":                              "agent-testbench case inspect --view timing",
+		"workflow task run":                        "agent-testbench task run NAME --command COMMAND or agent-testbench map run --plan PLAN_ID --rerun-task TASK_ID",
+	} {
+		needle := "replacement=" + replacement
+		if !strings.Contains(lines[command], needle) {
+			t.Fatalf("descriptor for %q should declare %q, line=%q", command, needle, lines[command])
+		}
+	}
+}
+
+func commandDescriptorRegistryLinesByCommand() map[string]string {
+	lines := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(commandDescriptorRegistryText), "\n") {
+		fields := strings.Split(line, "\t")
+		if len(fields) < 2 {
+			continue
+		}
+		lines[strings.TrimSpace(fields[0])] = line
+	}
+	return lines
+}
+
+func TestCompletionRootCommandsUseDescriptorPaths(t *testing.T) {
+	source, err := os.ReadFile("operator_commands.go")
+	if err != nil {
+		t.Fatalf("read operator commands source: %v", err)
+	}
+	if strings.Contains(string(source), `strings.TrimPrefix(usage, "agent-testbench ")`) {
+		t.Fatal("completion root command discovery should use descriptor command paths instead of usage inference")
+	}
+	names := rootCommandNames()
+	for _, want := range []string{"case", "commands", "environment", "map", "template-package"} {
+		if !containsString(names, want) {
+			t.Fatalf("root command names missing %q in %#v", want, names)
+		}
 	}
 }
 
@@ -219,8 +490,6 @@ func TestCommandsAllOmitsDuplicateCompatibilityEntrypoints(t *testing.T) {
 		commandCatalogCaseSuiteReport,
 		"environment acceptance start",
 		"environment acceptance report",
-		"gate baseline get",
-		"gate baseline set",
 		"map plan inspect",
 		"task watch",
 		"template-package verify",
@@ -279,6 +548,74 @@ func TestCommandsAllOmitsDuplicateCompatibilityEntrypoints(t *testing.T) {
 	} {
 		if commands[duplicate] {
 			t.Fatalf("historical compatibility entrypoint %q should not remain in catalog", duplicate)
+		}
+	}
+}
+
+func TestInternalCommandsRequireExplicitCatalogSurface(t *testing.T) {
+	internalCommands := []string{
+		"gate baseline get",
+		"gate baseline set",
+		"notify test",
+		"runtime mysql endpoints",
+		"replay evidence",
+		"template-package catalog list",
+		"template-package catalog restore",
+		"trace topology collect",
+	}
+
+	publicOut := runCLI(t, "commands", "--all", "--json")
+	var publicReport struct {
+		OK       bool `json:"ok"`
+		All      bool `json:"all"`
+		Internal bool `json:"internal,omitempty"`
+		Commands []struct {
+			Command string `json:"command"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(publicOut), &publicReport); err != nil {
+		t.Fatalf("decode public command catalog: %v\n%s", err, publicOut)
+	}
+	if !publicReport.OK || !publicReport.All || publicReport.Internal {
+		t.Fatalf("public command catalog should be full but non-internal: %#v", publicReport)
+	}
+	publicCommands := map[string]bool{}
+	for _, item := range publicReport.Commands {
+		publicCommands[item.Command] = true
+	}
+	for _, command := range internalCommands {
+		if publicCommands[command] {
+			t.Fatalf("public --all catalog should hide internal command %q", command)
+		}
+	}
+
+	internalOut := runCLI(t, "commands", "--all", "--internal", "--json")
+	var internalReport struct {
+		OK       bool `json:"ok"`
+		All      bool `json:"all"`
+		Internal bool `json:"internal"`
+		Commands []struct {
+			Command string   `json:"command"`
+			Tags    []string `json:"tags"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(internalOut), &internalReport); err != nil {
+		t.Fatalf("decode internal command catalog: %v\n%s", err, internalOut)
+	}
+	if !internalReport.OK || !internalReport.All || !internalReport.Internal {
+		t.Fatalf("internal command catalog should acknowledge internal surface: %#v", internalReport)
+	}
+	internalItems := map[string][]string{}
+	for _, item := range internalReport.Commands {
+		internalItems[item.Command] = item.Tags
+	}
+	for _, command := range internalCommands {
+		tags, ok := internalItems[command]
+		if !ok {
+			t.Fatalf("internal --all catalog missing internal command %q", command)
+		}
+		if !stringSliceContains(tags, "internal") {
+			t.Fatalf("internal command %q should expose internal tag: %#v", command, tags)
 		}
 	}
 }
@@ -437,6 +774,7 @@ func TestMapCommandsExposeLifecycleMetadata(t *testing.T) {
 		"map workflows":         "inspect",
 		"map coverage":          "inspect",
 		"map plans":             "inspect",
+		"map inspect":           "inspect",
 		"map doctor":            "maintain",
 		"map diff":              "maintain",
 		"map validation list":   "maintain",
@@ -510,9 +848,63 @@ func TestCommandsDefaultCatalogHidesSpecializedCommands(t *testing.T) {
 			t.Fatalf("default catalog missing command %q in %#v", want, commands)
 		}
 	}
-	for _, hidden := range []string{"profile import", "config publish", "template-package catalog-index", "template-package import", "runtime mysql endpoints", commandCatalogExecutorPlan, "case runs", "case evidence", "case timing", "case suite coverage", "workflow acceptance start", "baseline get", "workflow report", "case suite plan", "map plan inspect"} {
+	for _, hidden := range []string{"profile import", "config publish", "template-package catalog-index", "template-package import", "runtime mysql endpoints", commandCatalogExecutorPlan, commandCatalogCaseDiagnose, "case runs", "case evidence", "case timing", "case suite coverage", "workflow acceptance start", "baseline get", "workflow report", "case suite plan", "map plan inspect"} {
 		if _, ok := commands[hidden]; ok {
 			t.Fatalf("default catalog should hide %q: %#v", hidden, commands[hidden])
+		}
+	}
+}
+
+func TestEnvironmentConfigureConsolidatesConfigurationCommandsInCatalog(t *testing.T) {
+	defaultOut := runCLI(t, "commands", "--area", "environment", "--json")
+	var defaultReport struct {
+		Commands []struct {
+			Command string `json:"command"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(defaultOut), &defaultReport); err != nil {
+		t.Fatalf("decode default environment catalog: %v\n%s", err, defaultOut)
+	}
+	defaultCommands := map[string]bool{}
+	for _, item := range defaultReport.Commands {
+		defaultCommands[item.Command] = true
+	}
+	if !defaultCommands[commandCatalogEnvironmentConfigure] {
+		t.Fatalf("default environment catalog should promote configure: %#v", defaultCommands)
+	}
+	for _, hidden := range []string{
+		commandCatalogEnvironmentRepoSet,
+		commandCatalogEnvironmentStartupFilePut,
+		commandCatalogEnvironmentComponentsInspect,
+		commandCatalogEnvironmentComponentsReplace,
+	} {
+		if defaultCommands[hidden] {
+			t.Fatalf("default environment catalog should hide specialized config command %q: %#v", hidden, defaultCommands)
+		}
+	}
+
+	out := runCLI(t, "commands", "--all", "--area", "environment", "--json")
+	var report struct {
+		Commands []struct {
+			Command     string `json:"command"`
+			Replacement string `json:"replacement"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode full environment catalog: %v\n%s", err, out)
+	}
+	commands := map[string]string{}
+	for _, item := range report.Commands {
+		commands[item.Command] = item.Replacement
+	}
+	for command, replacement := range map[string]string{
+		commandCatalogEnvironmentRepoSet:           "environment configure --view repos",
+		commandCatalogEnvironmentStartupFilePut:    "environment configure --view startup-files",
+		commandCatalogEnvironmentComponentsInspect: "environment configure --view components",
+		commandCatalogEnvironmentComponentsReplace: "environment configure --view components",
+	} {
+		if !strings.Contains(commands[command], replacement) {
+			t.Fatalf("%s should point users to %s: %#v", command, replacement, commands)
 		}
 	}
 }
@@ -539,6 +931,133 @@ func TestCommandsDefaultCatalogExplainsInclusion(t *testing.T) {
 	for _, command := range []string{"map run", "case run", "task plan", "workflow gate"} {
 		if reasons[command] == "" {
 			t.Fatalf("default command %q should explain inclusion: %#v", command, reasons)
+		}
+	}
+}
+
+func TestCaseDiagnoseIsCompatibilitySurfaceForInspect(t *testing.T) {
+	defaultOut := runCLI(t, "commands", "--filter", commandCatalogCaseDiagnose, "--json")
+	if strings.Contains(defaultOut, `"command": "`+commandCatalogCaseDiagnose+`"`) {
+		t.Fatalf("default catalog should not promote case diagnose after inspect gained --view diagnose:\n%s", defaultOut)
+	}
+
+	out := runCLI(t, "commands", "--all", "--filter", commandCatalogCaseDiagnose, "--json")
+	var report struct {
+		Commands []struct {
+			Command     string `json:"command"`
+			Replacement string `json:"replacement"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode case diagnose catalog: %v\n%s", err, out)
+	}
+	if len(report.Commands) != 1 || report.Commands[0].Command != commandCatalogCaseDiagnose || !strings.Contains(report.Commands[0].Replacement, "case inspect --view diagnose") {
+		t.Fatalf("case diagnose should point users to case inspect --view diagnose: %#v", report.Commands)
+	}
+
+	helpOut := runCLI(t, "case", "diagnose", "--help")
+	if !strings.Contains(helpOut, "Command: case diagnose") {
+		t.Fatalf("case diagnose should remain executable with exact help during compatibility window:\n%s", helpOut)
+	}
+}
+
+func TestEvidenceInspectConsolidatesListAndTasksInCatalog(t *testing.T) {
+	helpOut := runCLI(t, "evidence")
+	for _, want := range []string{"Commands: evidence", "agent-testbench evidence import", "agent-testbench evidence inspect"} {
+		if !strings.Contains(helpOut, want) {
+			t.Fatalf("evidence parent help missing %q:\n%s", want, helpOut)
+		}
+	}
+	for _, hidden := range []string{"agent-testbench evidence list", "agent-testbench evidence tasks"} {
+		if strings.Contains(helpOut, hidden) {
+			t.Fatalf("evidence parent help should hide compatibility command %q:\n%s", hidden, helpOut)
+		}
+	}
+
+	defaultOut := runCLI(t, "commands", "--filter", "evidence list", "--json")
+	if strings.Contains(defaultOut, `"command": "evidence list"`) {
+		t.Fatalf("default catalog should not promote evidence list after inspect gained --view list:\n%s", defaultOut)
+	}
+
+	out := runCLI(t, "commands", "--all", "--filter", "evidence", "--json")
+	var report struct {
+		Commands []struct {
+			Command     string `json:"command"`
+			Replacement string `json:"replacement"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode evidence catalog: %v\n%s", err, out)
+	}
+	commands := map[string]string{}
+	for _, item := range report.Commands {
+		commands[item.Command] = item.Replacement
+	}
+	if _, ok := commands[commandCatalogEvidenceInspect]; !ok {
+		t.Fatalf("evidence inspect missing from full catalog: %#v", commands)
+	}
+	if !strings.Contains(commands[commandCatalogEvidenceList], "evidence inspect --view list") {
+		t.Fatalf("evidence list should point users to inspect list view: %#v", commands)
+	}
+	if !strings.Contains(commands[commandCatalogEvidenceTasks], "evidence inspect --view tasks") {
+		t.Fatalf("evidence tasks should point users to inspect tasks view: %#v", commands)
+	}
+}
+
+func TestMapInspectConsolidatesReadOnlyMapViewsInCatalog(t *testing.T) {
+	defaultOut := runCLI(t, "commands", "--json")
+	var defaultReport struct {
+		Commands []struct {
+			Command string `json:"command"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(defaultOut), &defaultReport); err != nil {
+		t.Fatalf("decode default command catalog: %v\n%s", err, defaultOut)
+	}
+	defaultCommands := map[string]bool{}
+	for _, item := range defaultReport.Commands {
+		defaultCommands[item.Command] = true
+	}
+	if !defaultCommands[commandCatalogMapInspect] {
+		t.Fatalf("default catalog should promote map inspect: %#v", defaultCommands)
+	}
+	for _, hidden := range []string{commandCatalogMapList, commandCatalogMapCoverage} {
+		if defaultCommands[hidden] {
+			t.Fatalf("default catalog should not promote %q after map inspect consolidation: %#v", hidden, defaultCommands)
+		}
+	}
+
+	helpOut := runCLI(t, "map", "inspect", "--help")
+	if !strings.Contains(helpOut, "Command: map inspect") || !strings.Contains(helpOut, "--view list|workflows|coverage|plans|plan") {
+		t.Fatalf("map inspect help should expose inspect views:\n%s", helpOut)
+	}
+
+	out := runCLI(t, "commands", "--all", "--filter", "map inspect", "--json")
+	var report struct {
+		Commands []struct {
+			Command     string `json:"command"`
+			Replacement string `json:"replacement"`
+		} `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode map inspect catalog: %v\n%s", err, out)
+	}
+	commands := map[string]string{}
+	for _, item := range report.Commands {
+		commands[item.Command] = item.Replacement
+	}
+	if _, ok := commands[commandCatalogMapInspect]; !ok {
+		t.Fatalf("map inspect missing from full catalog: %#v", commands)
+	}
+	for command, replacement := range map[string]string{
+		commandCatalogMapList:        "map inspect --view list",
+		commandCatalogMapWorkflows:   "map inspect --view workflows",
+		commandCatalogMapCoverage:    "map inspect --view coverage",
+		commandCatalogMapPlans:       "map inspect --view plans",
+		commandCatalogMapPlanInspect: "map inspect --view plan",
+	} {
+		if !strings.Contains(commands[command], replacement) {
+			t.Fatalf("%s should point users to %s: %#v", command, replacement, commands)
 		}
 	}
 }

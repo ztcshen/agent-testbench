@@ -38,7 +38,7 @@ func parseEnvironmentRestoreCommandOptions(args []string) (environmentRestoreCom
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
 	workspace := flags.String("workspace", "", "Local workspace for cloned or existing service checkouts")
 	execute := flags.Bool("execute", false, "Clone or update component repositories, run Docker Compose, and wait for health checks")
-	pull := flags.Bool("pull", false, "Run git pull --ff-only for existing checkouts when --execute is set")
+	pull := flags.Bool("pull", false, "Refresh existing checkouts with git pull --ff-only and run Docker Compose image pull when --execute is set")
 	prepareReposOnly := flags.Bool("prepare-repos-only", false, "When --execute is set, clone or validate repositories and stop before Docker startup")
 	runWorkflow := flags.Bool("run-workflow", false, "Run the environment verification workflow after Docker health checks pass")
 	serverURL := flags.String("server-url", "", "Running control plane base URL for async environment acceptance")

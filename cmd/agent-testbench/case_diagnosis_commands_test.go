@@ -154,7 +154,7 @@ func TestCaseDiagnoseReportsMissingRuntimeAndDependencyDiagnostics(t *testing.T)
 	}
 	joinedActions := strings.Join(report.NextActions, "\n")
 	if !strings.Contains(joinedActions, "agent-testbench workflow step --run run.observability --step step.send --json") ||
-		!strings.Contains(joinedActions, "agent-testbench evidence tasks --run run.observability --step step.send --kind runtime_log_collect --json") {
+		!strings.Contains(joinedActions, "agent-testbench evidence inspect --view tasks --run run.observability --step step.send --kind runtime_log_collect --json") {
 		t.Fatalf("diagnosis next actions = %#v", report.NextActions)
 	}
 	if !caseDiagnosisTestSignal(report.Signals, "evidence.logs", "0") || !caseDiagnosisTestSignal(report.Signals, "dependency.probes", "0") {

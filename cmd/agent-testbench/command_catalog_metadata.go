@@ -5,18 +5,26 @@ const (
 	cliCommandCommands = onboardSmokeCommands
 	cliCommandDoctor   = "doctor"
 
-	commandCatalogEnvironmentRestore = "environment restore"
-	commandCatalogEnvironmentStatus  = "environment status"
-	commandCatalogEnvironmentStop    = "environment stop"
-	commandCatalogEnvironmentRestart = "environment service restart"
-	commandCatalogTaskPlan           = "task plan"
-	commandCatalogWorkflowGate       = "workflow gate"
-	commandCatalogCaseInspect        = "case inspect"
-	commandCatalogCaseDiagnose       = "case diagnose"
-	commandCatalogCaseGate           = "case gate"
-	commandCatalogCaseRun            = "case run"
-	commandCatalogCaseSuiteReport    = "case suite report"
-	commandCatalogExecutorPlan       = "executor plan"
+	commandCatalogEnvironmentRestore           = "environment restore"
+	commandCatalogEnvironmentStatus            = "environment status"
+	commandCatalogEnvironmentStop              = "environment stop"
+	commandCatalogEnvironmentRestart           = "environment service restart"
+	commandCatalogEnvironmentConfigure         = "environment configure"
+	commandCatalogEnvironmentRepoSet           = "environment repo set"
+	commandCatalogEnvironmentStartupFilePut    = "environment startup-file put"
+	commandCatalogEnvironmentComponentsInspect = "environment components inspect"
+	commandCatalogEnvironmentComponentsReplace = "environment components replace"
+	commandCatalogTaskPlan                     = "task plan"
+	commandCatalogWorkflowGate                 = "workflow gate"
+	commandCatalogCaseInspect                  = "case inspect"
+	commandCatalogCaseDiagnose                 = "case diagnose"
+	commandCatalogCaseGate                     = "case gate"
+	commandCatalogCaseRun                      = "case run"
+	commandCatalogCaseSuiteReport              = "case suite report"
+	commandCatalogExecutorPlan                 = "executor plan"
+	commandCatalogEvidenceInspect              = "evidence inspect"
+	commandCatalogEvidenceList                 = "evidence list"
+	commandCatalogEvidenceTasks                = "evidence tasks"
 
 	commandCatalogMapList             = "map list"
 	commandCatalogMapWorkflows        = "map workflows"
@@ -31,6 +39,7 @@ const (
 	commandCatalogMapUpdate           = "map update"
 	commandCatalogMapSnapshot         = "map snapshot"
 	commandCatalogMapPublish          = "map publish"
+	commandCatalogMapInspect          = "map inspect"
 	commandCatalogMapExplain          = "map explain"
 	commandCatalogMapPlanInspect      = "map plan inspect"
 	commandCatalogMapRun              = "map run"
@@ -47,6 +56,7 @@ const (
 
 	commandCatalogSurfaceDefault       = "default"
 	commandCatalogSurfaceExtended      = "extended"
+	commandCatalogSurfaceInternal      = "internal"
 	commandCatalogSurfaceCompatibility = "compatibility"
 	commandCatalogSurfaceDeprecated    = "deprecated"
 )
@@ -70,6 +80,7 @@ func commandCatalogMapLifecycles() map[string]string {
 		commandCatalogMapUpdate:           commandCatalogLifecycleMaintain,
 		commandCatalogMapSnapshot:         commandCatalogLifecycleMaintain,
 		commandCatalogMapPublish:          commandCatalogLifecycleMaintain,
+		commandCatalogMapInspect:          commandCatalogLifecycleInspect,
 		commandCatalogMapExplain:          commandCatalogLifecyclePlan,
 		commandCatalogMapPlanInspect:      commandCatalogLifecyclePlan,
 		commandCatalogMapRun:              commandCatalogLifecycleExecute,
@@ -94,6 +105,7 @@ func commandCatalogTaskRanks() map[string]int {
 		commandCatalogMapPublish:          80,
 		commandCatalogMapVersions:         90,
 		commandCatalogMapImportWorkflows:  100,
+		commandCatalogMapInspect:          105,
 		commandCatalogMapList:             110,
 		commandCatalogMapWorkflows:        120,
 		commandCatalogMapExplain:          210,
@@ -102,26 +114,5 @@ func commandCatalogTaskRanks() map[string]int {
 		commandCatalogMapGate:             240,
 		commandCatalogMapPlans:            260,
 		commandCatalogMapAtlas:            310,
-	}
-}
-
-func commandCatalogDefaultInclusionReason(command string) string {
-	switch command {
-	case cliCommandStatus, cliCommandDoctor, cliCommandCommands:
-		return "orientation: first commands for status, diagnosis, and command discovery"
-	case "store current", "store status":
-		return "store: identifies the active SQL Store and its health"
-	case "environment discover", "environment inspect", commandCatalogEnvironmentRestore, commandCatalogEnvironmentStatus, commandCatalogEnvironmentStop, commandCatalogEnvironmentRestart:
-		return "environment lifecycle: inspect, restore, check, stop, or restart a registered environment"
-	case "task catalog", "task suggest", commandCatalogTaskPlan, "task run":
-		return "task intent: lets agents discover, plan, and run repeatable operator tasks"
-	case commandCatalogMapList, commandCatalogMapCoverage, commandCatalogMapDoctor, commandCatalogMapExplain, commandCatalogMapGate, commandCatalogMapRun, commandCatalogMapAtlas:
-		return "map lifecycle: inspect, plan, execute, gate, and review a test scenario map"
-	case "case discover", commandCatalogCaseSuiteReport, commandCatalogCaseInspect, commandCatalogCaseDiagnose, commandCatalogCaseGate, commandCatalogCaseRun:
-		return "case lifecycle: discover, run, inspect evidence, diagnose, and gate API or MQ cases"
-	case commandCatalogWorkflowGate:
-		return "workflow compatibility: keeps existing workflow gates visible while map-first flows converge"
-	default:
-		return "default operator path: commonly needed for local Store-first testing"
 	}
 }

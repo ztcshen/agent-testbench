@@ -146,14 +146,7 @@ func TestAnalyzeGoFileKeepsPackageBudgetWarnings(t *testing.T) {
 
 func TestAnalyzeGoFileBlocksPackageBudgetOverLimits(t *testing.T) {
 	root := t.TempDir()
-	for i := 0; i < 36; i++ {
-		path := filepath.Join(root, "internal", "domain", "sample", "file_"+strconv.Itoa(i)+".go")
-		writeFile(t, path, "package sample\n\nconst Value"+strconv.Itoa(i)+" = 1\n")
-	}
-	for i := 0; i < 6; i++ {
-		path := filepath.Join(root, "internal", "domain", "sample", "large_"+strconv.Itoa(i)+".go")
-		writeFile(t, path, "package sample\n\n"+strings.Repeat("const LargeValue = 1\n", 430))
-	}
+	writeOversizedPackageFixture(t, root)
 
 	report, err := Analyze(Options{Root: root, ReportDir: filepath.Join(root, "reports")})
 	if err != nil {
@@ -162,6 +155,52 @@ func TestAnalyzeGoFileBlocksPackageBudgetOverLimits(t *testing.T) {
 
 	assertIssueSeverity(t, report, "package-file-count", SeverityBlock)
 	assertIssueSeverity(t, report, "package-lines", SeverityBlock)
+}
+
+func TestAnalyzeScopedPackageBudgetDemotesPackageWideBlocks(t *testing.T) {
+	root := t.TempDir()
+	writeOversizedPackageFixture(t, root)
+
+	report, err := Analyze(Options{
+		Root:       root,
+		ReportDir:  filepath.Join(root, "reports"),
+		ScopePaths: []string{"internal/domain/sample/file_0.go"},
+	})
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+
+	assertIssueSeverity(t, report, "package-file-count", SeverityWarning)
+	assertIssueSeverity(t, report, "package-lines", SeverityWarning)
+}
+
+func TestAnalyzeGoFileUsesSurfaceHardCeilingsForLargeCLIAndTestFiles(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "cmd", "agent-testbench", "large_test.go")
+	writeFile(t, path, "package main\n\n"+strings.Repeat("const LargeTestValue = 1\n", 900))
+
+	report, err := Analyze(Options{
+		Root:       root,
+		ReportDir:  filepath.Join(root, "reports"),
+		ScopePaths: []string{"cmd/agent-testbench/large_test.go"},
+	})
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+
+	assertIssueSeverity(t, report, "file-lines", SeverityWarning)
+}
+
+func writeOversizedPackageFixture(t *testing.T, root string) {
+	t.Helper()
+	for i := 0; i < 36; i++ {
+		path := filepath.Join(root, "internal", "domain", "sample", "file_"+strconv.Itoa(i)+".go")
+		writeFile(t, path, "package sample\n\nconst Value"+strconv.Itoa(i)+" = 1\n")
+	}
+	for i := 0; i < 6; i++ {
+		path := filepath.Join(root, "internal", "domain", "sample", "large_"+strconv.Itoa(i)+".go")
+		writeFile(t, path, "package sample\n\n"+strings.Repeat("const LargeValue = 1\n", 430))
+	}
 }
 
 func TestAnalyzeGoFileReportsVeryWideStructs(t *testing.T) {

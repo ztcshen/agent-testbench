@@ -231,6 +231,7 @@ func TestMapCommandsAreDiscoverable(t *testing.T) {
 		"map validation list",
 		"map validation attach",
 		"map workflows",
+		"map inspect",
 		"map explain",
 		"map gate",
 		"map run",
@@ -345,6 +346,128 @@ func TestMapListAndPlansExposeAtlasEntrypoints(t *testing.T) {
 	if !strings.Contains(plan.AtlasCommand, "map atlas --map 'map.atlas' --plan 'plan.atlas.001'") || !strings.Contains(plan.GateCommand, "map gate --plan 'plan.atlas.001'") {
 		t.Fatalf("map plan commands = %#v", plan)
 	}
+}
+
+func TestMapInspectRoutesListWorkflowsCoverageAndPlansViews(t *testing.T) {
+	storeRef := seedMapInspectFixture(t)
+
+	listOut := runCLI(t, "map", "inspect", "--view", "list", "--store", storeRef, "--json")
+	var listReport struct {
+		OK    bool `json:"ok"`
+		Count int  `json:"count"`
+		Maps  []struct {
+			ID string `json:"id"`
+		} `json:"maps"`
+	}
+	if err := json.Unmarshal([]byte(listOut), &listReport); err != nil {
+		t.Fatalf("decode map inspect list json: %v\n%s", err, listOut)
+	}
+	if !listReport.OK || listReport.Count != 1 || listReport.Maps[0].ID != "map.inspect" {
+		t.Fatalf("map inspect list report = %#v", listReport)
+	}
+
+	workflowsOut := runCLI(t, "map", "inspect", "--view", "workflows", "--store", storeRef, "--map", "map.inspect", "--json")
+	var workflowsReport struct {
+		OK        bool `json:"ok"`
+		Count     int  `json:"count"`
+		Workflows []struct {
+			WorkflowID string `json:"workflowId"`
+			StepCount  int    `json:"stepCount"`
+		} `json:"workflows"`
+	}
+	if err := json.Unmarshal([]byte(workflowsOut), &workflowsReport); err != nil {
+		t.Fatalf("decode map inspect workflows json: %v\n%s", err, workflowsOut)
+	}
+	if !workflowsReport.OK || workflowsReport.Count != 1 || workflowsReport.Workflows[0].WorkflowID != "workflow.submit" || workflowsReport.Workflows[0].StepCount != 2 {
+		t.Fatalf("map inspect workflows report = %#v", workflowsReport)
+	}
+
+	coverageOut := runCLI(t, "map", "inspect", "--view", "coverage", "--store", storeRef, "--map", "map.inspect", "--json")
+	var coverageReport mapCoverageReport
+	if err := json.Unmarshal([]byte(coverageOut), &coverageReport); err != nil {
+		t.Fatalf("decode map inspect coverage json: %v\n%s", err, coverageOut)
+	}
+	if !coverageReport.OK || coverageReport.MapID != "map.inspect" || coverageReport.Cases.Nodes != 2 || coverageReport.Cases.PathReferences != 2 {
+		t.Fatalf("map inspect coverage report = %#v", coverageReport)
+	}
+
+	plansOut := runCLI(t, "map", "inspect", "--view", "plans", "--store", storeRef, "--map", "map.inspect", "--json")
+	var plansReport struct {
+		OK    bool   `json:"ok"`
+		MapID string `json:"mapId"`
+		Plans []struct {
+			ID string `json:"id"`
+		} `json:"plans"`
+	}
+	if err := json.Unmarshal([]byte(plansOut), &plansReport); err != nil {
+		t.Fatalf("decode map inspect plans json: %v\n%s", err, plansOut)
+	}
+	if !plansReport.OK || plansReport.MapID != "map.inspect" || len(plansReport.Plans) != 1 || plansReport.Plans[0].ID != "plan.inspect.001" {
+		t.Fatalf("map inspect plans report = %#v", plansReport)
+	}
+}
+
+func TestMapInspectRoutesPlanViewAndUnknownView(t *testing.T) {
+	storeRef := seedMapInspectFixture(t)
+
+	planOut := runCLI(t, "map", "inspect", "--view", "plan", "--store", storeRef, "--plan", "plan.inspect.001", "--json")
+	var planReport mapRunExplainCommandReport
+	if err := json.Unmarshal([]byte(planOut), &planReport); err != nil {
+		t.Fatalf("decode map inspect plan json: %v\n%s", err, planOut)
+	}
+	if planReport.OK || planReport.PlanID != "plan.inspect.001" || planReport.Status != "failed" {
+		t.Fatalf("map inspect plan report = %#v", planReport)
+	}
+	if !strings.Contains(strings.Join(planReport.NextActions, "\n"), "map inspect --view plan --plan 'plan.inspect.001'") {
+		t.Fatalf("map inspect plan next actions = %#v", planReport.NextActions)
+	}
+
+	out := runCLIFails(t, "map", "inspect", "--view", "unknown", "--store", storeRef, "--map", "map.inspect")
+	if !strings.Contains(out, "unknown map inspect view") {
+		t.Fatalf("unknown map inspect view should fail clearly:\n%s", out)
+	}
+}
+
+func seedMapInspectFixture(t *testing.T) string {
+	t.Helper()
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "map-inspect.sqlite")
+	storeRef := "sqlite://" + storePath
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	graph := store.TestPlanGraph{
+		Map: store.TestPlanMap{ID: "map.inspect", ProfileID: "profile.inspect", DisplayName: "Inspect Map", Status: "active", SummaryJSON: `{}`},
+		Nodes: []store.TestPlanNode{
+			{MapID: "map.inspect", ID: "node.prepare", CaseID: "case.prepare", SummaryJSON: `{}`},
+			{MapID: "map.inspect", ID: "node.submit", CaseID: "case.submit", SummaryJSON: `{}`},
+		},
+		Paths: []store.TestPlanPath{
+			{MapID: "map.inspect", ID: "path.submit", WorkflowID: "workflow.submit", DisplayName: "Submit", SummaryJSON: `{}`},
+		},
+		PathSteps: []store.TestPlanPathStep{
+			{MapID: "map.inspect", PathID: "path.submit", StepIndex: 1, NodeID: "node.prepare", CaseID: "case.prepare", SummaryJSON: `{}`},
+			{MapID: "map.inspect", PathID: "path.submit", StepIndex: 2, NodeID: "node.submit", CaseID: "case.submit", SummaryJSON: `{}`},
+		},
+	}
+	if err := runtime.ReplaceTestPlanGraph(ctx, graph); err != nil {
+		t.Fatalf("seed test plan graph: %v", err)
+	}
+	if err := runtime.SaveTestMapPlan(ctx, store.TestMapPlanRecord{
+		Instance: store.TestMapPlanInstance{
+			ID: "plan.inspect.001", MapID: "map.inspect", ProfileID: "profile.inspect", EnvironmentID: "env.inspect",
+			Scope: "all", TargetKind: "map", TargetID: "map.inspect", Mode: "run", Status: "failed", SummaryJSON: `{}`,
+		},
+		Tasks: []store.TestMapPlanTask{{
+			PlanID: "plan.inspect.001", ID: "task.submit", Index: 1, Kind: "case", Operation: "run_case",
+			NodeID: "node.submit", CaseID: "case.submit", Status: "failed", Reason: "HTTP 400", SummaryJSON: `{}`,
+		}},
+	}); err != nil {
+		t.Fatalf("seed test map plan: %v", err)
+	}
+	closeCLIStore(runtime)
+	return storeRef
 }
 
 func TestMapUpdateMaintainsMapMetadataWithoutLosingGraph(t *testing.T) {

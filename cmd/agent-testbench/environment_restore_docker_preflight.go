@@ -62,7 +62,7 @@ func environmentRestoreContainerNameConflicts(compose map[string]any, workspace 
 	return conflicts
 }
 
-func environmentRestorePreflightReport(packageSpec environmentRestorePackageSpec, specs []environmentRestoreRepoSpec, compose map[string]any, workspace string, execute bool, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool, packageIgnored bool) environmentRestorePreflight {
+func environmentRestorePreflightReport(packageSpec environmentRestorePackageSpec, specs []environmentRestoreRepoSpec, compose map[string]any, workspace string, execute bool, pull bool, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool, packageIgnored bool) environmentRestorePreflight {
 	report := environmentRestorePreflight{
 		OK:                true,
 		AssumeCleanDocker: cleanupOptions.AssumeCleanDocker,
@@ -77,7 +77,7 @@ func environmentRestorePreflightReport(packageSpec environmentRestorePackageSpec
 	composeFile := strings.TrimSpace(valueString(compose["composeFile"]))
 	startCommand := strings.TrimSpace(valueString(compose["startCommand"]))
 	if composeFile != "" {
-		environmentRestoreAddComposePreflight(&report, compose, specs, workspace, execute, cleanupOptions, prepareReposOnly)
+		environmentRestoreAddComposePreflight(&report, compose, specs, workspace, execute, pull, cleanupOptions, prepareReposOnly)
 	} else if startCommand != "" {
 		report.HeavySteps = append(report.HeavySteps, "start command may create local runtime processes or containers")
 	}
@@ -101,12 +101,12 @@ func environmentRestorePreflightRequiresGit(packageSpec environmentRestorePackag
 	return false
 }
 
-func environmentRestoreAddComposePreflight(report *environmentRestorePreflight, compose map[string]any, specs []environmentRestoreRepoSpec, workspace string, execute bool, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool) {
+func environmentRestoreAddComposePreflight(report *environmentRestorePreflight, compose map[string]any, specs []environmentRestoreRepoSpec, workspace string, execute bool, pull bool, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool) {
 	report.Tools = append(report.Tools, environmentRestoreTool("docker", true))
 	report.Tools = append(report.Tools, environmentRestoreCommandTool("docker compose", true, "docker", "compose", dockerComposeCommandVersion))
-	report.HeavySteps = append(report.HeavySteps, environmentRestoreComposeHeavySteps(compose, cleanupOptions)...)
+	report.HeavySteps = append(report.HeavySteps, environmentRestoreComposeHeavySteps(compose, cleanupOptions, pull)...)
 	environmentRestoreCheckComposeBindMounts(report, compose, workspace)
-	environmentRestoreCheckComposeImages(report, compose, workspace, execute)
+	environmentRestoreCheckComposeImages(report, compose, workspace, execute, pull)
 	environmentRestoreCheckContainerConflicts(report, compose, workspace, cleanupOptions, prepareReposOnly)
 	environmentRestoreCheckStartupAssets(report, compose, specs, workspace, cleanupOptions, prepareReposOnly)
 	for _, file := range environmentRestoreComposeFiles(compose) {
@@ -137,7 +137,7 @@ func environmentRestoreCheckComposeBindMounts(report *environmentRestorePrefligh
 	}
 }
 
-func environmentRestoreCheckComposeImages(report *environmentRestorePreflight, compose map[string]any, workspace string, execute bool) {
+func environmentRestoreCheckComposeImages(report *environmentRestorePreflight, compose map[string]any, workspace string, execute bool, pull bool) {
 	if !execute || boolFromReportAny(compose["skipPull"]) {
 		return
 	}
@@ -154,15 +154,17 @@ func environmentRestoreCheckComposeImages(report *environmentRestorePreflight, c
 		if buildServices[service] || strings.TrimSpace(image) == "" || strings.Contains(image, "$") {
 			continue
 		}
+		if environmentRestoreLocalDockerImageExists(dockerPath, image) {
+			report.LocalImageServices = append(report.LocalImageServices, service)
+			report.Notes = append(report.Notes, "local Docker image is available for compose service "+service+": "+image)
+		}
+		if !pull {
+			continue
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		out, err := exec.CommandContext(ctx, dockerPath, "manifest", "inspect", image).CombinedOutput()
 		cancel()
 		if err == nil {
-			continue
-		}
-		if environmentRestoreLocalDockerImageExists(dockerPath, image) {
-			report.LocalImageServices = append(report.LocalImageServices, service)
-			report.Notes = append(report.Notes, "local Docker image is available for compose service "+service+": "+image)
 			continue
 		}
 		detail := strings.TrimSpace(string(out))
@@ -186,9 +188,9 @@ func environmentRestoreLocalDockerImageExists(dockerPath string, image string) b
 	return exec.CommandContext(ctx, dockerPath, "image", "inspect", image).Run() == nil
 }
 
-func environmentRestoreComposeHeavySteps(compose map[string]any, cleanupOptions environmentRestoreDockerCleanupOptions) []string {
+func environmentRestoreComposeHeavySteps(compose map[string]any, cleanupOptions environmentRestoreDockerCleanupOptions, pull bool) []string {
 	steps := []string{}
-	if !boolFromReportAny(compose["skipPull"]) {
+	if pull && !boolFromReportAny(compose["skipPull"]) {
 		steps = append(steps, "docker compose pull may download images")
 	}
 	if !boolFromReportAny(compose["skipBuild"]) {

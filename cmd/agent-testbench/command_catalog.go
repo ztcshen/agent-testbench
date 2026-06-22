@@ -13,6 +13,7 @@ type commandCatalogReport struct {
 	Filter   string               `json:"filter,omitempty"`
 	Area     string               `json:"area,omitempty"`
 	All      bool                 `json:"all,omitempty"`
+	Internal bool                 `json:"internal,omitempty"`
 	Count    int                  `json:"count"`
 	Commands []commandCatalogItem `json:"commands"`
 }
@@ -32,7 +33,8 @@ type commandCatalogItem struct {
 }
 
 type commandCatalogOptions struct {
-	All bool
+	All      bool
+	Internal bool
 }
 
 func runCommands(args []string) error {
@@ -41,11 +43,12 @@ func runCommands(args []string) error {
 	filter := flags.String("filter", "", "Filter command catalog by command, area, usage, or tag")
 	area := flags.String("area", "", "Restrict command catalog to one area, such as store, case, workflow, or environment")
 	all := flags.Bool("all", false, "Show the full command catalog beyond the default surface")
+	internal := flags.Bool("internal", false, "Include internal maintenance and diagnostics commands; use with --all")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable command catalog")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	options := commandCatalogOptions{All: *all}
+	options := commandCatalogOptions{All: *all, Internal: *internal}
 	report := commandCatalogForAreaWithOptions(*filter, *area, options)
 	if *jsonOutput {
 		return writeIndentedJSON(report)
@@ -70,15 +73,19 @@ func commandCatalogForAreaWithOptions(filter string, area string, options comman
 		Filter:   filter,
 		Area:     area,
 		All:      options.All,
+		Internal: options.Internal,
 		Commands: []commandCatalogItem{},
 	}
 	seen := map[string]int{}
-	for _, usage := range commandUsageLines() {
-		item := commandCatalogItemFromUsage(usage)
+	for _, descriptor := range commandCatalogDescriptors() {
+		item := commandCatalogItemFromDescriptor(descriptor)
 		if len(item.Path) == 0 {
 			continue
 		}
 		if area != "" && item.Area != area {
+			continue
+		}
+		if item.surface == commandCatalogSurfaceInternal && (!options.All || !options.Internal) {
 			continue
 		}
 		if !options.All && item.surface != commandCatalogSurfaceDefault {
@@ -103,47 +110,29 @@ func commandCatalogForAreaWithOptions(filter string, area string, options comman
 }
 
 func commandUsageLines() []string {
-	lines := strings.Split(helpText(), "\n")
-	out := []string{}
-	inUsage := false
-	for _, line := range lines {
-		usage := strings.TrimSpace(line)
-		if usage == "Usage:" {
-			inUsage = true
-			continue
-		}
-		if inUsage && usage == "" {
-			break
-		}
-		if !inUsage {
-			continue
-		}
-		if strings.HasPrefix(usage, "agent-testbench ") {
-			out = append(out, usage)
-		}
+	descriptors := commandCatalogDescriptors()
+	out := make([]string, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		out = append(out, descriptor.Usage)
 	}
 	return out
 }
 
-func commandCatalogItemFromUsage(usage string) commandCatalogItem {
-	rest := strings.TrimSpace(strings.TrimPrefix(usage, "agent-testbench "))
-	fields := strings.Fields(rest)
-	path := []string{}
-	for _, field := range fields {
-		if commandUsagePathStops(field) {
-			break
-		}
-		path = append(path, strings.Trim(field, ","))
-	}
+func commandCatalogItemFromDescriptor(descriptor commandDescriptor) commandCatalogItem {
+	usage := descriptor.Usage
+	command := strings.TrimSpace(descriptor.Command)
+	path := strings.Fields(command)
 	area := ""
 	if len(path) > 0 {
 		area = path[0]
 	}
-	command := strings.Join(path, " ")
-	metadata := commandCatalogMetadata(command, area, usage)
+	metadata := commandCatalogMetadata(descriptor, area)
 	tags := commandCatalogTags(command, area, usage)
 	if metadata.Lifecycle != "" {
 		tags = append(tags, metadata.Lifecycle)
+	}
+	if metadata.Surface == commandCatalogSurfaceInternal {
+		tags = append(tags, commandCatalogSurfaceInternal)
 	}
 	return commandCatalogItem{
 		Command:     command,
@@ -179,12 +168,14 @@ func commandCatalogSurfaceRank(surface string) int {
 		return 0
 	case commandCatalogSurfaceExtended:
 		return 1
-	case commandCatalogSurfaceCompatibility:
+	case commandCatalogSurfaceInternal:
 		return 2
-	case commandCatalogSurfaceDeprecated:
+	case commandCatalogSurfaceCompatibility:
 		return 3
-	default:
+	case commandCatalogSurfaceDeprecated:
 		return 4
+	default:
+		return 5
 	}
 }
 
@@ -196,7 +187,9 @@ type commandCatalogMetadataReport struct {
 	Reason      string
 }
 
-func commandCatalogMetadata(command string, area string, usage string) commandCatalogMetadataReport {
+func commandCatalogMetadata(descriptor commandDescriptor, area string) commandCatalogMetadataReport {
+	command := descriptor.Command
+	usage := descriptor.Usage
 	metadata := commandCatalogMetadataReport{Surface: commandCatalogSurfaceExtended}
 	if area == "map" {
 		metadata.Lifecycle = commandCatalogMapLifecycle(command)
@@ -206,18 +199,17 @@ func commandCatalogMetadata(command string, area string, usage string) commandCa
 		metadata.Surface = commandCatalogSurfaceCompatibility
 		return metadata
 	}
-	if commandCatalogDefaultCommands()[command] {
-		metadata.Surface = commandCatalogSurfaceDefault
-		metadata.Reason = commandCatalogDefaultInclusionReason(command)
-		return metadata
+	if descriptor.Surface != "" {
+		metadata.Surface = descriptor.Surface
 	}
-	if replacement, ok := commandCatalogCompatibilityReplacements()[command]; ok {
-		metadata.Surface = commandCatalogSurfaceCompatibility
-		metadata.Replacement = replacement
-		return metadata
+	if descriptor.Replacement != "" {
+		metadata.Replacement = descriptor.Replacement
 	}
-	if replacement, ok := commandCatalogReplacementHints()[command]; ok {
-		metadata.Replacement = replacement
+	if descriptor.Reason != "" {
+		metadata.Reason = descriptor.Reason
+	}
+	if metadata.Surface == commandCatalogSurfaceInternal {
+		return metadata
 	}
 	return metadata
 }
@@ -247,89 +239,6 @@ func commandCatalogSortRank(item commandCatalogItem) int {
 	return 100000
 }
 
-func commandCatalogDefaultCommands() map[string]bool {
-	return map[string]bool{
-		cliCommandStatus:                 true,
-		cliCommandDoctor:                 true,
-		cliCommandCommands:               true,
-		"store current":                  true,
-		"store status":                   true,
-		"environment discover":           true,
-		"environment inspect":            true,
-		commandCatalogEnvironmentRestore: true,
-		commandCatalogEnvironmentStatus:  true,
-		commandCatalogEnvironmentStop:    true,
-		commandCatalogEnvironmentRestart: true,
-		commandCatalogMapList:            true,
-		commandCatalogMapCoverage:        true,
-		commandCatalogMapDoctor:          true,
-		commandCatalogMapExplain:         true,
-		commandCatalogMapGate:            true,
-		commandCatalogMapRun:             true,
-		commandCatalogMapAtlas:           true,
-		"case discover":                  true,
-		commandCatalogCaseSuiteReport:    true,
-		commandCatalogCaseInspect:        true,
-		commandCatalogCaseDiagnose:       true,
-		commandCatalogCaseGate:           true,
-		commandCatalogCaseRun:            true,
-		commandCatalogWorkflowGate:       true,
-		"task catalog":                   true,
-		"task suggest":                   true,
-		commandCatalogTaskPlan:           true,
-		"task run":                       true,
-	}
-}
-
-func commandCatalogCompatibilityReplacements() map[string]string {
-	return map[string]string{}
-}
-
-func commandCatalogReplacementHints() map[string]string {
-	return map[string]string{
-		commandCatalogExecutorPlan:  "agent-testbench map explain",
-		"runtime mysql endpoints":   "agent-testbench store status --json",
-		"trace topology collect":    "agent-testbench evidence tasks --run RUN_ID --json",
-		"replay evidence":           "agent-testbench evidence list --run RUN_ID --json",
-		"workflow discover":         "agent-testbench map list --json or agent-testbench map workflows --map MAP_ID --json",
-		"workflow register":         workflowToMapImportReplacement,
-		"workflow upsert":           workflowToMapImportReplacement,
-		"workflow binding register": workflowToMapImportReplacement,
-		"workflow binding upsert":   workflowToMapImportReplacement,
-		"workflow plan":             "agent-testbench map explain --map MAP_ID --workflow WORKFLOW_ID",
-		"workflow audit":            "agent-testbench map doctor --map MAP_ID",
-		"workflow runs":             "agent-testbench map plans --map MAP_ID",
-		"workflow run":              "agent-testbench map plan inspect --plan PLAN_ID",
-		"workflow step":             "agent-testbench map plan inspect --plan PLAN_ID",
-		"workflow latest-step":      "agent-testbench map plan inspect --plan PLAN_ID",
-		"case runs":                 "agent-testbench case inspect --view runs",
-		"case evidence":             "agent-testbench case inspect --view evidence",
-		"case timing":               "agent-testbench case inspect --view timing",
-		"workflow task run":         "agent-testbench task run NAME --command COMMAND or agent-testbench map run --plan PLAN_ID --rerun-task TASK_ID",
-	}
-}
-
-func commandUsagePathStops(token string) bool {
-	token = strings.TrimSpace(token)
-	if token == "" || strings.HasPrefix(token, "[") || strings.HasPrefix(token, "(") || strings.HasPrefix(token, "--") || strings.Contains(token, "|") {
-		return true
-	}
-	trimmed := strings.Trim(token, ".,")
-	if strings.Contains(trimmed, "=") || strings.Contains(trimmed, ":") || strings.Contains(trimmed, "/") {
-		return true
-	}
-	hasLetter := false
-	for _, item := range trimmed {
-		if item >= 'a' && item <= 'z' {
-			return false
-		}
-		if item >= 'A' && item <= 'Z' {
-			hasLetter = true
-		}
-	}
-	return hasLetter
-}
-
 func commandCatalogTags(command string, area string, usage string) []string {
 	tags := []string{area}
 	if strings.Contains(usage, "--store NAME_OR_DSN") {
@@ -353,14 +262,14 @@ func commandCatalogTags(command string, area string, usage string) []string {
 
 func commandCatalogTaskTags(command string) []string {
 	switch command {
-	case commandCatalogMapImportWorkflows, commandCatalogMapList, commandCatalogMapCoverage, commandCatalogMapDoctor, commandCatalogMapWorkflows, commandCatalogMapAtlas,
+	case commandCatalogMapImportWorkflows, commandCatalogMapInspect, commandCatalogMapList, commandCatalogMapCoverage, commandCatalogMapDoctor, commandCatalogMapWorkflows, commandCatalogMapAtlas,
 		commandCatalogMapUpdate, commandCatalogMapSnapshot, commandCatalogMapPublish, commandCatalogMapVersions, commandCatalogMapDiff, commandCatalogMapValidationList, commandCatalogMapValidationAttach:
 		return []string{"maintain map", "map maintenance"}
 	case commandCatalogMapPlans, commandCatalogMapExplain, commandCatalogMapGate, commandCatalogMapRun, commandCatalogMapPlanInspect:
 		return []string{"execute map", "map execution"}
 	case "environment restore", "environment status", "environment stop", "environment service restart", "environment discover", "environment inspect":
 		return []string{"restore environment", "environment operations"}
-	case commandCatalogCaseInspect, "case diagnose", "case evidence", "case gate", "workflow gate", "evidence list", "evidence tasks", cliCommandDoctor:
+	case commandCatalogCaseInspect, "case diagnose", "case evidence", "case gate", "workflow gate", commandCatalogEvidenceInspect, commandCatalogEvidenceList, commandCatalogEvidenceTasks, cliCommandDoctor:
 		return []string{"diagnose evidence", "evidence diagnosis"}
 	default:
 		return nil
@@ -388,6 +297,9 @@ func printCommandCatalog(report commandCatalogReport) {
 	if report.Area != "" {
 		fmt.Printf("Area: %s\n", report.Area)
 	}
+	if report.Internal {
+		fmt.Println("Internal: true")
+	}
 	for _, item := range report.Commands {
 		fmt.Printf("- %s [%s]\n", item.Command, item.Area)
 		if item.Lifecycle != "" {
@@ -406,7 +318,7 @@ func printCommandCatalog(report commandCatalogReport) {
 func commandHelpText(prefix []string) (string, error) {
 	prefix = normalizeCommandHelpPrefix(prefix)
 	if len(prefix) == 0 {
-		return helpText(), nil
+		return fullHelpText(), nil
 	}
 	command := strings.Join(prefix, " ")
 	if usages := commandUsageLinesForCommand(command); len(usages) > 0 {
@@ -428,6 +340,7 @@ func commandHelpText(prefix []string) (string, error) {
 	if len(matches) == 0 {
 		return "", fmt.Errorf("unknown help target: %s", command)
 	}
+	matches = commandParentNavigationItems(command, prefix, matches)
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "Commands: %s\n\nUsage:\n", command)
 	if command == "map" && len(prefix) == 1 {
@@ -439,6 +352,46 @@ func commandHelpText(prefix []string) (string, error) {
 	}
 	fmt.Fprintf(&builder, "\nUse `agent-testbench commands --filter %q --all` for machine-readable metadata.", command)
 	return strings.TrimRight(builder.String(), "\n"), nil
+}
+
+func commandParentNavigationItems(command string, prefix []string, matches []commandCatalogItem) []commandCatalogItem {
+	if len(prefix) != 1 {
+		return matches
+	}
+	switch command {
+	case "case", "environment", "map":
+		return commandParentDefaultItems(matches)
+	case builtInTaskStepEvidence:
+		visible := map[string]bool{
+			"evidence import":             true,
+			commandCatalogEvidenceInspect: true,
+		}
+		filtered := make([]commandCatalogItem, 0, len(matches))
+		for _, item := range matches {
+			if visible[item.Command] {
+				filtered = append(filtered, item)
+			}
+		}
+		if len(filtered) > 0 {
+			return filtered
+		}
+		return matches
+	default:
+		return matches
+	}
+}
+
+func commandParentDefaultItems(matches []commandCatalogItem) []commandCatalogItem {
+	defaults := make([]commandCatalogItem, 0, len(matches))
+	for _, item := range matches {
+		if item.surface == commandCatalogSurfaceDefault {
+			defaults = append(defaults, item)
+		}
+	}
+	if len(defaults) == 0 {
+		return matches
+	}
+	return defaults
 }
 
 func appendMapLifecycleHelp(builder *strings.Builder, matches []commandCatalogItem) {
@@ -496,10 +449,10 @@ func printCommandHelp(prefix []string) error {
 
 func commandUsageLinesForCommand(command string) []string {
 	lines := []string{}
-	for _, usage := range commandUsageLines() {
-		item := commandCatalogItemFromUsage(usage)
+	for _, descriptor := range commandCatalogDescriptors() {
+		item := commandCatalogItemFromDescriptor(descriptor)
 		if item.Command == command {
-			lines = append(lines, usage)
+			lines = append(lines, descriptor.Usage)
 		}
 	}
 	return lines

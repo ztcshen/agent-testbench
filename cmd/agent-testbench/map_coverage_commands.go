@@ -38,12 +38,28 @@ type mapCoverageReusedCaseRow struct {
 	Paths      []string `json:"paths"`
 }
 
+type mapCoverageOptions struct {
+	StoreRef   string
+	StoreURL   string
+	MapID      string
+	JSONOutput bool
+}
+
 func runMapCoverage(ctx context.Context, args []string) error {
 	input := newMapGraphCommandFlags("map coverage")
 	if err := input.parse(args); err != nil {
 		return err
 	}
-	runtime, graph, cleanup, err := openRequiredMapGraphForCLI(ctx, *input.storeRef, *input.storeURL, *input.mapID)
+	return runMapCoverageWithOptions(ctx, mapCoverageOptions{
+		StoreRef:   *input.storeRef,
+		StoreURL:   *input.storeURL,
+		MapID:      *input.mapID,
+		JSONOutput: *input.jsonOutput,
+	})
+}
+
+func runMapCoverageWithOptions(ctx context.Context, options mapCoverageOptions) error {
+	runtime, graph, cleanup, err := openRequiredMapGraphForCLI(ctx, options.StoreRef, options.StoreURL, options.MapID)
 	if err != nil {
 		return err
 	}
@@ -56,7 +72,7 @@ func runMapCoverage(ctx context.Context, args []string) error {
 		catalog = store.ProfileCatalog{}
 	}
 	report := buildMapCoverageReport(graph, catalog)
-	if *input.jsonOutput {
+	if options.JSONOutput {
 		return writeIndentedJSON(report)
 	}
 	printMapCoverageReport(report)

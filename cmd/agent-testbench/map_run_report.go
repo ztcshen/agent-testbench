@@ -150,7 +150,7 @@ func mapRunNextActions(planID string) []string {
 	if strings.TrimSpace(planID) == "" {
 		return nil
 	}
-	return []string{"agent-testbench map plan inspect --plan " + commandline.ShellQuote(planID) + " --json"}
+	return []string{"agent-testbench map inspect --view plan --plan " + commandline.ShellQuote(planID) + " --json"}
 }
 
 func printMapRunReport(report mapRunReport) {

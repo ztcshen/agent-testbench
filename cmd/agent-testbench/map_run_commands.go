@@ -334,6 +334,13 @@ func mapRunKeepRetryStatusUntilExecution(task store.TestMapPlanTask, options map
 	return options.retryFailed && !options.resumeRun && !options.skipPassed && len(options.rerunTaskIDs) == 0 && mapRunTaskFailedOrBlocked(task.Status)
 }
 
+type mapPlanInspectOptions struct {
+	StoreRef   string
+	StoreURL   string
+	PlanID     string
+	JSONOutput bool
+}
+
 func runMapPlanInspect(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("map plan inspect", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
@@ -344,20 +351,29 @@ func runMapPlanInspect(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if strings.TrimSpace(*planID) == "" {
+	return runMapPlanInspectWithOptions(ctx, mapPlanInspectOptions{
+		StoreRef:   *storeRef,
+		StoreURL:   *storeURL,
+		PlanID:     *planID,
+		JSONOutput: *jsonOutput,
+	})
+}
+
+func runMapPlanInspectWithOptions(ctx context.Context, options mapPlanInspectOptions) error {
+	if strings.TrimSpace(options.PlanID) == "" {
 		return errors.New("--plan is required")
 	}
-	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	runtime, cleanup, err := openRequiredCLIStore(ctx, options.StoreRef, options.StoreURL)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
-	record, err := runtime.GetTestMapPlan(ctx, *planID)
+	record, err := runtime.GetTestMapPlan(ctx, options.PlanID)
 	if err != nil {
 		return err
 	}
 	report := mapRunReportFromRecord(record)
-	if *jsonOutput {
+	if options.JSONOutput {
 		return writeIndentedJSON(report)
 	}
 	printMapRunReport(report)

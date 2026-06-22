@@ -31,6 +31,10 @@ func runEnvironmentComponentsInspect(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	return runEnvironmentComponentsInspectWithOptions(ctx, options)
+}
+
+func runEnvironmentComponentsInspectWithOptions(ctx context.Context, options environmentIDFlags) error {
 	runtime, cleanup, err := openRequiredCLIStore(ctx, options.StoreRef, options.StoreURL)
 	if err != nil {
 		return err
@@ -47,6 +51,22 @@ func runEnvironmentComponentsInspect(ctx context.Context, args []string) error {
 }
 
 func runEnvironmentComponentsReplace(ctx context.Context, args []string) error {
+	options, err := parseEnvironmentComponentsReplaceOptions(args)
+	if err != nil {
+		return err
+	}
+	return runEnvironmentComponentsReplaceWithOptions(ctx, options)
+}
+
+type environmentComponentsReplaceOptions struct {
+	storeRef   string
+	storeURL   string
+	jsonOutput bool
+	id         string
+	file       string
+}
+
+func parseEnvironmentComponentsReplaceOptions(args []string) (environmentComponentsReplaceOptions, error) {
 	flags := flag.NewFlagSet("environment components replace", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
@@ -54,16 +74,26 @@ func runEnvironmentComponentsReplace(ctx context.Context, args []string) error {
 	file := flags.String("file", "", "Component graph JSON file")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := parseInterspersedFlags(flags, args); err != nil {
-		return err
+		return environmentComponentsReplaceOptions{}, err
 	}
 	id := strings.TrimSpace(flags.Arg(0))
 	if id == "" {
-		return errors.New("environment id is required")
+		return environmentComponentsReplaceOptions{}, errors.New("environment id is required")
 	}
 	if strings.TrimSpace(*file) == "" {
-		return errors.New("--file COMPONENT_GRAPH_JSON is required")
+		return environmentComponentsReplaceOptions{}, errors.New("--file COMPONENT_GRAPH_JSON is required")
 	}
-	raw, err := os.ReadFile(strings.TrimSpace(*file))
+	return environmentComponentsReplaceOptions{
+		storeRef:   *storeRef,
+		storeURL:   *storeURL,
+		jsonOutput: *jsonOutput,
+		id:         id,
+		file:       strings.TrimSpace(*file),
+	}, nil
+}
+
+func runEnvironmentComponentsReplaceWithOptions(ctx context.Context, options environmentComponentsReplaceOptions) error {
+	raw, err := os.ReadFile(options.file)
 	if err != nil {
 		return err
 	}
@@ -71,26 +101,26 @@ func runEnvironmentComponentsReplace(ctx context.Context, args []string) error {
 	if err := json.Unmarshal(raw, &graph); err != nil {
 		return fmt.Errorf("decode component graph JSON: %w", err)
 	}
-	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	runtime, cleanup, err := openRequiredCLIStore(ctx, options.storeRef, options.storeURL)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
-	if _, err := runtime.GetEnvironment(ctx, id); err != nil {
+	if _, err := runtime.GetEnvironment(ctx, options.id); err != nil {
 		return err
 	}
-	readiness := environmentRestoreComponentGraphReport(id, graph)
+	readiness := environmentRestoreComponentGraphReport(options.id, graph)
 	if readiness.Configured && !readiness.OK {
 		return fmt.Errorf("component graph restore readiness failed: %s", readiness.Error)
 	}
-	if err := runtime.ReplaceEnvironmentComponentGraph(ctx, id, graph); err != nil {
+	if err := runtime.ReplaceEnvironmentComponentGraph(ctx, options.id, graph); err != nil {
 		return err
 	}
-	graph, err = runtime.GetEnvironmentComponentGraph(ctx, id)
+	graph, err = runtime.GetEnvironmentComponentGraph(ctx, options.id)
 	if err != nil {
 		return err
 	}
-	return printEnvironmentComponentGraph(id, graph, *jsonOutput)
+	return printEnvironmentComponentGraph(options.id, graph, options.jsonOutput)
 }
 
 func printEnvironmentComponentGraph(envID string, graph store.EnvironmentComponentGraph, jsonOutput bool) error {

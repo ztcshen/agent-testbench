@@ -129,3 +129,7 @@ func topLevelHelpText() string {
 func helpText() string {
 	return helpTextContent
 }
+
+func fullHelpText() string {
+	return helpTextContent
+}

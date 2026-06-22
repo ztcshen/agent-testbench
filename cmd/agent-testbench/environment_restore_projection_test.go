@@ -68,7 +68,7 @@ func TestEnvironmentRestoreProjectsDockerNativeStoreAssetsBeforeComposeUp(t *tes
 	if err != nil {
 		t.Fatalf("read docker calls: %v", err)
 	}
-	if !strings.Contains(string(calls), " up -d app") {
+	if !strings.Contains(string(calls), " up --pull never -d app") {
 		t.Fatalf("docker calls missing compose up:\n%s", calls)
 	}
 }

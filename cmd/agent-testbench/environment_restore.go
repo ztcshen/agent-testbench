@@ -143,7 +143,7 @@ func buildEnvironmentRestoreReportWithStructuredState(ctx context.Context, env s
 	}
 	attemptedAt := time.Now().UTC()
 	environmentRestoreEmitRunPlanningStarted(ctx, env.ID, attemptedAt)
-	result, timedOut := environmentRestoreBuildPlanAndReportWithWatchdog(ctx, env, workflowID, workspace, execute, workflowOptions, cleanupOptions, prepareReposOnly, files, services, checks, attemptedAt, componentGraphs...)
+	result, timedOut := environmentRestoreBuildPlanAndReportWithWatchdog(ctx, env, workflowID, workspace, execute, pull, workflowOptions, cleanupOptions, prepareReposOnly, files, services, checks, attemptedAt, componentGraphs...)
 	if result.Err != nil {
 		if timedOut {
 			report := newEnvironmentRestorePlanErrorReport(env, workflowID, workspace, execute, attemptedAt, result.Err.Error())
@@ -157,7 +157,7 @@ func buildEnvironmentRestoreReportWithStructuredState(ctx context.Context, env s
 	environmentRestoreEmitStep(ctx, "step_completed", "environment.restore.plan", "passed", report.EnvironmentID, "environment restore plan prepared", "")
 	environmentRestoreAddSourceReports(ctx, &report, plan, execute, pull)
 	environmentRestoreApplyPreDockerReadinessGates(&report, cleanupOptions)
-	report.Docker = environmentRestoreDockerForReport(ctx, report, plan, execute, prepareReposOnly, healthTimeout, cleanupOptions)
+	report.Docker = environmentRestoreDockerForReport(ctx, report, plan, execute, pull, prepareReposOnly, healthTimeout, cleanupOptions)
 	if !report.Docker.OK {
 		report.OK = false
 	}
@@ -175,7 +175,7 @@ func buildEnvironmentRestoreReportWithStructuredState(ctx context.Context, env s
 	return report, nil
 }
 
-func environmentRestoreBuildPlanAndReportWithWatchdog(ctx context.Context, env store.Environment, workflowID string, workspace string, execute bool, workflowOptions environmentRestoreWorkflowOptions, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool, files []store.EnvironmentFile, services []store.EnvironmentService, checks []store.EnvironmentHealthCheck, attemptedAt time.Time, componentGraphs ...store.EnvironmentComponentGraph) (environmentRestorePlanBuildResult, bool) {
+func environmentRestoreBuildPlanAndReportWithWatchdog(ctx context.Context, env store.Environment, workflowID string, workspace string, execute bool, pull bool, workflowOptions environmentRestoreWorkflowOptions, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool, files []store.EnvironmentFile, services []store.EnvironmentService, checks []store.EnvironmentHealthCheck, attemptedAt time.Time, componentGraphs ...store.EnvironmentComponentGraph) (environmentRestorePlanBuildResult, bool) {
 	results := make(chan environmentRestorePlanBuildResult, 1)
 	started := time.Now()
 	go func() {
@@ -187,7 +187,7 @@ func environmentRestoreBuildPlanAndReportWithWatchdog(ctx context.Context, env s
 		plan.AttemptedAt = attemptedAt
 		results <- environmentRestorePlanBuildResult{
 			Plan:   plan,
-			Report: newEnvironmentRestoreReport(env, plan, execute, workflowOptions, cleanupOptions, prepareReposOnly),
+			Report: newEnvironmentRestoreReport(env, plan, execute, pull, workflowOptions, cleanupOptions, prepareReposOnly),
 		}
 	}()
 
@@ -322,7 +322,7 @@ func environmentRestoreComposeForPlan(env store.Environment, files []store.Envir
 	return jsonObjectString(projected.ComposeJSON), nil
 }
 
-func newEnvironmentRestoreReport(env store.Environment, plan environmentRestoreBuildPlan, execute bool, workflowOptions environmentRestoreWorkflowOptions, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool) environmentRestoreReport {
+func newEnvironmentRestoreReport(env store.Environment, plan environmentRestoreBuildPlan, execute bool, pull bool, workflowOptions environmentRestoreWorkflowOptions, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool) environmentRestoreReport {
 	report := environmentRestoreReport{
 		OK:                   true,
 		RestoreID:            "restore." + safeReportID(env.ID) + "." + plan.AttemptedAt.Format("20060102T150405.000000000Z"),
@@ -334,7 +334,7 @@ func newEnvironmentRestoreReport(env store.Environment, plan environmentRestoreB
 		HealthChecks:         plan.HealthChecks,
 		ComponentGraph:       plan.ComponentGraphReport,
 		ComponentStartupPlan: plan.ComponentStartupPlan,
-		Preflight:            environmentRestorePreflightReport(plan.PackageSpec, plan.Specs, plan.Compose, plan.Workspace, execute, cleanupOptions, prepareReposOnly, plan.RemoteOnly),
+		Preflight:            environmentRestorePreflightReport(plan.PackageSpec, plan.Specs, plan.Compose, plan.Workspace, execute, pull, cleanupOptions, prepareReposOnly, plan.RemoteOnly),
 		FileProjection:       environmentRestoreFileProjection(env, plan),
 		SourcePolicy:         environmentsource.SourcePolicyReport(plan.Specs, plan.RemoteOnly),
 		Workflow: environmentRestoreWorkflowRun{
@@ -419,7 +419,7 @@ func environmentRestoreAddSourceReports(ctx context.Context, report *environment
 	environmentRestoreEmitStep(ctx, "step_completed", "source.component-assets", statusText(componentAssetsOK), report.EnvironmentID, fmt.Sprintf("%d remote component asset(s)", len(report.ComponentAssets)), "")
 }
 
-func environmentRestoreDockerForReport(ctx context.Context, report environmentRestoreReport, plan environmentRestoreBuildPlan, execute bool, prepareReposOnly bool, healthTimeout time.Duration, cleanupOptions environmentRestoreDockerCleanupOptions) environmentRestoreDockerReport {
+func environmentRestoreDockerForReport(ctx context.Context, report environmentRestoreReport, plan environmentRestoreBuildPlan, execute bool, pull bool, prepareReposOnly bool, healthTimeout time.Duration, cleanupOptions environmentRestoreDockerCleanupOptions) environmentRestoreDockerReport {
 	environmentRestoreEmitStep(ctx, "step_started", "docker.restore", "running", report.EnvironmentID, "preparing Docker restore phase", "")
 	var docker environmentRestoreDockerReport
 	if report.OK && prepareReposOnly {
@@ -433,7 +433,7 @@ func environmentRestoreDockerForReport(ctx context.Context, report environmentRe
 		return docker
 	}
 	if report.OK {
-		compose := environmentRestoreComposeWithPullSkipServices(plan.Compose, report.Preflight.LocalImageServices)
+		compose := environmentRestoreComposeWithPullPolicy(plan.Compose, pull)
 		docker = environmentRestoreDocker(ctx, plan.ComponentGraph, compose, plan.HealthChecks, plan.Workspace, execute, healthTimeout, cleanupOptions)
 		environmentRestoreEmitStep(ctx, "step_completed", "docker.restore", statusText(docker.OK), report.EnvironmentID, docker.Action, docker.Error)
 		return docker
@@ -443,16 +443,15 @@ func environmentRestoreDockerForReport(ctx context.Context, report environmentRe
 	return docker
 }
 
-func environmentRestoreComposeWithPullSkipServices(compose map[string]any, services []string) map[string]any {
-	services = dedupeStrings(services)
-	if len(services) == 0 {
+func environmentRestoreComposeWithPullPolicy(compose map[string]any, pull bool) map[string]any {
+	if pull || boolFromReportAny(compose["skipPull"]) {
 		return compose
 	}
 	out := map[string]any{}
 	for key, value := range compose {
 		out[key] = value
 	}
-	out["skipPullServices"] = services
+	out["skipPull"] = true
 	return out
 }
 

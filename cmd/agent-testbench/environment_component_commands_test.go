@@ -141,6 +141,43 @@ func TestEnvironmentComponentsInspectReportsRestoreReadiness(t *testing.T) {
 	}
 }
 
+func TestEnvironmentConfigureComponentsReplacesAndInspectsGraph(t *testing.T) {
+	fixture := writeEnvironmentComponentReadinessFixture(t, "env.configure.components", true)
+	replaceOut := runCLI(t, "environment", "configure",
+		"--view", "components",
+		"--store", "sqlite://"+fixture.storePath,
+		"--file", fixture.graphPath,
+		"--json",
+		fixture.envID,
+	)
+	inspectOut := runCLI(t, "environment", "configure",
+		"--view", "components",
+		"--store", "sqlite://"+fixture.storePath,
+		"--json",
+		fixture.envID,
+	)
+	for _, out := range []string{replaceOut, inspectOut} {
+		var payload struct {
+			ComponentGraph struct {
+				Counts struct {
+					Components int `json:"components"`
+					Assets     int `json:"assets"`
+				} `json:"counts"`
+				RestoreReadiness struct {
+					OK            bool     `json:"ok"`
+					BlockingOrder []string `json:"blockingOrder"`
+				} `json:"restoreReadiness"`
+			} `json:"componentGraph"`
+		}
+		if err := json.Unmarshal([]byte(out), &payload); err != nil {
+			t.Fatalf("decode configure components json: %v\n%s", err, out)
+		}
+		if payload.ComponentGraph.Counts.Components != 2 || payload.ComponentGraph.Counts.Assets != 1 || !payload.ComponentGraph.RestoreReadiness.OK || strings.Join(payload.ComponentGraph.RestoreReadiness.BlockingOrder, ",") != "db,app" {
+			t.Fatalf("configure components payload = %#v\n%s", payload.ComponentGraph, out)
+		}
+	}
+}
+
 func TestEnvironmentInspectReportsComponentGraphReadiness(t *testing.T) {
 	fixture := writeEnvironmentComponentReadinessFixture(t, "env.inspect.component-readiness", false)
 	runCLI(t, "environment", "components", "replace", "--store", "sqlite://"+fixture.storePath, "--file", fixture.graphPath, fixture.envID)
@@ -286,6 +323,80 @@ func TestEnvironmentStartupFilePutMergesGeneratedFilesWithoutReRegistering(t *te
 	}
 	if len(payload.Environment.Summary.StartupFiles.Files) != 1 || payload.Environment.Summary.StartupFiles.Files[0].Path != "compose/docker-compose.yml" {
 		t.Fatalf("startup-file summary = %#v", payload.Environment.Summary.StartupFiles)
+	}
+}
+
+func TestEnvironmentConfigureStartupFilesMergesGeneratedFiles(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	sourceCompose := filepath.Join(t.TempDir(), "source-compose.yml")
+	writeFile(t, sourceCompose, "services:\n  generated-service:\n    image: alpine:3.20\n")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.configure.startup-files",
+		"--compose-file", "compose/docker-compose.yml",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLI(t, "environment", "configure",
+		"--view", "startup-files",
+		"--store", "sqlite://"+storePath,
+		"--file", "compose/docker-compose.yml="+sourceCompose,
+		"--json",
+		"env.configure.startup-files",
+	)
+	var payload struct {
+		GeneratedFiles []struct {
+			Path  string `json:"path"`
+			Bytes int    `json:"bytes"`
+		} `json:"generatedFiles"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("decode configure startup-files json: %v\n%s", err, out)
+	}
+	if len(payload.GeneratedFiles) != 1 || payload.GeneratedFiles[0].Path != "compose/docker-compose.yml" || payload.GeneratedFiles[0].Bytes == 0 {
+		t.Fatalf("configure startup-files payload = %#v", payload.GeneratedFiles)
+	}
+}
+
+func TestEnvironmentConfigureStartupFilesRejectsRepoFlags(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	sourceCompose := filepath.Join(t.TempDir(), "source-compose.yml")
+	writeFile(t, sourceCompose, "services: {}\n")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.configure.startup-file-repo-flag",
+		"--compose-file", "compose/docker-compose.yml",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIFails(t, "environment", "configure",
+		"--view", "startup-files",
+		"--store", "sqlite://"+storePath,
+		"--file", "compose/docker-compose.yml="+sourceCompose,
+		"--repo-ref", "app=v1",
+		"env.configure.startup-file-repo-flag",
+	)
+	if !strings.Contains(out, "only supported for --view repos") {
+		t.Fatalf("startup-files should reject repo flags, got: %q", out)
+	}
+}
+
+func TestEnvironmentConfigureStartupFilesRequiresFile(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.configure.startup-file-required",
+		"--compose-file", "compose/docker-compose.yml",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIFails(t, "environment", "configure",
+		"--view", "startup-files",
+		"--store", "sqlite://"+storePath,
+		"env.configure.startup-file-required",
+	)
+	if !strings.Contains(out, "--file TARGET=SOURCE_FILE is required") {
+		t.Fatalf("startup-files should require --file, got: %q", out)
 	}
 }
 

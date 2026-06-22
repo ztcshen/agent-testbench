@@ -30,6 +30,10 @@ func runEnvironmentRepoSet(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	return runEnvironmentRepoSetWithOptions(ctx, opts)
+}
+
+func runEnvironmentRepoSetWithOptions(ctx context.Context, opts environmentRepoSetOptions) error {
 	runtime, cleanup, err := openRequiredCLIStore(ctx, opts.storeRef, opts.storeURL)
 	if err != nil {
 		return err
@@ -185,6 +189,22 @@ func runEnvironmentStartupFile(ctx context.Context, args []string) error {
 }
 
 func runEnvironmentStartupFilePut(ctx context.Context, args []string) error {
+	opts, err := parseEnvironmentStartupFilePutOptions(args)
+	if err != nil {
+		return err
+	}
+	return runEnvironmentStartupFilePutWithOptions(ctx, opts)
+}
+
+type environmentStartupFilePutOptions struct {
+	storeRef   string
+	storeURL   string
+	jsonOutput bool
+	id         string
+	files      stringListFlag
+}
+
+func parseEnvironmentStartupFilePutOptions(args []string) (environmentStartupFilePutOptions, error) {
 	flags := flag.NewFlagSet("environment startup-file put", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
@@ -193,25 +213,35 @@ func runEnvironmentStartupFilePut(ctx context.Context, args []string) error {
 	var files stringListFlag
 	flags.Var(&files, "file", "Generated startup file as TARGET=SOURCE_FILE; repeat for multiple files")
 	if err := parseInterspersedFlags(flags, args); err != nil {
-		return err
+		return environmentStartupFilePutOptions{}, err
 	}
 	id := strings.TrimSpace(flags.Arg(0))
 	if id == "" {
-		return errors.New("environment id is required")
+		return environmentStartupFilePutOptions{}, errors.New("environment id is required")
 	}
 	if len(files.Values()) == 0 {
-		return errors.New("--file TARGET=SOURCE_FILE is required")
+		return environmentStartupFilePutOptions{}, errors.New("--file TARGET=SOURCE_FILE is required")
 	}
-	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
+	return environmentStartupFilePutOptions{
+		storeRef:   *storeRef,
+		storeURL:   *storeURL,
+		jsonOutput: *jsonOutput,
+		id:         id,
+		files:      files,
+	}, nil
+}
+
+func runEnvironmentStartupFilePutWithOptions(ctx context.Context, opts environmentStartupFilePutOptions) error {
+	runtime, cleanup, err := openRequiredCLIStore(ctx, opts.storeRef, opts.storeURL)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
-	env, err := runtime.GetEnvironment(ctx, id)
+	env, err := runtime.GetEnvironment(ctx, opts.id)
 	if err != nil {
 		return err
 	}
-	generated, err := generatedFileContentMapFromFlags(files)
+	generated, err := generatedFileContentMapFromFlags(opts.files)
 	if err != nil {
 		return err
 	}
@@ -244,7 +274,7 @@ func runEnvironmentStartupFilePut(ctx context.Context, args []string) error {
 		"environment":    environmentPayload(env),
 		"generatedFiles": environmentStartupFilePayload(generated),
 	}
-	if *jsonOutput {
+	if opts.jsonOutput {
 		return writeIndentedJSON(payload)
 	}
 	fmt.Printf("Updated Environment Startup Files: %s\n", env.ID)

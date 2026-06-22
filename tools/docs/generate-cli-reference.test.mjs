@@ -27,12 +27,17 @@ test("CLI reference generator renders the current command catalog", async () => 
 
     assert.match(markdown, /# AgentTestBench CLI Reference/);
     assert.match(markdown, /Generated from `agent-testbench commands --all --json`/);
-    assert.match(markdown, /Total commands: `122`/);
+    assert.match(markdown, /Internal maintenance and diagnostics commands are intentionally excluded/);
+    assert.match(markdown, /Total commands: `117`/);
+    assert.match(markdown, /Default commands: `28`/);
     assert.match(markdown, /## Default Commands/);
     assert.match(markdown, /## Command Areas/);
     assert.match(markdown, /### `map`/);
+    assert.match(markdown, /\| `map inspect` \| yes \|/);
     assert.match(markdown, /\| `map run` \| yes \|/);
     assert.match(markdown, /\| `case inspect` \| yes \|/);
+    assert.match(markdown, /\| `evidence inspect` \| yes \|/);
+    assert.match(markdown, /\| `environment configure` \| yes \|/);
     assert.doesNotMatch(markdown, /Daily Agent Surface/);
     assert.doesNotMatch(markdown, /\bTier\b/);
     assert.doesNotMatch(markdown, /\bAudience\b/);
@@ -40,7 +45,12 @@ test("CLI reference generator renders the current command catalog", async () => 
     assert.doesNotMatch(markdown, /\bdaily\b/);
     assert.doesNotMatch(markdown, /\badvanced\b/);
     assert.doesNotMatch(markdown, /config publish/);
+    assert.doesNotMatch(markdown, /gate baseline get/);
+    assert.doesNotMatch(markdown, /notify test/);
+    assert.doesNotMatch(markdown, /runtime mysql endpoints/);
     assert.doesNotMatch(markdown, /template-package catalog-index/);
+    assert.doesNotMatch(markdown, /template-package catalog restore/);
+    assert.doesNotMatch(markdown, /trace topology collect/);
     assert.doesNotMatch(markdown, /workflow report/);
     assert.doesNotMatch(markdown, /workflow latest-step/);
   } finally {

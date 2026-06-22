@@ -63,9 +63,8 @@ func rootCommandNames() []string {
 		"help":    true,
 		"version": true,
 	}
-	for _, usage := range commandUsageLines() {
-		rest := strings.TrimSpace(strings.TrimPrefix(usage, "agent-testbench "))
-		fields := strings.Fields(rest)
+	for _, descriptor := range commandCatalogDescriptors() {
+		fields := strings.Fields(descriptor.Command)
 		if len(fields) > 0 {
 			seen[strings.Trim(fields[0], "[]")] = true
 		}
