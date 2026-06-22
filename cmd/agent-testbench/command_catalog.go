@@ -85,7 +85,7 @@ func commandCatalogForAreaWithOptions(filter string, area string, options comman
 		if area != "" && item.Area != area {
 			continue
 		}
-		if item.surface == commandCatalogSurfaceInternal && !(options.All && options.Internal) {
+		if item.surface == commandCatalogSurfaceInternal && (!options.All || !options.Internal) {
 			continue
 		}
 		if !options.All && item.surface != commandCatalogSurfaceDefault {
@@ -361,7 +361,7 @@ func commandParentNavigationItems(command string, prefix []string, matches []com
 	switch command {
 	case "case", "environment", "map":
 		return commandParentDefaultItems(matches)
-	case "evidence":
+	case builtInTaskStepEvidence:
 		visible := map[string]bool{
 			"evidence import":             true,
 			commandCatalogEvidenceInspect: true,

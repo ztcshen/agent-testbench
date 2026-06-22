@@ -17,7 +17,7 @@ import (
 
 func runEvidence(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return printCommandHelp([]string{"evidence"})
+		return printCommandHelp([]string{builtInTaskStepEvidence})
 	}
 	switch args[0] {
 	case "import":

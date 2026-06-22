@@ -22,13 +22,18 @@ type environmentConfigureOptions struct {
 	files      stringListFlag
 }
 
+const (
+	environmentConfigureViewRepos      = "repos"
+	environmentConfigureViewComponents = "components"
+)
+
 func runEnvironmentConfigure(ctx context.Context, args []string) error {
 	options, err := parseEnvironmentConfigureOptions(args)
 	if err != nil {
 		return err
 	}
 	switch options.view {
-	case "repos":
+	case environmentConfigureViewRepos:
 		return runEnvironmentConfigureRepos(ctx, options)
 	case "startup-files":
 		if environmentConfigureHasRepoUpdates(options) {
@@ -41,7 +46,7 @@ func runEnvironmentConfigure(ctx context.Context, args []string) error {
 			id:         options.id,
 			files:      options.files,
 		})
-	case "components":
+	case environmentConfigureViewComponents:
 		return runEnvironmentConfigureComponents(ctx, options)
 	default:
 		return fmt.Errorf("unknown environment configure view: %s", options.view)
@@ -93,12 +98,12 @@ func normalizeEnvironmentConfigureView(view string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(view)) {
 	case "":
 		return "", errors.New("environment configure --view is required")
-	case "repo", "repos", "repositories":
-		return "repos", nil
+	case "repo", environmentConfigureViewRepos, "repositories":
+		return environmentConfigureViewRepos, nil
 	case "startup-file", "startup-files":
 		return "startup-files", nil
-	case "component", "components":
-		return "components", nil
+	case "component", environmentConfigureViewComponents:
+		return environmentConfigureViewComponents, nil
 	default:
 		return "", fmt.Errorf("unknown environment configure view: %s", view)
 	}

@@ -124,13 +124,13 @@ func TestEnvironmentStatusMaterializesWorkspaceEnvFile(t *testing.T) {
 
 func TestEnvironmentStatusIgnoresOneOffComposeRunContainer(t *testing.T) {
 	output := strings.Join([]string{
-		`{"Name":"sandbox-scf-risk","Service":"scf-risk","State":"exited","ExitCode":1}`,
-		`{"Name":"scf-chain-sandbox-scf-risk-run-cce2c18b0dae","Service":"scf-risk","State":"running","ExitCode":0}`,
+		`{"Name":"sandbox-api","Service":"api","State":"exited","ExitCode":1}`,
+		`{"Name":"demo-api-run-cce2c18b0dae","Service":"api","State":"running","ExitCode":0}`,
 	}, "\n")
 
 	reports := parseComposeServiceStatusReports(output)
-	report := reports["scf-risk"]
-	if report.Container != "sandbox-scf-risk" || report.State != "exited" || report.OK {
+	report := reports["api"]
+	if report.Container != "sandbox-api" || report.State != "exited" || report.OK {
 		t.Fatalf("status should prefer the canonical service container over compose run one-off: %#v", report)
 	}
 }

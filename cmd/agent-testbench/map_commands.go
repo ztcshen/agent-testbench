@@ -250,7 +250,7 @@ func runMapInspect(ctx context.Context, args []string) error {
 		JSONOutput: *jsonOutput,
 	}
 	switch strings.TrimSpace(options.View) {
-	case "", "list":
+	case "", cliCommandList:
 		return runMapListWithOptions(ctx, mapListOptions{
 			StoreRef:   options.StoreRef,
 			StoreURL:   options.StoreURL,
