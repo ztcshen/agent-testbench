@@ -302,7 +302,7 @@ func TestEnvironmentRestoreRunsAllowedDockerCleanupBeforeStartup(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
 	joined := strings.Join(lines, "\n")
 	base := "compose -f " + filepath.Join(workspace, "compose.yml") + " --env-file " + environmentRestoreGeneratedEnvFilePath(workspace) + " -p demo"
-	for _, want := range []string{base + " ps", base + " images", base + " config", base + " down --remove-orphans --rmi all", base + " up -d web"} {
+	for _, want := range []string{base + " ps", base + " images", base + " config", base + " down --remove-orphans --rmi all", base + " up --pull never -d web"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("cleanup docker calls missing %q:\n%s", want, joined)
 		}
@@ -310,7 +310,7 @@ func TestEnvironmentRestoreRunsAllowedDockerCleanupBeforeStartup(t *testing.T) {
 	if strings.Contains(joined, "--volumes") || strings.Contains(joined, "system prune") {
 		t.Fatalf("cleanup should not remove volumes or run global prune:\n%s", joined)
 	}
-	order := []string{" ps", " images", " config", " down --remove-orphans --rmi all", " up -d"}
+	order := []string{" ps", " images", " config", " down --remove-orphans --rmi all", " up --pull never -d"}
 	last := -1
 	for _, marker := range order {
 		index := strings.Index(joined, marker)
@@ -434,7 +434,7 @@ fi
 	for _, want := range []string{
 		base + " down --remove-orphans",
 		"rm -f sandbox-kafka",
-		base + " up -d kafka",
+		base + " up --pull never -d kafka",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("cleanup docker calls missing %q:\n%s", want, joined)

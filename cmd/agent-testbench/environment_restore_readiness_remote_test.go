@@ -287,7 +287,7 @@ func (fixture environmentRestoreRemoteRepoFixture) assertDockerComposeUpCalled()
 		fixture.t.Fatalf("read fake docker calls: %v", err)
 	}
 	composePath := filepath.Join(fixture.workspace, "docker-compose.yml")
-	if want := "compose -f " + composePath + " --env-file " + environmentRestoreGeneratedEnvFilePath(fixture.workspace) + " up -d"; !strings.Contains(string(dockerCalls), want) {
+	if want := "compose -f " + composePath + " --env-file " + environmentRestoreGeneratedEnvFilePath(fixture.workspace) + " up --pull never -d"; !strings.Contains(string(dockerCalls), want) {
 		fixture.t.Fatalf("fake docker calls missing %q:\n%s", want, dockerCalls)
 	}
 }

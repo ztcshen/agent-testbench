@@ -69,7 +69,7 @@ func TestEnvironmentRestoreAppliesAssetsBoundToDependencyEdges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read fake docker calls: %v", err)
 	}
-	wantComposeUp := "compose -f " + filepath.Join(workspace, "compose.yml") + " --env-file " + environmentRestoreGeneratedEnvFilePath(workspace) + " up -d mysql apollo app"
+	wantComposeUp := "compose -f " + filepath.Join(workspace, "compose.yml") + " --env-file " + environmentRestoreGeneratedEnvFilePath(workspace) + " up --pull never -d mysql apollo app"
 	if !strings.Contains(string(dockerCalls), wantComposeUp) ||
 		strings.Contains(string(dockerCalls), "compose -f "+filepath.Join(workspace, "compose.yml")+" exec -T mysql sh -lc") ||
 		strings.Contains(string(dockerCalls), "-proot") {

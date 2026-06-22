@@ -39,6 +39,9 @@ func runEnvironmentConfigure(ctx context.Context, args []string) error {
 		if environmentConfigureHasRepoUpdates(options) {
 			return errors.New("--repo, --branch, --repo-ref, and --checkout are only supported for --view repos")
 		}
+		if len(options.files.Values()) == 0 {
+			return errors.New("--file TARGET=SOURCE_FILE is required")
+		}
 		return runEnvironmentStartupFilePutWithOptions(ctx, environmentStartupFilePutOptions{
 			storeRef:   options.storeRef,
 			storeURL:   options.storeURL,

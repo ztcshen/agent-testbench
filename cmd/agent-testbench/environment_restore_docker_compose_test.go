@@ -34,6 +34,7 @@ func TestEnvironmentRestoreHonorsComposeOptionsFromStore(t *testing.T) {
 	fixture := newEnvironmentRestoreDockerCLIFixture(t)
 	fixture.writeWorkspaceFile(t, "compose.yml", "services: {}\n")
 	fixture.writeWorkspaceFile(t, ".env.local", "MODE=local\n")
+	fixture.writeWorkspaceFile(t, ".env", "PROJECT_MODE=default\n")
 	runCLI(t, "environment", "register",
 		"--store", fixture.StoreDSN,
 		"--id", "env.compose.options",
@@ -87,8 +88,8 @@ func TestEnvironmentRestoreHonorsComposeOptionsFromStore(t *testing.T) {
 	if !foundComposeServiceHealth {
 		t.Fatalf("compose service readiness should be generated for requested service: %#v", report.Docker.HealthChecks)
 	}
-	base := "compose -f " + filepath.Join(fixture.Workspace, "compose.yml") + " --env-file " + environmentRestoreGeneratedEnvFilePath(fixture.Workspace) + " -p demo --env-file " + filepath.Join(fixture.Workspace, ".env.local") + " --profile api"
-	want := base + " up -d web"
+	base := "compose -f " + filepath.Join(fixture.Workspace, "compose.yml") + " --env-file " + filepath.Join(fixture.Workspace, ".env") + " --env-file " + environmentRestoreGeneratedEnvFilePath(fixture.Workspace) + " -p demo --env-file " + filepath.Join(fixture.Workspace, ".env.local") + " --profile api"
+	want := base + " up --pull never -d web"
 	dockerCalls, err := os.ReadFile(fixture.DockerCallsPath)
 	if err != nil {
 		t.Fatalf("read fake docker calls: %v", err)
@@ -140,7 +141,7 @@ func TestEnvironmentRestoreSupportsMultipleComposeFiles(t *testing.T) {
 		t.Fatalf("read fake docker calls: %v", err)
 	}
 	want := "compose -f " + filepath.Join(fixture.Workspace, "compose.base.yml") + " -f " + filepath.Join(fixture.Workspace, "compose.apps.yml") + " up -d"
-	want = strings.Replace(want, " up -d", " --env-file "+filepath.Join(fixture.Workspace, ".agent-testbench", "restore.env")+" up -d", 1)
+	want = strings.Replace(want, " up -d", " --env-file "+filepath.Join(fixture.Workspace, ".agent-testbench", "restore.env")+" up --pull never -d", 1)
 	if !strings.Contains(string(dockerCalls), want) {
 		t.Fatalf("multi compose docker calls missing %q:\n%s", want, dockerCalls)
 	}
@@ -364,7 +365,7 @@ fi
 	if err != nil {
 		t.Fatalf("read fake docker calls: %v", err)
 	}
-	wantComposeUp := "compose -f " + filepath.Join(fixture.Workspace, "compose.yml") + " --env-file " + environmentRestoreGeneratedEnvFilePath(fixture.Workspace) + " up -d kafka"
+	wantComposeUp := "compose -f " + filepath.Join(fixture.Workspace, "compose.yml") + " --env-file " + environmentRestoreGeneratedEnvFilePath(fixture.Workspace) + " up --pull never -d kafka"
 	if !strings.Contains(string(dockerCalls), "image inspect apache/kafka:3.7.0") || !strings.Contains(string(dockerCalls), wantComposeUp) {
 		t.Fatalf("restore should inspect local image and still run compose up:\n%s", dockerCalls)
 	}

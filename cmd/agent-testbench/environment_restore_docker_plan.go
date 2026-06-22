@@ -131,8 +131,18 @@ func environmentRestorePlanComposeCommands(report *environmentRestoreDockerRepor
 	if !boolFromReportAny(compose["skipBuild"]) && len(buildServices) > 0 {
 		report.Commands = append(report.Commands, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"build"}, buildServices...)...))
 	}
-	report.Commands = append(report.Commands, append(append([]string{"docker", "compose"}, baseArgs...), append([]string{"up", "-d"}, services...)...))
+	report.Commands = append(report.Commands, append(append([]string{"docker", "compose"}, baseArgs...), environmentRestoreComposeUpArgs(compose, services)...))
 	return baseArgs
+}
+
+func environmentRestoreComposeUpArgs(compose map[string]any, services []string) []string {
+	args := []string{"up"}
+	if boolFromReportAny(compose["skipPull"]) {
+		args = append(args, "--pull", "never")
+	}
+	args = append(args, "-d")
+	args = append(args, services...)
+	return args
 }
 
 func environmentRestoreFilterSkippedPullServices(imageServices []string, skipPullServices []string) []string {
@@ -432,6 +442,9 @@ func environmentRestoreComposeBaseArgs(compose map[string]any, workspace string,
 		args = append(args, "-f", composeFile)
 	}
 	if strings.TrimSpace(workspace) != "" && len(composeFiles) > 0 {
+		if envFile := environmentRestoreDefaultProjectEnvFile(workspace); envFile != "" {
+			args = append(args, "--env-file", envFile)
+		}
 		args = append(args, "--env-file", environmentRestoreGeneratedEnvFilePath(workspace))
 	}
 	if projectName := strings.TrimSpace(valueString(compose["projectName"])); projectName != "" {
@@ -444,6 +457,17 @@ func environmentRestoreComposeBaseArgs(compose map[string]any, workspace string,
 		args = append(args, "--profile", profile)
 	}
 	return args
+}
+
+func environmentRestoreDefaultProjectEnvFile(workspace string) string {
+	if strings.TrimSpace(workspace) == "" {
+		return ""
+	}
+	path := filepath.Join(workspace, ".env")
+	if stat, err := os.Stat(path); err == nil && !stat.IsDir() {
+		return path
+	}
+	return ""
 }
 
 func environmentRestoreComposeCommandServices(compose map[string]any, workspace string, composeFiles []string, selected []string) ([]string, []string) {

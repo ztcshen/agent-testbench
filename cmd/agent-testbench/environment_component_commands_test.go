@@ -381,6 +381,25 @@ func TestEnvironmentConfigureStartupFilesRejectsRepoFlags(t *testing.T) {
 	}
 }
 
+func TestEnvironmentConfigureStartupFilesRequiresFile(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	runCLI(t, "environment", "register",
+		"--store", "sqlite://"+storePath,
+		"--id", "env.configure.startup-file-required",
+		"--compose-file", "compose/docker-compose.yml",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	out := runCLIFails(t, "environment", "configure",
+		"--view", "startup-files",
+		"--store", "sqlite://"+storePath,
+		"env.configure.startup-file-required",
+	)
+	if !strings.Contains(out, "--file TARGET=SOURCE_FILE is required") {
+		t.Fatalf("startup-files should require --file, got: %q", out)
+	}
+}
+
 func TestEnvironmentStartupFilePutPreservesMixedLegacyGeneratedFiles(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "store.sqlite")
 	storeRef := "sqlite://" + storePath
