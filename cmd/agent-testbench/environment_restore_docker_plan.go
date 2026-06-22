@@ -431,7 +431,7 @@ func environmentRestoreComposeBaseArgs(compose map[string]any, workspace string,
 	for _, composeFile := range composeFiles {
 		args = append(args, "-f", composeFile)
 	}
-	if len(stringMapFromAny(compose["env"])) > 0 {
+	if strings.TrimSpace(workspace) != "" && len(composeFiles) > 0 {
 		args = append(args, "--env-file", environmentRestoreGeneratedEnvFilePath(workspace))
 	}
 	if projectName := strings.TrimSpace(valueString(compose["projectName"])); projectName != "" {

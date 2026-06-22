@@ -301,7 +301,8 @@ func TestEnvironmentRestoreRunsAllowedDockerCleanupBeforeStartup(t *testing.T) {
 	}
 	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
 	joined := strings.Join(lines, "\n")
-	for _, want := range []string{"compose -f " + filepath.Join(workspace, "compose.yml") + " -p demo ps", "compose -f " + filepath.Join(workspace, "compose.yml") + " -p demo images", "compose -f " + filepath.Join(workspace, "compose.yml") + " -p demo config", "compose -f " + filepath.Join(workspace, "compose.yml") + " -p demo down --remove-orphans --rmi all", "compose -f " + filepath.Join(workspace, "compose.yml") + " -p demo up -d web"} {
+	base := "compose -f " + filepath.Join(workspace, "compose.yml") + " --env-file " + environmentRestoreGeneratedEnvFilePath(workspace) + " -p demo"
+	for _, want := range []string{base + " ps", base + " images", base + " config", base + " down --remove-orphans --rmi all", base + " up -d web"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("cleanup docker calls missing %q:\n%s", want, joined)
 		}
@@ -429,10 +430,11 @@ fi
 		t.Fatalf("read fake docker calls: %v", err)
 	}
 	joined := string(raw)
+	base := "compose -f " + filepath.Join(fixture.Workspace, "compose.yml") + " --env-file " + environmentRestoreGeneratedEnvFilePath(fixture.Workspace) + " -p demo-fixed"
 	for _, want := range []string{
-		"compose -f " + filepath.Join(fixture.Workspace, "compose.yml") + " -p demo-fixed down --remove-orphans",
+		base + " down --remove-orphans",
 		"rm -f sandbox-kafka",
-		"compose -f " + filepath.Join(fixture.Workspace, "compose.yml") + " -p demo-fixed up -d kafka",
+		base + " up -d kafka",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("cleanup docker calls missing %q:\n%s", want, joined)

@@ -175,7 +175,8 @@ func TestEnvironmentRestoreWritesStoreGeneratedComposeFileBeforeDocker(t *testin
 	if err != nil {
 		t.Fatalf("read fake docker calls: %v", err)
 	}
-	if !strings.Contains(string(dockerCalls), "compose -f "+generatedPath+" up -d") {
+	want := "compose -f " + generatedPath + " --env-file " + environmentRestoreGeneratedEnvFilePath(fixture.Workspace) + " up -d"
+	if !strings.Contains(string(dockerCalls), want) {
 		t.Fatalf("fake docker calls should use generated compose file:\n%s", dockerCalls)
 	}
 }

@@ -143,7 +143,7 @@ func buildEnvironmentRestoreReportWithStructuredState(ctx context.Context, env s
 	}
 	attemptedAt := time.Now().UTC()
 	environmentRestoreEmitRunPlanningStarted(ctx, env.ID, attemptedAt)
-	result, timedOut := environmentRestoreBuildPlanAndReportWithWatchdog(ctx, env, workflowID, workspace, execute, workflowOptions, cleanupOptions, prepareReposOnly, files, services, checks, attemptedAt, componentGraphs...)
+	result, timedOut := environmentRestoreBuildPlanAndReportWithWatchdog(ctx, env, workflowID, workspace, execute, pull, workflowOptions, cleanupOptions, prepareReposOnly, files, services, checks, attemptedAt, componentGraphs...)
 	if result.Err != nil {
 		if timedOut {
 			report := newEnvironmentRestorePlanErrorReport(env, workflowID, workspace, execute, attemptedAt, result.Err.Error())
@@ -175,7 +175,7 @@ func buildEnvironmentRestoreReportWithStructuredState(ctx context.Context, env s
 	return report, nil
 }
 
-func environmentRestoreBuildPlanAndReportWithWatchdog(ctx context.Context, env store.Environment, workflowID string, workspace string, execute bool, workflowOptions environmentRestoreWorkflowOptions, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool, files []store.EnvironmentFile, services []store.EnvironmentService, checks []store.EnvironmentHealthCheck, attemptedAt time.Time, componentGraphs ...store.EnvironmentComponentGraph) (environmentRestorePlanBuildResult, bool) {
+func environmentRestoreBuildPlanAndReportWithWatchdog(ctx context.Context, env store.Environment, workflowID string, workspace string, execute bool, pull bool, workflowOptions environmentRestoreWorkflowOptions, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool, files []store.EnvironmentFile, services []store.EnvironmentService, checks []store.EnvironmentHealthCheck, attemptedAt time.Time, componentGraphs ...store.EnvironmentComponentGraph) (environmentRestorePlanBuildResult, bool) {
 	results := make(chan environmentRestorePlanBuildResult, 1)
 	started := time.Now()
 	go func() {
@@ -187,7 +187,7 @@ func environmentRestoreBuildPlanAndReportWithWatchdog(ctx context.Context, env s
 		plan.AttemptedAt = attemptedAt
 		results <- environmentRestorePlanBuildResult{
 			Plan:   plan,
-			Report: newEnvironmentRestoreReport(env, plan, execute, workflowOptions, cleanupOptions, prepareReposOnly),
+			Report: newEnvironmentRestoreReport(env, plan, execute, pull, workflowOptions, cleanupOptions, prepareReposOnly),
 		}
 	}()
 
@@ -322,7 +322,7 @@ func environmentRestoreComposeForPlan(env store.Environment, files []store.Envir
 	return jsonObjectString(projected.ComposeJSON), nil
 }
 
-func newEnvironmentRestoreReport(env store.Environment, plan environmentRestoreBuildPlan, execute bool, workflowOptions environmentRestoreWorkflowOptions, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool) environmentRestoreReport {
+func newEnvironmentRestoreReport(env store.Environment, plan environmentRestoreBuildPlan, execute bool, pull bool, workflowOptions environmentRestoreWorkflowOptions, cleanupOptions environmentRestoreDockerCleanupOptions, prepareReposOnly bool) environmentRestoreReport {
 	report := environmentRestoreReport{
 		OK:                   true,
 		RestoreID:            "restore." + safeReportID(env.ID) + "." + plan.AttemptedAt.Format("20060102T150405.000000000Z"),
@@ -334,7 +334,7 @@ func newEnvironmentRestoreReport(env store.Environment, plan environmentRestoreB
 		HealthChecks:         plan.HealthChecks,
 		ComponentGraph:       plan.ComponentGraphReport,
 		ComponentStartupPlan: plan.ComponentStartupPlan,
-		Preflight:            environmentRestorePreflightReport(plan.PackageSpec, plan.Specs, plan.Compose, plan.Workspace, execute, cleanupOptions, prepareReposOnly, plan.RemoteOnly),
+		Preflight:            environmentRestorePreflightReport(plan.PackageSpec, plan.Specs, plan.Compose, plan.Workspace, execute, pull, cleanupOptions, prepareReposOnly, plan.RemoteOnly),
 		FileProjection:       environmentRestoreFileProjection(env, plan),
 		SourcePolicy:         environmentsource.SourcePolicyReport(plan.Specs, plan.RemoteOnly),
 		Workflow: environmentRestoreWorkflowRun{

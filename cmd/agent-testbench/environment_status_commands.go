@@ -253,7 +253,34 @@ func addComposeServiceStatusReport(out map[string]environmentRestoreHealthCheckR
 	if !check.OK {
 		check.Error = "compose service is not ready"
 	}
+	if existing, ok := out[service]; ok {
+		if preferComposeServiceStatusReport(existing, check) {
+			out[service] = check
+		}
+		return
+	}
 	out[service] = check
+}
+
+func preferComposeServiceStatusReport(existing environmentRestoreHealthCheckReport, incoming environmentRestoreHealthCheckReport) bool {
+	existingOneOff := composeServiceStatusIsOneOff(existing)
+	incomingOneOff := composeServiceStatusIsOneOff(incoming)
+	if existingOneOff != incomingOneOff {
+		return existingOneOff && !incomingOneOff
+	}
+	if existing.OK != incoming.OK {
+		return existing.OK && !incoming.OK
+	}
+	return false
+}
+
+func composeServiceStatusIsOneOff(check environmentRestoreHealthCheckReport) bool {
+	name := strings.ToLower(strings.TrimSpace(check.Container))
+	service := strings.ToLower(strings.TrimSpace(check.Service))
+	if name == "" || service == "" {
+		return false
+	}
+	return strings.Contains(name, "-"+service+"-run-") || strings.Contains(name, "_"+service+"_run_")
 }
 
 func environmentStatusServiceFromHealth(check environmentRestoreHealthCheckReport) environmentStatusServiceReport {

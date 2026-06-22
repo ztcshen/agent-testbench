@@ -84,9 +84,54 @@ func TestEnvironmentStatusReportsComposeStateWithoutHeavyRestore(t *testing.T) {
 	if strings.Contains(calls, " up -d") || strings.Contains(calls, " pull") || strings.Contains(calls, " build") || strings.Contains(calls, " down") || strings.Contains(calls, " stop") {
 		t.Fatalf("environment status should not run heavy compose commands:\n%s", calls)
 	}
-	wantBatch := "compose -f " + filepath.Join(fixture.Workspace, "compose.yml") + " ps -a --format json web worker"
+	wantBatch := "compose -f " + filepath.Join(fixture.Workspace, "compose.yml") + " --env-file " + environmentRestoreGeneratedEnvFilePath(fixture.Workspace) + " ps -a --format json web worker"
 	if !strings.Contains(calls, wantBatch) || strings.Count(calls, " ps -a --format json ") != 1 {
 		t.Fatalf("environment status should inspect compose services in one batch, want %q:\n%s", wantBatch, calls)
+	}
+}
+
+func TestEnvironmentStatusMaterializesWorkspaceEnvFile(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	composeSource := filepath.Join(t.TempDir(), "compose.yml")
+	writeFile(t, composeSource, "services:\n  web:\n    image: alpine:3.20\n    volumes:\n      - ${AGENT_TESTBENCH_WORKSPACE}/app:/workspace/app\n")
+	runCLI(t, "environment", "register",
+		"--store", fixture.StoreDSN,
+		"--id", "env.status.workspace",
+		"--compose-file", "compose.yml",
+		"--compose-generated-file", "compose.yml="+composeSource,
+		"--compose-service", "web",
+		"--health-compose-service", "web",
+		"--verification-workflow", "workflow.core-10",
+	)
+
+	runCLIWithEnv(t, fixture.DockerEnv, "environment", "status", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--json", "env.status.workspace")
+	rawEnv, err := os.ReadFile(environmentRestoreGeneratedEnvFilePath(fixture.Workspace))
+	if err != nil {
+		t.Fatalf("read generated compose env: %v", err)
+	}
+	if !strings.Contains(string(rawEnv), "AGENT_TESTBENCH_WORKSPACE="+fixture.Workspace+"\n") {
+		t.Fatalf("generated compose env should materialize workspace:\n%s", rawEnv)
+	}
+	dockerCalls, err := os.ReadFile(fixture.DockerCallsPath)
+	if err != nil {
+		t.Fatalf("read fake docker calls: %v", err)
+	}
+	want := "--env-file " + environmentRestoreGeneratedEnvFilePath(fixture.Workspace)
+	if !strings.Contains(string(dockerCalls), want) {
+		t.Fatalf("environment status should pass generated compose env file %q:\n%s", want, dockerCalls)
+	}
+}
+
+func TestEnvironmentStatusIgnoresOneOffComposeRunContainer(t *testing.T) {
+	output := strings.Join([]string{
+		`{"Name":"sandbox-scf-risk","Service":"scf-risk","State":"exited","ExitCode":1}`,
+		`{"Name":"scf-chain-sandbox-scf-risk-run-cce2c18b0dae","Service":"scf-risk","State":"running","ExitCode":0}`,
+	}, "\n")
+
+	reports := parseComposeServiceStatusReports(output)
+	report := reports["scf-risk"]
+	if report.Container != "sandbox-scf-risk" || report.State != "exited" || report.OK {
+		t.Fatalf("status should prefer the canonical service container over compose run one-off: %#v", report)
 	}
 }
 
@@ -455,7 +500,8 @@ func TestEnvironmentStopDefaultsToComposeStopAndPersistsLastStop(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode environment stop report: %v\n%s", err, out)
 	}
-	if !report.OK || report.Docker.Action != "compose-stop" || !reflect.DeepEqual(report.Docker.Command, []string{"docker", "compose", "-f", filepath.Join(fixture.Workspace, "compose.yml"), "stop", "web"}) {
+	want := []string{"docker", "compose", "-f", filepath.Join(fixture.Workspace, "compose.yml"), "--env-file", environmentRestoreGeneratedEnvFilePath(fixture.Workspace), "stop", "web"}
+	if !report.OK || report.Docker.Action != "compose-stop" || !reflect.DeepEqual(report.Docker.Command, want) {
 		t.Fatalf("environment stop report = %#v", report)
 	}
 	if !report.Environment.Summary.LastStop.OK || report.Environment.Summary.LastStop.Action != "compose-stop" {
@@ -466,7 +512,7 @@ func TestEnvironmentStopDefaultsToComposeStopAndPersistsLastStop(t *testing.T) {
 		t.Fatalf("read fake docker calls: %v", err)
 	}
 	calls := string(dockerCalls)
-	if !strings.Contains(calls, "compose -f "+filepath.Join(fixture.Workspace, "compose.yml")+" stop web") {
+	if !strings.Contains(calls, strings.Join(want[1:], " ")) {
 		t.Fatalf("environment stop should run compose stop:\n%s", calls)
 	}
 	if strings.Contains(calls, " down") || strings.Contains(calls, "--rmi") || strings.Contains(calls, " -v") || strings.Contains(calls, "rm ") {
@@ -518,7 +564,7 @@ func TestEnvironmentServiceRestartScopesComposeServiceAndPersistsSummary(t *test
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode environment service restart report: %v\n%s", err, out)
 	}
-	want := []string{"docker", "compose", "-f", filepath.Join(fixture.Workspace, "compose.yml"), "restart", "web"}
+	want := []string{"docker", "compose", "-f", filepath.Join(fixture.Workspace, "compose.yml"), "--env-file", environmentRestoreGeneratedEnvFilePath(fixture.Workspace), "restart", "web"}
 	if !report.OK || report.Docker.Action != "compose-service-restart" || report.Docker.Service != "web" || !reflect.DeepEqual(report.Docker.Command, want) {
 		t.Fatalf("environment service restart report = %#v want command %#v", report, want)
 	}
@@ -533,7 +579,7 @@ func TestEnvironmentServiceRestartScopesComposeServiceAndPersistsSummary(t *test
 		t.Fatalf("read fake docker calls: %v", err)
 	}
 	calls := string(callsRaw)
-	if !strings.Contains(calls, "compose -f "+filepath.Join(fixture.Workspace, "compose.yml")+" restart web") {
+	if !strings.Contains(calls, strings.Join(want[1:], " ")) {
 		t.Fatalf("service restart should run compose restart for web:\n%s", calls)
 	}
 	if strings.Contains(calls, "restart worker") {
@@ -627,7 +673,7 @@ func TestEnvironmentStopDownRemoveOrphansRequiresExplicitFlags(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode environment stop down report: %v\n%s", err, out)
 	}
-	want := []string{"docker", "compose", "-f", filepath.Join(fixture.Workspace, "compose.yml"), "-p", "demo-stop", "down", "--remove-orphans"}
+	want := []string{"docker", "compose", "-f", filepath.Join(fixture.Workspace, "compose.yml"), "--env-file", environmentRestoreGeneratedEnvFilePath(fixture.Workspace), "-p", "demo-stop", "down", "--remove-orphans"}
 	if !report.OK || report.Docker.Action != "compose-down" || !reflect.DeepEqual(report.Docker.Command, want) {
 		t.Fatalf("environment stop down report = %#v want command %#v", report, want)
 	}
