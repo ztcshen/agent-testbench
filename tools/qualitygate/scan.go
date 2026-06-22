@@ -18,6 +18,7 @@ type scanState struct {
 	cfg        Config
 	modulePath string
 	inScope    func(string) bool
+	scoped     bool
 	packages   map[string]*PackageMetric
 }
 
@@ -49,6 +50,7 @@ func Analyze(options Options) (Report, error) {
 		cfg:        cfg,
 		modulePath: modulePath,
 		inScope:    scopeMatcher(options.ScopePaths),
+		scoped:     len(normalizedScope(options.ScopePaths)) > 0,
 		packages:   map[string]*PackageMetric{},
 	}
 	if err := filepath.WalkDir(absRoot, func(path string, entry os.DirEntry, walkErr error) error {
@@ -154,7 +156,7 @@ func (s *scanState) scanGoFile(root string, rel string, report *Report) error {
 		Package:        pkgDir,
 		Value:          effectiveLines,
 		Warn:           s.fileLineWarningThreshold(rel),
-		Block:          s.cfg.FileEffectiveLinesBlock,
+		Block:          s.fileLineBlockThreshold(rel),
 		Recommendation: "Do not split mechanically; first identify cohesive responsibilities and keep helpers package-local.",
 		ConfigOnly:     isConfigOrEnumFile(rel),
 	})
@@ -229,6 +231,7 @@ func (s *scanState) addPackageIssues(report *Report) {
 			Warn:           warnLines,
 			Block:          blockLines,
 			Recommendation: "Split packages only around stable semantics, not to appease a line counter.",
+			DemoteBlock:    s.scoped,
 		})
 		s.addThresholdIssue(report, thresholdIssueInput{
 			ID:             "package-file-count",
@@ -240,6 +243,7 @@ func (s *scanState) addPackageIssues(report *Report) {
 			Warn:           warnFiles,
 			Block:          blockFiles,
 			Recommendation: "Check whether the package has multiple concepts before introducing a new package boundary.",
+			DemoteBlock:    s.scoped,
 		})
 	}
 	sort.Slice(report.Metrics.Packages, func(i int, j int) bool {
@@ -297,17 +301,35 @@ func (s *scanState) functionWarningThreshold(file string) (int, int) {
 }
 
 func (s *scanState) fileLineWarningThreshold(file string) int {
-	if strings.HasSuffix(file, "_test.go") ||
-		isCLISurfaceFile(file) ||
+	if strings.HasSuffix(file, "_test.go") {
+		return 800
+	}
+	if isCLISurfaceFile(file) ||
 		isControlPlaneSurfaceFile(file) ||
 		isStoreSchemaSurfaceFile(file) ||
 		isProfileArtifactSurfaceFile(file) ||
 		isRunnerEvidenceSurfaceFile(file) ||
 		isStoreContractSurfaceFile(file) ||
 		isQualityGateToolFile(file) {
-		return s.cfg.FileEffectiveLinesBlock - 1
+		return 800
 	}
 	return s.cfg.FileEffectiveLinesWarn
+}
+
+func (s *scanState) fileLineBlockThreshold(file string) int {
+	if strings.HasSuffix(file, "_test.go") {
+		return 1500
+	}
+	if isCLISurfaceFile(file) ||
+		isControlPlaneSurfaceFile(file) ||
+		isStoreSchemaSurfaceFile(file) ||
+		isProfileArtifactSurfaceFile(file) ||
+		isRunnerEvidenceSurfaceFile(file) ||
+		isStoreContractSurfaceFile(file) ||
+		isQualityGateToolFile(file) {
+		return 1200
+	}
+	return s.cfg.FileEffectiveLinesBlock
 }
 
 func (s *scanState) fileFunctionCountWarningThreshold(file string) int {
@@ -359,6 +381,7 @@ type thresholdIssueInput struct {
 	Block          int
 	Recommendation string
 	ConfigOnly     bool
+	DemoteBlock    bool
 }
 
 func (s *scanState) addThresholdIssue(report *Report, input thresholdIssueInput) {
@@ -374,7 +397,7 @@ func (s *scanState) addThresholdIssue(report *Report, input thresholdIssueInput)
 	if severity == "" {
 		return
 	}
-	if input.ConfigOnly && severity == SeverityBlock {
+	if (input.ConfigOnly || input.DemoteBlock) && severity == SeverityBlock {
 		severity = SeverityWarning
 	}
 	report.addIssue(Issue{

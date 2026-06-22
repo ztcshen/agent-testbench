@@ -234,7 +234,7 @@ func TestCommandDescriptorsDeclareCommandPaths(t *testing.T) {
 	}
 }
 
-func TestCommandDescriptorRegistryOwnsCatalogMetadata(t *testing.T) {
+func TestCommandDescriptorRegistryOwnsCatalogMetadataSources(t *testing.T) {
 	catalogSource, err := os.ReadFile("command_catalog.go")
 	if err != nil {
 		t.Fatalf("read command catalog source: %v", err)
@@ -256,7 +256,9 @@ func TestCommandDescriptorRegistryOwnsCatalogMetadata(t *testing.T) {
 	if strings.Contains(string(metadataSource), "func commandCatalogDefaultInclusionReason") {
 		t.Fatal("default inclusion reasons should live in descriptor registry")
 	}
+}
 
+func TestCommandDescriptorRegistryDeclaresSurfaceMetadata(t *testing.T) {
 	lines := commandDescriptorRegistryLinesByCommand()
 	for _, command := range []string{
 		cliCommandStatus,
@@ -307,7 +309,10 @@ func TestCommandDescriptorRegistryOwnsCatalogMetadata(t *testing.T) {
 			t.Fatalf("descriptor for %q should declare surface=internal, line=%q", command, lines[command])
 		}
 	}
+}
 
+func TestCommandDescriptorRegistryDeclaresReplacementHints(t *testing.T) {
+	lines := commandDescriptorRegistryLinesByCommand()
 	for command, replacement := range map[string]string{
 		commandCatalogExecutorPlan:                 "agent-testbench map explain",
 		"runtime mysql endpoints":                  "agent-testbench store status --json",

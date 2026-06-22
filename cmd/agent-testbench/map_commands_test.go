@@ -348,44 +348,8 @@ func TestMapListAndPlansExposeAtlasEntrypoints(t *testing.T) {
 	}
 }
 
-func TestMapInspectRoutesListWorkflowsCoveragePlansAndPlanViews(t *testing.T) {
-	ctx := context.Background()
-	storePath := filepath.Join(t.TempDir(), "map-inspect.sqlite")
-	storeRef := "sqlite://" + storePath
-	runtime, err := openStore(ctx, storeRef)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	graph := store.TestPlanGraph{
-		Map: store.TestPlanMap{ID: "map.inspect", ProfileID: "profile.inspect", DisplayName: "Inspect Map", Status: "active", SummaryJSON: `{}`},
-		Nodes: []store.TestPlanNode{
-			{MapID: "map.inspect", ID: "node.prepare", CaseID: "case.prepare", SummaryJSON: `{}`},
-			{MapID: "map.inspect", ID: "node.submit", CaseID: "case.submit", SummaryJSON: `{}`},
-		},
-		Paths: []store.TestPlanPath{
-			{MapID: "map.inspect", ID: "path.submit", WorkflowID: "workflow.submit", DisplayName: "Submit", SummaryJSON: `{}`},
-		},
-		PathSteps: []store.TestPlanPathStep{
-			{MapID: "map.inspect", PathID: "path.submit", StepIndex: 1, NodeID: "node.prepare", CaseID: "case.prepare", SummaryJSON: `{}`},
-			{MapID: "map.inspect", PathID: "path.submit", StepIndex: 2, NodeID: "node.submit", CaseID: "case.submit", SummaryJSON: `{}`},
-		},
-	}
-	if err := runtime.ReplaceTestPlanGraph(ctx, graph); err != nil {
-		t.Fatalf("seed test plan graph: %v", err)
-	}
-	if err := runtime.SaveTestMapPlan(ctx, store.TestMapPlanRecord{
-		Instance: store.TestMapPlanInstance{
-			ID: "plan.inspect.001", MapID: "map.inspect", ProfileID: "profile.inspect", EnvironmentID: "env.inspect",
-			Scope: "all", TargetKind: "map", TargetID: "map.inspect", Mode: "run", Status: "failed", SummaryJSON: `{}`,
-		},
-		Tasks: []store.TestMapPlanTask{{
-			PlanID: "plan.inspect.001", ID: "task.submit", Index: 1, Kind: "case", Operation: "run_case",
-			NodeID: "node.submit", CaseID: "case.submit", Status: "failed", Reason: "HTTP 400", SummaryJSON: `{}`,
-		}},
-	}); err != nil {
-		t.Fatalf("seed test map plan: %v", err)
-	}
-	closeCLIStore(runtime)
+func TestMapInspectRoutesListWorkflowsCoverageAndPlansViews(t *testing.T) {
+	storeRef := seedMapInspectFixture(t)
 
 	listOut := runCLI(t, "map", "inspect", "--view", "list", "--store", storeRef, "--json")
 	var listReport struct {
@@ -441,6 +405,10 @@ func TestMapInspectRoutesListWorkflowsCoveragePlansAndPlanViews(t *testing.T) {
 	if !plansReport.OK || plansReport.MapID != "map.inspect" || len(plansReport.Plans) != 1 || plansReport.Plans[0].ID != "plan.inspect.001" {
 		t.Fatalf("map inspect plans report = %#v", plansReport)
 	}
+}
+
+func TestMapInspectRoutesPlanViewAndUnknownView(t *testing.T) {
+	storeRef := seedMapInspectFixture(t)
 
 	planOut := runCLI(t, "map", "inspect", "--view", "plan", "--store", storeRef, "--plan", "plan.inspect.001", "--json")
 	var planReport mapRunExplainCommandReport
@@ -458,6 +426,48 @@ func TestMapInspectRoutesListWorkflowsCoveragePlansAndPlanViews(t *testing.T) {
 	if !strings.Contains(out, "unknown map inspect view") {
 		t.Fatalf("unknown map inspect view should fail clearly:\n%s", out)
 	}
+}
+
+func seedMapInspectFixture(t *testing.T) string {
+	t.Helper()
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "map-inspect.sqlite")
+	storeRef := "sqlite://" + storePath
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	graph := store.TestPlanGraph{
+		Map: store.TestPlanMap{ID: "map.inspect", ProfileID: "profile.inspect", DisplayName: "Inspect Map", Status: "active", SummaryJSON: `{}`},
+		Nodes: []store.TestPlanNode{
+			{MapID: "map.inspect", ID: "node.prepare", CaseID: "case.prepare", SummaryJSON: `{}`},
+			{MapID: "map.inspect", ID: "node.submit", CaseID: "case.submit", SummaryJSON: `{}`},
+		},
+		Paths: []store.TestPlanPath{
+			{MapID: "map.inspect", ID: "path.submit", WorkflowID: "workflow.submit", DisplayName: "Submit", SummaryJSON: `{}`},
+		},
+		PathSteps: []store.TestPlanPathStep{
+			{MapID: "map.inspect", PathID: "path.submit", StepIndex: 1, NodeID: "node.prepare", CaseID: "case.prepare", SummaryJSON: `{}`},
+			{MapID: "map.inspect", PathID: "path.submit", StepIndex: 2, NodeID: "node.submit", CaseID: "case.submit", SummaryJSON: `{}`},
+		},
+	}
+	if err := runtime.ReplaceTestPlanGraph(ctx, graph); err != nil {
+		t.Fatalf("seed test plan graph: %v", err)
+	}
+	if err := runtime.SaveTestMapPlan(ctx, store.TestMapPlanRecord{
+		Instance: store.TestMapPlanInstance{
+			ID: "plan.inspect.001", MapID: "map.inspect", ProfileID: "profile.inspect", EnvironmentID: "env.inspect",
+			Scope: "all", TargetKind: "map", TargetID: "map.inspect", Mode: "run", Status: "failed", SummaryJSON: `{}`,
+		},
+		Tasks: []store.TestMapPlanTask{{
+			PlanID: "plan.inspect.001", ID: "task.submit", Index: 1, Kind: "case", Operation: "run_case",
+			NodeID: "node.submit", CaseID: "case.submit", Status: "failed", Reason: "HTTP 400", SummaryJSON: `{}`,
+		}},
+	}); err != nil {
+		t.Fatalf("seed test map plan: %v", err)
+	}
+	closeCLIStore(runtime)
+	return storeRef
 }
 
 func TestMapUpdateMaintainsMapMetadataWithoutLosingGraph(t *testing.T) {
