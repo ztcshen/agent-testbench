@@ -12,8 +12,8 @@ import (
 )
 
 func TestMapValidationPromoteCommandIsDiscoverable(t *testing.T) {
-	out := runCLI(t, "commands", "--all", "--filter", "map validation promote", "--json")
-	if !strings.Contains(out, `"command": "map validation promote"`) {
+	out := runCLI(t, "commands", "--all", "--filter", commandCatalogMapValidationPromote, "--json")
+	if !strings.Contains(out, `"command": "`+commandCatalogMapValidationPromote+`"`) {
 		t.Fatalf("map validation promote command not discoverable:\n%s", out)
 	}
 }

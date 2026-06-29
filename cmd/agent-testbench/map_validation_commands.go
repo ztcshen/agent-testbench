@@ -165,7 +165,7 @@ func runMapValidationAttach(ctx context.Context, args []string) error {
 }
 
 func runMapValidationPromote(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("map validation promote", flag.ContinueOnError)
+	flags := flag.NewFlagSet(commandCatalogMapValidationPromote, flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
@@ -178,7 +178,7 @@ func runMapValidationPromote(ctx context.Context, args []string) error {
 		return err
 	}
 	if flags.NArg() > 0 {
-		return fmt.Errorf("map validation promote does not accept positional arguments: %s", strings.Join(flags.Args(), " "))
+		return fmt.Errorf("%s does not accept positional arguments: %s", commandCatalogMapValidationPromote, strings.Join(flags.Args(), " "))
 	}
 	target := firstNonEmpty(strings.TrimSpace(*nodeID), strings.TrimSpace(*caseID))
 	if target == "" {
@@ -371,7 +371,7 @@ func ensurePromotedPrimaryReachable(graph store.TestPlanGraph, node store.TestPl
 		Status:               "active",
 		RequiredPropertyJSON: mustCompactJSON(map[string]any{"caseId": node.CaseID}),
 		ProvidedPropertyJSON: mustCompactJSON(map[string]any{"pathId": pathID, "stateEffect": plangraph.StateEffectAdvance}),
-		SummaryJSON:          mustCompactJSON(map[string]any{"source": "map validation promote", "caseId": node.CaseID}),
+		SummaryJSON:          mustCompactJSON(map[string]any{"source": commandCatalogMapValidationPromote, "caseId": node.CaseID}),
 		SortOrder:            nextPromotedPrimaryPathSortOrder(graph.Paths),
 	})
 	graph.PathSteps = upsertPromotedPrimaryPathStep(graph.PathSteps, store.TestPlanPathStep{
