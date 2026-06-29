@@ -321,7 +321,7 @@ func parseDefaultOverrideOptions(flagValues map[string]any, rawJSON string) (map
 		}
 		if ok {
 			hasValue = true
-			for key, value := range parsed.(map[string]any) {
+			for key, value := range parsed {
 				out[key] = value
 			}
 		}
@@ -386,15 +386,16 @@ func parseOptionalJSONValue(name string, raw string) (any, bool, error) {
 	return out, true, nil
 }
 
-func parseOptionalJSONObject(name string, raw string) (any, bool, error) {
+func parseOptionalJSONObject(name string, raw string) (map[string]any, bool, error) {
 	value, ok, err := parseOptionalJSONValue(name, raw)
 	if err != nil || !ok {
-		return value, ok, err
+		return nil, ok, err
 	}
-	if _, valid := value.(map[string]any); !valid {
+	out, valid := value.(map[string]any)
+	if !valid {
 		return nil, false, fmt.Errorf("--%s must be a JSON object", name)
 	}
-	return value, true, nil
+	return out, true, nil
 }
 
 func parseHeadersOptions(values []string, rawJSON string) (map[string]any, error) {
@@ -405,11 +406,7 @@ func parseHeadersOptions(values []string, rawJSON string) (map[string]any, error
 			return nil, err
 		}
 		if ok {
-			headers, valid := parsed.(map[string]any)
-			if !valid {
-				return nil, fmt.Errorf("--headers-json must be a JSON object")
-			}
-			for key, value := range headers {
+			for key, value := range parsed {
 				out[key] = value
 			}
 		}

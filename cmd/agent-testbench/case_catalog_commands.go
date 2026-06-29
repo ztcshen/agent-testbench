@@ -14,6 +14,8 @@ import (
 	"agent-testbench/internal/store"
 )
 
+const caseCatalogCommandUpsert = "upsert"
+
 type caseCatalogUpsertReport struct {
 	OK          bool                        `json:"ok"`
 	ProfileID   string                      `json:"profileId"`
@@ -69,7 +71,7 @@ func runCaseCatalog(ctx context.Context, args []string) error {
 		return errors.New("missing case catalog command")
 	}
 	switch args[0] {
-	case "upsert":
+	case caseCatalogCommandUpsert:
 		return runCaseCatalogUpsert(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown case catalog command: %s", args[0])
@@ -77,7 +79,7 @@ func runCaseCatalog(ctx context.Context, args []string) error {
 }
 
 func runCaseCatalogUpsert(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("case catalog upsert", flag.ContinueOnError)
+	flags := flag.NewFlagSet("case catalog "+caseCatalogCommandUpsert, flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
@@ -185,6 +187,33 @@ func upsertCaseCatalogCase(ctx context.Context, runtime store.Store, options cas
 	apiCase, exists := findCatalogAPICase(catalog.APICases, options.CaseID)
 	apiCase.ID = strings.TrimSpace(options.CaseID)
 	apiCase.NodeID = strings.TrimSpace(options.NodeID)
+	applyCaseCatalogMetadataFields(&apiCase, catalog.APICases, options, exists)
+	if err := applyCaseCatalogJSONFields(&apiCase, options); err != nil {
+		return caseCatalogUpsertReport{}, err
+	}
+	catalog.APICases = upsertCatalogAPICase(catalog.APICases, apiCase)
+	catalog.IndexedAt = time.Now().UTC()
+	if err := runtime.ReplaceProfileCatalog(ctx, catalog); err != nil {
+		return caseCatalogUpsertReport{}, err
+	}
+	return caseCatalogUpsertReport{
+		OK:        true,
+		ProfileID: catalog.ProfileID,
+		Created:   !exists,
+		Updated:   exists,
+		Case:      caseCatalogUpsertCaseRefFromCatalog(apiCase),
+		Counts: workflowCatalogUpsertCounts{
+			Before: beforeCounts,
+			After:  profileImportCountsFromCatalog(catalog),
+		},
+		NextActions: []string{
+			"agent-testbench case config " + caseCatalogCommandUpsert + " --case " + commandline.ShellQuote(apiCase.ID) + " --method METHOD --path PATH --json",
+			"agent-testbench map import-workflows --json",
+		},
+	}, nil
+}
+
+func applyCaseCatalogMetadataFields(apiCase *store.CatalogAPICase, existingCases []store.CatalogAPICase, options caseCatalogUpsertOptions, exists bool) {
 	if !exists || options.PassedFlags["display-name"] {
 		apiCase.DisplayName = firstNonEmpty(strings.TrimSpace(options.DisplayName), apiCase.ID)
 	}
@@ -217,49 +246,35 @@ func upsertCaseCatalogCase(ctx context.Context, runtime store.Store, options cas
 	if options.PassedFlags["sort-order"] {
 		apiCase.SortOrder = options.SortOrder
 	} else if !exists {
-		apiCase.SortOrder = nextCatalogAPICaseSortOrder(catalog.APICases)
+		apiCase.SortOrder = nextCatalogAPICaseSortOrder(existingCases)
 	}
-	applyOptionalCaseCatalogRuntimeFields(&apiCase, options)
+	applyOptionalCaseCatalogRuntimeFields(apiCase, options)
+}
+
+func applyCaseCatalogJSONFields(apiCase *store.CatalogAPICase, options caseCatalogUpsertOptions) error {
 	if options.PassedFlags["patch-json"] {
-		apiCase.PatchJSON, err = compactOptionalJSONString("patch-json", options.PatchJSON)
+		patchJSON, err := compactOptionalJSONString("patch-json", options.PatchJSON)
 		if err != nil {
-			return caseCatalogUpsertReport{}, err
+			return err
 		}
+		apiCase.PatchJSON = patchJSON
 	}
 	if options.PassedFlags["expected-json"] {
-		apiCase.ExpectedJSON, err = compactOptionalJSONString("expected-json", options.ExpectedJSON)
+		expectedJSON, err := compactOptionalJSONString("expected-json", options.ExpectedJSON)
 		if err != nil {
-			return caseCatalogUpsertReport{}, err
+			return err
 		}
+		apiCase.ExpectedJSON = expectedJSON
 	}
 	defaults, hasDefaults, err := parseDefaultOverrideOptions(options.DefaultOverrides, options.DefaultOverridesJSON)
 	if err != nil {
-		return caseCatalogUpsertReport{}, err
+		return err
 	}
 	if hasDefaults {
 		defaults = mergeCatalogDefaultOverrides(apiCase.DefaultOverridesJSON, defaults)
 		apiCase.DefaultOverridesJSON = compactJSONObject(defaults)
 	}
-	catalog.APICases = upsertCatalogAPICase(catalog.APICases, apiCase)
-	catalog.IndexedAt = time.Now().UTC()
-	if err := runtime.ReplaceProfileCatalog(ctx, catalog); err != nil {
-		return caseCatalogUpsertReport{}, err
-	}
-	return caseCatalogUpsertReport{
-		OK:        true,
-		ProfileID: catalog.ProfileID,
-		Created:   !exists,
-		Updated:   exists,
-		Case:      caseCatalogUpsertCaseRefFromCatalog(apiCase),
-		Counts: workflowCatalogUpsertCounts{
-			Before: beforeCounts,
-			After:  profileImportCountsFromCatalog(catalog),
-		},
-		NextActions: []string{
-			"agent-testbench case config upsert --case " + commandline.ShellQuote(apiCase.ID) + " --method METHOD --path PATH --json",
-			"agent-testbench map import-workflows --json",
-		},
-	}, nil
+	return nil
 }
 
 func applyOptionalCaseCatalogRuntimeFields(apiCase *store.CatalogAPICase, options caseCatalogUpsertOptions) {
