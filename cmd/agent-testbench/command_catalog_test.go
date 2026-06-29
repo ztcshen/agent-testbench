@@ -144,6 +144,7 @@ func TestParentCommandsDefaultToCatalogNavigation(t *testing.T) {
 				"agent-testbench case runs",
 				"agent-testbench case evidence",
 				"agent-testbench case timing",
+				"agent-testbench case catalog upsert",
 				"agent-testbench case config upsert",
 				"agent-testbench case incomplete-batches",
 				"agent-testbench case diagnose",
@@ -738,7 +739,7 @@ func TestCommandsSupportTaskOrientedFilters(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode maintain map command catalog: %v\n%s", err, out)
 	}
-	wantOrder := []string{"map doctor", "map coverage", "map diff", "map validation list", "map validation attach"}
+	wantOrder := []string{"map doctor", "map coverage", "map diff", "map validation list", "map validation attach", "map validation promote"}
 	if len(report.Commands) < len(wantOrder) {
 		t.Fatalf("maintain map command catalog too short: %#v", report.Commands)
 	}
@@ -770,23 +771,24 @@ func TestMapCommandsExposeLifecycleMetadata(t *testing.T) {
 		t.Fatalf("map command catalog should be populated: %#v", report)
 	}
 	wantLifecycle := map[string]string{
-		"map list":              "inspect",
-		"map workflows":         "inspect",
-		"map coverage":          "inspect",
-		"map plans":             "inspect",
-		"map inspect":           "inspect",
-		"map doctor":            "maintain",
-		"map diff":              "maintain",
-		"map validation list":   "maintain",
-		"map validation attach": "maintain",
-		"map update":            "maintain",
-		"map snapshot":          "maintain",
-		"map publish":           "maintain",
-		"map explain":           "plan",
-		"map plan inspect":      "plan",
-		"map run":               "execute",
-		"map gate":              "execute",
-		"map atlas":             "review",
+		"map list":               "inspect",
+		"map workflows":          "inspect",
+		"map coverage":           "inspect",
+		"map plans":              "inspect",
+		"map inspect":            "inspect",
+		"map doctor":             "maintain",
+		"map diff":               "maintain",
+		"map validation list":    "maintain",
+		"map validation attach":  "maintain",
+		"map validation promote": "maintain",
+		"map update":             "maintain",
+		"map snapshot":           "maintain",
+		"map publish":            "maintain",
+		"map explain":            "plan",
+		"map plan inspect":       "plan",
+		"map run":                "execute",
+		"map gate":               "execute",
+		"map atlas":              "review",
 	}
 	seen := map[string]string{}
 	for _, item := range report.Commands {

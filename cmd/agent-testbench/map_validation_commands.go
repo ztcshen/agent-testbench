@@ -32,6 +32,16 @@ type mapValidationAttachReport struct {
 	} `json:"counts"`
 }
 
+type mapValidationPromoteReport struct {
+	OK     bool               `json:"ok"`
+	MapID  string             `json:"mapId"`
+	Node   store.TestPlanNode `json:"node"`
+	Counts struct {
+		Primary    int `json:"primary"`
+		Validation int `json:"validation"`
+	} `json:"counts"`
+}
+
 type mapValidationGroup struct {
 	InterfaceNodeID string                     `json:"interfaceNodeId,omitempty"`
 	AnchorNodeID    string                     `json:"anchorNodeId,omitempty"`
@@ -68,6 +78,8 @@ func runMapValidation(ctx context.Context, args []string) error {
 		return runMapValidationList(ctx, args[1:])
 	case "attach":
 		return runMapValidationAttach(ctx, args[1:])
+	case "promote":
+		return runMapValidationPromote(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown map validation command: %s", args[0])
 	}
@@ -149,6 +161,52 @@ func runMapValidationAttach(ctx context.Context, args []string) error {
 		return writeIndentedJSON(report)
 	}
 	printMapValidationAttachReport(report)
+	return nil
+}
+
+func runMapValidationPromote(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("map validation promote", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
+	mapID := flags.String("map", "", "Plan map id")
+	caseID := flags.String("case", "", "Case id to promote to a primary map node")
+	nodeID := flags.String("node", "", "Map node id to promote to a primary map node")
+	interfaceID := flags.String("interface", "", "Override interface node id")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() > 0 {
+		return fmt.Errorf("map validation promote does not accept positional arguments: %s", strings.Join(flags.Args(), " "))
+	}
+	target := firstNonEmpty(strings.TrimSpace(*nodeID), strings.TrimSpace(*caseID))
+	if target == "" {
+		return errors.New("--case or --node is required")
+	}
+	runtime, graph, cleanup, err := openRequiredMapGraphForCLI(ctx, *storeRef, *storeURL, *mapID)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	node, err := mapPrimaryNodeForPromote(ctx, runtime, graph, target, strings.TrimSpace(*caseID), *interfaceID)
+	if err != nil {
+		return err
+	}
+	graph = upsertMapNode(graph, node)
+	if err := plangraph.ValidateDAG(graph); err != nil {
+		return err
+	}
+	if err := runtime.ReplaceTestPlanGraph(ctx, graph); err != nil {
+		return err
+	}
+	report := mapValidationPromoteReport{OK: true, MapID: graph.Map.ID, Node: node}
+	report.Counts.Primary = countPrimaryNodes(graph.Nodes)
+	report.Counts.Validation = countValidationNodes(graph.Nodes)
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printMapValidationPromoteReport(report)
 	return nil
 }
 
@@ -252,6 +310,54 @@ func mapValidationNodeForAttach(ctx context.Context, runtime store.Store, graph 
 	}, nil
 }
 
+func mapPrimaryNodeForPromote(ctx context.Context, runtime store.Store, graph store.TestPlanGraph, target string, caseID string, interfaceID string) (store.TestPlanNode, error) {
+	if node, ok := findMapNodeByNodeOrCase(graph.Nodes, target); ok {
+		return promoteMapNodeToPrimary(node, nil, interfaceID), nil
+	}
+	caseID = strings.TrimSpace(firstNonEmpty(caseID, target))
+	apiCase, ok := findCatalogAPICaseForMap(ctx, runtime, graph.Map.ProfileID, caseID)
+	if !ok {
+		return store.TestPlanNode{}, fmt.Errorf("case not found in map or active catalog: %s", target)
+	}
+	node := store.TestPlanNode{
+		MapID:             graph.Map.ID,
+		ID:                caseID,
+		CaseID:            caseID,
+		InterfaceNodeID:   stringDefault(interfaceID, apiCase.NodeID),
+		RequestTemplateID: apiCase.RequestTemplateID,
+		RenderMode:        apiCase.RenderMode,
+		PatchJSON:         normalizeMapJSON(apiCase.PatchJSON, ""),
+		ExpectedJSON:      normalizeMapJSON(apiCase.ExpectedJSON, ""),
+		SummaryJSON:       mustCompactJSON(map[string]any{"displayName": stringDefault(apiCase.DisplayName, caseID), "caseType": apiCase.CaseType, "scenario": apiCase.Scenario, "tags": apiCase.Tags}),
+		SortOrder:         apiCase.SortOrder,
+	}
+	return promoteMapNodeToPrimary(node, &apiCase, interfaceID), nil
+}
+
+func promoteMapNodeToPrimary(node store.TestPlanNode, apiCase *store.CatalogAPICase, interfaceID string) store.TestPlanNode {
+	node.Role = plangraph.NodeRolePrimary
+	node.StateEffect = plangraph.StateEffectAdvance
+	node.BaseCaseID = ""
+	node.AnchorNodeID = ""
+	if strings.TrimSpace(node.CaseID) == "" {
+		node.CaseID = node.ID
+	}
+	if strings.TrimSpace(interfaceID) != "" {
+		node.InterfaceNodeID = strings.TrimSpace(interfaceID)
+	} else if apiCase != nil && strings.TrimSpace(node.InterfaceNodeID) == "" {
+		node.InterfaceNodeID = apiCase.NodeID
+	}
+	if apiCase != nil && strings.TrimSpace(node.RequestTemplateID) == "" {
+		node.RequestTemplateID = apiCase.RequestTemplateID
+	}
+	node.RequiredPropertyJSON = mustCompactJSON(map[string]any{"caseId": node.CaseID})
+	node.ProvidedPropertyJSON = mustCompactJSON(map[string]any{"caseId": node.CaseID, "stateEffect": plangraph.StateEffectAdvance})
+	if strings.TrimSpace(node.SummaryJSON) == "" {
+		node.SummaryJSON = "{}"
+	}
+	return node
+}
+
 func findCatalogAPICaseForMap(ctx context.Context, runtime store.Store, profileID string, caseID string) (store.CatalogAPICase, bool) {
 	if catalog, err := runtime.GetProfileCatalogByID(ctx, profileID); err == nil {
 		if item, ok := findCatalogAPICase(catalog.APICases, caseID); ok {
@@ -295,6 +401,16 @@ func countValidationNodes(nodes []store.TestPlanNode) int {
 	count := 0
 	for _, node := range nodes {
 		if mapNodeIsValidation(node) {
+			count++
+		}
+	}
+	return count
+}
+
+func countPrimaryNodes(nodes []store.TestPlanNode) int {
+	count := 0
+	for _, node := range nodes {
+		if !mapNodeIsValidation(node) {
 			count++
 		}
 	}
@@ -358,4 +474,12 @@ func printMapValidationAttachReport(report mapValidationAttachReport) {
 	fmt.Printf("Map: %s\n", report.MapID)
 	fmt.Printf("Case: %s\n", report.Node.CaseID)
 	fmt.Printf("Anchor: %s\n", report.Node.AnchorNodeID)
+}
+
+func printMapValidationPromoteReport(report mapValidationPromoteReport) {
+	fmt.Println("Map Case Promoted")
+	fmt.Printf("Map: %s\n", report.MapID)
+	fmt.Printf("Case: %s\n", report.Node.CaseID)
+	fmt.Printf("Role: %s\n", report.Node.Role)
+	fmt.Printf("State Effect: %s\n", report.Node.StateEffect)
 }

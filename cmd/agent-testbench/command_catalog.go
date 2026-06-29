@@ -263,7 +263,7 @@ func commandCatalogTags(command string, area string, usage string) []string {
 func commandCatalogTaskTags(command string) []string {
 	switch command {
 	case commandCatalogMapImportWorkflows, commandCatalogMapInspect, commandCatalogMapList, commandCatalogMapCoverage, commandCatalogMapDoctor, commandCatalogMapWorkflows, commandCatalogMapAtlas,
-		commandCatalogMapUpdate, commandCatalogMapSnapshot, commandCatalogMapPublish, commandCatalogMapVersions, commandCatalogMapDiff, commandCatalogMapValidationList, commandCatalogMapValidationAttach:
+		commandCatalogMapUpdate, commandCatalogMapSnapshot, commandCatalogMapPublish, commandCatalogMapVersions, commandCatalogMapDiff, commandCatalogMapValidationList, commandCatalogMapValidationAttach, commandCatalogMapValidationPromote:
 		return []string{"maintain map", "map maintenance"}
 	case commandCatalogMapPlans, commandCatalogMapExplain, commandCatalogMapGate, commandCatalogMapRun, commandCatalogMapPlanInspect:
 		return []string{"execute map", "map execution"}

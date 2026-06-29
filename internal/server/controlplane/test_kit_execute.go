@@ -34,7 +34,11 @@ func executeTestKitCase(ctx context.Context, bundle profile.Bundle, runtime stor
 			},
 		}
 	}
-	if missing := missingRequiredCaseInputs(item.Inputs, mapFromAny(payload["overrides"])); len(missing) > 0 {
+	overrides := mergeStringAnyMaps(item.Case.DefaultOverrides, mapFromAny(payload["overrides"]))
+	if len(overrides) > 0 {
+		payload["overrides"] = overrides
+	}
+	if missing := missingRequiredCaseInputs(item.Inputs, overrides); len(missing) > 0 {
 		return failedCaseExecution(item.Case.ID, "missing required case input: "+strings.Join(missing, ", "))
 	}
 	request, err := buildCaseHTTPRequest(ctx, bundle, runtime, *item.Execution, item.CaseBaseURL, payload)

@@ -26,25 +26,26 @@ const (
 	commandCatalogEvidenceList                 = "evidence list"
 	commandCatalogEvidenceTasks                = "evidence tasks"
 
-	commandCatalogMapList             = "map list"
-	commandCatalogMapWorkflows        = "map workflows"
-	commandCatalogMapCoverage         = "map coverage"
-	commandCatalogMapPlans            = "map plans"
-	commandCatalogMapVersions         = "map versions"
-	commandCatalogMapImportWorkflows  = "map import-workflows"
-	commandCatalogMapDoctor           = "map doctor"
-	commandCatalogMapDiff             = "map diff"
-	commandCatalogMapValidationList   = "map validation list"
-	commandCatalogMapValidationAttach = "map validation attach"
-	commandCatalogMapUpdate           = "map update"
-	commandCatalogMapSnapshot         = "map snapshot"
-	commandCatalogMapPublish          = "map publish"
-	commandCatalogMapInspect          = "map inspect"
-	commandCatalogMapExplain          = "map explain"
-	commandCatalogMapPlanInspect      = "map plan inspect"
-	commandCatalogMapRun              = "map run"
-	commandCatalogMapGate             = "map gate"
-	commandCatalogMapAtlas            = "map atlas"
+	commandCatalogMapList              = "map list"
+	commandCatalogMapWorkflows         = "map workflows"
+	commandCatalogMapCoverage          = "map coverage"
+	commandCatalogMapPlans             = "map plans"
+	commandCatalogMapVersions          = "map versions"
+	commandCatalogMapImportWorkflows   = "map import-workflows"
+	commandCatalogMapDoctor            = "map doctor"
+	commandCatalogMapDiff              = "map diff"
+	commandCatalogMapValidationList    = "map validation list"
+	commandCatalogMapValidationAttach  = "map validation attach"
+	commandCatalogMapValidationPromote = "map validation promote"
+	commandCatalogMapUpdate            = "map update"
+	commandCatalogMapSnapshot          = "map snapshot"
+	commandCatalogMapPublish           = "map publish"
+	commandCatalogMapInspect           = "map inspect"
+	commandCatalogMapExplain           = "map explain"
+	commandCatalogMapPlanInspect       = "map plan inspect"
+	commandCatalogMapRun               = "map run"
+	commandCatalogMapGate              = "map gate"
+	commandCatalogMapAtlas             = "map atlas"
 
 	commandCatalogLifecycleInspect  = "inspect"
 	commandCatalogLifecycleMaintain = "maintain"
@@ -67,25 +68,26 @@ func commandCatalogMapLifecycle(command string) string {
 
 func commandCatalogMapLifecycles() map[string]string {
 	return map[string]string{
-		commandCatalogMapList:             commandCatalogLifecycleInspect,
-		commandCatalogMapWorkflows:        commandCatalogLifecycleInspect,
-		commandCatalogMapCoverage:         commandCatalogLifecycleInspect,
-		commandCatalogMapPlans:            commandCatalogLifecycleInspect,
-		commandCatalogMapVersions:         commandCatalogLifecycleInspect,
-		commandCatalogMapImportWorkflows:  commandCatalogLifecycleMaintain,
-		commandCatalogMapDoctor:           commandCatalogLifecycleMaintain,
-		commandCatalogMapDiff:             commandCatalogLifecycleMaintain,
-		commandCatalogMapValidationList:   commandCatalogLifecycleMaintain,
-		commandCatalogMapValidationAttach: commandCatalogLifecycleMaintain,
-		commandCatalogMapUpdate:           commandCatalogLifecycleMaintain,
-		commandCatalogMapSnapshot:         commandCatalogLifecycleMaintain,
-		commandCatalogMapPublish:          commandCatalogLifecycleMaintain,
-		commandCatalogMapInspect:          commandCatalogLifecycleInspect,
-		commandCatalogMapExplain:          commandCatalogLifecyclePlan,
-		commandCatalogMapPlanInspect:      commandCatalogLifecyclePlan,
-		commandCatalogMapRun:              commandCatalogLifecycleExecute,
-		commandCatalogMapGate:             commandCatalogLifecycleExecute,
-		commandCatalogMapAtlas:            commandCatalogLifecycleReview,
+		commandCatalogMapList:              commandCatalogLifecycleInspect,
+		commandCatalogMapWorkflows:         commandCatalogLifecycleInspect,
+		commandCatalogMapCoverage:          commandCatalogLifecycleInspect,
+		commandCatalogMapPlans:             commandCatalogLifecycleInspect,
+		commandCatalogMapVersions:          commandCatalogLifecycleInspect,
+		commandCatalogMapImportWorkflows:   commandCatalogLifecycleMaintain,
+		commandCatalogMapDoctor:            commandCatalogLifecycleMaintain,
+		commandCatalogMapDiff:              commandCatalogLifecycleMaintain,
+		commandCatalogMapValidationList:    commandCatalogLifecycleMaintain,
+		commandCatalogMapValidationAttach:  commandCatalogLifecycleMaintain,
+		commandCatalogMapValidationPromote: commandCatalogLifecycleMaintain,
+		commandCatalogMapUpdate:            commandCatalogLifecycleMaintain,
+		commandCatalogMapSnapshot:          commandCatalogLifecycleMaintain,
+		commandCatalogMapPublish:           commandCatalogLifecycleMaintain,
+		commandCatalogMapInspect:           commandCatalogLifecycleInspect,
+		commandCatalogMapExplain:           commandCatalogLifecyclePlan,
+		commandCatalogMapPlanInspect:       commandCatalogLifecyclePlan,
+		commandCatalogMapRun:               commandCatalogLifecycleExecute,
+		commandCatalogMapGate:              commandCatalogLifecycleExecute,
+		commandCatalogMapAtlas:             commandCatalogLifecycleReview,
 	}
 }
 
@@ -95,24 +97,25 @@ func commandCatalogTaskRank(command string) int {
 
 func commandCatalogTaskRanks() map[string]int {
 	return map[string]int{
-		commandCatalogMapDoctor:           10,
-		commandCatalogMapCoverage:         20,
-		commandCatalogMapDiff:             30,
-		commandCatalogMapValidationList:   40,
-		commandCatalogMapValidationAttach: 50,
-		commandCatalogMapUpdate:           60,
-		commandCatalogMapSnapshot:         70,
-		commandCatalogMapPublish:          80,
-		commandCatalogMapVersions:         90,
-		commandCatalogMapImportWorkflows:  100,
-		commandCatalogMapInspect:          105,
-		commandCatalogMapList:             110,
-		commandCatalogMapWorkflows:        120,
-		commandCatalogMapExplain:          210,
-		commandCatalogMapPlanInspect:      220,
-		commandCatalogMapRun:              230,
-		commandCatalogMapGate:             240,
-		commandCatalogMapPlans:            260,
-		commandCatalogMapAtlas:            310,
+		commandCatalogMapDoctor:            10,
+		commandCatalogMapCoverage:          20,
+		commandCatalogMapDiff:              30,
+		commandCatalogMapValidationList:    40,
+		commandCatalogMapValidationAttach:  50,
+		commandCatalogMapValidationPromote: 55,
+		commandCatalogMapUpdate:            60,
+		commandCatalogMapSnapshot:          70,
+		commandCatalogMapPublish:           80,
+		commandCatalogMapVersions:          90,
+		commandCatalogMapImportWorkflows:   100,
+		commandCatalogMapInspect:           105,
+		commandCatalogMapList:              110,
+		commandCatalogMapWorkflows:         120,
+		commandCatalogMapExplain:           210,
+		commandCatalogMapPlanInspect:       220,
+		commandCatalogMapRun:               230,
+		commandCatalogMapGate:              240,
+		commandCatalogMapPlans:             260,
+		commandCatalogMapAtlas:             310,
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
@@ -167,6 +168,95 @@ func TestCaseConfigUpsertReusesAPICaseScopedExecutionConfig(t *testing.T) {
 	}
 }
 
+func TestCaseConfigUpsertPersistsDefaultOverridesAndWorkflowIO(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "store.sqlite")
+	seedCaseConfigUpsertWorkflowCatalog(t, storePath)
+
+	out := runCLI(t, "case", "config", "upsert",
+		"--store", "sqlite://"+storePath,
+		"--case", "case.generic.prepare",
+		"--method", "POST",
+		"--path", "/generic/prepare",
+		"--body-json", `{"executorParam":"{{ override:executorParam }}"}`,
+		"--default-override", "executorParam=ent8001",
+		"--exports-json", `[{"name":"transaction_id","from":"responseBody","path":"transaction_id"}]`,
+		"--expected-status", "200",
+		"--json",
+	)
+	var report struct {
+		OK               bool           `json:"ok"`
+		DefaultOverrides map[string]any `json:"defaultOverrides"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode case config upsert report: %v\n%s", err, out)
+	}
+	if !report.OK || report.DefaultOverrides["executorParam"] != "ent8001" {
+		t.Fatalf("case config upsert default overrides = %#v", report)
+	}
+
+	runCLI(t, "case", "config", "upsert",
+		"--store", "sqlite://"+storePath,
+		"--case", "case.generic.callback",
+		"--method", "POST",
+		"--path", "/generic/callback",
+		"--body-json", `{"transactionId":"{{ override:transaction_id }}"}`,
+		"--inputs-json", `[{"name":"transaction_id","source":"previous","required":true}]`,
+		"--expected-status", "200",
+		"--json",
+	)
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		if r.Method != http.MethodPost || r.URL.Path != "/generic/prepare" || !strings.Contains(string(body), `"executorParam":"ent8001"`) {
+			t.Fatalf("unexpected rendered request: %s %s body=%s", r.Method, r.URL.Path, body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"transaction_id":"tx-001"}`)
+	}))
+	defer target.Close()
+
+	runOut := runCLI(t, "case", "run",
+		"--store", "sqlite://"+storePath,
+		"--case-id", "case.generic.prepare",
+		"--base-url", target.URL,
+		"--run-id", "run.case-config-default-override",
+		"--json",
+	)
+	if !strings.Contains(runOut, `"status": "passed"`) {
+		t.Fatalf("store-backed default override should pass run:\n%s", runOut)
+	}
+
+	auditOut := runCLI(t, "workflow", "audit", "--store", "sqlite://"+storePath, "--workflow", "workflow.generic", "--json")
+	var audit struct {
+		OK         bool `json:"ok"`
+		IssueCount int  `json:"issueCount"`
+	}
+	if err := json.Unmarshal([]byte(auditOut), &audit); err != nil {
+		t.Fatalf("decode workflow audit json: %v\n%s", err, auditOut)
+	}
+	if !audit.OK || audit.IssueCount != 0 {
+		t.Fatalf("workflow audit should see persisted exports/inputs: %#v\n%s", audit, auditOut)
+	}
+
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	catalog, err := s.GetProfileCatalog(ctx)
+	if err != nil {
+		t.Fatalf("get profile catalog: %v", err)
+	}
+	apiCase, ok := findCatalogAPICase(catalog.APICases, "case.generic.prepare")
+	if !ok || apiCase.DefaultOverridesJSON != `{"executorParam":"ent8001"}` {
+		t.Fatalf("persisted api case default overrides = %#v", apiCase)
+	}
+}
+
 func writeCaseConfigSigningKey(t *testing.T) string {
 	t.Helper()
 	keyPath := filepath.Join(t.TempDir(), "request-signing-key.pem")
@@ -175,6 +265,41 @@ func writeCaseConfigSigningKey(t *testing.T) string {
 		t.Fatalf("generate signing key: %v\n%s", err, out)
 	}
 	return keyPath
+}
+
+func seedCaseConfigUpsertWorkflowCatalog(t *testing.T, storePath string) {
+	t.Helper()
+	ctx := context.Background()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "default",
+		IndexedAt: time.Now().UTC(),
+		InterfaceNodes: []store.CatalogInterfaceNode{{
+			ID:        "node.generic",
+			ServiceID: "service.generic",
+			Method:    "POST",
+			Path:      "/generic/prepare",
+			Status:    "active",
+		}},
+		Workflows: []store.CatalogWorkflow{{
+			ID:          "workflow.generic",
+			DisplayName: "Generic Flow",
+		}},
+		WorkflowBindings: []store.CatalogWorkflowBinding{
+			{WorkflowID: "workflow.generic", StepID: "prepare", NodeID: "node.generic", CaseID: "case.generic.prepare", Required: true, SortOrder: 1},
+			{WorkflowID: "workflow.generic", StepID: "callback", NodeID: "node.generic", CaseID: "case.generic.callback", Required: true, SortOrder: 2},
+		},
+		APICases: []store.CatalogAPICase{
+			{ID: "case.generic.prepare", DisplayName: "Generic Prepare", NodeID: "node.generic", Status: "active", SortOrder: 1},
+			{ID: "case.generic.callback", DisplayName: "Generic Callback", NodeID: "node.generic", Status: "active", SortOrder: 2},
+		},
+	}); err != nil {
+		t.Fatalf("replace profile catalog: %v", err)
+	}
 }
 
 func seedCaseConfigUpsertCatalog(t *testing.T, storePath string) {
