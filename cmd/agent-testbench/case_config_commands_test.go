@@ -178,7 +178,7 @@ func TestCaseConfigUpsertPersistsDefaultOverridesAndWorkflowIO(t *testing.T) {
 		"--method", "POST",
 		"--path", "/generic/prepare",
 		"--body-json", `{"executorParam":"{{ override:executorParam }}"}`,
-		"--default-override", "executorParam=ent8001",
+		"--default-override", "executorParam=sample-runner",
 		"--exports-json", `[{"name":"transaction_id","from":"responseBody","path":"transaction_id"}]`,
 		"--expected-status", "200",
 		"--json",
@@ -190,7 +190,7 @@ func TestCaseConfigUpsertPersistsDefaultOverridesAndWorkflowIO(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode case config upsert report: %v\n%s", err, out)
 	}
-	if !report.OK || report.DefaultOverrides["executorParam"] != "ent8001" {
+	if !report.OK || report.DefaultOverrides["executorParam"] != "sample-runner" {
 		t.Fatalf("case config upsert default overrides = %#v", report)
 	}
 
@@ -210,7 +210,7 @@ func TestCaseConfigUpsertPersistsDefaultOverridesAndWorkflowIO(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read request body: %v", err)
 		}
-		if r.Method != http.MethodPost || r.URL.Path != "/generic/prepare" || !strings.Contains(string(body), `"executorParam":"ent8001"`) {
+		if r.Method != http.MethodPost || r.URL.Path != "/generic/prepare" || !strings.Contains(string(body), `"executorParam":"sample-runner"`) {
 			t.Fatalf("unexpected rendered request: %s %s body=%s", r.Method, r.URL.Path, body)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -252,7 +252,7 @@ func TestCaseConfigUpsertPersistsDefaultOverridesAndWorkflowIO(t *testing.T) {
 		t.Fatalf("get profile catalog: %v", err)
 	}
 	apiCase, ok := findCatalogAPICase(catalog.APICases, "case.generic.prepare")
-	if !ok || apiCase.DefaultOverridesJSON != `{"executorParam":"ent8001"}` {
+	if !ok || apiCase.DefaultOverridesJSON != `{"executorParam":"sample-runner"}` {
 		t.Fatalf("persisted api case default overrides = %#v", apiCase)
 	}
 }

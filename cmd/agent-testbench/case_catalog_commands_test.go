@@ -27,7 +27,7 @@ func TestCaseCatalogUpsertCreatesActiveStoreBackedAPICase(t *testing.T) {
 		"--render-mode", "template_patch",
 		"--patch-json", `[{"op":"add","path":"$.trace","value":"smoke"}]`,
 		"--expected-json", `{"status":200}`,
-		"--default-override", "executorParam=ent8001",
+		"--default-override", "executorParam=sample-runner",
 		"--json",
 	)
 	var report struct {
@@ -57,7 +57,7 @@ func TestCaseCatalogUpsertCreatesActiveStoreBackedAPICase(t *testing.T) {
 	if !report.OK || !report.Created || report.Case.ID != "case.submit.smoke" || report.Case.Status != "active" || report.Case.RenderMode != "template_patch" {
 		t.Fatalf("case catalog upsert report = %#v", report)
 	}
-	if report.Case.DefaultOverrides["executorParam"] != "ent8001" || report.Counts.Before.APICases != 0 || report.Counts.After.APICases != 1 {
+	if report.Case.DefaultOverrides["executorParam"] != "sample-runner" || report.Counts.Before.APICases != 0 || report.Counts.After.APICases != 1 {
 		t.Fatalf("case catalog counts/defaults = %#v", report)
 	}
 
@@ -71,7 +71,7 @@ func TestCaseCatalogUpsertCreatesActiveStoreBackedAPICase(t *testing.T) {
 		t.Fatalf("get profile catalog: %v", err)
 	}
 	item, ok := findCatalogAPICase(catalog.APICases, "case.submit.smoke")
-	if !ok || item.NodeID != "node.submit" || item.RequestTemplateID != "template.submit" || item.DefaultOverridesJSON != `{"executorParam":"ent8001"}` {
+	if !ok || item.NodeID != "node.submit" || item.RequestTemplateID != "template.submit" || item.DefaultOverridesJSON != `{"executorParam":"sample-runner"}` {
 		t.Fatalf("persisted api case = %#v", item)
 	}
 }

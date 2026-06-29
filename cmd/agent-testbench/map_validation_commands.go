@@ -9,6 +9,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"agent-testbench/internal/domain/plangraph"
 	"agent-testbench/internal/store"
@@ -41,6 +42,8 @@ type mapValidationPromoteReport struct {
 		Validation int `json:"validation"`
 	} `json:"counts"`
 }
+
+const mapValidationPropertyStateEffect = "stateEffect"
 
 type mapValidationGroup struct {
 	InterfaceNodeID string                     `json:"interfaceNodeId,omitempty"`
@@ -180,7 +183,12 @@ func runMapValidationPromote(ctx context.Context, args []string) error {
 	if flags.NArg() > 0 {
 		return fmt.Errorf("%s does not accept positional arguments: %s", commandCatalogMapValidationPromote, strings.Join(flags.Args(), " "))
 	}
-	target := firstNonEmpty(strings.TrimSpace(*nodeID), strings.TrimSpace(*caseID))
+	caseTarget := strings.TrimSpace(*caseID)
+	nodeTarget := strings.TrimSpace(*nodeID)
+	if caseTarget != "" && nodeTarget != "" {
+		return errors.New("--case and --node cannot both be set")
+	}
+	target := firstNonEmpty(nodeTarget, caseTarget)
 	if target == "" {
 		return errors.New("--case or --node is required")
 	}
@@ -189,7 +197,7 @@ func runMapValidationPromote(ctx context.Context, args []string) error {
 		return err
 	}
 	defer cleanup()
-	node, err := mapPrimaryNodeForPromote(ctx, runtime, graph, target, strings.TrimSpace(*caseID), *interfaceID)
+	node, err := mapPrimaryNodeForPromote(ctx, runtime, graph, target, caseTarget, *interfaceID)
 	if err != nil {
 		return err
 	}
@@ -198,6 +206,7 @@ func runMapValidationPromote(ctx context.Context, args []string) error {
 	if err := plangraph.ValidateDAG(graph); err != nil {
 		return err
 	}
+	graph.Map.UpdatedAt = time.Now().UTC()
 	if err := runtime.ReplaceTestPlanGraph(ctx, graph); err != nil {
 		return err
 	}
@@ -304,8 +313,8 @@ func mapValidationNodeForAttach(ctx context.Context, runtime store.Store, graph 
 		RenderMode:           apiCase.RenderMode,
 		PatchJSON:            normalizeMapJSON(apiCase.PatchJSON, ""),
 		ExpectedJSON:         normalizeMapJSON(apiCase.ExpectedJSON, ""),
-		RequiredPropertyJSON: mustCompactJSON(map[string]any{"caseId": caseID, "samePreconditionAsCase": stringDefault(anchor.CaseID, anchor.ID), "stateEffect": plangraph.StateEffectUnchanged}),
-		ProvidedPropertyJSON: mustCompactJSON(map[string]any{"caseId": caseID, "stateEffect": plangraph.StateEffectUnchanged}),
+		RequiredPropertyJSON: mustCompactJSON(map[string]any{"caseId": caseID, "samePreconditionAsCase": stringDefault(anchor.CaseID, anchor.ID), mapValidationPropertyStateEffect: plangraph.StateEffectUnchanged}),
+		ProvidedPropertyJSON: mustCompactJSON(map[string]any{"caseId": caseID, mapValidationPropertyStateEffect: plangraph.StateEffectUnchanged}),
 		SummaryJSON:          mustCompactJSON(map[string]any{"displayName": displayName, "caseType": apiCase.CaseType, "scenario": apiCase.Scenario, "tags": apiCase.Tags}),
 		SortOrder:            apiCase.SortOrder,
 	}, nil
@@ -352,7 +361,7 @@ func promoteMapNodeToPrimary(node store.TestPlanNode, apiCase *store.CatalogAPIC
 		node.RequestTemplateID = apiCase.RequestTemplateID
 	}
 	node.RequiredPropertyJSON = mustCompactJSON(map[string]any{"caseId": node.CaseID})
-	node.ProvidedPropertyJSON = mustCompactJSON(map[string]any{"caseId": node.CaseID, "stateEffect": plangraph.StateEffectAdvance})
+	node.ProvidedPropertyJSON = mustCompactJSON(map[string]any{"caseId": node.CaseID, mapValidationPropertyStateEffect: plangraph.StateEffectAdvance})
 	if strings.TrimSpace(node.SummaryJSON) == "" {
 		node.SummaryJSON = "{}"
 	}
@@ -370,7 +379,7 @@ func ensurePromotedPrimaryReachable(graph store.TestPlanGraph, node store.TestPl
 		DisplayName:          "Primary case: " + mapNodeDisplayName(node),
 		Status:               "active",
 		RequiredPropertyJSON: mustCompactJSON(map[string]any{"caseId": node.CaseID}),
-		ProvidedPropertyJSON: mustCompactJSON(map[string]any{"pathId": pathID, "stateEffect": plangraph.StateEffectAdvance}),
+		ProvidedPropertyJSON: mustCompactJSON(map[string]any{"pathId": pathID, mapValidationPropertyStateEffect: plangraph.StateEffectAdvance}),
 		SummaryJSON:          mustCompactJSON(map[string]any{"source": commandCatalogMapValidationPromote, "caseId": node.CaseID}),
 		SortOrder:            nextPromotedPrimaryPathSortOrder(graph.Paths),
 	})
