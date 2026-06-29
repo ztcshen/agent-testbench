@@ -229,7 +229,7 @@ func TestMapCommandsAreDiscoverable(t *testing.T) {
 		"map doctor",
 		"map diff",
 		"map validation list",
-		"map validation attach",
+		commandCatalogMapValidationAttach, commandCatalogMapValidationPromote,
 		"map workflows",
 		"map inspect",
 		"map explain",

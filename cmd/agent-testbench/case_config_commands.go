@@ -20,6 +20,7 @@ type caseConfigUpsertReport struct {
 	Created          bool                      `json:"created"`
 	Updated          bool                      `json:"updated"`
 	Config           caseConfigUpsertConfigRef `json:"config"`
+	DefaultOverrides map[string]any            `json:"defaultOverrides,omitempty"`
 	SelectedByRunner bool                      `json:"selectedByRunner"`
 	Warnings         []string                  `json:"warnings,omitempty"`
 }
@@ -53,14 +54,19 @@ func runCaseConfigUpsert(ctx context.Context, args []string) error {
 	configID := flags.String("config-id", "", "Template config id to update")
 	authJSON := flags.String("auth-json", "", "Request auth JSON")
 	headersJSON := flags.String("headers-json", "", "Request headers JSON object")
+	defaultOverridesJSON := flags.String("default-overrides-json", "", "Default request overrides JSON object persisted on the catalog case")
+	inputsJSON := flags.String("inputs-json", "", "Workflow input metadata JSON array for this case execution config")
+	exportsJSON := flags.String("exports-json", "", "Workflow export metadata JSON array for this case execution config")
 	signed := flags.Bool("signed", false, "Enable request signing with the configured auth block")
 	traceEndpoint := flags.String("trace-endpoint", "", "Trace endpoint associated with this case execution")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	headers := stringListFlag{}
+	defaultOverrides := mapFlag{}
 	expectedStatuses := stringListFlag{}
 	responseContains := stringListFlag{}
 	responseNotContains := stringListFlag{}
 	flags.Var(&headers, "header", "Request header as Name=Value; repeat for multiple headers")
+	flags.Var(&defaultOverrides, "default-override", "Default override as key=value persisted on the catalog case; repeat for multiple values")
 	flags.Var(&expectedStatuses, "expected-status", "Expected HTTP status; repeat for multiple values")
 	flags.Var(&responseContains, "response-contains", "Required response fragment; repeat for multiple values")
 	flags.Var(&responseNotContains, "response-not-contains", "Forbidden response fragment; repeat for multiple values")
@@ -86,20 +92,24 @@ func runCaseConfigUpsert(ctx context.Context, args []string) error {
 	err = withProfileCatalogWriteLock(storeDSN, func() error {
 		var upsertErr error
 		report, upsertErr = upsertCaseExecutionConfig(ctx, runtime, caseConfigUpsertOptions{
-			CaseID:              *caseID,
-			ConfigID:            *configID,
-			Method:              *method,
-			Path:                *path,
-			BodyJSON:            *bodyJSON,
-			NodeID:              *nodeID,
-			Headers:             headers.Values(),
-			HeadersJSON:         *headersJSON,
-			AuthJSON:            *authJSON,
-			Signed:              *signed,
-			TraceEndpoint:       *traceEndpoint,
-			ExpectedStatuses:    expectedStatuses.Values(),
-			ResponseContains:    responseContains.Values(),
-			ResponseNotContains: responseNotContains.Values(),
+			CaseID:               *caseID,
+			ConfigID:             *configID,
+			Method:               *method,
+			Path:                 *path,
+			BodyJSON:             *bodyJSON,
+			NodeID:               *nodeID,
+			Headers:              headers.Values(),
+			HeadersJSON:          *headersJSON,
+			AuthJSON:             *authJSON,
+			DefaultOverrides:     defaultOverrides.Values(),
+			DefaultOverridesJSON: *defaultOverridesJSON,
+			InputsJSON:           *inputsJSON,
+			ExportsJSON:          *exportsJSON,
+			Signed:               *signed,
+			TraceEndpoint:        *traceEndpoint,
+			ExpectedStatuses:     expectedStatuses.Values(),
+			ResponseContains:     responseContains.Values(),
+			ResponseNotContains:  responseNotContains.Values(),
 		})
 		return upsertErr
 	})
@@ -114,20 +124,24 @@ func runCaseConfigUpsert(ctx context.Context, args []string) error {
 }
 
 type caseConfigUpsertOptions struct {
-	CaseID              string
-	ConfigID            string
-	Method              string
-	Path                string
-	BodyJSON            string
-	NodeID              string
-	Headers             []string
-	HeadersJSON         string
-	AuthJSON            string
-	Signed              bool
-	TraceEndpoint       string
-	ExpectedStatuses    []string
-	ResponseContains    []string
-	ResponseNotContains []string
+	CaseID               string
+	ConfigID             string
+	Method               string
+	Path                 string
+	BodyJSON             string
+	NodeID               string
+	Headers              []string
+	HeadersJSON          string
+	AuthJSON             string
+	DefaultOverrides     map[string]any
+	DefaultOverridesJSON string
+	InputsJSON           string
+	ExportsJSON          string
+	Signed               bool
+	TraceEndpoint        string
+	ExpectedStatuses     []string
+	ResponseContains     []string
+	ResponseNotContains  []string
 }
 
 func upsertCaseExecutionConfig(ctx context.Context, runtime store.Store, options caseConfigUpsertOptions) (caseConfigUpsertReport, error) {
@@ -149,6 +163,18 @@ func upsertCaseExecutionConfig(ctx context.Context, runtime store.Store, options
 		return caseConfigUpsertReport{}, err
 	}
 	auth, hasAuth, err := parseOptionalJSONObject("auth-json", options.AuthJSON)
+	if err != nil {
+		return caseConfigUpsertReport{}, err
+	}
+	defaultOverrides, hasDefaultOverrides, err := parseDefaultOverrideOptions(options.DefaultOverrides, options.DefaultOverridesJSON)
+	if err != nil {
+		return caseConfigUpsertReport{}, err
+	}
+	inputs, hasInputs, err := parseOptionalJSONArrayObjects("inputs-json", options.InputsJSON)
+	if err != nil {
+		return caseConfigUpsertReport{}, err
+	}
+	exports, hasExports, err := parseOptionalJSONArrayObjects("exports-json", options.ExportsJSON)
 	if err != nil {
 		return caseConfigUpsertReport{}, err
 	}
@@ -184,12 +210,21 @@ func upsertCaseExecutionConfig(ctx context.Context, runtime store.Store, options
 		ExpectedStatuses:    statuses,
 		ResponseContains:    options.ResponseContains,
 		ResponseNotContains: options.ResponseNotContains,
+		Inputs:              inputs,
+		HasInputs:           hasInputs,
+		Exports:             exports,
+		HasExports:          hasExports,
 	})
 	if err != nil {
 		return caseConfigUpsertReport{}, err
 	}
 	config.ConfigJSON = configJSON
 	catalog.TemplateConfigs = upsertCatalogTemplateConfig(catalog.TemplateConfigs, config)
+	if hasDefaultOverrides {
+		defaultOverrides = mergeCatalogDefaultOverrides(apiCase.DefaultOverridesJSON, defaultOverrides)
+		apiCase.DefaultOverridesJSON = compactJSONObject(defaultOverrides)
+		catalog.APICases = upsertCatalogAPICase(catalog.APICases, apiCase)
+	}
 	selectedID := selectedCaseExecutionTemplateConfigID(catalog, caseID)
 	catalog.IndexedAt = time.Now().UTC()
 	if err := runtime.ReplaceProfileCatalog(ctx, catalog); err != nil {
@@ -201,6 +236,7 @@ func upsertCaseExecutionConfig(ctx context.Context, runtime store.Store, options
 		Created:          !exists,
 		Updated:          exists,
 		Config:           caseConfigUpsertConfigRef{ID: configID},
+		DefaultOverrides: defaultOverrides,
 		SelectedByRunner: selectedID == configID,
 	}, nil
 }
@@ -219,6 +255,10 @@ type caseConfigExecutionPatch struct {
 	ExpectedStatuses    []int
 	ResponseContains    []string
 	ResponseNotContains []string
+	Inputs              []map[string]any
+	HasInputs           bool
+	Exports             []map[string]any
+	HasExports          bool
 }
 
 func mergeCaseExecutionConfigJSON(raw string, caseID string, apiCase store.CatalogAPICase, catalog store.ProfileCatalog, patch caseConfigExecutionPatch) (string, error) {
@@ -262,7 +302,76 @@ func mergeCaseExecutionConfigJSON(raw string, caseID string, apiCase store.Catal
 	}
 	doc["caseId"] = caseID
 	doc["caseExecution"] = execution
+	if patch.HasInputs {
+		doc["inputs"] = patch.Inputs
+	}
+	if patch.HasExports {
+		doc["exports"] = patch.Exports
+	}
 	return compactJSON(doc)
+}
+
+func parseDefaultOverrideOptions(flagValues map[string]any, rawJSON string) (map[string]any, bool, error) {
+	out := map[string]any{}
+	hasValue := false
+	if strings.TrimSpace(rawJSON) != "" {
+		parsed, ok, err := parseOptionalJSONObject("default-overrides-json", rawJSON)
+		if err != nil {
+			return nil, false, err
+		}
+		if ok {
+			hasValue = true
+			for key, value := range parsed {
+				out[key] = value
+			}
+		}
+	}
+	if len(flagValues) > 0 {
+		hasValue = true
+		for key, value := range flagValues {
+			out[key] = value
+		}
+	}
+	return out, hasValue, nil
+}
+
+func parseOptionalJSONArrayObjects(name string, raw string) ([]map[string]any, bool, error) {
+	value, ok, err := parseOptionalJSONValue(name, raw)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	items, valid := value.([]any)
+	if !valid {
+		return nil, false, fmt.Errorf("--%s must be a JSON array", name)
+	}
+	out := make([]map[string]any, 0, len(items))
+	for index, item := range items {
+		typed, valid := item.(map[string]any)
+		if !valid || typed == nil {
+			return nil, false, fmt.Errorf("--%s item %d must be a JSON object", name, index)
+		}
+		out = append(out, typed)
+	}
+	return out, true, nil
+}
+
+func compactJSONObject(value map[string]any) string {
+	if len(value) == 0 {
+		return "{}"
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return "{}"
+	}
+	return string(raw)
+}
+
+func mergeCatalogDefaultOverrides(existingJSON string, updates map[string]any) map[string]any {
+	merged := rawJSONObject(existingJSON)
+	for key, value := range updates {
+		merged[key] = value
+	}
+	return merged
 }
 
 func parseOptionalJSONValue(name string, raw string) (any, bool, error) {
@@ -277,15 +386,16 @@ func parseOptionalJSONValue(name string, raw string) (any, bool, error) {
 	return out, true, nil
 }
 
-func parseOptionalJSONObject(name string, raw string) (any, bool, error) {
+func parseOptionalJSONObject(name string, raw string) (map[string]any, bool, error) {
 	value, ok, err := parseOptionalJSONValue(name, raw)
 	if err != nil || !ok {
-		return value, ok, err
+		return nil, ok, err
 	}
-	if _, valid := value.(map[string]any); !valid {
+	out, valid := value.(map[string]any)
+	if !valid {
 		return nil, false, fmt.Errorf("--%s must be a JSON object", name)
 	}
-	return value, true, nil
+	return out, true, nil
 }
 
 func parseHeadersOptions(values []string, rawJSON string) (map[string]any, error) {
@@ -296,11 +406,7 @@ func parseHeadersOptions(values []string, rawJSON string) (map[string]any, error
 			return nil, err
 		}
 		if ok {
-			headers, valid := parsed.(map[string]any)
-			if !valid {
-				return nil, fmt.Errorf("--headers-json must be a JSON object")
-			}
-			for key, value := range headers {
+			for key, value := range parsed {
 				out[key] = value
 			}
 		}
@@ -384,6 +490,16 @@ func isCaseExecutionConfigScope(scopeType string) bool {
 }
 
 func upsertCatalogTemplateConfig(items []store.CatalogTemplateConfig, next store.CatalogTemplateConfig) []store.CatalogTemplateConfig {
+	for i, item := range items {
+		if item.ID == next.ID {
+			items[i] = next
+			return items
+		}
+	}
+	return append(items, next)
+}
+
+func upsertCatalogAPICase(items []store.CatalogAPICase, next store.CatalogAPICase) []store.CatalogAPICase {
 	for i, item := range items {
 		if item.ID == next.ID {
 			items[i] = next

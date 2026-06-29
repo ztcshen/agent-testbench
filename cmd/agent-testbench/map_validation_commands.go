@@ -9,6 +9,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"agent-testbench/internal/domain/plangraph"
 	"agent-testbench/internal/store"
@@ -31,6 +32,18 @@ type mapValidationAttachReport struct {
 		Validation int `json:"validation"`
 	} `json:"counts"`
 }
+
+type mapValidationPromoteReport struct {
+	OK     bool               `json:"ok"`
+	MapID  string             `json:"mapId"`
+	Node   store.TestPlanNode `json:"node"`
+	Counts struct {
+		Primary    int `json:"primary"`
+		Validation int `json:"validation"`
+	} `json:"counts"`
+}
+
+const mapValidationPropertyStateEffect = "stateEffect"
 
 type mapValidationGroup struct {
 	InterfaceNodeID string                     `json:"interfaceNodeId,omitempty"`
@@ -68,6 +81,8 @@ func runMapValidation(ctx context.Context, args []string) error {
 		return runMapValidationList(ctx, args[1:])
 	case "attach":
 		return runMapValidationAttach(ctx, args[1:])
+	case "promote":
+		return runMapValidationPromote(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown map validation command: %s", args[0])
 	}
@@ -149,6 +164,62 @@ func runMapValidationAttach(ctx context.Context, args []string) error {
 		return writeIndentedJSON(report)
 	}
 	printMapValidationAttachReport(report)
+	return nil
+}
+
+func runMapValidationPromote(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet(commandCatalogMapValidationPromote, flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
+	mapID := flags.String("map", "", "Plan map id")
+	caseID := flags.String("case", "", "Case id to promote to a primary map node")
+	nodeID := flags.String("node", "", "Map node id to promote to a primary map node")
+	interfaceID := flags.String("interface", "", "Override interface node id")
+	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() > 0 {
+		return fmt.Errorf("%s does not accept positional arguments: %s", commandCatalogMapValidationPromote, strings.Join(flags.Args(), " "))
+	}
+	caseTarget := strings.TrimSpace(*caseID)
+	nodeTarget := strings.TrimSpace(*nodeID)
+	if caseTarget != "" && nodeTarget != "" {
+		return errors.New("--case and --node cannot both be set")
+	}
+	target := firstNonEmpty(nodeTarget, caseTarget)
+	if target == "" {
+		return errors.New("--case or --node is required")
+	}
+	runtime, graph, cleanup, err := openRequiredMapGraphForCLI(ctx, *storeRef, *storeURL, *mapID)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	node, sourceNode, err := mapPrimaryNodeForPromote(ctx, runtime, graph, nodeTarget, caseTarget, target, *interfaceID)
+	if err != nil {
+		return err
+	}
+	graph = upsertMapNode(graph, node)
+	graph, err = ensurePromotedPrimaryReachable(graph, node, sourceNode)
+	if err != nil {
+		return err
+	}
+	if err := plangraph.ValidateDAG(graph); err != nil {
+		return err
+	}
+	graph.Map.UpdatedAt = time.Now().UTC()
+	if err := runtime.ReplaceTestPlanGraph(ctx, graph); err != nil {
+		return err
+	}
+	report := mapValidationPromoteReport{OK: true, MapID: graph.Map.ID, Node: node}
+	report.Counts.Primary = countPrimaryNodes(graph.Nodes)
+	report.Counts.Validation = countValidationNodes(graph.Nodes)
+	if *jsonOutput {
+		return writeIndentedJSON(report)
+	}
+	printMapValidationPromoteReport(report)
 	return nil
 }
 
@@ -245,11 +316,250 @@ func mapValidationNodeForAttach(ctx context.Context, runtime store.Store, graph 
 		RenderMode:           apiCase.RenderMode,
 		PatchJSON:            normalizeMapJSON(apiCase.PatchJSON, ""),
 		ExpectedJSON:         normalizeMapJSON(apiCase.ExpectedJSON, ""),
-		RequiredPropertyJSON: mustCompactJSON(map[string]any{"caseId": caseID, "samePreconditionAsCase": stringDefault(anchor.CaseID, anchor.ID), "stateEffect": plangraph.StateEffectUnchanged}),
-		ProvidedPropertyJSON: mustCompactJSON(map[string]any{"caseId": caseID, "stateEffect": plangraph.StateEffectUnchanged}),
+		RequiredPropertyJSON: mustCompactJSON(map[string]any{"caseId": caseID, "samePreconditionAsCase": stringDefault(anchor.CaseID, anchor.ID), mapValidationPropertyStateEffect: plangraph.StateEffectUnchanged}),
+		ProvidedPropertyJSON: mustCompactJSON(map[string]any{"caseId": caseID, mapValidationPropertyStateEffect: plangraph.StateEffectUnchanged}),
 		SummaryJSON:          mustCompactJSON(map[string]any{"displayName": displayName, "caseType": apiCase.CaseType, "scenario": apiCase.Scenario, "tags": apiCase.Tags}),
 		SortOrder:            apiCase.SortOrder,
 	}, nil
+}
+
+func mapPrimaryNodeForPromote(ctx context.Context, runtime store.Store, graph store.TestPlanGraph, nodeID string, caseID string, target string, interfaceID string) (store.TestPlanNode, store.TestPlanNode, error) {
+	if nodeID != "" {
+		node, ok := findMapNodeByID(graph.Nodes, nodeID)
+		if !ok {
+			return store.TestPlanNode{}, store.TestPlanNode{}, fmt.Errorf("map node not found: %s", nodeID)
+		}
+		return promoteMapNodeToPrimary(node, nil, interfaceID), node, nil
+	}
+	caseID = strings.TrimSpace(firstNonEmpty(caseID, target))
+	if node, ok := findMapNodeByCaseID(graph.Nodes, caseID); ok {
+		return promoteMapNodeToPrimary(node, nil, interfaceID), node, nil
+	}
+	apiCase, ok := findCatalogAPICaseForMap(ctx, runtime, graph.Map.ProfileID, caseID)
+	if !ok {
+		return store.TestPlanNode{}, store.TestPlanNode{}, fmt.Errorf("case not found in map or active catalog: %s", target)
+	}
+	node := store.TestPlanNode{
+		MapID:             graph.Map.ID,
+		ID:                caseID,
+		CaseID:            caseID,
+		InterfaceNodeID:   stringDefault(interfaceID, apiCase.NodeID),
+		RequestTemplateID: apiCase.RequestTemplateID,
+		RenderMode:        apiCase.RenderMode,
+		PatchJSON:         normalizeMapJSON(apiCase.PatchJSON, ""),
+		ExpectedJSON:      normalizeMapJSON(apiCase.ExpectedJSON, ""),
+		SummaryJSON:       mustCompactJSON(map[string]any{"displayName": stringDefault(apiCase.DisplayName, caseID), "caseType": apiCase.CaseType, "scenario": apiCase.Scenario, "tags": apiCase.Tags}),
+		SortOrder:         apiCase.SortOrder,
+	}
+	return promoteMapNodeToPrimary(node, &apiCase, interfaceID), store.TestPlanNode{}, nil
+}
+
+func promoteMapNodeToPrimary(node store.TestPlanNode, apiCase *store.CatalogAPICase, interfaceID string) store.TestPlanNode {
+	node.Role = plangraph.NodeRolePrimary
+	node.StateEffect = plangraph.StateEffectAdvance
+	node.BaseCaseID = ""
+	node.AnchorNodeID = ""
+	if strings.TrimSpace(node.CaseID) == "" {
+		node.CaseID = node.ID
+	}
+	if strings.TrimSpace(interfaceID) != "" {
+		node.InterfaceNodeID = strings.TrimSpace(interfaceID)
+	} else if apiCase != nil && strings.TrimSpace(node.InterfaceNodeID) == "" {
+		node.InterfaceNodeID = apiCase.NodeID
+	}
+	if apiCase != nil && strings.TrimSpace(node.RequestTemplateID) == "" {
+		node.RequestTemplateID = apiCase.RequestTemplateID
+	}
+	node.RequiredPropertyJSON = mustCompactJSON(map[string]any{"caseId": node.CaseID})
+	node.ProvidedPropertyJSON = mustCompactJSON(map[string]any{"caseId": node.CaseID, mapValidationPropertyStateEffect: plangraph.StateEffectAdvance})
+	if strings.TrimSpace(node.SummaryJSON) == "" {
+		node.SummaryJSON = "{}"
+	}
+	return node
+}
+
+func ensurePromotedPrimaryReachable(graph store.TestPlanGraph, node store.TestPlanNode, sourceNode store.TestPlanNode) (store.TestPlanGraph, error) {
+	if mapPromotedPrimaryIsReachable(graph, node.ID) {
+		return graph, nil
+	}
+	if strings.TrimSpace(sourceNode.AnchorNodeID) != "" {
+		return upsertAnchoredPromotedPrimaryPath(graph, node, sourceNode.AnchorNodeID)
+	}
+	return upsertStandalonePromotedPrimaryPath(graph, node), nil
+}
+
+func upsertStandalonePromotedPrimaryPath(graph store.TestPlanGraph, node store.TestPlanNode) store.TestPlanGraph {
+	pathID := promotedPrimaryPathID(node)
+	graph.Paths = upsertPromotedPrimaryPath(graph.Paths, promotedPrimaryPath(graph, node, pathID, nil))
+	graph.PathSteps = replacePromotedPrimaryPathSteps(graph.PathSteps, pathID, []store.TestPlanPathStep{{
+		MapID:       graph.Map.ID,
+		PathID:      pathID,
+		StepIndex:   1,
+		StepID:      "step." + safeReportID(node.ID),
+		NodeID:      node.ID,
+		CaseID:      node.CaseID,
+		Required:    true,
+		SummaryJSON: "{}",
+	}})
+	return graph
+}
+
+func upsertAnchoredPromotedPrimaryPath(graph store.TestPlanGraph, node store.TestPlanNode, anchorNodeID string) (store.TestPlanGraph, error) {
+	sourcePathID, prefixSteps, ok := mapPathPrefixBeforeNode(graph, anchorNodeID)
+	if !ok {
+		return graph, fmt.Errorf("anchored validation target is not reachable from anchor path: %s", anchorNodeID)
+	}
+	pathID := promotedPrimaryPathID(node)
+	graph.Paths = upsertPromotedPrimaryPath(graph.Paths, promotedPrimaryPath(graph, node, pathID, map[string]any{"anchorNodeId": anchorNodeID, "sourcePathId": sourcePathID}))
+	graph.PathSteps = replacePromotedPrimaryPathSteps(graph.PathSteps, pathID, buildPromotedPrimaryPathSteps(graph.Map.ID, pathID, prefixSteps, node))
+	return graph, nil
+}
+
+func promotedPrimaryPath(graph store.TestPlanGraph, node store.TestPlanNode, pathID string, summary map[string]any) store.TestPlanPath {
+	if summary == nil {
+		summary = map[string]any{}
+	}
+	summary["source"] = commandCatalogMapValidationPromote
+	summary["caseId"] = node.CaseID
+	return store.TestPlanPath{
+		MapID:                graph.Map.ID,
+		ID:                   pathID,
+		DisplayName:          "Primary case: " + mapNodeDisplayName(node),
+		Status:               "active",
+		RequiredPropertyJSON: mustCompactJSON(map[string]any{"caseId": node.CaseID}),
+		ProvidedPropertyJSON: mustCompactJSON(map[string]any{"pathId": pathID, mapValidationPropertyStateEffect: plangraph.StateEffectAdvance}),
+		SummaryJSON:          mustCompactJSON(summary),
+		SortOrder:            nextPromotedPrimaryPathSortOrder(graph.Paths),
+	}
+}
+
+func mapPromotedPrimaryIsReachable(graph store.TestPlanGraph, nodeID string) bool {
+	for _, step := range graph.PathSteps {
+		if step.NodeID == nodeID {
+			return true
+		}
+	}
+	materializationIDs := mapMaterializationIDs(graph.Materializations)
+	for _, edge := range graph.Edges {
+		materializationID := strings.TrimSpace(edge.MaterializationID)
+		if edge.ToNodeID == nodeID && edge.Kind == plangraph.EdgeKindFixture && edge.Required && materializationIDs[materializationID] {
+			return true
+		}
+	}
+	return false
+}
+
+func mapMaterializationIDs(items []store.TestPlanMaterialization) map[string]bool {
+	out := map[string]bool{}
+	for _, item := range items {
+		if id := strings.TrimSpace(item.ID); id != "" {
+			out[id] = true
+		}
+	}
+	return out
+}
+
+func mapPathPrefixBeforeNode(graph store.TestPlanGraph, nodeID string) (string, []store.TestPlanPathStep, bool) {
+	for _, path := range graph.Paths {
+		steps := mapPathSteps(graph.PathSteps, path.ID)
+		for index, step := range steps {
+			if step.NodeID == nodeID {
+				return path.ID, append([]store.TestPlanPathStep(nil), steps[:index]...), true
+			}
+		}
+	}
+	return "", nil, false
+}
+
+func mapPathSteps(steps []store.TestPlanPathStep, pathID string) []store.TestPlanPathStep {
+	var out []store.TestPlanPathStep
+	for _, step := range steps {
+		if step.PathID == pathID {
+			out = append(out, step)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].StepIndex < out[j].StepIndex
+	})
+	return out
+}
+
+func buildPromotedPrimaryPathSteps(mapID string, pathID string, prefixSteps []store.TestPlanPathStep, node store.TestPlanNode) []store.TestPlanPathStep {
+	steps := make([]store.TestPlanPathStep, 0, len(prefixSteps)+1)
+	for _, step := range prefixSteps {
+		step.MapID = mapID
+		step.PathID = pathID
+		step.StepIndex = len(steps) + 1
+		step.StepID = promotedPrimaryStepID(step.StepIndex, step.NodeID)
+		if strings.TrimSpace(step.SummaryJSON) == "" {
+			step.SummaryJSON = "{}"
+		}
+		steps = append(steps, step)
+	}
+	stepIndex := len(steps) + 1
+	steps = append(steps, store.TestPlanPathStep{
+		MapID:       mapID,
+		PathID:      pathID,
+		StepIndex:   stepIndex,
+		StepID:      promotedPrimaryStepID(stepIndex, node.ID),
+		NodeID:      node.ID,
+		CaseID:      node.CaseID,
+		Required:    true,
+		SummaryJSON: "{}",
+	})
+	return steps
+}
+
+func promotedPrimaryStepID(index int, nodeID string) string {
+	return fmt.Sprintf("step.%02d.%s", index, safeReportID(nodeID))
+}
+
+func promotedPrimaryPathID(node store.TestPlanNode) string {
+	return "path.primary." + safeReportID(firstNonEmpty(node.CaseID, node.ID))
+}
+
+func upsertPromotedPrimaryPath(paths []store.TestPlanPath, path store.TestPlanPath) []store.TestPlanPath {
+	for index, item := range paths {
+		if item.ID == path.ID {
+			paths[index] = path
+			return paths
+		}
+	}
+	paths = append(paths, path)
+	sort.SliceStable(paths, func(i, j int) bool {
+		if paths[i].SortOrder != paths[j].SortOrder {
+			return paths[i].SortOrder < paths[j].SortOrder
+		}
+		return paths[i].ID < paths[j].ID
+	})
+	return paths
+}
+
+func replacePromotedPrimaryPathSteps(steps []store.TestPlanPathStep, pathID string, replacements []store.TestPlanPathStep) []store.TestPlanPathStep {
+	out := make([]store.TestPlanPathStep, 0, len(steps)+len(replacements))
+	for _, step := range steps {
+		if step.PathID != pathID {
+			out = append(out, step)
+		}
+	}
+	out = append(out, replacements...)
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].PathID != out[j].PathID {
+			return out[i].PathID < out[j].PathID
+		}
+		return out[i].StepIndex < out[j].StepIndex
+	})
+	return out
+}
+
+func nextPromotedPrimaryPathSortOrder(paths []store.TestPlanPath) int {
+	maxOrder := 0
+	for _, path := range paths {
+		if path.SortOrder > maxOrder {
+			maxOrder = path.SortOrder
+		}
+	}
+	return maxOrder + 1
 }
 
 func findCatalogAPICaseForMap(ctx context.Context, runtime store.Store, profileID string, caseID string) (store.CatalogAPICase, bool) {
@@ -268,6 +578,26 @@ func findMapNodeByNodeOrCase(nodes []store.TestPlanNode, ref string) (store.Test
 	ref = strings.TrimSpace(ref)
 	for _, node := range nodes {
 		if node.ID == ref || node.CaseID == ref {
+			return node, true
+		}
+	}
+	return store.TestPlanNode{}, false
+}
+
+func findMapNodeByID(nodes []store.TestPlanNode, id string) (store.TestPlanNode, bool) {
+	id = strings.TrimSpace(id)
+	for _, node := range nodes {
+		if node.ID == id {
+			return node, true
+		}
+	}
+	return store.TestPlanNode{}, false
+}
+
+func findMapNodeByCaseID(nodes []store.TestPlanNode, caseID string) (store.TestPlanNode, bool) {
+	caseID = strings.TrimSpace(caseID)
+	for _, node := range nodes {
+		if node.CaseID == caseID {
 			return node, true
 		}
 	}
@@ -295,6 +625,16 @@ func countValidationNodes(nodes []store.TestPlanNode) int {
 	count := 0
 	for _, node := range nodes {
 		if mapNodeIsValidation(node) {
+			count++
+		}
+	}
+	return count
+}
+
+func countPrimaryNodes(nodes []store.TestPlanNode) int {
+	count := 0
+	for _, node := range nodes {
+		if !mapNodeIsValidation(node) {
 			count++
 		}
 	}
@@ -358,4 +698,12 @@ func printMapValidationAttachReport(report mapValidationAttachReport) {
 	fmt.Printf("Map: %s\n", report.MapID)
 	fmt.Printf("Case: %s\n", report.Node.CaseID)
 	fmt.Printf("Anchor: %s\n", report.Node.AnchorNodeID)
+}
+
+func printMapValidationPromoteReport(report mapValidationPromoteReport) {
+	fmt.Println("Map Case Promoted")
+	fmt.Printf("Map: %s\n", report.MapID)
+	fmt.Printf("Case: %s\n", report.Node.CaseID)
+	fmt.Printf("Role: %s\n", report.Node.Role)
+	fmt.Printf("State Effect: %s\n", report.Node.StateEffect)
 }

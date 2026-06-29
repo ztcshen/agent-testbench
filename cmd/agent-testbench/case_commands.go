@@ -12,6 +12,8 @@ func runCase(ctx context.Context, args []string) error {
 	switch args[0] {
 	case "discover":
 		return runCaseDiscover(ctx, args[1:])
+	case "catalog":
+		return runCaseCatalog(ctx, args[1:])
 	case "suite":
 		return runCaseSuite(ctx, args[1:])
 	case "run":
