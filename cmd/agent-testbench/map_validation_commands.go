@@ -197,12 +197,15 @@ func runMapValidationPromote(ctx context.Context, args []string) error {
 		return err
 	}
 	defer cleanup()
-	node, err := mapPrimaryNodeForPromote(ctx, runtime, graph, target, caseTarget, *interfaceID)
+	node, sourceNode, err := mapPrimaryNodeForPromote(ctx, runtime, graph, nodeTarget, caseTarget, target, *interfaceID)
 	if err != nil {
 		return err
 	}
 	graph = upsertMapNode(graph, node)
-	graph = ensurePromotedPrimaryReachable(graph, node)
+	graph, err = ensurePromotedPrimaryReachable(graph, node, sourceNode)
+	if err != nil {
+		return err
+	}
 	if err := plangraph.ValidateDAG(graph); err != nil {
 		return err
 	}
@@ -320,14 +323,21 @@ func mapValidationNodeForAttach(ctx context.Context, runtime store.Store, graph 
 	}, nil
 }
 
-func mapPrimaryNodeForPromote(ctx context.Context, runtime store.Store, graph store.TestPlanGraph, target string, caseID string, interfaceID string) (store.TestPlanNode, error) {
-	if node, ok := findMapNodeByNodeOrCase(graph.Nodes, target); ok {
-		return promoteMapNodeToPrimary(node, nil, interfaceID), nil
+func mapPrimaryNodeForPromote(ctx context.Context, runtime store.Store, graph store.TestPlanGraph, nodeID string, caseID string, target string, interfaceID string) (store.TestPlanNode, store.TestPlanNode, error) {
+	if nodeID != "" {
+		node, ok := findMapNodeByID(graph.Nodes, nodeID)
+		if !ok {
+			return store.TestPlanNode{}, store.TestPlanNode{}, fmt.Errorf("map node not found: %s", nodeID)
+		}
+		return promoteMapNodeToPrimary(node, nil, interfaceID), node, nil
 	}
 	caseID = strings.TrimSpace(firstNonEmpty(caseID, target))
+	if node, ok := findMapNodeByCaseID(graph.Nodes, caseID); ok {
+		return promoteMapNodeToPrimary(node, nil, interfaceID), node, nil
+	}
 	apiCase, ok := findCatalogAPICaseForMap(ctx, runtime, graph.Map.ProfileID, caseID)
 	if !ok {
-		return store.TestPlanNode{}, fmt.Errorf("case not found in map or active catalog: %s", target)
+		return store.TestPlanNode{}, store.TestPlanNode{}, fmt.Errorf("case not found in map or active catalog: %s", target)
 	}
 	node := store.TestPlanNode{
 		MapID:             graph.Map.ID,
@@ -341,7 +351,7 @@ func mapPrimaryNodeForPromote(ctx context.Context, runtime store.Store, graph st
 		SummaryJSON:       mustCompactJSON(map[string]any{"displayName": stringDefault(apiCase.DisplayName, caseID), "caseType": apiCase.CaseType, "scenario": apiCase.Scenario, "tags": apiCase.Tags}),
 		SortOrder:         apiCase.SortOrder,
 	}
-	return promoteMapNodeToPrimary(node, &apiCase, interfaceID), nil
+	return promoteMapNodeToPrimary(node, &apiCase, interfaceID), store.TestPlanNode{}, nil
 }
 
 func promoteMapNodeToPrimary(node store.TestPlanNode, apiCase *store.CatalogAPICase, interfaceID string) store.TestPlanNode {
@@ -368,22 +378,20 @@ func promoteMapNodeToPrimary(node store.TestPlanNode, apiCase *store.CatalogAPIC
 	return node
 }
 
-func ensurePromotedPrimaryReachable(graph store.TestPlanGraph, node store.TestPlanNode) store.TestPlanGraph {
+func ensurePromotedPrimaryReachable(graph store.TestPlanGraph, node store.TestPlanNode, sourceNode store.TestPlanNode) (store.TestPlanGraph, error) {
 	if mapPromotedPrimaryIsReachable(graph, node.ID) {
-		return graph
+		return graph, nil
 	}
+	if strings.TrimSpace(sourceNode.AnchorNodeID) != "" {
+		return upsertAnchoredPromotedPrimaryPath(graph, node, sourceNode.AnchorNodeID)
+	}
+	return upsertStandalonePromotedPrimaryPath(graph, node), nil
+}
+
+func upsertStandalonePromotedPrimaryPath(graph store.TestPlanGraph, node store.TestPlanNode) store.TestPlanGraph {
 	pathID := promotedPrimaryPathID(node)
-	graph.Paths = upsertPromotedPrimaryPath(graph.Paths, store.TestPlanPath{
-		MapID:                graph.Map.ID,
-		ID:                   pathID,
-		DisplayName:          "Primary case: " + mapNodeDisplayName(node),
-		Status:               "active",
-		RequiredPropertyJSON: mustCompactJSON(map[string]any{"caseId": node.CaseID}),
-		ProvidedPropertyJSON: mustCompactJSON(map[string]any{"pathId": pathID, mapValidationPropertyStateEffect: plangraph.StateEffectAdvance}),
-		SummaryJSON:          mustCompactJSON(map[string]any{"source": commandCatalogMapValidationPromote, "caseId": node.CaseID}),
-		SortOrder:            nextPromotedPrimaryPathSortOrder(graph.Paths),
-	})
-	graph.PathSteps = upsertPromotedPrimaryPathStep(graph.PathSteps, store.TestPlanPathStep{
+	graph.Paths = upsertPromotedPrimaryPath(graph.Paths, promotedPrimaryPath(graph, node, pathID, nil))
+	graph.PathSteps = replacePromotedPrimaryPathSteps(graph.PathSteps, pathID, []store.TestPlanPathStep{{
 		MapID:       graph.Map.ID,
 		PathID:      pathID,
 		StepIndex:   1,
@@ -392,8 +400,37 @@ func ensurePromotedPrimaryReachable(graph store.TestPlanGraph, node store.TestPl
 		CaseID:      node.CaseID,
 		Required:    true,
 		SummaryJSON: "{}",
-	})
+	}})
 	return graph
+}
+
+func upsertAnchoredPromotedPrimaryPath(graph store.TestPlanGraph, node store.TestPlanNode, anchorNodeID string) (store.TestPlanGraph, error) {
+	sourcePathID, prefixSteps, ok := mapPathPrefixBeforeNode(graph, anchorNodeID)
+	if !ok {
+		return graph, fmt.Errorf("anchored validation target is not reachable from anchor path: %s", anchorNodeID)
+	}
+	pathID := promotedPrimaryPathID(node)
+	graph.Paths = upsertPromotedPrimaryPath(graph.Paths, promotedPrimaryPath(graph, node, pathID, map[string]any{"anchorNodeId": anchorNodeID, "sourcePathId": sourcePathID}))
+	graph.PathSteps = replacePromotedPrimaryPathSteps(graph.PathSteps, pathID, buildPromotedPrimaryPathSteps(graph.Map.ID, pathID, prefixSteps, node))
+	return graph, nil
+}
+
+func promotedPrimaryPath(graph store.TestPlanGraph, node store.TestPlanNode, pathID string, summary map[string]any) store.TestPlanPath {
+	if summary == nil {
+		summary = map[string]any{}
+	}
+	summary["source"] = commandCatalogMapValidationPromote
+	summary["caseId"] = node.CaseID
+	return store.TestPlanPath{
+		MapID:                graph.Map.ID,
+		ID:                   pathID,
+		DisplayName:          "Primary case: " + mapNodeDisplayName(node),
+		Status:               "active",
+		RequiredPropertyJSON: mustCompactJSON(map[string]any{"caseId": node.CaseID}),
+		ProvidedPropertyJSON: mustCompactJSON(map[string]any{"pathId": pathID, mapValidationPropertyStateEffect: plangraph.StateEffectAdvance}),
+		SummaryJSON:          mustCompactJSON(summary),
+		SortOrder:            nextPromotedPrimaryPathSortOrder(graph.Paths),
+	}
 }
 
 func mapPromotedPrimaryIsReachable(graph store.TestPlanGraph, nodeID string) bool {
@@ -402,12 +439,79 @@ func mapPromotedPrimaryIsReachable(graph store.TestPlanGraph, nodeID string) boo
 			return true
 		}
 	}
+	materializationIDs := mapMaterializationIDs(graph.Materializations)
 	for _, edge := range graph.Edges {
-		if edge.ToNodeID == nodeID && edge.Kind == plangraph.EdgeKindFixture && edge.Required && strings.TrimSpace(edge.MaterializationID) != "" {
+		materializationID := strings.TrimSpace(edge.MaterializationID)
+		if edge.ToNodeID == nodeID && edge.Kind == plangraph.EdgeKindFixture && edge.Required && materializationIDs[materializationID] {
 			return true
 		}
 	}
 	return false
+}
+
+func mapMaterializationIDs(items []store.TestPlanMaterialization) map[string]bool {
+	out := map[string]bool{}
+	for _, item := range items {
+		if id := strings.TrimSpace(item.ID); id != "" {
+			out[id] = true
+		}
+	}
+	return out
+}
+
+func mapPathPrefixBeforeNode(graph store.TestPlanGraph, nodeID string) (string, []store.TestPlanPathStep, bool) {
+	for _, path := range graph.Paths {
+		steps := mapPathSteps(graph.PathSteps, path.ID)
+		for index, step := range steps {
+			if step.NodeID == nodeID {
+				return path.ID, append([]store.TestPlanPathStep(nil), steps[:index]...), true
+			}
+		}
+	}
+	return "", nil, false
+}
+
+func mapPathSteps(steps []store.TestPlanPathStep, pathID string) []store.TestPlanPathStep {
+	var out []store.TestPlanPathStep
+	for _, step := range steps {
+		if step.PathID == pathID {
+			out = append(out, step)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].StepIndex < out[j].StepIndex
+	})
+	return out
+}
+
+func buildPromotedPrimaryPathSteps(mapID string, pathID string, prefixSteps []store.TestPlanPathStep, node store.TestPlanNode) []store.TestPlanPathStep {
+	steps := make([]store.TestPlanPathStep, 0, len(prefixSteps)+1)
+	for _, step := range prefixSteps {
+		step.MapID = mapID
+		step.PathID = pathID
+		step.StepIndex = len(steps) + 1
+		step.StepID = promotedPrimaryStepID(step.StepIndex, step.NodeID)
+		if strings.TrimSpace(step.SummaryJSON) == "" {
+			step.SummaryJSON = "{}"
+		}
+		steps = append(steps, step)
+	}
+	stepIndex := len(steps) + 1
+	steps = append(steps, store.TestPlanPathStep{
+		MapID:       mapID,
+		PathID:      pathID,
+		StepIndex:   stepIndex,
+		StepID:      promotedPrimaryStepID(stepIndex, node.ID),
+		NodeID:      node.ID,
+		CaseID:      node.CaseID,
+		Required:    true,
+		SummaryJSON: "{}",
+	})
+	return steps
+}
+
+func promotedPrimaryStepID(index int, nodeID string) string {
+	return fmt.Sprintf("step.%02d.%s", index, safeReportID(nodeID))
 }
 
 func promotedPrimaryPathID(node store.TestPlanNode) string {
@@ -431,21 +535,21 @@ func upsertPromotedPrimaryPath(paths []store.TestPlanPath, path store.TestPlanPa
 	return paths
 }
 
-func upsertPromotedPrimaryPathStep(steps []store.TestPlanPathStep, step store.TestPlanPathStep) []store.TestPlanPathStep {
-	for index, item := range steps {
-		if item.PathID == step.PathID && item.StepIndex == step.StepIndex {
-			steps[index] = step
-			return steps
+func replacePromotedPrimaryPathSteps(steps []store.TestPlanPathStep, pathID string, replacements []store.TestPlanPathStep) []store.TestPlanPathStep {
+	out := make([]store.TestPlanPathStep, 0, len(steps)+len(replacements))
+	for _, step := range steps {
+		if step.PathID != pathID {
+			out = append(out, step)
 		}
 	}
-	steps = append(steps, step)
-	sort.SliceStable(steps, func(i, j int) bool {
-		if steps[i].PathID != steps[j].PathID {
-			return steps[i].PathID < steps[j].PathID
+	out = append(out, replacements...)
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].PathID != out[j].PathID {
+			return out[i].PathID < out[j].PathID
 		}
-		return steps[i].StepIndex < steps[j].StepIndex
+		return out[i].StepIndex < out[j].StepIndex
 	})
-	return steps
+	return out
 }
 
 func nextPromotedPrimaryPathSortOrder(paths []store.TestPlanPath) int {
@@ -474,6 +578,26 @@ func findMapNodeByNodeOrCase(nodes []store.TestPlanNode, ref string) (store.Test
 	ref = strings.TrimSpace(ref)
 	for _, node := range nodes {
 		if node.ID == ref || node.CaseID == ref {
+			return node, true
+		}
+	}
+	return store.TestPlanNode{}, false
+}
+
+func findMapNodeByID(nodes []store.TestPlanNode, id string) (store.TestPlanNode, bool) {
+	id = strings.TrimSpace(id)
+	for _, node := range nodes {
+		if node.ID == id {
+			return node, true
+		}
+	}
+	return store.TestPlanNode{}, false
+}
+
+func findMapNodeByCaseID(nodes []store.TestPlanNode, caseID string) (store.TestPlanNode, bool) {
+	caseID = strings.TrimSpace(caseID)
+	for _, node := range nodes {
+		if node.CaseID == caseID {
 			return node, true
 		}
 	}

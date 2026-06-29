@@ -31,6 +31,35 @@ func TestMapValidationPromoteRejectsAmbiguousTargetFlags(t *testing.T) {
 	}
 }
 
+func TestMapValidationPromoteHonorsCaseFlagSemantics(t *testing.T) {
+	storeRef := seedPromoteStore(t, standalonePromoteCatalog(), store.TestPlanGraph{
+		Map: store.TestPlanMap{ID: "map.promote", ProfileID: "profile.promote", DisplayName: "Promote Map", Status: "draft", SummaryJSON: `{}`},
+		Nodes: []store.TestPlanNode{{
+			MapID: "map.promote", ID: "case.smoke.patch", CaseID: "case.other", Role: "validation", StateEffect: "unchanged", SummaryJSON: `{}`,
+		}},
+	})
+
+	out := runCLI(t, "map", "validation", "promote", "--store", storeRef, "--map", "map.promote", "--case", "case.smoke.patch", "--json")
+	var report mapValidationPromoteTestReport
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode validation promote json: %v\n%s", err, out)
+	}
+	if report.Node.CaseID != "case.smoke.patch" {
+		t.Fatalf("--case should promote by case id, report = %#v", report.Node)
+	}
+}
+
+func TestMapValidationPromoteNodeFlagRequiresExistingNodeID(t *testing.T) {
+	storeRef := seedPromoteStore(t, standalonePromoteCatalog(), store.TestPlanGraph{
+		Map: store.TestPlanMap{ID: "map.promote", ProfileID: "profile.promote", DisplayName: "Promote Map", Status: "draft", SummaryJSON: `{}`},
+	})
+
+	out := runCLIFails(t, "map", "validation", "promote", "--store", storeRef, "--map", "map.promote", "--node", "case.smoke.patch", "--json")
+	if !strings.Contains(out, "map node not found: case.smoke.patch") {
+		t.Fatalf("--node should require an existing node id, got %s", out)
+	}
+}
+
 func TestMapValidationPromoteTurnsStandaloneSmokeIntoExecutablePrimaryNode(t *testing.T) {
 	storeRef, seedUpdatedAt := seedStandalonePromoteMap(t)
 	assertStandalonePromotePrecondition(t, storeRef)
@@ -38,6 +67,23 @@ func TestMapValidationPromoteTurnsStandaloneSmokeIntoExecutablePrimaryNode(t *te
 	assertPromoteReportConvertedNode(t, out)
 	assertPromoteRefreshedMapTimestamp(t, storeRef, seedUpdatedAt)
 	assertPromotedMapDoctorClean(t, storeRef)
+	assertPromotedMapExplainExecutable(t, storeRef)
+}
+
+func TestMapValidationPromotePreservesAnchoredPreconditionPrefix(t *testing.T) {
+	storeRef := seedPromoteStore(t, standalonePromoteCatalog(), anchoredValidationPromoteGraph())
+	runCLI(t, "map", "validation", "promote", "--store", storeRef, "--map", "map.promote", "--case", "case.smoke.patch", "--json")
+
+	graph := loadPromoteGraph(t, storeRef)
+	pathSteps := promotedPrimaryPathSteps(graph, "path.primary.case.smoke.patch")
+	if len(pathSteps) != 2 || pathSteps[0].NodeID != "case.prepare" || pathSteps[1].NodeID != "case.smoke.patch" {
+		t.Fatalf("anchored promote path steps = %#v", pathSteps)
+	}
+}
+
+func TestMapValidationPromoteIgnoresStaleFixtureEdgeReachability(t *testing.T) {
+	storeRef := seedPromoteStore(t, standalonePromoteCatalog(), staleFixturePromoteGraph())
+	runCLI(t, "map", "validation", "promote", "--store", storeRef, "--map", "map.promote", "--case", "case.smoke.patch", "--json")
 	assertPromotedMapExplainExecutable(t, storeRef)
 }
 
@@ -74,6 +120,13 @@ type mapValidationExplainTestReport struct {
 
 func seedStandalonePromoteMap(t *testing.T) (string, time.Time) {
 	t.Helper()
+	seedUpdatedAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	storeRef := seedPromoteStore(t, standalonePromoteCatalog(), standalonePromoteGraph(seedUpdatedAt))
+	return storeRef, seedUpdatedAt
+}
+
+func seedPromoteStore(t *testing.T, catalog store.ProfileCatalog, graph store.TestPlanGraph) string {
+	t.Helper()
 	ctx := context.Background()
 	storePath := filepath.Join(t.TempDir(), "map-validation-promote.sqlite")
 	storeRef := "sqlite://" + storePath
@@ -82,14 +135,13 @@ func seedStandalonePromoteMap(t *testing.T) (string, time.Time) {
 		t.Fatalf("open store: %v", err)
 	}
 	defer closeCLIStore(runtime)
-	if err := runtime.ReplaceProfileCatalog(ctx, standalonePromoteCatalog()); err != nil {
+	if err := runtime.ReplaceProfileCatalog(ctx, catalog); err != nil {
 		t.Fatalf("seed catalog: %v", err)
 	}
-	seedUpdatedAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	if err := runtime.ReplaceTestPlanGraph(ctx, standalonePromoteGraph(seedUpdatedAt)); err != nil {
+	if err := runtime.ReplaceTestPlanGraph(ctx, graph); err != nil {
 		t.Fatalf("seed validation graph: %v", err)
 	}
-	return storeRef, seedUpdatedAt
+	return storeRef
 }
 
 func standalonePromoteCatalog() store.ProfileCatalog {
@@ -116,6 +168,55 @@ func standalonePromoteGraph(updatedAt time.Time) store.TestPlanGraph {
 	}
 }
 
+func anchoredValidationPromoteGraph() store.TestPlanGraph {
+	graph := standalonePromoteGraph(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
+	graph.Nodes = []store.TestPlanNode{
+		{MapID: "map.promote", ID: "case.prepare", CaseID: "case.prepare", Role: "primary", StateEffect: "advance", SummaryJSON: `{}`, SortOrder: 1},
+		{MapID: "map.promote", ID: "case.submit", CaseID: "case.submit", Role: "primary", StateEffect: "advance", SummaryJSON: `{}`, SortOrder: 2},
+		{MapID: "map.promote", ID: "case.smoke.patch", CaseID: "case.smoke.patch", AnchorNodeID: "case.submit", BaseCaseID: "case.submit", Role: "validation", StateEffect: "unchanged", SummaryJSON: `{}`, SortOrder: 3},
+	}
+	graph.Paths = []store.TestPlanPath{{MapID: "map.promote", ID: "path.submit", WorkflowID: "workflow.submit", DisplayName: "Submit", Status: "active", SummaryJSON: `{}`}}
+	graph.PathSteps = []store.TestPlanPathStep{
+		{MapID: "map.promote", PathID: "path.submit", StepIndex: 1, StepID: "prepare", NodeID: "case.prepare", CaseID: "case.prepare", Required: true, SummaryJSON: `{}`},
+		{MapID: "map.promote", PathID: "path.submit", StepIndex: 2, StepID: "submit", NodeID: "case.submit", CaseID: "case.submit", Required: true, SummaryJSON: `{}`},
+	}
+	return graph
+}
+
+func staleFixturePromoteGraph() store.TestPlanGraph {
+	graph := standalonePromoteGraph(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
+	graph.Edges = []store.TestPlanEdge{{
+		MapID: "map.promote", ID: "edge.fixture.stale", FromNodeID: "case.prepare", ToNodeID: "case.smoke.patch",
+		Kind: "fixture", MaterializationID: "fixture.missing", Required: true, SummaryJSON: `{}`,
+	}}
+	return graph
+}
+
+func loadPromoteGraph(t *testing.T, storeRef string) store.TestPlanGraph {
+	t.Helper()
+	ctx := context.Background()
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("reopen promoted store: %v", err)
+	}
+	loaded, err := runtime.GetTestPlanGraph(ctx, "map.promote")
+	closeCLIStore(runtime)
+	if err != nil {
+		t.Fatalf("load promoted graph: %v", err)
+	}
+	return loaded
+}
+
+func promotedPrimaryPathSteps(graph store.TestPlanGraph, pathID string) []store.TestPlanPathStep {
+	var out []store.TestPlanPathStep
+	for _, step := range graph.PathSteps {
+		if step.PathID == pathID {
+			out = append(out, step)
+		}
+	}
+	return out
+}
+
 func assertStandalonePromotePrecondition(t *testing.T, storeRef string) {
 	t.Helper()
 	doctorOut := runCLIFails(t, "map", "doctor", "--store", storeRef, "--map", "map.promote", "--json")
@@ -140,16 +241,7 @@ func assertPromoteReportConvertedNode(t *testing.T, out string) {
 
 func assertPromoteRefreshedMapTimestamp(t *testing.T, storeRef string, seedUpdatedAt time.Time) {
 	t.Helper()
-	ctx := context.Background()
-	runtime, err := openStore(ctx, storeRef)
-	if err != nil {
-		t.Fatalf("reopen promoted store: %v", err)
-	}
-	loaded, err := runtime.GetTestPlanGraph(ctx, "map.promote")
-	closeCLIStore(runtime)
-	if err != nil {
-		t.Fatalf("load promoted graph: %v", err)
-	}
+	loaded := loadPromoteGraph(t, storeRef)
 	if !loaded.Map.UpdatedAt.After(seedUpdatedAt) {
 		t.Fatalf("promote should refresh map updatedAt, got %s want after %s", loaded.Map.UpdatedAt.Format(time.RFC3339Nano), seedUpdatedAt.Format(time.RFC3339Nano))
 	}
