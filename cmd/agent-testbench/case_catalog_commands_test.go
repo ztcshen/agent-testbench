@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,30 +16,7 @@ func TestCaseCatalogUpsertCreatesActiveStoreBackedAPICase(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "case-catalog.sqlite")
 	storeRef := "sqlite://" + storePath
 	ctx := context.Background()
-	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
-	if err != nil {
-		t.Fatalf("open sqlite store: %v", err)
-	}
-	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
-		ProfileID: "default",
-		IndexedAt: time.Now().UTC(),
-		InterfaceNodes: []store.CatalogInterfaceNode{{
-			ID:     "node.submit",
-			Method: "POST",
-			Path:   "/submit",
-			Status: "active",
-		}},
-		RequestTemplates: []store.CatalogRequestTemplate{{
-			ID:     "template.submit",
-			NodeID: "node.submit",
-			Method: "POST",
-			Path:   "/submit",
-			Status: "active",
-		}},
-	}); err != nil {
-		t.Fatalf("replace profile catalog: %v", err)
-	}
-	_ = s.Close()
+	seedCaseCatalogUpsertStore(t, ctx, storePath)
 
 	out := runCLI(t, "case", "catalog", "upsert",
 		"--store", storeRef,
@@ -83,7 +61,7 @@ func TestCaseCatalogUpsertCreatesActiveStoreBackedAPICase(t *testing.T) {
 		t.Fatalf("case catalog counts/defaults = %#v", report)
 	}
 
-	s, err = sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
 	if err != nil {
 		t.Fatalf("reopen sqlite store: %v", err)
 	}
@@ -95,5 +73,62 @@ func TestCaseCatalogUpsertCreatesActiveStoreBackedAPICase(t *testing.T) {
 	item, ok := findCatalogAPICase(catalog.APICases, "case.submit.smoke")
 	if !ok || item.NodeID != "node.submit" || item.RequestTemplateID != "template.submit" || item.DefaultOverridesJSON != `{"executorParam":"ent8001"}` {
 		t.Fatalf("persisted api case = %#v", item)
+	}
+}
+
+func TestCaseCatalogUpsertRejectsInvalidJSONFieldShapes(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "case-catalog-json-shape.sqlite")
+	storeRef := "sqlite://" + storePath
+	ctx := context.Background()
+	seedCaseCatalogUpsertStore(t, ctx, storePath)
+
+	patchOut := runCLIFails(t, "case", "catalog", "upsert",
+		"--store", storeRef,
+		"--case", "case.submit.bad-patch",
+		"--node", "node.submit",
+		"--patch-json", `{}`,
+		"--json",
+	)
+	if !strings.Contains(patchOut, "--patch-json must be a JSON array") {
+		t.Fatalf("patch shape error = %s", patchOut)
+	}
+
+	expectedOut := runCLIFails(t, "case", "catalog", "upsert",
+		"--store", storeRef,
+		"--case", "case.submit.bad-expected",
+		"--node", "node.submit",
+		"--expected-json", `[]`,
+		"--json",
+	)
+	if !strings.Contains(expectedOut, "--expected-json must be a JSON object") {
+		t.Fatalf("expected shape error = %s", expectedOut)
+	}
+}
+
+func seedCaseCatalogUpsertStore(t *testing.T, ctx context.Context, storePath string) {
+	t.Helper()
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+		ProfileID: "default",
+		IndexedAt: time.Now().UTC(),
+		InterfaceNodes: []store.CatalogInterfaceNode{{
+			ID:     "node.submit",
+			Method: "POST",
+			Path:   "/submit",
+			Status: "active",
+		}},
+		RequestTemplates: []store.CatalogRequestTemplate{{
+			ID:     "template.submit",
+			NodeID: "node.submit",
+			Method: "POST",
+			Path:   "/submit",
+			Status: "active",
+		}},
+	}); err != nil {
+		t.Fatalf("replace profile catalog: %v", err)
 	}
 }

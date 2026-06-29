@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -253,14 +252,14 @@ func applyCaseCatalogMetadataFields(apiCase *store.CatalogAPICase, existingCases
 
 func applyCaseCatalogJSONFields(apiCase *store.CatalogAPICase, options caseCatalogUpsertOptions) error {
 	if options.PassedFlags["patch-json"] {
-		patchJSON, err := compactOptionalJSONString("patch-json", options.PatchJSON)
+		patchJSON, err := compactOptionalJSONArrayString("patch-json", options.PatchJSON)
 		if err != nil {
 			return err
 		}
 		apiCase.PatchJSON = patchJSON
 	}
 	if options.PassedFlags["expected-json"] {
-		expectedJSON, err := compactOptionalJSONString("expected-json", options.ExpectedJSON)
+		expectedJSON, err := compactOptionalJSONObjectString("expected-json", options.ExpectedJSON)
 		if err != nil {
 			return err
 		}
@@ -304,14 +303,18 @@ func applyOptionalCaseCatalogRuntimeFields(apiCase *store.CatalogAPICase, option
 	}
 }
 
-func compactOptionalJSONString(name string, raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", nil
+func compactOptionalJSONArrayString(name string, raw string) (string, error) {
+	value, ok, err := parseOptionalJSONArrayObjects(name, raw)
+	if err != nil || !ok {
+		return "", err
 	}
-	var value any
-	if err := json.Unmarshal([]byte(raw), &value); err != nil {
-		return "", fmt.Errorf("decode --%s: %w", name, err)
+	return mustCompactJSON(value), nil
+}
+
+func compactOptionalJSONObjectString(name string, raw string) (string, error) {
+	value, ok, err := parseOptionalJSONObject(name, raw)
+	if err != nil || !ok {
+		return "", err
 	}
 	return mustCompactJSON(value), nil
 }
