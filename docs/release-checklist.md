@@ -21,6 +21,18 @@ AGENT_TESTBENCH_SMOKE_STORE_DSN="sqlite:///tmp/agent-testbench-smoke.sqlite" npm
 AGENT_TESTBENCH_SMOKE_STORE_DSN="sqlite:///tmp/agent-testbench-smoke.sqlite" npm run release-check -- --scope-file .release-check-scope
 ```
 
+When a release slice touches binary packaging, static workbench assets, or
+`agent-testbench serve`, also run the archive smoke:
+
+```sh
+npm run smoke:release-archive-serve
+```
+
+This builds a host-platform release archive, extracts it outside the source
+checkout, starts the released binary from the extracted directory, loads the
+static workbench, and confirms `/api/store/current` responds through a temporary
+SQLite Store.
+
 `release-check` refuses to run without one of `--scope`, `--scope-file`, or
 `--full`. When scoped to a Go file, release-check runs only that package. When
 scoped to a Go directory, it runs that directory tree. Module metadata changes
@@ -138,6 +150,8 @@ of these items:
 ## Manual Review
 
 - `README.md` points to the current quick start and public docs.
+- `docs/adoption-playbook.md` reflects the current evaluation path, promotion
+  assets, trust checklist, and known limitations.
 - `CHANGELOG.md` describes notable changes.
 - New CLI, API, Store, report, or template package contracts are documented.
 - Environment Catalog docs describe register, discover, inspect, bootstrap,
@@ -159,5 +173,8 @@ For each public release, include:
 
 ## Packaging
 
-The first public release can ship source only. Binary packaging can be added
-later with a dedicated release tool once CLI flags and report contracts settle.
+Tag releases build versioned CLI archives for the supported workflow targets.
+Each archive must include the binary, license/readme files, optional notice,
+and `control-plane/static` so `agent-testbench serve` can render the workbench
+outside a source checkout. Treat `npm run smoke:release-archive-serve` as the
+local proof that the archive is usable before promoting a binary release.

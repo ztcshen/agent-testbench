@@ -438,13 +438,38 @@ func defaultStoreConfigPath(appName string) (string, error) {
 
 func maskStoreURL(rawURL string) string {
 	parsed, err := url.Parse(rawURL)
-	if err != nil || parsed.User == nil {
+	if err != nil {
 		return rawURL
 	}
-	username := parsed.User.Username()
-	if username == "" {
+	changed := false
+	if parsed.User != nil {
+		username := parsed.User.Username()
+		if username != "" {
+			parsed.User = url.UserPassword(username, "xxxxx")
+			changed = true
+		}
+	}
+	query := parsed.Query()
+	for key, values := range query {
+		if !storeURLQueryKeyIsCredential(key) {
+			continue
+		}
+		if len(values) == 0 {
+			query.Set(key, "xxxxx")
+			changed = true
+			continue
+		}
+		for _, value := range values {
+			if strings.TrimSpace(value) != "" {
+				query.Set(key, "xxxxx")
+				changed = true
+				break
+			}
+		}
+	}
+	if !changed {
 		return rawURL
 	}
-	parsed.User = url.UserPassword(username, "xxxxx")
+	parsed.RawQuery = query.Encode()
 	return parsed.String()
 }

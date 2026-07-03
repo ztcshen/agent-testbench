@@ -217,7 +217,7 @@ if [[ "$scoped_release_check" -eq 1 ]]; then
   tracked_generated_paths=()
   while IFS= read -r -d '' path; do
     case "$path" in
-      .runtime/*|cmd/agent-testbench/.runtime/*|internal/server/controlplane/.runtime/*|node_modules/*|team-configs/*|test-private/*|test-results/*|coverage/*|*.db|*.sqlite|*.sqlite3)
+      .runtime/*|cmd/agent-testbench/.runtime/*|internal/server/controlplane/.runtime/*|node_modules/*|team-configs/*|test-private/*|test-results/*|coverage/*|dist/*|*.db|*.sqlite|*.sqlite3)
         tracked_generated_paths+=("$path")
         ;;
     esac
@@ -237,6 +237,7 @@ else
     'test-private' \
     'test-results' \
     'coverage' \
+    'dist' \
     '*.db' \
     '*.sqlite' \
     '*.sqlite3')
@@ -437,8 +438,11 @@ else
       tools/examples/*.test.mjs|tools/smoke/*.test.mjs)
         node_scope_tests+=("$path")
         ;;
-      .github/workflows/ci.yml)
+      .github/workflows/ci.yml|.github/workflows/release.yml)
         node_scope_tests+=("tools/smoke/ci-workflow.test.mjs")
+        ;;
+      scripts/build-release.sh)
+        node_scope_tests+=("tools/smoke/release-archive-serve.test.mjs")
         ;;
       tools/release-check.sh|tools/guardrails/*)
         node_scope_tests+=("tools/smoke/release-check.test.mjs")

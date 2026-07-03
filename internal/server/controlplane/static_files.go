@@ -41,10 +41,33 @@ func serveStaticFile(w http.ResponseWriter, r *http.Request, staticDir string, n
 }
 
 func findStaticDir() string {
-	candidates := []string{
+	candidates := executableStaticDirCandidates()
+	candidates = append(candidates,
 		filepath.Join("control-plane", "static"),
 		filepath.Join("..", "..", "control-plane", "static"),
+	)
+	candidates = append(candidates, staticDirCandidatesFromWorkingDirectory()...)
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return candidate
+		}
 	}
+	return filepath.Join("control-plane", "static")
+}
+
+func executableStaticDirCandidates() []string {
+	if executablePath, err := os.Executable(); err == nil {
+		executableDir := filepath.Dir(executablePath)
+		return []string{
+			filepath.Join(executableDir, "control-plane", "static"),
+			filepath.Join(filepath.Dir(executableDir), "control-plane", "static"),
+		}
+	}
+	return nil
+}
+
+func staticDirCandidatesFromWorkingDirectory() []string {
+	var candidates []string
 	if wd, err := os.Getwd(); err == nil {
 		for dir := wd; ; dir = filepath.Dir(dir) {
 			candidates = append(candidates, filepath.Join(dir, "control-plane", "static"))
@@ -53,12 +76,7 @@ func findStaticDir() string {
 			}
 		}
 	}
-	for _, candidate := range candidates {
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			return candidate
-		}
-	}
-	return filepath.Join("control-plane", "static")
+	return candidates
 }
 
 const ReadModelDashboard = "dashboard"

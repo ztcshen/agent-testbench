@@ -1,6 +1,7 @@
 # AgentTestBench
 
 [![CI](https://github.com/ztcshen/agent-testbench/actions/workflows/ci.yml/badge.svg)](https://github.com/ztcshen/agent-testbench/actions/workflows/ci.yml)
+[![Release](https://github.com/ztcshen/agent-testbench/actions/workflows/release.yml/badge.svg)](https://github.com/ztcshen/agent-testbench/actions/workflows/release.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
 [English](README.md) | **简体中文**
@@ -9,6 +10,19 @@ AgentTestBench 是一个面向 Agent 的 API 工作流测试环境，围绕可�
 图谱、可审计 Evidence 和质量门禁构建。它帮助测试工程师和自动化 agent 发现
 可测目标、执行接口用例、工作流和 map plan、记录可复现 Evidence，并生成紧凑的
 HTML/JSON 报告，同时保持开源核心通用、可复用。
+
+一句话定位：**AgentTestBench 是一个 local-first 的 agent-native API 工作流验证
+控制平面。**
+
+不用准备团队 Store，也可以先跑一圈本地 Evidence 闭环：
+
+```sh
+./bin/agent-testbench.sh demo
+```
+
+这个 demo 会启动临时 HTTP 目标，执行 `case.create-item`，把请求、响应、断言
+Evidence 写入临时 SQLite Store，索引运行记录，并打印 Evidence 目录。源码
+checkout 中安装依赖后，`npm run demo:one` 会包装同一个 CLI 命令。
 
 ## 产品方向
 
@@ -131,7 +145,9 @@ flowchart LR
 安装依赖并验证仓库：
 
 ```sh
+./bin/agent-testbench.sh demo
 npm ci
+npm run demo:one
 ./bin/agent-testbench.sh version
 ./bin/agent-testbench.sh setup --store local --sqlite .runtime/agent-testbench-local.sqlite --build-runtime
 ./bin/agent-testbench.sh onboard --store local --sqlite .runtime/agent-testbench-local.sqlite --install-shell
@@ -141,10 +157,13 @@ npm ci
 # SQL Store 示例：
 # PostgreSQL：
 AGENT_TESTBENCH_DEMO_STORE='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run demo:api-case
-AGENT_TESTBENCH_SMOKE_STORE_DSN='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run release-check -- --scope cmd/agent-testbench
 # MySQL：
 AGENT_TESTBENCH_DEMO_STORE='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run demo:api-case
-AGENT_TESTBENCH_SMOKE_STORE_DSN='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run release-check -- --scope cmd/agent-testbench
+# SQLite：
+AGENT_TESTBENCH_DEMO_STORE="sqlite://$PWD/.runtime/agent-testbench-smoke.sqlite" npm run demo:api-case
+AGENT_TESTBENCH_SMOKE_STORE_DSN="sqlite://$PWD/.runtime/agent-testbench-smoke.sqlite" npm run release-check -- --scope cmd/agent-testbench
 ```
 
 主 CLI 名称是 `agent-testbench`；公开配置和 smoke 测试环境变量统一使用
@@ -159,13 +178,16 @@ Store-backed 任务定义、运行历史、日志和文件/webhook 通知。`con
 `config path`、`logs` 和 `completion bash|zsh` 分别用于查看本地配置、定位配置
 文件、读取 runtime 日志和接入 shell completion。
 
-`demo:api-case` 会启动一个临时本地 HTTP 服务，执行
-`examples/api-cases/create-item.json`，写入 active SQL Store 或
+`./bin/agent-testbench.sh demo` 是零外部依赖入口：它会启动临时本地 HTTP 服务，
+创建临时 SQLite Store，执行通用 API case，索引运行记录，并打印 Evidence 目录和
+下一条 inspect 命令。`npm run demo:one` 会包装同一个 CLI 入口。底层
+`demo:api-case` 会运行示例 case，写入 active SQL Store 或
 `AGENT_TESTBENCH_DEMO_STORE=postgres://...` /
-`AGENT_TESTBENCH_DEMO_STORE=mysql://...`，并打印 Evidence 目录。
+`AGENT_TESTBENCH_DEMO_STORE=mysql://...` /
+`AGENT_TESTBENCH_DEMO_STORE=sqlite://...`。
 demo 和发布门禁都要求 MySQL Store 使用看起来属于 sandbox/smoke/test/CI 的专用
 库名，不要指向业务 schema。
-`release-check` 要求提供 PostgreSQL 或 MySQL smoke Store DSN，会运行空白检查、
+`release-check` 要求提供 SQLite、PostgreSQL 或 MySQL smoke Store DSN，会运行空白检查、
 生成态检查、核心守卫、Go 测试、demo、React build、active SQL Store CLI smoke
 和无头浏览器冒烟。
 
@@ -211,6 +233,9 @@ AgentTestBench API 和 UI
 | 文档 | 内容 |
 | --- | --- |
 | [Quick Start](docs/quickstart.md) | 首次本地运行、Store 初始化和工作台启动方向。 |
+| [Adoption Playbook](docs/adoption-playbook.md) | 5 分钟评估路径、项目定位、传播素材、可信度检查清单和已知限制。 |
+| [Comparison and Positioning](docs/comparison.md) | AgentTestBench 与 Newman/Postman、Karate、Testcontainers、Backstage 和可观测性 demo 的定位差异。 |
+| [GitHub Actions Integration](docs/github-actions.md) | demo、scoped release-check 和 Evidence artifact 的 CI 接入模板。 |
 | [Test Scenario Maps](docs/test-plan-maps.md) | Map 生命周期、workflow 收敛、验证用例族、planner explain、map 执行、门禁和 Atlas 评审。 |
 | [Backend Capabilities](docs/backend-capabilities.md) | Store、Environment Catalog、干净机器恢复、目标发现、执行、报告、Evidence、API 和发布守卫。 |
 | [Share Kit](docs/share-kit.md) | 项目 tagline、短介绍、demo 脚本和传播文案。 |
@@ -252,8 +277,9 @@ AgentTestBench API 和 UI
   验收工作流记录和 verified 发布门禁；
 - 工作台：基于 Control plane API 的本地 React 页面，支持 catalog、workflow、
   environment、run、Evidence 和 topology 审阅；
-- 发布门禁：`AGENT_TESTBENCH_SMOKE_STORE_DSN=postgres://... npm run release-check` 或
-  `AGENT_TESTBENCH_SMOKE_STORE_DSN=mysql://... npm run release-check`；组织自有 MySQL
+- 发布门禁：日常切片运行 `npm run release-check -- --scope PATH`；正式签核用
+  `AGENT_TESTBENCH_SMOKE_STORE_DSN=postgres://... npm run release-check -- --full`
+  或 `AGENT_TESTBENCH_SMOKE_STORE_DSN=mysql://... npm run release-check -- --full`；组织自有 MySQL
   Store 可选真实验收先运行 `npm run release-check:mysql-real:preflight`，再运行
   `npm run release-check:mysql-real`，并必须同时提供
   `AGENT_TESTBENCH_REQUIRE_REAL_SKYWALKING=1`、`AGENT_TESTBENCH_TRACE_GRAPHQL_URL`、
@@ -268,9 +294,9 @@ workflow 的 trace-id 映射，才能运行严格门禁。
 提交变更前请运行完整本地门禁：
 
 ```sh
-AGENT_TESTBENCH_SMOKE_STORE_DSN='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN='postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable' npm run release-check -- --full
 # 或
-AGENT_TESTBENCH_SMOKE_STORE_DSN='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run release-check
+AGENT_TESTBENCH_SMOKE_STORE_DSN='mysql://user:pass@host:3306/agent_testbench_smoke?tls=false' npm run release-check -- --full
 ```
 
 更多信息见 [CONTRIBUTING.md](CONTRIBUTING.md)、[SECURITY.md](SECURITY.md)

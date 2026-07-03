@@ -47,6 +47,7 @@ func commandCatalogDescriptors() []commandDescriptor {
 
 const commandDescriptorRegistryText = `
 version	agent-testbench version
+demo	agent-testbench demo [--output-dir PATH] [--store NAME_OR_DSN] [--run-id ID] [--json]	surface=default	reason=quick proof: runs a local API case, writes Evidence, and indexes a SQL Store
 setup	agent-testbench setup [--repo PATH] [--store NAME] [--url DSN | --sqlite PATH] [--build-runtime] [--runtime-only] [--json]
 onboard	agent-testbench onboard [--repo PATH] [--store NAME] [--url DSN | --sqlite PATH] [--build-runtime] [--install-shell] [--bin-dir PATH] [--smoke none|commands|store] [--json]
 status	agent-testbench status [--deep] [--json]	surface=default	reason=orientation: first commands for status, diagnosis, and command discovery

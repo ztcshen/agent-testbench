@@ -1,13 +1,14 @@
 {
   "name": "agent-testbench",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.4.0-dev",
+  "private": false,
   "description": "Agent-native test environment for API workflows, auditable evidence, and quality gates.",
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "build:frontend": "node control-plane/frontend/build.mjs",
     "demo:api-case": "node tools/examples/api-case-demo.mjs",
+    "demo:one": "./bin/agent-testbench.sh demo",
     "demo:services": "node tools/examples/demo-service-server.mjs",
     "docs:cli-reference": "node tools/docs/generate-cli-reference.mjs",
     "docs:cli-reference:check": "node tools/docs/generate-cli-reference.mjs --check",
@@ -20,6 +21,7 @@
     "quality:report": "QUALITY_GATE_STRICT=false bash scripts/quality-gate.sh",
     "quality:strict": "QUALITY_GATE_STRICT=true bash scripts/quality-gate.sh",
     "release-check": "bash tools/release-check.sh",
+    "release:build": "bash scripts/build-release.sh",
     "release-check:mysql-real": "bash tools/smoke/mysql-real-store-release-check.sh",
     "release-check:mysql-real:preflight": "AGENT_TESTBENCH_REAL_MYSQL_RELEASE_DRY_RUN=1 bash tools/smoke/mysql-real-store-release-check.sh",
     "store:preflight:mysql": "bash tools/smoke/mysql-store-preflight.sh",
@@ -30,6 +32,7 @@
     "smoke:cli:sql-active": "AGENT_TESTBENCH_DISABLE_SQLITE_STORE=1 node tools/smoke/cli-active-store-smoke.mjs",
     "smoke:frontend": "AGENT_TESTBENCH_DISABLE_SQLITE_STORE=1 node tools/smoke/control-plane-smoke.mjs",
     "smoke:frontend:sql-active": "npm run smoke:frontend",
+    "smoke:release-archive-serve": "node --test tools/smoke/release-archive-serve.test.mjs",
     "test:frontend": "node --test control-plane/frontend/src/*.test.mjs",
     "test": "go test ./..."
   },

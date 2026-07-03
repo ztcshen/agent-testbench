@@ -8,10 +8,11 @@ import (
 	"strings"
 )
 
-const version = "0.1.0"
 const interfaceNodeCommand = "interface-node"
 const cliCommandTask = "task"
+const cliCommandDemo = "demo"
 
+var version = "0.4.0-dev"
 var buildRevision = ""
 
 type versionCommandReport struct {
@@ -28,7 +29,8 @@ func (e unknownRootCommandError) Error() string {
 }
 
 var rootCommands = map[string]rootCommand{
-	"commands":           runCommands,
+	cliCommandCommands:   runCommands,
+	cliCommandDemo:       func(args []string) error { return runDemo(context.Background(), args) },
 	"setup":              func(args []string) error { return runSetup(context.Background(), args) },
 	"onboard":            func(args []string) error { return runOnboard(context.Background(), args) },
 	"status":             func(args []string) error { return runStatus(context.Background(), args) },

@@ -12,6 +12,9 @@ func TestTopLevelHelpShowsStoreFlagNotLegacyStoreURL(t *testing.T) {
 	if !strings.Contains(out, "--store NAME_OR_DSN") {
 		t.Fatalf("top-level help should show Store-first flag, got %q", out)
 	}
+	if !strings.Contains(out, "agent-testbench demo [--output-dir PATH]") {
+		t.Fatalf("top-level help should expose the built-in local demo:\n%s", out)
+	}
 	if !strings.Contains(out, "Recommended workflows") || !strings.Contains(out, "agent-testbench commands --all") {
 		t.Fatalf("top-level help should be a task-oriented start page with a path to the full catalog:\n%s", out)
 	}
@@ -845,7 +848,7 @@ func TestCommandsDefaultCatalogHidesSpecializedCommands(t *testing.T) {
 	if report.Count > 30 {
 		t.Fatalf("default command catalog should stay at or below the first target of 30 commands, got %d", report.Count)
 	}
-	for _, want := range []string{"status", "doctor", "store current", "environment restore", "task suggest", "task plan", "map explain", "map run", "case inspect", "case run", commandCatalogCaseSuiteReport} {
+	for _, want := range []string{"demo", "status", "doctor", "store current", "environment restore", "task suggest", "task plan", "map explain", "map run", "case inspect", "case run", commandCatalogCaseSuiteReport} {
 		if _, ok := commands[want]; !ok {
 			t.Fatalf("default catalog missing command %q in %#v", want, commands)
 		}

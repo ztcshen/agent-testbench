@@ -81,7 +81,7 @@ AgentTestBench 目前仍是 pre-1.0。路线图重点是降低试用门槛、提
   configured workflow step.
 - Deepen clean-machine restore evidence across more Docker Compose stacks and
   middleware combinations.
-- Publish versioned releases and binary artifacts.
+- Continue improving versioned releases and binary artifacts.
 - Provide a plugin-style template package workflow for optional
   import/export/review artifacts.
 - Continue broadening redaction guidance and raw-artifact opt-in controls for

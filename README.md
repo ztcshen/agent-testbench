@@ -1,6 +1,7 @@
 # AgentTestBench
 
 [![CI](https://github.com/ztcshen/agent-testbench/actions/workflows/ci.yml/badge.svg)](https://github.com/ztcshen/agent-testbench/actions/workflows/ci.yml)
+[![Release](https://github.com/ztcshen/agent-testbench/actions/workflows/release.yml/badge.svg)](https://github.com/ztcshen/agent-testbench/actions/workflows/release.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
 **English** | [简体中文](README.zh-CN.md)
@@ -11,6 +12,21 @@ engineers and automation agents discover runnable targets, run API cases,
 workflows, and map plans, record reproducible Evidence, and inspect compact
 HTML/JSON reports without hardcoding one business domain into the open-source
 core.
+
+In one sentence: **AgentTestBench is a local-first control plane for
+agent-native API workflow validation.**
+
+Try the local Evidence loop without provisioning a team Store:
+
+```sh
+./bin/agent-testbench.sh demo
+```
+
+The demo starts a temporary HTTP target, runs
+`case.create-item`, writes request/response/assertion Evidence into a temporary
+SQLite Store, indexes the run, and prints the Evidence bundle path. In a source
+checkout, `npm run demo:one` wraps the same CLI command after dependencies are
+installed.
 
 ## Product Direction
 
@@ -155,7 +171,9 @@ These are design influences, not vendored runtime dependencies.
 Install dependencies and verify the checkout:
 
 ```sh
+./bin/agent-testbench.sh demo
 npm ci
+npm run demo:one
 ./bin/agent-testbench.sh version
 ./bin/agent-testbench.sh setup --store local --sqlite .runtime/agent-testbench-local.sqlite --build-runtime
 ./bin/agent-testbench.sh onboard --store local --sqlite .runtime/agent-testbench-local.sqlite --install-shell
@@ -192,14 +210,17 @@ shell integration. If a wrapper on `PATH` points at an older binary, `doctor`
 reports `runtime.shell-entrypoint` with the exact `.runtime/bin` directory or
 `ATB_BIN` value to use before rerunning `update`.
 
-The demo command starts a temporary local HTTP endpoint, runs the generic
-`examples/api-cases/create-item.json` case against the active SQL Store or
+`./bin/agent-testbench.sh demo` is the zero-setup path: it starts a temporary
+local HTTP endpoint, creates a temporary SQLite Store, runs a generic API case,
+indexes the run, and prints the Evidence bundle path plus the next inspect
+command. `npm run demo:one` wraps the same CLI entrypoint. The lower-level
+`demo:api-case` command runs the example case against the active SQL Store or
 `AGENT_TESTBENCH_DEMO_STORE=postgres://...` /
 `AGENT_TESTBENCH_DEMO_STORE=mysql://...` /
-`AGENT_TESTBENCH_DEMO_STORE=sqlite://...`, and prints the Evidence bundle path. The
-demo and release gate require dedicated MySQL Store database names that look
-like sandbox/smoke/test/CI targets; do not point them at an application schema. The
-release gate requires a SQLite, PostgreSQL, or MySQL smoke Store DSN.
+`AGENT_TESTBENCH_DEMO_STORE=sqlite://...`. The demo and release gate require
+dedicated MySQL Store database names that look like sandbox/smoke/test/CI
+targets; do not point them at an application schema. The release gate requires
+a SQLite, PostgreSQL, or MySQL smoke Store DSN.
 It runs whitespace checks, generated-state checks, source-domain guardrails, Go
 tests, the demo, the React build, active SQL Store CLI smoke tests, and
 headless browser smoke tests.
@@ -249,6 +270,9 @@ Core packages stay generic:
 | --- | --- |
 | [Quick Start](docs/quickstart.md) | First local run, Store setup, and workbench launch direction. |
 | [CLI Reference](docs/cli-reference.md) | Generated command catalog, daily surface, advanced entries, replacements, and usage. |
+| [Adoption Playbook](docs/adoption-playbook.md) | Five-minute evaluation path, positioning, promotion assets, trust checklist, and honest limits. |
+| [Comparison and Positioning](docs/comparison.md) | Where AgentTestBench fits beside Newman/Postman, Karate, Testcontainers, Backstage, and observability demos. |
+| [GitHub Actions Integration](docs/github-actions.md) | Starter CI workflow for the built-in demo, scoped release checks, and Evidence artifacts. |
 | [Demo Gallery](docs/demo-gallery.md) | Visual CLI capability tour, neutral demo services, and exposure plan. |
 | [Test Scenario Maps](docs/test-plan-maps.md) | Map lifecycle, workflow convergence, validation families, planner explain, map execution, gates, and Atlas review. |
 | [Backend Capabilities](docs/backend-capabilities.md) | Store, Environment Catalog, clean-machine restore, discovery, execution, reports, Evidence, APIs, and release guardrails. |

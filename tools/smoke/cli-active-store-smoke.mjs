@@ -182,9 +182,14 @@ async function main() {
       throw new Error(`store status did not use ${backend}:\n${status.stdout}`);
     }
 
-    const publish = await runJSON(["config", "publish", "--from", profileDir, "--json"], env);
+    const publish = await runJSON(["template-package", "import", "--from", profileDir, "--json"], env);
     if (publish?.profileId !== "smoke") {
       throw new Error(`unexpected publish payload: ${JSON.stringify(publish)}`);
+    }
+    const mapID = "map.smoke";
+    const mapImport = await runJSON(["map", "import-workflows", "--map", mapID, "--workflow", "workflow.alpha", "--json"], env);
+    if (!mapImport?.ok || mapImport?.map?.id !== mapID || mapImport?.counts?.pathSteps !== cliSmokeSteps.length) {
+      throw new Error(`unexpected map import payload: ${JSON.stringify(mapImport)}`);
     }
 
     const cases = await runJSON(["case", "discover", "--filter", "case.step", "--json"], env);
@@ -198,20 +203,31 @@ async function main() {
     }
 
     const report = await runJSON([
-      "workflow", "report",
+      "map", "run",
+      "--map", mapID,
+      "--scope", "workflows",
       "--workflow", "workflow.alpha",
       "--base-url", `http://127.0.0.1:${targetPort}`,
-      "--output-dir", path.join(tempDir, "workflow-report"),
+      "--evidence-dir", path.join(tempDir, "workflow-evidence"),
       "--json",
     ], env);
-    if (!report?.ok || report?.counts?.passed !== cliSmokeSteps.length || report?.counts?.failed !== 0 || !report?.runId) {
-      throw new Error(`workflow report did not pass all steps: ${JSON.stringify(report)}`);
+    const workflowTask = Array.isArray(report?.tasks)
+      ? report.tasks.find((task) => task?.workflowId === "workflow.alpha" && task?.workflowRunId)
+      : null;
+    if (!report?.ok || report?.status !== "passed" || report?.summary?.workflowRuns !== 1 || report?.summary?.apiCaseRuns !== cliSmokeSteps.length || !workflowTask?.workflowRunId) {
+      throw new Error(`map run did not pass the workflow smoke: ${JSON.stringify(report)}`);
     }
+    const workflowRunID = workflowTask.workflowRunId;
+    const workflowStepResults = Array.isArray(workflowTask?.summary?.steps) ? workflowTask.summary.steps : [];
 
     for (const step of cliSmokeSteps) {
+      const stepResult = workflowStepResults.find((item) => item?.stepId === step.id && item?.caseId === step.caseID);
+      if (!stepResult?.runId || !stepResult?.apiCaseRunId) {
+        throw new Error(`map run did not expose a case run for ${step.id}: ${JSON.stringify(workflowTask)}`);
+      }
       const topology = await runJSON([
         "trace", "topology", "collect",
-        "--run", report.runId,
+        "--run", stepResult.runId,
         "--step", step.id,
         "--case", step.caseID,
         "--request", `cli-smoke-request-${step.id}`,
@@ -227,22 +243,21 @@ async function main() {
         throw new Error(`trace topology did not persist SkyWalking data for ${step.id}: ${JSON.stringify(topology)}`);
       }
       const evidence = await runJSON([
-        "case", "evidence",
-        "--run", report.runId,
-        "--case-id", step.caseID,
-        "--step-id", step.id,
+        "case", "inspect",
+        "--view", "evidence",
+        "--case-run", stepResult.apiCaseRunId,
         "--json",
       ], env);
-      assertWorkflowCaseEvidence(evidence, { runID: report.runId, caseID: step.caseID, stepID: step.id, path: step.path, traceID: step.traceID });
+      assertWorkflowCaseEvidence(evidence, { runID: stepResult.runId, caseID: step.caseID, stepID: step.id, path: step.path, traceID: step.traceID });
+      const tasks = await runJSON(["evidence", "inspect", "--view", "tasks", "--run", stepResult.runId, "--kind", "trace_topology_collect", "--json"], env);
+      if (tasks?.counts?.passed !== 1 || tasks?.counts?.failed !== 0) {
+        throw new Error(`post-process tasks did not show a passed topology collection for ${step.id}: ${JSON.stringify(tasks)}`);
+      }
     }
 
-    const caseRuns = await runJSON(["case", "runs", "--run", report.runId, "--json"], env);
+    const caseRuns = await runJSON(["case", "inspect", "--view", "runs", "--run", workflowRunID, "--json"], env);
     if (!caseRuns?.ok || !Array.isArray(caseRuns.caseRuns) || caseRuns.caseRuns.length !== cliSmokeSteps.length) {
       throw new Error(`case runs did not read workflow results from active Store: ${JSON.stringify(caseRuns)}`);
-    }
-    const tasks = await runJSON(["evidence", "tasks", "--run", report.runId, "--kind", "trace_topology_collect", "--json"], env);
-    if (tasks?.counts?.passed !== cliSmokeSteps.length || tasks?.counts?.failed !== 0) {
-      throw new Error(`post-process tasks did not show all passed topology collections: ${JSON.stringify(tasks)}`);
     }
   } finally {
     await closeServer(targetServer);
