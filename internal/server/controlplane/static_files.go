@@ -41,17 +41,11 @@ func serveStaticFile(w http.ResponseWriter, r *http.Request, staticDir string, n
 }
 
 func findStaticDir() string {
-	candidates := []string{
+	candidates := executableStaticDirCandidates()
+	candidates = append(candidates,
 		filepath.Join("control-plane", "static"),
 		filepath.Join("..", "..", "control-plane", "static"),
-	}
-	if executablePath, err := os.Executable(); err == nil {
-		executableDir := filepath.Dir(executablePath)
-		candidates = append(candidates,
-			filepath.Join(executableDir, "control-plane", "static"),
-			filepath.Join(filepath.Dir(executableDir), "control-plane", "static"),
-		)
-	}
+	)
 	candidates = append(candidates, staticDirCandidatesFromWorkingDirectory()...)
 	for _, candidate := range candidates {
 		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
@@ -59,6 +53,17 @@ func findStaticDir() string {
 		}
 	}
 	return filepath.Join("control-plane", "static")
+}
+
+func executableStaticDirCandidates() []string {
+	if executablePath, err := os.Executable(); err == nil {
+		executableDir := filepath.Dir(executablePath)
+		return []string{
+			filepath.Join(executableDir, "control-plane", "static"),
+			filepath.Join(filepath.Dir(executableDir), "control-plane", "static"),
+		}
+	}
+	return nil
 }
 
 func staticDirCandidatesFromWorkingDirectory() []string {

@@ -441,6 +441,9 @@ else
       .github/workflows/ci.yml|.github/workflows/release.yml)
         node_scope_tests+=("tools/smoke/ci-workflow.test.mjs")
         ;;
+      scripts/build-release.sh)
+        node_scope_tests+=("tools/smoke/release-archive-serve.test.mjs")
+        ;;
       tools/release-check.sh|tools/guardrails/*)
         node_scope_tests+=("tools/smoke/release-check.test.mjs")
         ;;

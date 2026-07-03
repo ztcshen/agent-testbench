@@ -302,6 +302,12 @@ test("release-check scopes release workflow changes to workflow smoke", () => {
   assert.doesNotMatch(result.stdout, /running Go tests/);
 });
 
+test("release-check scopes release packaging script changes to archive smoke", () => {
+  const script = readFileSync(path.join(rootDir, "tools", "release-check.sh"), "utf8");
+
+  assert.match(script, /scripts\/build-release\.sh\)\n\s*node_scope_tests\+=\("tools\/smoke\/release-archive-serve\.test\.mjs"\)/);
+});
+
 test("release-check scoped Go selection runs only touched package directories", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agent-testbench-release-go-scope-"));
   const binDir = path.join(tempDir, "bin");

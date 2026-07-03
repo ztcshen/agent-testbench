@@ -101,6 +101,9 @@ test("tag release workflow builds and uploads versioned CLI assets", () => {
   assert.match(workflow, /npm run release-check -- --full/);
   assert.match(workflow, /AGENT_TESTBENCH_SMOKE_STORE_DSN:\s*sqlite:\/\/\$\{\{\s*runner\.temp\s*\}\}\/agent-testbench-release-gate\.sqlite/);
   assert.match(workflow, /needs:\n\s+- build\n\s+- gate/);
+  assert.match(workflow, /Build frontend assets/);
+  assert.match(workflow, /npm run build:frontend/);
+  assert.ok(workflow.indexOf("Build frontend assets") < workflow.indexOf("Build release asset"));
   assert.match(workflow, /name:\s*linux-amd64/);
   assert.match(workflow, /name:\s*linux-arm64/);
   assert.match(workflow, /name:\s*darwin-amd64/);

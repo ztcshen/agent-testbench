@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -26,7 +25,7 @@ import (
 const demoDefaultRunPrefix = "demo-create-item"
 const demoAPIItemsPath = "/v1/items"
 
-var safeDemoMySQLDatabasePattern = regexp.MustCompile(`(?i)(^|[_-])agent[_-]testbench([_-]|$)|(^|[_-])(sandbox|smoke|test|ci)([_-]|$)`)
+var safeDemoSQLDatabasePattern = regexp.MustCompile(`(?i)(^|[_-])agent[_-]testbench([_-]|$)|(^|[_-])(sandbox|smoke|test|ci)([_-]|$)`)
 var storeURLQueryCredentialKeys = map[string]struct{}{
 	"access_key":    {},
 	"access_token":  {},
@@ -67,7 +66,7 @@ type demoCommandReport struct {
 	OutputRoot         string `json:"outputRoot"`
 	OutputRetained     bool   `json:"outputRetained"`
 	EvidencePath       string `json:"evidencePath"`
-	DemoEndpoint       string `json:"demoEndpoint"`
+	DemoEndpointUsed   string `json:"demoEndpointUsed,omitempty"`
 	NextInspectCommand string `json:"nextInspectCommand,omitempty"`
 }
 
@@ -140,7 +139,7 @@ func executeDemo(ctx context.Context, options demoCommandOptions) (demoCommandRe
 	if err != nil {
 		return demoCommandReport{}, err
 	}
-	if err := requireSafeDemoMySQLStore(storeURL); err != nil {
+	if err := requireSafeDemoSQLStore(storeURL); err != nil {
 		return demoCommandReport{}, err
 	}
 	if err := upgradeDemoStoreSchema(ctx, storeURL); err != nil {
@@ -191,7 +190,7 @@ func executeDemo(ctx context.Context, options demoCommandOptions) (demoCommandRe
 		OutputRoot:         outputRoot.path,
 		OutputRetained:     !options.clean,
 		EvidencePath:       result.EvidencePath,
-		DemoEndpoint:       server.URL,
+		DemoEndpointUsed:   server.URL,
 		NextInspectCommand: nextInspectCommand,
 	}
 	if options.clean {
@@ -316,39 +315,50 @@ func storeURLQueryKeyIsCredential(key string) bool {
 	return strings.Contains(normalized, "password")
 }
 
-func requireSafeDemoMySQLStore(storeURL string) error {
+func requireSafeDemoSQLStore(storeURL string) error {
 	backend, err := storeBackendFromURL(storeURL)
 	if err != nil {
 		return err
 	}
-	if backend != "mysql" {
+	if backend != "mysql" && backend != "postgres" {
 		return nil
 	}
-	database, err := mysqlStoreDatabaseName(storeURL)
+	database, err := demoSQLStoreDatabaseName(storeURL, backend)
 	if err != nil {
 		return err
 	}
-	if !safeDemoMySQLDatabasePattern.MatchString(database) {
-		return fmt.Errorf("demo refuses MySQL database %q; use a dedicated sandbox/smoke/test/ci database name", database)
+	if !safeDemoSQLDatabasePattern.MatchString(database) {
+		return fmt.Errorf("demo refuses %s database %q; use a dedicated sandbox/smoke/test/ci database name", demoSQLStoreBackendLabel(backend), database)
 	}
 	return nil
 }
 
-func mysqlStoreDatabaseName(storeURL string) (string, error) {
+func demoSQLStoreDatabaseName(storeURL string, backend string) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(storeURL))
 	if err != nil {
-		return "", fmt.Errorf("parse MySQL demo Store URL: %w", err)
+		return "", fmt.Errorf("parse %s demo Store URL: %w", demoSQLStoreBackendLabel(backend), err)
 	}
 	escapedPath := strings.TrimLeft(parsed.EscapedPath(), "/")
 	database, err := url.PathUnescape(escapedPath)
 	if err != nil {
-		return "", fmt.Errorf("parse MySQL demo Store database path: %w", err)
+		return "", fmt.Errorf("parse %s demo Store database path: %w", demoSQLStoreBackendLabel(backend), err)
 	}
 	database = strings.TrimSpace(database)
 	if database == "" {
-		return "", errors.New("demo MySQL Store requires a database path")
+		return "", fmt.Errorf("demo %s Store requires a database path", demoSQLStoreBackendLabel(backend))
 	}
 	return database, nil
+}
+
+func demoSQLStoreBackendLabel(backend string) string {
+	switch backend {
+	case "postgres":
+		return "PostgreSQL"
+	case "mysql":
+		return "MySQL"
+	default:
+		return backend
+	}
 }
 
 func upgradeDemoStoreSchema(ctx context.Context, storeURL string) error {
@@ -437,7 +447,9 @@ func printDemoReport(report demoCommandReport) {
 	fmt.Printf("Status: %s\n", report.Status)
 	fmt.Printf("Evidence bundle: %s\n", report.EvidencePath)
 	fmt.Printf("Store: %s\n", report.Store)
-	fmt.Printf("Demo endpoint: %s\n", report.DemoEndpoint)
+	if strings.TrimSpace(report.DemoEndpointUsed) != "" {
+		fmt.Printf("Demo endpoint used during run: %s\n", report.DemoEndpointUsed)
+	}
 	fmt.Printf("Demo output root: %s\n", report.OutputRoot)
 	if report.OutputRetained && strings.TrimSpace(report.NextInspectCommand) != "" {
 		fmt.Printf("Next: %s\n", report.NextInspectCommand)

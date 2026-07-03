@@ -20,10 +20,14 @@ func TestDemoCommandRunsLocalAPIAndIndexesEvidence(t *testing.T) {
 		"Status: passed",
 		"Evidence bundle:",
 		"Store: sqlite://",
+		"Demo endpoint used during run:",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("demo output missing %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "Demo endpoint:") {
+		t.Fatalf("demo output should label the closed endpoint as used during the run:\n%s", out)
 	}
 
 	storeRef := "sqlite://" + filepath.Join(outputDir, "store.sqlite")
@@ -170,20 +174,45 @@ func TestDemoInspectCommandUsesRunnableStoreReference(t *testing.T) {
 	}
 }
 
-func TestDemoMySQLStoreGuard(t *testing.T) {
-	if err := requireSafeDemoMySQLStore("mysql://user:secret@example.com:3306/agent_testbench_smoke?tls=false"); err != nil {
+func TestDemoSQLStoreGuard(t *testing.T) {
+	if err := requireSafeDemoSQLStore("mysql://user:secret@example.com:3306/agent_testbench_smoke?tls=false"); err != nil {
 		t.Fatalf("safe MySQL demo store rejected: %v", err)
 	}
-	if err := requireSafeDemoMySQLStore("mysql://user:secret@example.com:3306/sandbox_demo?tls=false"); err != nil {
+	if err := requireSafeDemoSQLStore("mysql://user:secret@example.com:3306/sandbox_demo?tls=false"); err != nil {
 		t.Fatalf("sandbox MySQL demo store rejected: %v", err)
 	}
+	if err := requireSafeDemoSQLStore("postgres://user:secret@example.com:5432/agent_testbench_smoke?sslmode=disable"); err != nil {
+		t.Fatalf("safe PostgreSQL demo store rejected: %v", err)
+	}
+	if err := requireSafeDemoSQLStore("postgres://user:secret@example.com:5432/sandbox_demo?sslmode=disable"); err != nil {
+		t.Fatalf("sandbox PostgreSQL demo store rejected: %v", err)
+	}
 
-	err := requireSafeDemoMySQLStore("mysql://user:secret@example.com:3306/business_prod?tls=false")
+	err := requireSafeDemoSQLStore("mysql://user:secret@example.com:3306/business_prod?tls=false")
 	if err == nil {
 		t.Fatal("unsafe MySQL demo store unexpectedly accepted")
 	}
 	message := err.Error()
 	if !strings.Contains(message, "business_prod") || strings.Contains(message, "secret") {
 		t.Fatalf("unsafe MySQL error should name only the database, got: %s", message)
+	}
+
+	err = requireSafeDemoSQLStore("postgres://user:secret@example.com:5432/business_prod?sslmode=disable")
+	if err == nil {
+		t.Fatal("unsafe PostgreSQL demo store unexpectedly accepted")
+	}
+	message = err.Error()
+	if !strings.Contains(message, "business_prod") || strings.Contains(message, "secret") {
+		t.Fatalf("unsafe PostgreSQL error should name only the database, got: %s", message)
+	}
+}
+
+func TestMaskStoreURLScrubsQueryCredentials(t *testing.T) {
+	got := maskStoreURL("postgres://user@example.com:5432/agent_testbench_smoke?password=secret&sslmode=disable&client_secret=hidden")
+	if strings.Contains(got, "password=secret") || strings.Contains(got, "client_secret=hidden") {
+		t.Fatalf("maskStoreURL leaked query credentials: %s", got)
+	}
+	if !strings.Contains(got, "password=xxxxx") || !strings.Contains(got, "client_secret=xxxxx") || !strings.Contains(got, "sslmode=disable") {
+		t.Fatalf("maskStoreURL did not preserve safe query params and mask credential params: %s", got)
 	}
 }
