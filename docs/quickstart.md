@@ -16,9 +16,17 @@ Install JavaScript dependencies once:
 npm ci
 ```
 
+For the fastest local proof, run the one-command demo after dependencies are
+installed:
+
+```sh
+npm run demo:one
+```
+
 ## Verify the Checkout
 
 ```sh
+npm run demo:one
 ./bin/agent-testbench.sh version
 ./bin/agent-testbench.sh setup --store local --sqlite .runtime/agent-testbench-local.sqlite --build-runtime
 ./bin/agent-testbench.sh onboard --store local --sqlite .runtime/agent-testbench-local.sqlite --install-shell
@@ -45,8 +53,10 @@ test against a generated generic import bundle. For final live topology sign-off
 `AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS`, and `AGENT_TESTBENCH_SMOKE_TRACE_IDS` with trace id mappings
 for every configured workflow step so release-check fails instead of using the
 synthetic SkyWalking provider or a partial trace-id set.
-The demo command starts a temporary local HTTP endpoint, runs the generic
-`examples/api-cases/create-item.json` case against the active SQL Store, or
+`npm run demo:one` is the quickest local proof: it starts a temporary HTTP
+endpoint, creates a temporary SQLite Store, runs the generic
+`examples/api-cases/create-item.json` case, and prints the Evidence bundle path.
+The lower-level demo command runs the same case against the active SQL Store, or
 `AGENT_TESTBENCH_DEMO_STORE=postgres://...` / `AGENT_TESTBENCH_DEMO_STORE=mysql://...` /
 `AGENT_TESTBENCH_DEMO_STORE=sqlite://...`, and
 prints the Evidence bundle path.

@@ -182,7 +182,7 @@ async function main() {
       throw new Error(`store status did not use ${backend}:\n${status.stdout}`);
     }
 
-    const publish = await runJSON(["config", "publish", "--from", profileDir, "--json"], env);
+    const publish = await runJSON(["template-package", "import", "--from", profileDir, "--json"], env);
     if (publish?.profileId !== "smoke") {
       throw new Error(`unexpected publish payload: ${JSON.stringify(publish)}`);
     }

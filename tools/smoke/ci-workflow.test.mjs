@@ -47,6 +47,10 @@ test("Go lint entrypoints use the PR-diff lint gate", () => {
   const packageJSON = readFileSync(join(rootDir, "package.json"), "utf8");
   const makefile = readFileSync(join(rootDir, "Makefile"), "utf8");
 
+  assert.match(workflow, /actions\/checkout@v7/);
+  assert.match(workflow, /actions\/setup-go@v6/);
+  assert.match(workflow, /actions\/setup-node@v6/);
+  assert.match(workflow, /node-version:\s*24/);
   assert.match(workflow, /go install github\.com\/golangci\/golangci-lint\/v2\/cmd\/golangci-lint@v2\.12\.2/);
   assert.match(workflow, /make lint/);
   assert.match(workflow, /make lint-full/);
@@ -73,6 +77,29 @@ test("CI includes dependency baseline validation", () => {
   assert.match(workflow, /Run dependency baseline/);
   assert.match(workflow, /npm run guard:dependencies/);
   assert.match(packageJSON, /"guard:dependencies": "bash tools\/guardrails\/check_dependency_baseline\.sh"/);
+});
+
+test("tag release workflow builds and uploads versioned CLI assets", () => {
+  const workflow = readFileSync(join(rootDir, ".github", "workflows", "release.yml"), "utf8");
+  const packageJSON = readFileSync(join(rootDir, "package.json"), "utf8");
+  const releaseScript = readFileSync(join(rootDir, "scripts", "build-release.sh"), "utf8");
+
+  assert.match(workflow, /tags:\n\s+- "v\*"/);
+  assert.match(workflow, /contents:\s*write/);
+  assert.match(workflow, /actions\/checkout@v7/);
+  assert.match(workflow, /actions\/setup-go@v6/);
+  assert.match(workflow, /actions\/setup-node@v6/);
+  assert.match(workflow, /actions\/upload-artifact@v7/);
+  assert.match(workflow, /actions\/download-artifact@v8/);
+  assert.match(workflow, /name:\s*linux-amd64/);
+  assert.match(workflow, /name:\s*linux-arm64/);
+  assert.match(workflow, /name:\s*darwin-amd64/);
+  assert.match(workflow, /name:\s*darwin-arm64/);
+  assert.match(workflow, /gh release create/);
+  assert.match(workflow, /gh release upload "\$tag" dist\/\*\.tar\.gz --clobber/);
+  assert.match(packageJSON, /"release:build": "bash scripts\/build-release\.sh"/);
+  assert.match(releaseScript, /-X main\.version=\$version -X main\.buildRevision=\$revision/);
+  assert.match(releaseScript, /agent-testbench_\$\{version\}_\$\{goos\}_\$\{goarch\}\.tar\.gz/);
 });
 
 test("pull request template asks for scoped release-check evidence", () => {

@@ -8,10 +8,10 @@ import (
 	"strings"
 )
 
-const version = "0.1.0"
 const interfaceNodeCommand = "interface-node"
 const cliCommandTask = "task"
 
+var version = "0.4.0-dev"
 var buildRevision = ""
 
 type versionCommandReport struct {

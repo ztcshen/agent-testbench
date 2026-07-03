@@ -51,6 +51,7 @@ AgentTestBench 是一套通用的 agent-native 集成测试控制平面。它让
 git clone https://github.com/ztcshen/agent-testbench.git
 cd agent-testbench
 npm ci
+npm run demo:one
 npm run demo:services -- --port 49190
 AGENT_TESTBENCH_DEMO_STORE="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run demo:api-case
 AGENT_TESTBENCH_SMOKE_STORE_DSN="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run release-check -- --scope cmd/agent-testbench
@@ -61,6 +62,9 @@ AGENT_TESTBENCH_SMOKE_STORE_DSN="mysql://user:pass@host:3306/agent_testbench_smo
 
 What to point out:
 
+- `demo:one` is the lowest-friction first proof: it starts a temporary local
+  target, uses a temporary SQLite Store, runs one API case, and prints the
+  Evidence bundle path.
 - `/demo-gallery.html` now opens with a CLI automation animation: restore a
   target runtime, rank risky cases, run a case, produce a map atlas,
   process Evidence tasks, identify a Root cause, and publish a quality report.
@@ -89,6 +93,8 @@ What to point out:
 
 讲解重点：
 
+- `demo:one` 是最低摩擦的首次证明：它启动临时本地目标，使用临时 SQLite Store，
+  执行一个 API case，并打印 Evidence 目录。
 - `/demo-gallery.html` 现在包含 CLI 自动化演示动画：恢复目标运行时、排序高风险用例、
   执行用例、生成 map atlas、处理 Evidence tasks、定位 Root cause，并发布质量报告。
 - `demo:services` 会启动零售履约、IoT 遥测控制和内容审核三个通用 demo target，

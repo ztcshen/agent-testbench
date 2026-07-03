@@ -1,6 +1,7 @@
 # AgentTestBench
 
 [![CI](https://github.com/ztcshen/agent-testbench/actions/workflows/ci.yml/badge.svg)](https://github.com/ztcshen/agent-testbench/actions/workflows/ci.yml)
+[![Release](https://github.com/ztcshen/agent-testbench/actions/workflows/release.yml/badge.svg)](https://github.com/ztcshen/agent-testbench/actions/workflows/release.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
 **English** | [简体中文](README.zh-CN.md)
@@ -11,6 +12,17 @@ engineers and automation agents discover runnable targets, run API cases,
 workflows, and map plans, record reproducible Evidence, and inspect compact
 HTML/JSON reports without hardcoding one business domain into the open-source
 core.
+
+Try the local Evidence loop without provisioning a team Store:
+
+```sh
+npm ci
+npm run demo:one
+```
+
+The demo starts a temporary HTTP target, runs
+`examples/api-cases/create-item.json`, writes request/response/assertion
+Evidence into a temporary SQLite Store, and prints the Evidence bundle path.
 
 ## Product Direction
 
@@ -156,6 +168,7 @@ Install dependencies and verify the checkout:
 
 ```sh
 npm ci
+npm run demo:one
 ./bin/agent-testbench.sh version
 ./bin/agent-testbench.sh setup --store local --sqlite .runtime/agent-testbench-local.sqlite --build-runtime
 ./bin/agent-testbench.sh onboard --store local --sqlite .runtime/agent-testbench-local.sqlite --install-shell
@@ -192,14 +205,16 @@ shell integration. If a wrapper on `PATH` points at an older binary, `doctor`
 reports `runtime.shell-entrypoint` with the exact `.runtime/bin` directory or
 `ATB_BIN` value to use before rerunning `update`.
 
-The demo command starts a temporary local HTTP endpoint, runs the generic
-`examples/api-cases/create-item.json` case against the active SQL Store or
+`npm run demo:one` is the zero-setup path: it starts a temporary local HTTP
+endpoint, creates a temporary SQLite Store, runs the generic
+`examples/api-cases/create-item.json` case, and prints the Evidence bundle path.
+The lower-level `demo:api-case` command runs the same case against the active SQL Store or
 `AGENT_TESTBENCH_DEMO_STORE=postgres://...` /
 `AGENT_TESTBENCH_DEMO_STORE=mysql://...` /
-`AGENT_TESTBENCH_DEMO_STORE=sqlite://...`, and prints the Evidence bundle path. The
-demo and release gate require dedicated MySQL Store database names that look
-like sandbox/smoke/test/CI targets; do not point them at an application schema. The
-release gate requires a SQLite, PostgreSQL, or MySQL smoke Store DSN.
+`AGENT_TESTBENCH_DEMO_STORE=sqlite://...`. The demo and release gate require
+dedicated MySQL Store database names that look like sandbox/smoke/test/CI
+targets; do not point them at an application schema. The release gate requires
+a SQLite, PostgreSQL, or MySQL smoke Store DSN.
 It runs whitespace checks, generated-state checks, source-domain guardrails, Go
 tests, the demo, the React build, active SQL Store CLI smoke tests, and
 headless browser smoke tests.
