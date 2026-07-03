@@ -143,6 +143,12 @@ func TestDemoInspectCommandUsesRunnableStoreReference(t *testing.T) {
 			wantOK:      false,
 		},
 		{
+			name:        "explicit dsn query password",
+			storeRef:    "postgres://user@example.com:5432/agent_testbench_smoke?password=secret&sslmode=disable",
+			resolvedURL: "postgres://user@example.com:5432/agent_testbench_smoke?password=secret&sslmode=disable",
+			wantOK:      false,
+		},
+		{
 			name:        "explicit safe sqlite dsn",
 			storeRef:    "sqlite:///tmp/agent-testbench-demo/store.sqlite",
 			resolvedURL: "sqlite:///tmp/agent-testbench-demo/store.sqlite",

@@ -438,7 +438,7 @@ else
       tools/examples/*.test.mjs|tools/smoke/*.test.mjs)
         node_scope_tests+=("$path")
         ;;
-      .github/workflows/ci.yml)
+      .github/workflows/ci.yml|.github/workflows/release.yml)
         node_scope_tests+=("tools/smoke/ci-workflow.test.mjs")
         ;;
       tools/release-check.sh|tools/guardrails/*)

@@ -27,6 +27,20 @@ const demoDefaultRunPrefix = "demo-create-item"
 const demoAPIItemsPath = "/v1/items"
 
 var safeDemoMySQLDatabasePattern = regexp.MustCompile(`(?i)(^|[_-])agent[_-]testbench([_-]|$)|(^|[_-])(sandbox|smoke|test|ci)([_-]|$)`)
+var storeURLQueryCredentialKeys = map[string]struct{}{
+	"access_key":    {},
+	"access_token":  {},
+	"api_key":       {},
+	"apikey":        {},
+	"client_secret": {},
+	"pass":          {},
+	"passwd":        {},
+	"password":      {},
+	"pwd":           {},
+	"refresh_token": {},
+	"secret":        {},
+	"token":         {},
+}
 
 type demoCommandOptions struct {
 	outputDir   string
@@ -261,19 +275,45 @@ func demoInspectStoreReference(storeRef string, resolvedStoreURL string) (string
 	if _, err := storeBackendFromURL(storeRef); err != nil {
 		return storeRef, true
 	}
-	if storeURLHasInlinePassword(storeRef) {
+	if storeURLHasCredentials(storeRef) {
 		return "", false
 	}
 	return storeRef, true
 }
 
-func storeURLHasInlinePassword(raw string) bool {
+func storeURLHasCredentials(raw string) bool {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || parsed.User == nil {
+	if err != nil {
 		return false
 	}
-	_, ok := parsed.User.Password()
-	return ok
+	if parsed.User != nil {
+		if _, ok := parsed.User.Password(); ok {
+			return true
+		}
+	}
+	for key, values := range parsed.Query() {
+		if !storeURLQueryKeyIsCredential(key) {
+			continue
+		}
+		if len(values) == 0 {
+			return true
+		}
+		for _, value := range values {
+			if strings.TrimSpace(value) != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func storeURLQueryKeyIsCredential(key string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	normalized = strings.NewReplacer("-", "_", ".", "_").Replace(normalized)
+	if _, ok := storeURLQueryCredentialKeys[normalized]; ok {
+		return true
+	}
+	return strings.Contains(normalized, "password")
 }
 
 func requireSafeDemoMySQLStore(storeURL string) error {

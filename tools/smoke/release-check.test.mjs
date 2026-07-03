@@ -290,6 +290,18 @@ test("release-check scope-file runs targeted example tests without full Go suite
   }
 });
 
+test("release-check scopes release workflow changes to workflow smoke", () => {
+  const result = runReleaseCheck(releaseCheckEnv({
+    AGENT_TESTBENCH_SKIP_QUALITY_GATE: "1",
+  }), ["--scope", ".github/workflows/release.yml"]);
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /running scoped Node tests/);
+  assert.match(result.stdout, /tools\/smoke\/ci-workflow\.test\.mjs/);
+  assert.doesNotMatch(result.stdout, /no scoped runtime tests selected/);
+  assert.doesNotMatch(result.stdout, /running Go tests/);
+});
+
 test("release-check scoped Go selection runs only touched package directories", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agent-testbench-release-go-scope-"));
   const binDir = path.join(tempDir, "bin");

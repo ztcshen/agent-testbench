@@ -94,6 +94,13 @@ test("tag release workflow builds and uploads versioned CLI assets", () => {
   assert.match(workflow, /actions\/setup-node@v6/);
   assert.match(workflow, /actions\/upload-artifact@v7/);
   assert.match(workflow, /actions\/download-artifact@v8/);
+  assert.match(workflow, /gate:\n\s+name:\s*Release gate/);
+  assert.match(workflow, /Install release gate tools/);
+  assert.match(workflow, /go install github\.com\/golangci\/golangci-lint\/v2\/cmd\/golangci-lint@v2\.12\.2/);
+  assert.match(workflow, /npx playwright install chromium/);
+  assert.match(workflow, /npm run release-check -- --full/);
+  assert.match(workflow, /AGENT_TESTBENCH_SMOKE_STORE_DSN:\s*sqlite:\/\/\$\{\{\s*runner\.temp\s*\}\}\/agent-testbench-release-gate\.sqlite/);
+  assert.match(workflow, /needs:\n\s+- build\n\s+- gate/);
   assert.match(workflow, /name:\s*linux-amd64/);
   assert.match(workflow, /name:\s*linux-arm64/);
   assert.match(workflow, /name:\s*darwin-amd64/);
