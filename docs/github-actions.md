@@ -27,6 +27,9 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Install release gate tools
+        run: sudo apt-get update && sudo apt-get install -y ripgrep sqlite3
+
       - run: npm ci
 
       - name: Run local AgentTestBench demo

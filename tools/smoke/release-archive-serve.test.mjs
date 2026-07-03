@@ -107,7 +107,7 @@ test("release archive can serve the workbench outside a source checkout", async 
       "--host", "127.0.0.1",
       "--port", String(port),
     ], {
-      cwd: releaseRoot,
+      cwd: tempDir,
       env: {
         ...process.env,
         AGENT_TESTBENCH_CONFIG_HOME: path.join(tempDir, "config"),

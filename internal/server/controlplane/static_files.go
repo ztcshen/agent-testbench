@@ -45,6 +45,24 @@ func findStaticDir() string {
 		filepath.Join("control-plane", "static"),
 		filepath.Join("..", "..", "control-plane", "static"),
 	}
+	if executablePath, err := os.Executable(); err == nil {
+		executableDir := filepath.Dir(executablePath)
+		candidates = append(candidates,
+			filepath.Join(executableDir, "control-plane", "static"),
+			filepath.Join(filepath.Dir(executableDir), "control-plane", "static"),
+		)
+	}
+	candidates = append(candidates, staticDirCandidatesFromWorkingDirectory()...)
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return candidate
+		}
+	}
+	return filepath.Join("control-plane", "static")
+}
+
+func staticDirCandidatesFromWorkingDirectory() []string {
+	var candidates []string
 	if wd, err := os.Getwd(); err == nil {
 		for dir := wd; ; dir = filepath.Dir(dir) {
 			candidates = append(candidates, filepath.Join(dir, "control-plane", "static"))
@@ -53,12 +71,7 @@ func findStaticDir() string {
 			}
 		}
 	}
-	for _, candidate := range candidates {
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			return candidate
-		}
-	}
-	return filepath.Join("control-plane", "static")
+	return candidates
 }
 
 const ReadModelDashboard = "dashboard"

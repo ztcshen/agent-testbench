@@ -8,6 +8,7 @@ test-results/
 test-private/
 coverage/
 build/reports/
+dist/
 *.log
 *.db
 *.sqlite

@@ -101,6 +101,8 @@ func parseDemoCommandOptions(args []string) (demoCommandOptions, error) {
 }
 
 func executeDemo(ctx context.Context, options demoCommandOptions) (demoCommandReport, error) {
+	explicitStoreRef := strings.TrimSpace(options.storeRef) != ""
+	explicitEvidenceDir := strings.TrimSpace(options.evidenceDir) != ""
 	outputRoot, err := prepareDemoOutputRoot(options.outputDir)
 	if err != nil {
 		return demoCommandReport{}, err
@@ -112,6 +114,9 @@ func executeDemo(ctx context.Context, options demoCommandOptions) (demoCommandRe
 	evidenceDir := strings.TrimSpace(options.evidenceDir)
 	if evidenceDir == "" {
 		evidenceDir = filepath.Join(outputRoot.path, "evidence")
+	}
+	if err := validateDemoCleanEvidenceRetention(options.clean, explicitStoreRef, explicitEvidenceDir, outputRoot.path, evidenceDir); err != nil {
+		return demoCommandReport{}, err
 	}
 	storeRef := strings.TrimSpace(options.storeRef)
 	if storeRef == "" {
@@ -137,7 +142,7 @@ func executeDemo(ctx context.Context, options demoCommandOptions) (demoCommandRe
 	}
 	runID := strings.TrimSpace(options.runID)
 	if runID == "" {
-		runID = demoDefaultRunPrefix + "-" + time.Now().UTC().Format("20060102T150405")
+		runID = defaultDemoRunID(time.Now())
 	}
 	result, err := apicase.Run(ctx, apicase.RunOptions{
 		CasePath:    casePath,
@@ -181,6 +186,43 @@ func executeDemo(ctx context.Context, options demoCommandOptions) (demoCommandRe
 		}
 	}
 	return report, nil
+}
+
+func defaultDemoRunID(now time.Time) string {
+	return demoDefaultRunPrefix + "-" + now.UTC().Format("20060102T150405.000000000")
+}
+
+func validateDemoCleanEvidenceRetention(clean bool, explicitStoreRef bool, explicitEvidenceDir bool, outputRoot string, evidenceDir string) error {
+	if !clean || !explicitStoreRef {
+		return nil
+	}
+	if !explicitEvidenceDir {
+		return fmt.Errorf("demo refuses --clean with an explicit --store unless --evidence-dir points outside the cleaned --output-dir")
+	}
+	inside, err := demoPathContainsOrEquals(outputRoot, evidenceDir)
+	if err != nil {
+		return err
+	}
+	if inside {
+		return fmt.Errorf("demo refuses --clean because --evidence-dir %s is inside the cleaned --output-dir %s", evidenceDir, outputRoot)
+	}
+	return nil
+}
+
+func demoPathContainsOrEquals(parent string, child string) (bool, error) {
+	absoluteParent, err := filepath.Abs(parent)
+	if err != nil {
+		return false, fmt.Errorf("resolve demo output directory: %w", err)
+	}
+	absoluteChild, err := filepath.Abs(child)
+	if err != nil {
+		return false, fmt.Errorf("resolve demo evidence directory: %w", err)
+	}
+	relative, err := filepath.Rel(absoluteParent, absoluteChild)
+	if err != nil {
+		return false, fmt.Errorf("compare demo output and evidence directories: %w", err)
+	}
+	return relative == "." || (!strings.HasPrefix(relative, ".."+string(os.PathSeparator)) && relative != ".." && !filepath.IsAbs(relative)), nil
 }
 
 func prepareDemoOutputRoot(outputDir string) (demoOutputRoot, error) {

@@ -1,9 +1,11 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDemoCommandRunsLocalAPIAndIndexesEvidence(t *testing.T) {
@@ -50,6 +52,66 @@ func TestDemoCommandCleanAllowsImplicitTemporaryOutput(t *testing.T) {
 	}
 	if strings.Contains(out, "Next:") {
 		t.Fatalf("demo --clean should not print an inspect command for removed output:\n%s", out)
+	}
+}
+
+func TestDemoCommandCleanRefusesExplicitStoreWithDefaultEvidenceDir(t *testing.T) {
+	storeRef := "sqlite://" + filepath.Join(t.TempDir(), "persistent.sqlite")
+	env := []string{"AGENT_TESTBENCH_CONFIG_HOME=" + t.TempDir()}
+
+	out := runCLIFailsWithEnv(t, env, "demo", "--store", storeRef, "--clean")
+	if !strings.Contains(out, "refuses --clean with an explicit --store") {
+		t.Fatalf("demo --clean should reject persistent stores with default evidence:\n%s", out)
+	}
+}
+
+func TestDemoCommandCleanRefusesExplicitStoreEvidenceInsideOutputDir(t *testing.T) {
+	parent := t.TempDir()
+	outputDir := filepath.Join(parent, "demo-output")
+	evidenceDir := filepath.Join(outputDir, "evidence")
+	storeRef := "sqlite://" + filepath.Join(t.TempDir(), "persistent.sqlite")
+	env := []string{"AGENT_TESTBENCH_CONFIG_HOME=" + t.TempDir()}
+
+	out := runCLIFailsWithEnv(t, env, "demo", "--output-dir", outputDir, "--store", storeRef, "--evidence-dir", evidenceDir, "--clean")
+	if !strings.Contains(out, "is inside the cleaned --output-dir") {
+		t.Fatalf("demo --clean should reject evidence under cleaned output root:\n%s", out)
+	}
+}
+
+func TestDemoCommandCleanKeepsExplicitStoreEvidenceOutsideOutputDir(t *testing.T) {
+	parent := t.TempDir()
+	outputDir := filepath.Join(parent, "demo-output")
+	evidenceDir := filepath.Join(t.TempDir(), "evidence")
+	storeRef := "sqlite://" + filepath.Join(t.TempDir(), "persistent.sqlite")
+	env := []string{"AGENT_TESTBENCH_CONFIG_HOME=" + t.TempDir()}
+
+	out := runCLIWithEnv(t, env, "demo", "--output-dir", outputDir, "--store", storeRef, "--evidence-dir", evidenceDir, "--clean")
+	if !strings.Contains(out, "Demo output cleanup: enabled") {
+		t.Fatalf("demo --clean should report cleanup:\n%s", out)
+	}
+	if _, err := os.Stat(outputDir); !os.IsNotExist(err) {
+		t.Fatalf("cleaned output dir should be removed, stat err = %v", err)
+	}
+	if _, err := os.Stat(evidenceDir); err != nil {
+		t.Fatalf("retained evidence dir should remain: %v", err)
+	}
+	runs := runCLIWithEnv(t, env, "case", "inspect", "--view", "runs", "--store", storeRef, "--json")
+	if !strings.Contains(runs, demoDefaultRunPrefix) {
+		t.Fatalf("persistent store should retain the demo run:\n%s", runs)
+	}
+}
+
+func TestDefaultDemoRunIDUsesSubsecondPrecision(t *testing.T) {
+	now := time.Date(2026, time.July, 3, 12, 0, 0, 1, time.UTC)
+	next := now.Add(time.Nanosecond)
+
+	first := defaultDemoRunID(now)
+	second := defaultDemoRunID(next)
+	if first == second {
+		t.Fatalf("default demo run IDs should differ within the same second: %q", first)
+	}
+	if !strings.HasPrefix(first, demoDefaultRunPrefix+"-20260703T120000.") {
+		t.Fatalf("default demo run ID has unexpected format: %q", first)
 	}
 }
 

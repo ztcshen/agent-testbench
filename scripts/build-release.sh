@@ -60,10 +60,6 @@ if [[ -z "$revision" ]]; then
   revision=$(git rev-parse HEAD)
 fi
 
-if [[ ${#targets[@]} -eq 0 ]]; then
-  targets+=("$(go env GOOS)/$(go env GOARCH)")
-fi
-
 absolute_path() {
   node -e 'const path = require("node:path"); process.stdout.write(path.resolve(process.argv[1]));' "$1"
 }
@@ -99,6 +95,10 @@ validate_release_output_dir() {
 
 if ! validate_release_output_dir "$output_dir"; then
   exit 1
+fi
+
+if [[ ${#targets[@]} -eq 0 ]]; then
+  targets+=("$(go env GOOS)/$(go env GOARCH)")
 fi
 
 mkdir -p "$output_dir"

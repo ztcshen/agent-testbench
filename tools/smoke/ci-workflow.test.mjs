@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..", "..");
@@ -106,14 +108,46 @@ test("tag release workflow builds and uploads versioned CLI assets", () => {
   assert.doesNotMatch(releaseScript, /rm -rf "\$output_dir"/);
 });
 
-test("release build refuses the repository root as output directory", () => {
+test("release build refuses the repository root before resolving the default Go target", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "agent-testbench-release-path-"));
+  const fakeBin = join(tempDir, "bin");
+  await mkdir(fakeBin, { recursive: true });
+  const fakeGo = join(fakeBin, "go");
+  await writeFile(fakeGo, "#!/usr/bin/env sh\necho 'fake go should not run' >&2\nexit 42\n");
+  await chmod(fakeGo, 0o755);
+
   const result = spawnSync("bash", ["scripts/build-release.sh", "--output-dir", rootDir], {
     cwd: rootDir,
     encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${fakeBin}${delimiter}${process.env.PATH || ""}`,
+    },
   });
 
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /dedicated artifact directory/);
+  try {
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /dedicated artifact directory/);
+    assert.doesNotMatch(result.stderr, /fake go should not run/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("starter GitHub Actions workflow installs release-check tools", () => {
+  const docs = readFileSync(join(rootDir, "docs", "github-actions.md"), "utf8");
+
+  assert.match(docs, /Install release gate tools/);
+  assert.match(docs, /sudo apt-get update && sudo apt-get install -y ripgrep sqlite3/);
+});
+
+test("generated release archives stay ignored and guarded", () => {
+  const gitignore = readFileSync(join(rootDir, ".gitignore"), "utf8");
+  const releaseCheck = readFileSync(join(rootDir, "tools", "release-check.sh"), "utf8");
+
+  assert.match(gitignore, /^dist\/$/m);
+  assert.match(releaseCheck, /dist\/\*/);
+  assert.match(releaseCheck, /'dist'/);
 });
 
 test("pull request template asks for scoped release-check evidence", () => {
