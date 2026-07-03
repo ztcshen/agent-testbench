@@ -26,7 +26,7 @@ import (
 const demoDefaultRunPrefix = "demo-create-item"
 const demoAPIItemsPath = "/v1/items"
 
-var safeDemoMySQLDatabasePattern = regexp.MustCompile(`(?i)(^|[_-])agent[_-]testbench([_-]|$)|(^|[_-])(smoke|test|ci)([_-]|$)`)
+var safeDemoMySQLDatabasePattern = regexp.MustCompile(`(?i)(^|[_-])agent[_-]testbench([_-]|$)|(^|[_-])(sandbox|smoke|test|ci)([_-]|$)`)
 
 type demoCommandOptions struct {
 	outputDir   string

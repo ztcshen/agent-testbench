@@ -168,6 +168,9 @@ func TestDemoMySQLStoreGuard(t *testing.T) {
 	if err := requireSafeDemoMySQLStore("mysql://user:secret@example.com:3306/agent_testbench_smoke?tls=false"); err != nil {
 		t.Fatalf("safe MySQL demo store rejected: %v", err)
 	}
+	if err := requireSafeDemoMySQLStore("mysql://user:secret@example.com:3306/sandbox_demo?tls=false"); err != nil {
+		t.Fatalf("sandbox MySQL demo store rejected: %v", err)
+	}
 
 	err := requireSafeDemoMySQLStore("mysql://user:secret@example.com:3306/business_prod?tls=false")
 	if err == nil {
