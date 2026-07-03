@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -100,6 +101,18 @@ test("tag release workflow builds and uploads versioned CLI assets", () => {
   assert.match(packageJSON, /"release:build": "bash scripts\/build-release\.sh"/);
   assert.match(releaseScript, /-X main\.version=\$version -X main\.buildRevision=\$revision/);
   assert.match(releaseScript, /agent-testbench_\$\{version\}_\$\{goos\}_\$\{goarch\}\.tar\.gz/);
+  assert.match(releaseScript, /control-plane\/static/);
+  assert.doesNotMatch(releaseScript, /rm -rf "\$output_dir"/);
+});
+
+test("release build refuses the repository root as output directory", () => {
+  const result = spawnSync("bash", ["scripts/build-release.sh", "--output-dir", rootDir], {
+    cwd: rootDir,
+    encoding: "utf8",
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /dedicated artifact directory/);
 });
 
 test("pull request template asks for scoped release-check evidence", () => {

@@ -2,17 +2,21 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"agent-testbench/internal/domain/apicasespec"
+	"agent-testbench/internal/domain/commandline"
 	"agent-testbench/internal/runner/apicase"
 	"agent-testbench/internal/store/mysql"
 	"agent-testbench/internal/store/postgres"
@@ -22,6 +26,8 @@ import (
 const demoDefaultRunPrefix = "demo-create-item"
 const demoAPIItemsPath = "/v1/items"
 
+var safeDemoMySQLDatabasePattern = regexp.MustCompile(`(?i)(^|[_-])agent[_-]testbench([_-]|$)|(^|[_-])(smoke|test|ci)([_-]|$)`)
+
 type demoCommandOptions struct {
 	outputDir   string
 	evidenceDir string
@@ -30,6 +36,12 @@ type demoCommandOptions struct {
 	profileID   string
 	jsonOutput  bool
 	clean       bool
+}
+
+type demoOutputRoot struct {
+	path    string
+	cleanup func() error
+	created bool
 }
 
 type demoCommandReport struct {
@@ -89,21 +101,27 @@ func parseDemoCommandOptions(args []string) (demoCommandOptions, error) {
 }
 
 func executeDemo(ctx context.Context, options demoCommandOptions) (demoCommandReport, error) {
-	outputRoot, cleanup, err := prepareDemoOutputRoot(options.outputDir)
+	outputRoot, err := prepareDemoOutputRoot(options.outputDir)
 	if err != nil {
 		return demoCommandReport{}, err
+	}
+	if options.clean && !outputRoot.created {
+		return demoCommandReport{}, fmt.Errorf("demo refuses --clean with pre-existing --output-dir %s; omit --clean or choose a new demo output directory", outputRoot.path)
 	}
 
 	evidenceDir := strings.TrimSpace(options.evidenceDir)
 	if evidenceDir == "" {
-		evidenceDir = filepath.Join(outputRoot, "evidence")
+		evidenceDir = filepath.Join(outputRoot.path, "evidence")
 	}
 	storeRef := strings.TrimSpace(options.storeRef)
 	if storeRef == "" {
-		storeRef = "sqlite://" + filepath.Join(outputRoot, "store.sqlite")
+		storeRef = "sqlite://" + filepath.Join(outputRoot.path, "store.sqlite")
 	}
 	storeURL, err := resolveRequiredDailyStoreReference(storeRef, "")
 	if err != nil {
+		return demoCommandReport{}, err
+	}
+	if err := requireSafeDemoMySQLStore(storeURL); err != nil {
 		return demoCommandReport{}, err
 	}
 	if err := upgradeDemoStoreSchema(ctx, storeURL); err != nil {
@@ -113,7 +131,7 @@ func executeDemo(ctx context.Context, options demoCommandOptions) (demoCommandRe
 	server := httptest.NewServer(http.HandlerFunc(handleDemoAPIRequest))
 	defer server.Close()
 
-	casePath, err := writeDemoCase(outputRoot)
+	casePath, err := writeDemoCase(outputRoot.path)
 	if err != nil {
 		return demoCommandReport{}, err
 	}
@@ -137,7 +155,13 @@ func executeDemo(ctx context.Context, options demoCommandOptions) (demoCommandRe
 	maskedStore := maskStoreURL(storeURL)
 	nextInspectCommand := ""
 	if !options.clean {
-		nextInspectCommand = fmt.Sprintf("agent-testbench case inspect --view runs --store %s --run %s --json", maskedStore, result.RunID)
+		if inspectStoreRef, ok := demoInspectStoreReference(options.storeRef, storeURL); ok {
+			nextInspectCommand = fmt.Sprintf(
+				"agent-testbench case inspect --view runs --store %s --run %s --json",
+				commandline.ShellQuote(inspectStoreRef),
+				commandline.ShellQuote(result.RunID),
+			)
+		}
 	}
 	report := demoCommandReport{
 		OK:                 result.Status == "passed",
@@ -145,36 +169,104 @@ func executeDemo(ctx context.Context, options demoCommandOptions) (demoCommandRe
 		CaseID:             result.CaseID,
 		Status:             result.Status,
 		Store:              maskedStore,
-		OutputRoot:         outputRoot,
+		OutputRoot:         outputRoot.path,
 		OutputRetained:     !options.clean,
 		EvidencePath:       result.EvidencePath,
 		DemoEndpoint:       server.URL,
 		NextInspectCommand: nextInspectCommand,
 	}
 	if options.clean {
-		if err := cleanup(); err != nil {
+		if err := outputRoot.cleanup(); err != nil {
 			return demoCommandReport{}, err
 		}
 	}
 	return report, nil
 }
 
-func prepareDemoOutputRoot(outputDir string) (string, func() error, error) {
+func prepareDemoOutputRoot(outputDir string) (demoOutputRoot, error) {
 	if strings.TrimSpace(outputDir) == "" {
 		dir, err := os.MkdirTemp("", "agent-testbench-demo-")
 		if err != nil {
-			return "", func() error { return nil }, fmt.Errorf("create demo output directory: %w", err)
+			return demoOutputRoot{}, fmt.Errorf("create demo output directory: %w", err)
 		}
-		return dir, func() error { return os.RemoveAll(dir) }, nil
+		return demoOutputRoot{path: dir, cleanup: func() error { return os.RemoveAll(dir) }, created: true}, nil
 	}
 	absolute, err := filepath.Abs(outputDir)
 	if err != nil {
-		return "", func() error { return nil }, fmt.Errorf("resolve demo output directory: %w", err)
+		return demoOutputRoot{}, fmt.Errorf("resolve demo output directory: %w", err)
+	}
+	info, err := os.Stat(absolute)
+	if err == nil {
+		if !info.IsDir() {
+			return demoOutputRoot{}, fmt.Errorf("demo output path exists and is not a directory: %s", absolute)
+		}
+		return demoOutputRoot{path: absolute, cleanup: func() error { return nil }, created: false}, nil
+	}
+	if !os.IsNotExist(err) {
+		return demoOutputRoot{}, fmt.Errorf("inspect demo output directory: %w", err)
 	}
 	if err := os.MkdirAll(absolute, 0o755); err != nil {
-		return "", func() error { return nil }, fmt.Errorf("create demo output directory: %w", err)
+		return demoOutputRoot{}, fmt.Errorf("create demo output directory: %w", err)
 	}
-	return absolute, func() error { return os.RemoveAll(absolute) }, nil
+	return demoOutputRoot{path: absolute, cleanup: func() error { return os.RemoveAll(absolute) }, created: true}, nil
+}
+
+func demoInspectStoreReference(storeRef string, resolvedStoreURL string) (string, bool) {
+	storeRef = strings.TrimSpace(storeRef)
+	if storeRef == "" {
+		return resolvedStoreURL, true
+	}
+	if _, err := storeBackendFromURL(storeRef); err != nil {
+		return storeRef, true
+	}
+	if storeURLHasInlinePassword(storeRef) {
+		return "", false
+	}
+	return storeRef, true
+}
+
+func storeURLHasInlinePassword(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.User == nil {
+		return false
+	}
+	_, ok := parsed.User.Password()
+	return ok
+}
+
+func requireSafeDemoMySQLStore(storeURL string) error {
+	backend, err := storeBackendFromURL(storeURL)
+	if err != nil {
+		return err
+	}
+	if backend != "mysql" {
+		return nil
+	}
+	database, err := mysqlStoreDatabaseName(storeURL)
+	if err != nil {
+		return err
+	}
+	if !safeDemoMySQLDatabasePattern.MatchString(database) {
+		return fmt.Errorf("demo refuses MySQL database %q; use a dedicated sandbox/smoke/test/ci database name", database)
+	}
+	return nil
+}
+
+func mysqlStoreDatabaseName(storeURL string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(storeURL))
+	if err != nil {
+		return "", fmt.Errorf("parse MySQL demo Store URL: %w", err)
+	}
+	escapedPath := strings.TrimLeft(parsed.EscapedPath(), "/")
+	database, err := url.PathUnescape(escapedPath)
+	if err != nil {
+		return "", fmt.Errorf("parse MySQL demo Store database path: %w", err)
+	}
+	database = strings.TrimSpace(database)
+	if database == "" {
+		return "", errors.New("demo MySQL Store requires a database path")
+	}
+	return database, nil
 }
 
 func upgradeDemoStoreSchema(ctx context.Context, storeURL string) error {
@@ -265,9 +357,9 @@ func printDemoReport(report demoCommandReport) {
 	fmt.Printf("Store: %s\n", report.Store)
 	fmt.Printf("Demo endpoint: %s\n", report.DemoEndpoint)
 	fmt.Printf("Demo output root: %s\n", report.OutputRoot)
-	if report.OutputRetained {
+	if report.OutputRetained && strings.TrimSpace(report.NextInspectCommand) != "" {
 		fmt.Printf("Next: %s\n", report.NextInspectCommand)
-	} else {
+	} else if !report.OutputRetained {
 		fmt.Println("Demo output cleanup: enabled")
 	}
 }

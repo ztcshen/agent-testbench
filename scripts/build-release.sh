@@ -64,12 +64,43 @@ if [[ ${#targets[@]} -eq 0 ]]; then
   targets+=("$(go env GOOS)/$(go env GOARCH)")
 fi
 
-if [[ -z "$output_dir" || "$output_dir" == "/" || "$output_dir" == "." ]]; then
-  echo "--output-dir must point at a dedicated artifact directory, got: ${output_dir:-<empty>}" >&2
+absolute_path() {
+  node -e 'const path = require("node:path"); process.stdout.write(path.resolve(process.argv[1]));' "$1"
+}
+
+path_contains_or_equals() {
+  node -e 'const path = require("node:path"); const parent = path.resolve(process.argv[1]); const child = path.resolve(process.argv[2]); const rel = path.relative(parent, child); process.exit(rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel)) ? 0 : 1);' "$1" "$2"
+}
+
+validate_release_output_dir() {
+  local candidate="$1"
+  if [[ -z "$candidate" ]]; then
+    echo "--output-dir must point at a dedicated artifact directory, got: <empty>" >&2
+    return 1
+  fi
+
+  local absolute
+  absolute=$(absolute_path "$candidate")
+  if [[ "$absolute" == "/" || "$absolute" == "$ROOT_DIR" || "$absolute" == "$HOME" ]]; then
+    echo "--output-dir must point at a dedicated artifact directory outside the repository root and home directory, got: $absolute" >&2
+    return 1
+  fi
+  if path_contains_or_equals "$absolute" "$ROOT_DIR"; then
+    echo "--output-dir must not be the repository root or one of its parent directories, got: $absolute" >&2
+    return 1
+  fi
+  if path_contains_or_equals "$absolute" "$HOME"; then
+    echo "--output-dir must not be the home directory or one of its parent directories, got: $absolute" >&2
+    return 1
+  fi
+
+  output_dir="$absolute"
+}
+
+if ! validate_release_output_dir "$output_dir"; then
   exit 1
 fi
 
-rm -rf "$output_dir"
 mkdir -p "$output_dir"
 
 for target in "${targets[@]}"; do
@@ -85,6 +116,7 @@ for target in "${targets[@]}"; do
     binary_name="agent-testbench.exe"
   fi
 
+  rm -rf "$work_dir"
   mkdir -p "$work_dir"
   env GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build \
     -trimpath \
@@ -95,8 +127,11 @@ for target in "${targets[@]}"; do
   if [[ -f NOTICE ]]; then
     cp NOTICE "$work_dir/"
   fi
+  mkdir -p "$work_dir/control-plane"
+  cp -R control-plane/static "$work_dir/control-plane/"
 
   archive="$output_dir/agent-testbench_${version}_${goos}_${goarch}.tar.gz"
+  rm -f "$archive"
   tar -C "$output_dir" -czf "$archive" "$(basename "$work_dir")"
   rm -rf "$work_dir"
   echo "$archive"
