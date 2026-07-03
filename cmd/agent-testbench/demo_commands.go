@@ -20,6 +20,7 @@ import (
 )
 
 const demoDefaultRunPrefix = "demo-create-item"
+const demoAPIItemsPath = "/v1/items"
 
 type demoCommandOptions struct {
 	outputDir   string
@@ -61,14 +62,14 @@ func runDemo(ctx context.Context, args []string) error {
 }
 
 func parseDemoCommandOptions(args []string) (demoCommandOptions, error) {
-	flags := flag.NewFlagSet("demo", flag.ContinueOnError)
+	flags := flag.NewFlagSet(cliCommandDemo, flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	options := demoCommandOptions{}
 	outputDir := flags.String("output-dir", options.outputDir, "Demo output directory; defaults to a temporary directory")
 	evidenceDir := flags.String("evidence-dir", options.evidenceDir, "Evidence output directory; defaults to OUTPUT_DIR/evidence")
 	storeRef := flags.String("store", options.storeRef, "Named Store config or Store DSN; defaults to OUTPUT_DIR/store.sqlite")
 	runID := flags.String("run-id", options.runID, "Run id; defaults to a demo-create-item timestamp")
-	profileID := flags.String("profile", "demo", "Profile id for Store records")
+	profileID := flags.String("profile", cliCommandDemo, "Profile id for Store records")
 	jsonOutput := flags.Bool("json", options.jsonOutput, "Emit a machine-readable JSON report")
 	clean := flags.Bool("clean", options.clean, "Remove demo output after a successful run")
 	if err := flags.Parse(args); err != nil {
@@ -91,9 +92,6 @@ func executeDemo(ctx context.Context, options demoCommandOptions) (demoCommandRe
 	outputRoot, cleanup, err := prepareDemoOutputRoot(options.outputDir)
 	if err != nil {
 		return demoCommandReport{}, err
-	}
-	if options.clean {
-		defer cleanup()
 	}
 
 	evidenceDir := strings.TrimSpace(options.evidenceDir)
@@ -141,7 +139,7 @@ func executeDemo(ctx context.Context, options demoCommandOptions) (demoCommandRe
 	if !options.clean {
 		nextInspectCommand = fmt.Sprintf("agent-testbench case inspect --view runs --store %s --run %s --json", maskedStore, result.RunID)
 	}
-	return demoCommandReport{
+	report := demoCommandReport{
 		OK:                 result.Status == "passed",
 		RunID:              result.RunID,
 		CaseID:             result.CaseID,
@@ -152,25 +150,31 @@ func executeDemo(ctx context.Context, options demoCommandOptions) (demoCommandRe
 		EvidencePath:       result.EvidencePath,
 		DemoEndpoint:       server.URL,
 		NextInspectCommand: nextInspectCommand,
-	}, nil
+	}
+	if options.clean {
+		if err := cleanup(); err != nil {
+			return demoCommandReport{}, err
+		}
+	}
+	return report, nil
 }
 
-func prepareDemoOutputRoot(outputDir string) (string, func(), error) {
+func prepareDemoOutputRoot(outputDir string) (string, func() error, error) {
 	if strings.TrimSpace(outputDir) == "" {
 		dir, err := os.MkdirTemp("", "agent-testbench-demo-")
 		if err != nil {
-			return "", func() {}, fmt.Errorf("create demo output directory: %w", err)
+			return "", func() error { return nil }, fmt.Errorf("create demo output directory: %w", err)
 		}
-		return dir, func() { _ = os.RemoveAll(dir) }, nil
+		return dir, func() error { return os.RemoveAll(dir) }, nil
 	}
 	absolute, err := filepath.Abs(outputDir)
 	if err != nil {
-		return "", func() {}, fmt.Errorf("resolve demo output directory: %w", err)
+		return "", func() error { return nil }, fmt.Errorf("resolve demo output directory: %w", err)
 	}
 	if err := os.MkdirAll(absolute, 0o755); err != nil {
-		return "", func() {}, fmt.Errorf("create demo output directory: %w", err)
+		return "", func() error { return nil }, fmt.Errorf("create demo output directory: %w", err)
 	}
-	return absolute, func() { _ = os.RemoveAll(absolute) }, nil
+	return absolute, func() error { return os.RemoveAll(absolute) }, nil
 }
 
 func upgradeDemoStoreSchema(ctx context.Context, storeURL string) error {
@@ -215,7 +219,7 @@ func writeDemoCase(outputRoot string) (string, error) {
 		"case.create-item",
 		"Create Item",
 		http.MethodPost,
-		"/v1/items",
+		demoAPIItemsPath,
 		map[string]string{"Content-Type": "application/json"},
 		map[string]any{"id": "item-001", "name": "Example Item"},
 		http.StatusCreated,
@@ -233,10 +237,12 @@ func handleDemoAPIRequest(response http.ResponseWriter, request *http.Request) {
 		http.Error(response, `{"error":"read request body"}`, http.StatusBadRequest)
 		return
 	}
-	if request.Method == http.MethodPost && request.URL.Path == "/v1/items" {
+	if request.Method == http.MethodPost && request.URL.Path == demoAPIItemsPath {
 		response.Header().Set("Content-Type", "application/json")
 		response.WriteHeader(http.StatusCreated)
-		_, _ = fmt.Fprintf(response, `{"status":"created","received":%s}`, demoJSONBody(body))
+		if _, err := fmt.Fprintf(response, `{"status":"created","received":%s}`, demoJSONBody(body)); err != nil {
+			return
+		}
 		return
 	}
 	http.NotFound(response, request)
