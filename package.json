@@ -8,7 +8,7 @@
   "scripts": {
     "build:frontend": "node control-plane/frontend/build.mjs",
     "demo:api-case": "node tools/examples/api-case-demo.mjs",
-    "demo:one": "AGENT_TESTBENCH_ALLOW_SQLITE_COMPAT_DEMO=1 node tools/examples/api-case-demo.mjs",
+    "demo:one": "./bin/agent-testbench.sh demo",
     "demo:services": "node tools/examples/demo-service-server.mjs",
     "docs:cli-reference": "node tools/docs/generate-cli-reference.mjs",
     "docs:cli-reference:check": "node tools/docs/generate-cli-reference.mjs --check",

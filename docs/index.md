@@ -16,6 +16,11 @@ AgentTestBench 保持核心通用、本地优先。你可以按自己的角色�
   自动生成的命令目录，包含日常 agent 入口、高级入口、替代命令和精确用法。
 - [Share Kit](share-kit.md): project tagline, short descriptions, demo script,
   and announcement snippets. 项目 tagline、短介绍、demo 脚本和传播文案。
+- [Comparison and Positioning](comparison.md): where AgentTestBench fits beside
+  mature tools and when to use it with them. 与成熟工具的定位差异，以及什么时候适合并用。
+- [GitHub Actions Integration](github-actions.md): copyable CI workflow for the
+  built-in demo, release check, and Evidence artifacts. 可复制的 CI workflow，用于内置 demo、
+  release-check 和 Evidence artifact。
 - [Demo Gallery](demo-gallery.md): visual CLI capability map, neutral demo
   services, and an exposure plan for screenshots, talks, and README links.
   CLI 能力可视化、通用 demo 服务，以及用于截图、分享和 README 链接的曝光方案。

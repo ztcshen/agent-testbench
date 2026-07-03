@@ -4,6 +4,7 @@ const topLevelHelpTextContent = `AgentTestBench
 
 Usage:
   agent-testbench status [--deep] [--json]
+  agent-testbench demo [--output-dir PATH] [--store NAME_OR_DSN] [--run-id ID] [--json]
   agent-testbench doctor [--fix] [--deep] [--trace-graphql-url URL] [--json]
   agent-testbench commands [--area AREA] [--filter TEXT] [--all] [--internal] [--json]
   agent-testbench setup [--repo PATH] [--store NAME] [--url DSN | --sqlite PATH] [--build-runtime] [--runtime-only] [--json]
@@ -28,6 +29,7 @@ Usage:
   agent-testbench notify test (--file PATH | --webhook URL) [--message TEXT] [--json]
 
 Recommended workflows:
+  agent-testbench demo
   agent-testbench status --json
   agent-testbench doctor --deep --json
   agent-testbench task suggest --goal "maintain map" --json
@@ -39,6 +41,7 @@ Recommended workflows:
   agent-testbench commands --all
 
 Examples:
+  agent-testbench demo
   agent-testbench setup --store local --sqlite .runtime/agent-testbench-local.sqlite --build-runtime
   agent-testbench onboard --store local --sqlite .runtime/agent-testbench-local.sqlite --install-shell
   agent-testbench status
@@ -54,6 +57,7 @@ const helpTextContent = `AgentTestBench
 
 Usage:
   agent-testbench version
+  agent-testbench demo [--output-dir PATH] [--store NAME_OR_DSN] [--run-id ID] [--json]
   agent-testbench setup [--repo PATH] [--store NAME] [--url DSN | --sqlite PATH] [--build-runtime] [--runtime-only] [--json]
   agent-testbench onboard [--repo PATH] [--store NAME] [--url DSN | --sqlite PATH] [--build-runtime] [--install-shell] [--bin-dir PATH] [--smoke none|commands|store] [--json]
   agent-testbench status [--deep] [--json]
@@ -184,6 +188,7 @@ Usage:
   agent-testbench help
 
 Examples:
+  agent-testbench demo
   agent-testbench setup --store local --sqlite .runtime/agent-testbench-local.sqlite --build-runtime
   agent-testbench setup --repo . --build-runtime --runtime-only
   agent-testbench onboard --store local --sqlite .runtime/agent-testbench-local.sqlite --install-shell

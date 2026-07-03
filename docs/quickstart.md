@@ -1,31 +1,32 @@
 # Quick Start
 
-This guide starts from an empty checkout, configures a SQL Store, and runs a
-neutral local smoke flow. It does not require a hosted service or a team-owned
-template package.
+This guide starts from an empty checkout, runs the built-in local demo,
+configures a SQL Store, and runs a neutral smoke flow. It does not require a
+hosted service or a team-owned template package.
 
 ## Prerequisites
 
 - Go matching `go.mod`
 - Node.js 20 or newer
-- npm
+- npm for frontend, docs, and release-check tasks
 
-Install JavaScript dependencies once:
+For the fastest local proof from source, run the built-in demo:
+
+```sh
+./bin/agent-testbench.sh demo
+```
+
+Install JavaScript dependencies once before running npm scripts:
 
 ```sh
 npm ci
-```
-
-For the fastest local proof, run the one-command demo after dependencies are
-installed:
-
-```sh
 npm run demo:one
 ```
 
 ## Verify the Checkout
 
 ```sh
+./bin/agent-testbench.sh demo
 npm run demo:one
 ./bin/agent-testbench.sh version
 ./bin/agent-testbench.sh setup --store local --sqlite .runtime/agent-testbench-local.sqlite --build-runtime
@@ -53,18 +54,19 @@ test against a generated generic import bundle. For final live topology sign-off
 `AGENT_TESTBENCH_SMOKE_EXPECTED_STEPS`, and `AGENT_TESTBENCH_SMOKE_TRACE_IDS` with trace id mappings
 for every configured workflow step so release-check fails instead of using the
 synthetic SkyWalking provider or a partial trace-id set.
-`npm run demo:one` is the quickest local proof: it starts a temporary HTTP
-endpoint, creates a temporary SQLite Store, runs the generic
-`examples/api-cases/create-item.json` case, and prints the Evidence bundle path.
-The lower-level demo command runs the same case against the active SQL Store, or
+`./bin/agent-testbench.sh demo` is the quickest local proof: it starts a
+temporary HTTP endpoint, creates a temporary SQLite Store, runs a generic API
+case, indexes the run, and prints the Evidence bundle path plus a copyable
+inspect command. `npm run demo:one` wraps the same CLI entrypoint. The
+lower-level `demo:api-case` script runs the example case against the active SQL Store, or
 `AGENT_TESTBENCH_DEMO_STORE=postgres://...` / `AGENT_TESTBENCH_DEMO_STORE=mysql://...` /
 `AGENT_TESTBENCH_DEMO_STORE=sqlite://...`, and
 prints the Evidence bundle path.
 MySQL demo Stores must use dedicated sandbox/smoke/test/CI-looking database
 names and must not point at application schemas.
 Demo output is kept under the system temp directory so you can inspect it after
-the command exits. Set `AGENT_TESTBENCH_CLEAN_DEMO_OUTPUT=1` to remove it
-automatically.
+the command exits. Pass `--clean` when you want the CLI demo output removed
+after a successful run.
 
 ## Daily CLI Orientation
 

@@ -14,12 +14,12 @@ HTML/JSON 报告，同时保持开源核心通用、可复用。
 不用准备团队 Store，也可以先跑一圈本地 Evidence 闭环：
 
 ```sh
-npm ci
-npm run demo:one
+./bin/agent-testbench.sh demo
 ```
 
-这个 demo 会启动临时 HTTP 目标，执行 `examples/api-cases/create-item.json`，
-把请求、响应、断言 Evidence 写入临时 SQLite Store，并打印 Evidence 目录。
+这个 demo 会启动临时 HTTP 目标，执行 `case.create-item`，把请求、响应、断言
+Evidence 写入临时 SQLite Store，索引运行记录，并打印 Evidence 目录。源码
+checkout 中安装依赖后，`npm run demo:one` 会包装同一个 CLI 命令。
 
 ## 产品方向
 
@@ -142,6 +142,7 @@ flowchart LR
 安装依赖并验证仓库：
 
 ```sh
+./bin/agent-testbench.sh demo
 npm ci
 npm run demo:one
 ./bin/agent-testbench.sh version
@@ -174,9 +175,10 @@ Store-backed 任务定义、运行历史、日志和文件/webhook 通知。`con
 `config path`、`logs` 和 `completion bash|zsh` 分别用于查看本地配置、定位配置
 文件、读取 runtime 日志和接入 shell completion。
 
-`npm run demo:one` 是零外部依赖入口：它会启动临时本地 HTTP 服务，创建临时
-SQLite Store，执行 `examples/api-cases/create-item.json`，并打印 Evidence 目录。
-底层 `demo:api-case` 会运行同一个 case，写入 active SQL Store 或
+`./bin/agent-testbench.sh demo` 是零外部依赖入口：它会启动临时本地 HTTP 服务，
+创建临时 SQLite Store，执行通用 API case，索引运行记录，并打印 Evidence 目录和
+下一条 inspect 命令。`npm run demo:one` 会包装同一个 CLI 入口。底层
+`demo:api-case` 会运行示例 case，写入 active SQL Store 或
 `AGENT_TESTBENCH_DEMO_STORE=postgres://...` /
 `AGENT_TESTBENCH_DEMO_STORE=mysql://...` /
 `AGENT_TESTBENCH_DEMO_STORE=sqlite://...`。
@@ -228,6 +230,8 @@ AgentTestBench API 和 UI
 | 文档 | 内容 |
 | --- | --- |
 | [Quick Start](docs/quickstart.md) | 首次本地运行、Store 初始化和工作台启动方向。 |
+| [Comparison and Positioning](docs/comparison.md) | AgentTestBench 与 Newman/Postman、Karate、Testcontainers、Backstage 和可观测性 demo 的定位差异。 |
+| [GitHub Actions Integration](docs/github-actions.md) | demo、scoped release-check 和 Evidence artifact 的 CI 接入模板。 |
 | [Test Scenario Maps](docs/test-plan-maps.md) | Map 生命周期、workflow 收敛、验证用例族、planner explain、map 执行、门禁和 Atlas 评审。 |
 | [Backend Capabilities](docs/backend-capabilities.md) | Store、Environment Catalog、干净机器恢复、目标发现、执行、报告、Evidence、API 和发布守卫。 |
 | [Share Kit](docs/share-kit.md) | 项目 tagline、短介绍、demo 脚本和传播文案。 |

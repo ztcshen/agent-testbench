@@ -16,13 +16,14 @@ core.
 Try the local Evidence loop without provisioning a team Store:
 
 ```sh
-npm ci
-npm run demo:one
+./bin/agent-testbench.sh demo
 ```
 
 The demo starts a temporary HTTP target, runs
-`examples/api-cases/create-item.json`, writes request/response/assertion
-Evidence into a temporary SQLite Store, and prints the Evidence bundle path.
+`case.create-item`, writes request/response/assertion Evidence into a temporary
+SQLite Store, indexes the run, and prints the Evidence bundle path. In a source
+checkout, `npm run demo:one` wraps the same CLI command after dependencies are
+installed.
 
 ## Product Direction
 
@@ -167,6 +168,7 @@ These are design influences, not vendored runtime dependencies.
 Install dependencies and verify the checkout:
 
 ```sh
+./bin/agent-testbench.sh demo
 npm ci
 npm run demo:one
 ./bin/agent-testbench.sh version
@@ -205,10 +207,11 @@ shell integration. If a wrapper on `PATH` points at an older binary, `doctor`
 reports `runtime.shell-entrypoint` with the exact `.runtime/bin` directory or
 `ATB_BIN` value to use before rerunning `update`.
 
-`npm run demo:one` is the zero-setup path: it starts a temporary local HTTP
-endpoint, creates a temporary SQLite Store, runs the generic
-`examples/api-cases/create-item.json` case, and prints the Evidence bundle path.
-The lower-level `demo:api-case` command runs the same case against the active SQL Store or
+`./bin/agent-testbench.sh demo` is the zero-setup path: it starts a temporary
+local HTTP endpoint, creates a temporary SQLite Store, runs a generic API case,
+indexes the run, and prints the Evidence bundle path plus the next inspect
+command. `npm run demo:one` wraps the same CLI entrypoint. The lower-level
+`demo:api-case` command runs the example case against the active SQL Store or
 `AGENT_TESTBENCH_DEMO_STORE=postgres://...` /
 `AGENT_TESTBENCH_DEMO_STORE=mysql://...` /
 `AGENT_TESTBENCH_DEMO_STORE=sqlite://...`. The demo and release gate require
@@ -264,6 +267,8 @@ Core packages stay generic:
 | --- | --- |
 | [Quick Start](docs/quickstart.md) | First local run, Store setup, and workbench launch direction. |
 | [CLI Reference](docs/cli-reference.md) | Generated command catalog, daily surface, advanced entries, replacements, and usage. |
+| [Comparison and Positioning](docs/comparison.md) | Where AgentTestBench fits beside Newman/Postman, Karate, Testcontainers, Backstage, and observability demos. |
+| [GitHub Actions Integration](docs/github-actions.md) | Starter CI workflow for the built-in demo, scoped release checks, and Evidence artifacts. |
 | [Demo Gallery](docs/demo-gallery.md) | Visual CLI capability tour, neutral demo services, and exposure plan. |
 | [Test Scenario Maps](docs/test-plan-maps.md) | Map lifecycle, workflow convergence, validation families, planner explain, map execution, gates, and Atlas review. |
 | [Backend Capabilities](docs/backend-capabilities.md) | Store, Environment Catalog, clean-machine restore, discovery, execution, reports, Evidence, APIs, and release guardrails. |
