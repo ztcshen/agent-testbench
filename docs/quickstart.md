@@ -21,7 +21,13 @@ Install JavaScript dependencies once before running npm scripts:
 ```sh
 npm ci
 npm run demo:one
+npm run smoke:release-archive-serve
 ```
+
+`smoke:release-archive-serve` is the release-package proof: it builds a
+host-platform archive, extracts it outside the source checkout, starts the
+released `agent-testbench serve`, loads the static workbench, and confirms the
+Store API responds through a temporary SQLite Store.
 
 ## Verify the Checkout
 

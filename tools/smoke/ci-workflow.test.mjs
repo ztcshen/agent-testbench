@@ -99,6 +99,7 @@ test("tag release workflow builds and uploads versioned CLI assets", () => {
   assert.match(workflow, /gh release create/);
   assert.match(workflow, /gh release upload "\$tag" dist\/\*\.tar\.gz --clobber/);
   assert.match(packageJSON, /"release:build": "bash scripts\/build-release\.sh"/);
+  assert.match(packageJSON, /"smoke:release-archive-serve": "node --test tools\/smoke\/release-archive-serve\.test\.mjs"/);
   assert.match(releaseScript, /-X main\.version=\$version -X main\.buildRevision=\$revision/);
   assert.match(releaseScript, /agent-testbench_\$\{version\}_\$\{goos\}_\$\{goarch\}\.tar\.gz/);
   assert.match(releaseScript, /control-plane\/static/);

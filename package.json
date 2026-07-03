@@ -32,6 +32,7 @@
     "smoke:cli:sql-active": "AGENT_TESTBENCH_DISABLE_SQLITE_STORE=1 node tools/smoke/cli-active-store-smoke.mjs",
     "smoke:frontend": "AGENT_TESTBENCH_DISABLE_SQLITE_STORE=1 node tools/smoke/control-plane-smoke.mjs",
     "smoke:frontend:sql-active": "npm run smoke:frontend",
+    "smoke:release-archive-serve": "node --test tools/smoke/release-archive-serve.test.mjs",
     "test:frontend": "node --test control-plane/frontend/src/*.test.mjs",
     "test": "go test ./..."
   },

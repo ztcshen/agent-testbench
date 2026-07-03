@@ -9,11 +9,10 @@ AgentTestBench。文案保持通用，具体团队案例应放在外部 template
 
 ## One-Liner / 一句话介绍
 
-**AgentTestBench is an agent-native test environment for API workflows,
-auditable Evidence, and quality gates.**
+**AgentTestBench is a local-first control plane for agent-native API workflow
+validation.**
 
-**AgentTestBench 是一个面向 Agent 的 API 工作流测试环境，围绕可审计 Evidence
-和质量门禁构建。**
+**AgentTestBench 是一个 local-first 的 agent-native API 工作流验证控制平面。**
 
 ## Short Description / 短介绍
 
@@ -53,6 +52,7 @@ cd agent-testbench
 ./bin/agent-testbench.sh demo
 npm ci
 npm run demo:one
+npm run smoke:release-archive-serve
 npm run demo:services -- --port 49190
 AGENT_TESTBENCH_DEMO_STORE="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run demo:api-case
 AGENT_TESTBENCH_SMOKE_STORE_DSN="postgres://user:pass@host:5432/agent_testbench_smoke?sslmode=disable" npm run release-check -- --scope cmd/agent-testbench
@@ -67,6 +67,9 @@ What to point out:
   temporary local target, uses a temporary SQLite Store, runs one API case,
   indexes the run, and prints the Evidence bundle path. `npm run demo:one`
   wraps the same CLI command in a source checkout.
+- `smoke:release-archive-serve` builds a release archive, extracts it outside
+  the source tree, starts `agent-testbench serve`, loads the static workbench,
+  and confirms the Store API responds.
 - `/demo-gallery.html` now opens with a CLI automation animation: restore a
   target runtime, rank risky cases, run a case, produce a map atlas,
   process Evidence tasks, identify a Root cause, and publish a quality report.
@@ -98,6 +101,8 @@ What to point out:
 - `agent-testbench demo` 是最低摩擦的首次证明：它启动临时本地目标，使用临时
   SQLite Store，执行一个 API case，索引运行记录，并打印 Evidence 目录。源码
   checkout 中的 `npm run demo:one` 会包装同一个 CLI 命令。
+- `smoke:release-archive-serve` 会构建 release archive，在源码树外解压，启动
+  `agent-testbench serve`，加载静态工作台，并确认 Store API 可用。
 - `/demo-gallery.html` 现在包含 CLI 自动化演示动画：恢复目标运行时、排序高风险用例、
   执行用例、生成 map atlas、处理 Evidence tasks、定位 Root cause，并发布质量报告。
 - `demo:services` 会启动零售履约、IoT 遥测控制和内容审核三个通用 demo target，
@@ -121,14 +126,14 @@ What to point out:
 
 ### English
 
-AgentTestBench is an agent-native test environment for API workflows,
-auditable Evidence, and quality gates. It gives agents a clean
-discover-then-run workflow and returns Evidence-rich HTML/JSON reports.
+AgentTestBench is a local-first control plane for agent-native API workflow
+validation. It gives agents a clean discover-then-run workflow and returns
+Evidence-rich HTML/JSON reports.
 
 ### 简体中文
 
-AgentTestBench 是一个面向 Agent 的 API 工作流测试环境。它让 agent 先发现目标、
-再执行报告，并为 API 用例和工作流生成包含 Evidence 的 HTML/JSON 报告。
+AgentTestBench 是一个 local-first 的 agent-native API 工作流验证控制平面。它让
+agent 先发现目标、再执行报告，并为 API 用例和工作流生成包含 Evidence 的 HTML/JSON 报告。
 
 ## Suggested Tags / 推荐标签
 

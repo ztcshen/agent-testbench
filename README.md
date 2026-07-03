@@ -13,6 +13,9 @@ workflows, and map plans, record reproducible Evidence, and inspect compact
 HTML/JSON reports without hardcoding one business domain into the open-source
 core.
 
+In one sentence: **AgentTestBench is a local-first control plane for
+agent-native API workflow validation.**
+
 Try the local Evidence loop without provisioning a team Store:
 
 ```sh
@@ -267,6 +270,7 @@ Core packages stay generic:
 | --- | --- |
 | [Quick Start](docs/quickstart.md) | First local run, Store setup, and workbench launch direction. |
 | [CLI Reference](docs/cli-reference.md) | Generated command catalog, daily surface, advanced entries, replacements, and usage. |
+| [Adoption Playbook](docs/adoption-playbook.md) | Five-minute evaluation path, positioning, promotion assets, trust checklist, and honest limits. |
 | [Comparison and Positioning](docs/comparison.md) | Where AgentTestBench fits beside Newman/Postman, Karate, Testcontainers, Backstage, and observability demos. |
 | [GitHub Actions Integration](docs/github-actions.md) | Starter CI workflow for the built-in demo, scoped release checks, and Evidence artifacts. |
 | [Demo Gallery](docs/demo-gallery.md) | Visual CLI capability tour, neutral demo services, and exposure plan. |

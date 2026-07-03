@@ -269,6 +269,16 @@ function edgeColor(e){if(e.pathId&&pathById.has(e.pathId))return pathById.get(e.
 }
 
 func mapAtlasGraphJS() string {
+	return strings.Join([]string{
+		mapAtlasWorkflowFilterJS(),
+		mapAtlasRenderGraphJS(),
+		mapAtlasEdgeRoutingJS(),
+		mapAtlasMinimapJS(),
+		mapAtlasInterfaceViewJS(),
+	}, "\n")
+}
+
+func mapAtlasWorkflowFilterJS() string {
 	return `function renderWorkflowFilter(){
   const select=document.getElementById("workflow-filter");
   if(select.options.length===1){
@@ -285,8 +295,11 @@ func mapAtlasGraphJS() string {
   document.getElementById("path-finder-close").onclick=closePathFinder;
   document.getElementById("path-find-run").onclick=findPath;
   document.getElementById("language-select").onchange=function(e){navigateToState({language:e.target.value},true)};
+}`
 }
-function renderGraph(){
+
+func mapAtlasRenderGraphJS() string {
+	return `function renderGraph(){
   const svg=document.getElementById("edge-layer");
   const nodes=document.getElementById("node-layer");
   svg.innerHTML="";nodes.innerHTML="";
@@ -319,8 +332,11 @@ function renderGraph(){
 	    nodes.appendChild(el);
   }
   renderMinimap(maxX,maxY);
+}`
 }
-function arrowMarkerID(color){return "map-atlas-arrow-"+String(color||"").replace(/[^a-zA-Z0-9_-]/g,"")}
+
+func mapAtlasEdgeRoutingJS() string {
+	return `function arrowMarkerID(color){return "map-atlas-arrow-"+String(color||"").replace(/[^a-zA-Z0-9_-]/g,"")}
 function renderArrowMarkers(svg){
   const defs=document.createElementNS("http://www.w3.org/2000/svg","defs");
   const colors=new Set(["#94a3b8","#b45309"]);
@@ -348,8 +364,11 @@ function edgePorts(from,to){
     return {from:fromLeft,to:toRight,mode:"row"};
   }
   return {from:fromBottom,to:toTop,mode:"fold"};
+}`
 }
-function renderMinimap(maxX,maxY){
+
+func mapAtlasMinimapJS() string {
+	return `function renderMinimap(maxX,maxY){
   const svg=document.getElementById("map-atlas-minimap");svg.innerHTML="";
 	  svg.setAttribute("viewBox","0 0 "+maxX+" "+maxY);
 	  for(const n of atlasData.nodes){
@@ -378,8 +397,11 @@ function selectedCaseSummary(current, primaries){
   const tasks=tasksForNode(current);
   const taskStatus=tasks.length?tasks.map(function(t){return t.status||""}).filter(Boolean).join(", "):tr("notRun");
   return '<div class="section"><h3>'+esc(tr("selectedCase"))+'</h3><div class="kv"><div>'+esc(tr("caseID"))+'</div><div>'+esc(current.caseId||current.id)+'</div><div>'+esc(tr("type"))+'</div><div>'+esc(current.caseType||current.role||"case")+'</div><div>'+esc(tr("stateEffect"))+'</div><div>'+esc(current.stateEffect||"")+'</div><div>'+esc(tr("anchor"))+'</div><div>'+esc(anchor?(anchor.displayName+" / "+(anchor.caseId||anchor.id)):(current.anchorNodeId||current.baseCaseId||""))+'</div><div>'+esc(tr("runTasks"))+'</div><div>'+esc(taskStatus)+'</div></div></div>';
+}`
 }
-function renderInterfaceView(){
+
+func mapAtlasInterfaceViewJS() string {
+	return `function renderInterfaceView(){
   const svg=document.getElementById("edge-layer"),nodes=document.getElementById("node-layer"),mini=document.getElementById("map-atlas-minimap");
   svg.innerHTML="";svg.setAttribute("width",0);svg.setAttribute("height",0);mini.style.display="none";
   setInterfaceMode(true);
