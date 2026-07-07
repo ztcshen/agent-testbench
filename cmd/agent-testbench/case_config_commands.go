@@ -14,6 +14,8 @@ import (
 	"agent-testbench/internal/store"
 )
 
+const caseConfigScopeTypeStep = "step"
+
 type caseConfigUpsertReport struct {
 	OK               bool                      `json:"ok"`
 	CaseID           string                    `json:"caseId"`
@@ -52,7 +54,7 @@ func runCaseConfigUpsert(ctx context.Context, args []string) error {
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
 	caseID := flags.String("case", "", "API case id")
 	workflowID := flags.String("workflow", "", "Workflow id when updating a workflow step execution config")
-	stepID := flags.String("step", "", "Workflow step id when updating a workflow step execution config")
+	stepID := flags.String(caseConfigScopeTypeStep, "", "Workflow step id when updating a workflow step execution config")
 	method := flags.String("method", "", "HTTP method")
 	path := flags.String("path", "", "Request path")
 	bodyJSON := flags.String("body-json", "", "Request body JSON")
@@ -269,7 +271,7 @@ func prepareCaseExecutionTemplateConfig(catalog store.ProfileCatalog, caseID str
 	config, exists := findCatalogTemplateConfig(catalog.TemplateConfigs, configID)
 	config.ID = configID
 	if isWorkflowStepCaseExecutionScope(options.WorkflowID, options.StepID) {
-		config.ScopeType = "step"
+		config.ScopeType = caseConfigScopeTypeStep
 		config.WorkflowID = strings.TrimSpace(options.WorkflowID)
 		config.ScopeID = strings.TrimSpace(options.StepID)
 	} else if !exists || !isCaseExecutionConfigScope(config.ScopeType) {
@@ -302,7 +304,7 @@ func caseConfigUpsertConfigRefFromStore(configID string, config store.CatalogTem
 		ScopeID:    config.ScopeID,
 		WorkflowID: config.WorkflowID,
 	}
-	if strings.TrimSpace(config.ScopeType) == "step" {
+	if strings.TrimSpace(config.ScopeType) == caseConfigScopeTypeStep {
 		ref.StepID = config.ScopeID
 	}
 	return ref
@@ -551,7 +553,7 @@ func workflowStepCaseExecutionTemplateConfigID(catalog store.ProfileCatalog, cas
 		return ""
 	}
 	for _, config := range catalog.TemplateConfigs {
-		if !isActiveCaseConfigStatus(config.Status) || strings.TrimSpace(config.ScopeType) != "step" || strings.TrimSpace(config.WorkflowID) != workflowID || strings.TrimSpace(config.ScopeID) != stepID {
+		if !isActiveCaseConfigStatus(config.Status) || strings.TrimSpace(config.ScopeType) != caseConfigScopeTypeStep || strings.TrimSpace(config.WorkflowID) != workflowID || strings.TrimSpace(config.ScopeID) != stepID {
 			continue
 		}
 		if !configContainsCaseExecution(config, caseID) {
