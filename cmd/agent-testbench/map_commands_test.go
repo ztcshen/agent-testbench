@@ -13,110 +13,6 @@ import (
 	"agent-testbench/internal/store"
 )
 
-func TestMapImportWorkflowsAndExplainUsesStoreCatalog(t *testing.T) {
-	ctx := context.Background()
-	storePath := filepath.Join(t.TempDir(), "map.sqlite")
-	storeRef := "sqlite://" + storePath
-	runtime, err := openStore(ctx, storeRef)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	if err := runtime.ReplaceProfileCatalog(ctx, mapCommandProfileCatalogFixture()); err != nil {
-		t.Fatalf("seed profile catalog: %v", err)
-	}
-	closeCLIStore(runtime)
-
-	importOut := runCLI(t, "map", "import-workflows", "--store", storeRef, "--json")
-	var importReport struct {
-		OK  bool `json:"ok"`
-		Map struct {
-			ID        string `json:"id"`
-			ProfileID string `json:"profileId"`
-		} `json:"map"`
-		Counts struct {
-			Nodes            int `json:"nodes"`
-			Paths            int `json:"paths"`
-			Materializations int `json:"materializations"`
-		} `json:"counts"`
-	}
-	if err := json.Unmarshal([]byte(importOut), &importReport); err != nil {
-		t.Fatalf("decode map import json: %v\n%s", err, importOut)
-	}
-	if !importReport.OK || importReport.Map.ID != "map.profile.flow" || importReport.Counts.Nodes != 3 || importReport.Counts.Paths != 1 || importReport.Counts.Materializations != 1 {
-		t.Fatalf("map import report = %#v", importReport)
-	}
-
-	explainOut := runCLI(t, "map", "explain", "--store", storeRef, "--map", "map.profile.flow", "--case", "case.submit.field.required", "--json")
-	var explainReport struct {
-		OK           bool   `json:"ok"`
-		TargetCaseID string `json:"targetCaseId"`
-		TargetNodeID string `json:"targetNodeId"`
-		Operations   []struct {
-			Kind        string `json:"kind"`
-			PathID      string `json:"pathId"`
-			UntilNodeID string `json:"untilNodeId"`
-			CaseID      string `json:"caseId"`
-		} `json:"operations"`
-	}
-	if err := json.Unmarshal([]byte(explainOut), &explainReport); err != nil {
-		t.Fatalf("decode map explain json: %v\n%s", err, explainOut)
-	}
-	if !explainReport.OK || explainReport.TargetCaseID != "case.submit.field.required" || len(explainReport.Operations) != 2 {
-		t.Fatalf("map explain report = %#v", explainReport)
-	}
-	if explainReport.Operations[0].Kind != "run_path_prefix" || explainReport.Operations[0].PathID != "workflow.flow.create" || explainReport.Operations[0].UntilNodeID != "case.prepare" {
-		t.Fatalf("prefix operation = %#v", explainReport.Operations[0])
-	}
-	if explainReport.Operations[1].Kind != "run_case" || explainReport.Operations[1].CaseID != "case.submit.field.required" {
-		t.Fatalf("run case operation = %#v", explainReport.Operations[1])
-	}
-}
-
-func TestMapImportWorkflowsCanLimitImportedWorkflowPaths(t *testing.T) {
-	ctx := context.Background()
-	storePath := filepath.Join(t.TempDir(), "map-filtered.sqlite")
-	storeRef := "sqlite://" + storePath
-	runtime, err := openStore(ctx, storeRef)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	if err := runtime.ReplaceProfileCatalog(ctx, mapCommandProfileCatalogFixture()); err != nil {
-		t.Fatalf("seed profile catalog: %v", err)
-	}
-	closeCLIStore(runtime)
-
-	importOut := runCLI(t, "map", "import-workflows", "--store", storeRef, "--map", "map.filtered", "--workflow", "workflow.flow.create", "--json")
-	var importReport struct {
-		OK     bool `json:"ok"`
-		Counts struct {
-			Paths     int `json:"paths"`
-			PathSteps int `json:"pathSteps"`
-		} `json:"counts"`
-	}
-	if err := json.Unmarshal([]byte(importOut), &importReport); err != nil {
-		t.Fatalf("decode map import json: %v\n%s", err, importOut)
-	}
-	if !importReport.OK || importReport.Counts.Paths != 1 || importReport.Counts.PathSteps != 2 {
-		t.Fatalf("filtered map import report = %#v", importReport)
-	}
-
-	workflowsOut := runCLI(t, "map", "workflows", "--store", storeRef, "--map", "map.filtered", "--json")
-	var workflowsReport struct {
-		OK        bool `json:"ok"`
-		Count     int  `json:"count"`
-		Workflows []struct {
-			WorkflowID string `json:"workflowId"`
-			StepCount  int    `json:"stepCount"`
-		} `json:"workflows"`
-	}
-	if err := json.Unmarshal([]byte(workflowsOut), &workflowsReport); err != nil {
-		t.Fatalf("decode map workflows json: %v\n%s", err, workflowsOut)
-	}
-	if !workflowsReport.OK || workflowsReport.Count != 1 || workflowsReport.Workflows[0].WorkflowID != "workflow.flow.create" || workflowsReport.Workflows[0].StepCount != 2 {
-		t.Fatalf("filtered map workflows report = %#v", workflowsReport)
-	}
-}
-
 func TestMapExplainScopeAllCanSavePlannerInstance(t *testing.T) {
 	ctx := context.Background()
 	storePath := filepath.Join(t.TempDir(), "map-explain-save.sqlite")
@@ -195,14 +91,6 @@ func mapExplainHasTaskKind(tasks []struct {
 		}
 	}
 	return false
-}
-
-func TestMapImportWorkflowsRejectsPositionalArgsBeforeOpeningStore(t *testing.T) {
-	storePath := filepath.Join(t.TempDir(), "map.sqlite")
-	out := runCLIFails(t, "map", "import-workflows", "typo", "--store", "sqlite://"+storePath, "--json")
-	if !strings.Contains(out, "does not accept positional arguments") {
-		t.Fatalf("unexpected import-workflows positional arg error:\n%s", out)
-	}
 }
 
 func TestMapCommandsAreDiscoverable(t *testing.T) {
@@ -1111,17 +999,10 @@ func TestMapAtlasOverlaysSavedPlanTasks(t *testing.T) {
 	ctx := context.Background()
 	storePath := filepath.Join(t.TempDir(), "map-atlas-plan.sqlite")
 	storeRef := "sqlite://" + storePath
-	runtime, err := openStore(ctx, storeRef)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	if err := runtime.ReplaceProfileCatalog(ctx, mapCommandProfileCatalogFixture()); err != nil {
-		t.Fatalf("seed profile catalog: %v", err)
-	}
-	closeCLIStore(runtime)
+	seedMapCommandProfileCatalog(t, storeRef, mapCommandProfileCatalogFixture())
 
 	runCLI(t, "map", "import-workflows", "--store", storeRef, "--json")
-	runtime, err = openStore(ctx, storeRef)
+	runtime, err := openStore(ctx, storeRef)
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)
 	}
@@ -1346,6 +1227,42 @@ func mapCommandProfileCatalogFixture() store.ProfileCatalog {
 			ID: "dependency.field.required", CaseID: "case.submit.field.required", FixtureID: "fixture.before.submit", Required: true, MappingsJSON: `[]`,
 		}},
 	}
+}
+
+func seedMapCommandProfileCatalog(t *testing.T, storeRef string, catalog store.ProfileCatalog) {
+	t.Helper()
+	runtime, err := openStore(context.Background(), storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer closeCLIStore(runtime)
+	if err := runtime.ReplaceProfileCatalog(context.Background(), catalog); err != nil {
+		t.Fatalf("replace profile catalog: %v", err)
+	}
+}
+
+func mapCommandProfileCatalogWithAuditWorkflow() store.ProfileCatalog {
+	catalog := mapCommandProfileCatalogFixture()
+	catalog.Workflows = append(catalog.Workflows, store.CatalogWorkflow{ID: "workflow.flow.audit", DisplayName: "Audit Flow"})
+	catalog.APICases = append(catalog.APICases, store.CatalogAPICase{
+		ID: "case.audit", DisplayName: "Audit", NodeID: "node.audit", RequestTemplateID: "template.audit", Status: "active", SortOrder: 4,
+	})
+	catalog.WorkflowBindings = append(catalog.WorkflowBindings,
+		store.CatalogWorkflowBinding{WorkflowID: "workflow.flow.audit", StepID: "step.prepare", NodeID: "node.prepare", CaseID: "case.prepare", Required: true, SortOrder: 1},
+		store.CatalogWorkflowBinding{WorkflowID: "workflow.flow.audit", StepID: "step.audit", NodeID: "node.audit", CaseID: "case.audit", Required: true, SortOrder: 2},
+	)
+	return catalog
+}
+
+func mapCommandWorkflowReportHasWorkflow(workflows []struct {
+	WorkflowID string `json:"workflowId"`
+}, workflowID string) bool {
+	for _, workflow := range workflows {
+		if workflow.WorkflowID == workflowID {
+			return true
+		}
+	}
+	return false
 }
 
 func mapCommandHasNode(nodes []store.TestPlanNode, id string) bool {

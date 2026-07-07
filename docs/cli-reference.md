@@ -81,7 +81,7 @@ Default commands: `29`
 | `case runs` | yes | `agent-testbench case inspect --view runs` | `agent-testbench case runs [--store NAME_OR_DSN] [--run ID] [--json]` |
 | `case evidence` | yes | `agent-testbench case inspect --view evidence` | `agent-testbench case evidence [--store NAME_OR_DSN] [--case-run ID \| --run ID [--case-id ID] [--step-id ID]] [--json]` |
 | `case timing` | yes | `agent-testbench case inspect --view timing` | `agent-testbench case timing [--store NAME_OR_DSN] [--kind KIND] [--max-age-minutes N] [--json]` |
-| `case config upsert` | yes |  | `agent-testbench case config upsert --case ID [--store NAME_OR_DSN] [--config-id ID] [--node-id ID] [--method METHOD] [--path PATH] [--body-json JSON] [--header KEY=VALUE]... [--headers-json JSON] [--auth-json JSON] [--default-override KEY=VALUE]... [--default-overrides-json JSON] [--inputs-json JSON] [--exports-json JSON] [--signed] [--trace-endpoint URL] [--expected-status CODE]... [--response-contains TEXT]... [--response-not-contains TEXT]... [--json]` |
+| `case config upsert` | yes |  | `agent-testbench case config upsert --case ID [--workflow ID --step ID] [--store NAME_OR_DSN] [--config-id ID] [--node-id ID] [--status STATUS] [--method METHOD] [--path PATH] [--body-json JSON] [--header KEY=VALUE]... [--headers-json JSON] [--auth-json JSON] [--default-override KEY=VALUE]... [--default-overrides-json JSON] [--inputs-json JSON] [--exports-json JSON] [--signed] [--trace-endpoint URL] [--expected-status CODE]... [--response-contains TEXT]... [--response-not-contains TEXT]... [--json]` |
 | `case run` | yes |  | `agent-testbench case run --case-id ID [--base-url URL] [--override KEY=VALUE] [--evidence-dir PATH] [--store NAME_OR_DSN] [--run-id ID] [--json]` |
 | `case incomplete-batches` | yes |  | `agent-testbench case incomplete-batches [--profile PATH_OR_ID] [--store NAME_OR_DSN] [--json]` |
 | `case diagnose` | yes | `agent-testbench case inspect --view diagnose` | `agent-testbench case diagnose [--store NAME_OR_DSN] [--case-run ID \| --run ID [--case-id ID] [--step-id ID]] [--json]` |
@@ -189,7 +189,7 @@ Default commands: `29`
 
 | Command | Store | Replacement | Usage |
 | --- | --- | --- | --- |
-| `map import-workflows` | yes |  | `agent-testbench map import-workflows [--store NAME_OR_DSN] [--map ID] [--workflow ID] [--display-name NAME] [--description TEXT] [--json]` |
+| `map import-workflows` | yes |  | `agent-testbench map import-workflows [--store NAME_OR_DSN] [--map ID] [--workflow ID] [--append] [--display-name NAME] [--description TEXT] [--json]` |
 | `map list` | yes | `agent-testbench map inspect --view list` | `agent-testbench map list [--store NAME_OR_DSN] [--json]` |
 | `map plans` | yes | `agent-testbench map inspect --view plans --map MAP_ID` | `agent-testbench map plans --map ID [--store NAME_OR_DSN] [--limit N] [--json]` |
 | `map update` | yes |  | `agent-testbench map update --map ID [--display-name NAME] [--description TEXT] [--status STATUS] [--store NAME_OR_DSN] [--json]` |

@@ -94,18 +94,7 @@ func TestCaseConfigUpsertUpdatesSelectedConfigAndRequestAuthFields(t *testing.T)
 		"--expected-status", "200",
 		"--json",
 	)
-	var report struct {
-		OK      bool `json:"ok"`
-		Created bool `json:"created"`
-		Updated bool `json:"updated"`
-		Config  struct {
-			ID string `json:"id"`
-		} `json:"config"`
-		SelectedByRunner bool `json:"selectedByRunner"`
-	}
-	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode case config upsert report: %v\n%s", err, out)
-	}
+	report := decodeCaseConfigUpsertSelectionReport(t, out)
 	if !report.OK || report.Created || !report.Updated || report.Config.ID != "config.case.generic.submit" || !report.SelectedByRunner {
 		t.Fatalf("case config upsert report = %#v", report)
 	}
@@ -151,18 +140,7 @@ func TestCaseConfigUpsertReusesAPICaseScopedExecutionConfig(t *testing.T) {
 		"--expected-status", "200",
 		"--json",
 	)
-	var report struct {
-		OK      bool `json:"ok"`
-		Created bool `json:"created"`
-		Updated bool `json:"updated"`
-		Config  struct {
-			ID string `json:"id"`
-		} `json:"config"`
-		SelectedByRunner bool `json:"selectedByRunner"`
-	}
-	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode case config upsert report: %v\n%s", err, out)
-	}
+	report := decodeCaseConfigUpsertSelectionReport(t, out)
 	if !report.OK || report.Created || !report.Updated || report.Config.ID != "config.api-case.generic.submit" || !report.SelectedByRunner {
 		t.Fatalf("api-case scoped config should be updated in place: %#v", report)
 	}
@@ -257,6 +235,63 @@ func TestCaseConfigUpsertPersistsDefaultOverridesAndWorkflowIO(t *testing.T) {
 	}
 }
 
+func TestCaseConfigUpsertUpdatesWorkflowStepExecutionConfigForAudit(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "step-config.sqlite")
+	seedCaseConfigUpsertWorkflowStepCatalog(t, storePath)
+	storeRef := "sqlite://" + storePath
+
+	auditOut := runCLI(t, "workflow", "audit", "--store", storeRef, "--workflow", "workflow.generic", "--json")
+	var before struct {
+		OK         bool `json:"ok"`
+		IssueCount int  `json:"issueCount"`
+	}
+	if err := json.Unmarshal([]byte(auditOut), &before); err != nil {
+		t.Fatalf("decode workflow audit before upsert: %v\n%s", err, auditOut)
+	}
+	if before.OK || before.IssueCount != 1 {
+		t.Fatalf("workflow audit should start with missing step export: %#v\n%s", before, auditOut)
+	}
+
+	out := runCLI(t, "case", "config", "upsert",
+		"--store", storeRef,
+		"--case", "case.generic.prepare",
+		"--workflow", "workflow.generic",
+		"--step", "prepare",
+		"--exports-json", `[{"name":"transaction_id","from":"responseBody","path":"transaction_id"}]`,
+		"--json",
+	)
+	var report struct {
+		OK      bool `json:"ok"`
+		Updated bool `json:"updated"`
+		Config  struct {
+			ID         string `json:"id"`
+			ScopeType  string `json:"scopeType"`
+			WorkflowID string `json:"workflowId"`
+			StepID     string `json:"stepId"`
+		} `json:"config"`
+		SelectedByRunner bool `json:"selectedByRunner"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode step config upsert report: %v\n%s", err, out)
+	}
+	if !report.OK || !report.Updated || report.Config.ID != "cfg.workflow-step.workflow.generic.prepare" ||
+		report.Config.ScopeType != "step" || report.Config.WorkflowID != "workflow.generic" || report.Config.StepID != "prepare" || !report.SelectedByRunner {
+		t.Fatalf("step config upsert report = %#v", report)
+	}
+
+	auditOut = runCLI(t, "workflow", "audit", "--store", storeRef, "--workflow", "workflow.generic", "--json")
+	var after struct {
+		OK         bool `json:"ok"`
+		IssueCount int  `json:"issueCount"`
+	}
+	if err := json.Unmarshal([]byte(auditOut), &after); err != nil {
+		t.Fatalf("decode workflow audit after upsert: %v\n%s", err, auditOut)
+	}
+	if !after.OK || after.IssueCount != 0 {
+		t.Fatalf("workflow audit should see persisted step exports: %#v\n%s", after, auditOut)
+	}
+}
+
 func writeCaseConfigSigningKey(t *testing.T) string {
 	t.Helper()
 	keyPath := filepath.Join(t.TempDir(), "request-signing-key.pem")
@@ -267,7 +302,26 @@ func writeCaseConfigSigningKey(t *testing.T) string {
 	return keyPath
 }
 
-func seedCaseConfigUpsertWorkflowCatalog(t *testing.T, storePath string) {
+type caseConfigUpsertSelectionReport struct {
+	OK      bool `json:"ok"`
+	Created bool `json:"created"`
+	Updated bool `json:"updated"`
+	Config  struct {
+		ID string `json:"id"`
+	} `json:"config"`
+	SelectedByRunner bool `json:"selectedByRunner"`
+}
+
+func decodeCaseConfigUpsertSelectionReport(t *testing.T, out string) caseConfigUpsertSelectionReport {
+	t.Helper()
+	var report caseConfigUpsertSelectionReport
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode case config upsert report: %v\n%s", err, out)
+	}
+	return report
+}
+
+func replaceCaseConfigUpsertCatalog(t *testing.T, storePath string, catalog store.ProfileCatalog) {
 	t.Helper()
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
@@ -275,14 +329,97 @@ func seedCaseConfigUpsertWorkflowCatalog(t *testing.T, storePath string) {
 		t.Fatalf("open sqlite store: %v", err)
 	}
 	defer s.Close()
-	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
+	if err := s.ReplaceProfileCatalog(ctx, catalog); err != nil {
+		t.Fatalf("replace profile catalog: %v", err)
+	}
+}
+
+func seedCaseConfigUpsertWorkflowCatalog(t *testing.T, storePath string) {
+	t.Helper()
+	replaceCaseConfigUpsertCatalog(t, storePath, caseConfigWorkflowCatalog("/generic/prepare", nil))
+}
+
+func seedCaseConfigUpsertWorkflowStepCatalog(t *testing.T, storePath string) {
+	t.Helper()
+	replaceCaseConfigUpsertCatalog(t, storePath, caseConfigWorkflowCatalog("/generic",
+		[]store.CatalogTemplateConfig{
+			{
+				ID:         "cfg.workflow-step.workflow.generic.prepare",
+				WorkflowID: "workflow.generic",
+				ScopeType:  "step",
+				ScopeID:    "prepare",
+				Status:     "active",
+				ConfigJSON: `{"caseId":"case.generic.prepare","caseExecution":{"method":"POST","nodeId":"node.generic","path":"/generic/prepare"}}`,
+			},
+			{
+				ID:         "cfg.workflow-step.workflow.generic.callback",
+				WorkflowID: "workflow.generic",
+				ScopeType:  "step",
+				ScopeID:    "callback",
+				Status:     "active",
+				ConfigJSON: `{"caseId":"case.generic.callback","caseExecution":{"method":"POST","nodeId":"node.generic","path":"/generic/callback"},"inputs":[{"name":"transaction_id","source":"previous","required":true}]}`,
+			},
+		},
+	))
+}
+
+func seedCaseConfigUpsertCatalog(t *testing.T, storePath string) {
+	t.Helper()
+	replaceCaseConfigUpsertCatalog(t, storePath, caseConfigSubmitCatalog(nil))
+}
+
+func seedCaseConfigUpsertCatalogWithAPICaseScopedConfig(t *testing.T, storePath string) {
+	t.Helper()
+	replaceCaseConfigUpsertCatalog(t, storePath, caseConfigSubmitCatalog([]store.CatalogTemplateConfig{{
+		ID:         "config.api-case.generic.submit",
+		ScopeType:  "api-case",
+		ScopeID:    "case.generic.submit",
+		Status:     "active",
+		ConfigJSON: `{"caseId":"case.generic.submit","caseExecution":{"method":"POST","nodeId":"node.generic","path":"/generic/submit"}}`,
+	}}))
+}
+
+func seedCaseConfigUpsertCatalogWithBaseConfig(t *testing.T, storePath string) {
+	t.Helper()
+	replaceCaseConfigUpsertCatalog(t, storePath, caseConfigSubmitCatalog([]store.CatalogTemplateConfig{{
+		ID:         "config.case.generic.submit",
+		ScopeType:  "case",
+		ScopeID:    "case.generic.submit",
+		Status:     "active",
+		ConfigJSON: `{"caseId":"case.generic.submit","caseExecution":{"method":"POST","nodeId":"node.generic","path":"/generic/submit"}}`,
+	}}))
+}
+
+func caseConfigSubmitCatalog(templateConfigs []store.CatalogTemplateConfig) store.ProfileCatalog {
+	return store.ProfileCatalog{
 		ProfileID: "default",
 		IndexedAt: time.Now().UTC(),
 		InterfaceNodes: []store.CatalogInterfaceNode{{
 			ID:        "node.generic",
 			ServiceID: "service.generic",
 			Method:    "POST",
-			Path:      "/generic/prepare",
+			Path:      "/generic/submit",
+			Status:    "active",
+		}},
+		APICases: []store.CatalogAPICase{{
+			ID:          "case.generic.submit",
+			DisplayName: "Generic Submit",
+			NodeID:      "node.generic",
+			Status:      "active",
+		}},
+		TemplateConfigs: templateConfigs,
+	}
+}
+
+func caseConfigWorkflowCatalog(interfacePath string, templateConfigs []store.CatalogTemplateConfig) store.ProfileCatalog {
+	return store.ProfileCatalog{
+		ProfileID: "default",
+		IndexedAt: time.Now().UTC(),
+		InterfaceNodes: []store.CatalogInterfaceNode{{
+			ID:        "node.generic",
+			ServiceID: "service.generic",
+			Method:    "POST",
+			Path:      interfacePath,
 			Status:    "active",
 		}},
 		Workflows: []store.CatalogWorkflow{{
@@ -297,108 +434,6 @@ func seedCaseConfigUpsertWorkflowCatalog(t *testing.T, storePath string) {
 			{ID: "case.generic.prepare", DisplayName: "Generic Prepare", NodeID: "node.generic", Status: "active", SortOrder: 1},
 			{ID: "case.generic.callback", DisplayName: "Generic Callback", NodeID: "node.generic", Status: "active", SortOrder: 2},
 		},
-	}); err != nil {
-		t.Fatalf("replace profile catalog: %v", err)
-	}
-}
-
-func seedCaseConfigUpsertCatalog(t *testing.T, storePath string) {
-	t.Helper()
-	ctx := context.Background()
-	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
-	if err != nil {
-		t.Fatalf("open sqlite store: %v", err)
-	}
-	defer s.Close()
-	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
-		ProfileID: "default",
-		IndexedAt: time.Now().UTC(),
-		InterfaceNodes: []store.CatalogInterfaceNode{{
-			ID:        "node.generic",
-			ServiceID: "service.generic",
-			Method:    "POST",
-			Path:      "/generic/submit",
-			Status:    "active",
-		}},
-		APICases: []store.CatalogAPICase{{
-			ID:          "case.generic.submit",
-			DisplayName: "Generic Submit",
-			NodeID:      "node.generic",
-			Status:      "active",
-		}},
-	}); err != nil {
-		t.Fatalf("replace profile catalog: %v", err)
-	}
-}
-
-func seedCaseConfigUpsertCatalogWithAPICaseScopedConfig(t *testing.T, storePath string) {
-	t.Helper()
-	ctx := context.Background()
-	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
-	if err != nil {
-		t.Fatalf("open sqlite store: %v", err)
-	}
-	defer s.Close()
-	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
-		ProfileID: "default",
-		IndexedAt: time.Now().UTC(),
-		InterfaceNodes: []store.CatalogInterfaceNode{{
-			ID:        "node.generic",
-			ServiceID: "service.generic",
-			Method:    "POST",
-			Path:      "/generic/submit",
-			Status:    "active",
-		}},
-		APICases: []store.CatalogAPICase{{
-			ID:          "case.generic.submit",
-			DisplayName: "Generic Submit",
-			NodeID:      "node.generic",
-			Status:      "active",
-		}},
-		TemplateConfigs: []store.CatalogTemplateConfig{{
-			ID:         "config.api-case.generic.submit",
-			ScopeType:  "api-case",
-			ScopeID:    "case.generic.submit",
-			Status:     "active",
-			ConfigJSON: `{"caseId":"case.generic.submit","caseExecution":{"method":"POST","nodeId":"node.generic","path":"/generic/submit"}}`,
-		}},
-	}); err != nil {
-		t.Fatalf("replace profile catalog: %v", err)
-	}
-}
-
-func seedCaseConfigUpsertCatalogWithBaseConfig(t *testing.T, storePath string) {
-	t.Helper()
-	ctx := context.Background()
-	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
-	if err != nil {
-		t.Fatalf("open sqlite store: %v", err)
-	}
-	defer s.Close()
-	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
-		ProfileID: "default",
-		IndexedAt: time.Now().UTC(),
-		InterfaceNodes: []store.CatalogInterfaceNode{{
-			ID:        "node.generic",
-			ServiceID: "service.generic",
-			Method:    "POST",
-			Path:      "/generic/submit",
-			Status:    "active",
-		}},
-		APICases: []store.CatalogAPICase{{
-			ID:          "case.generic.submit",
-			DisplayName: "Generic Submit",
-			NodeID:      "node.generic",
-			Status:      "active",
-		}},
-		TemplateConfigs: []store.CatalogTemplateConfig{{
-			ID:         "config.case.generic.submit",
-			ScopeType:  "case",
-			ScopeID:    "case.generic.submit",
-			Status:     "active",
-			ConfigJSON: `{"caseId":"case.generic.submit","caseExecution":{"method":"POST","nodeId":"node.generic","path":"/generic/submit"}}`,
-		}},
-	}); err != nil {
-		t.Fatalf("replace profile catalog: %v", err)
+		TemplateConfigs: templateConfigs,
 	}
 }

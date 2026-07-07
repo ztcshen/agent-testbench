@@ -118,6 +118,7 @@ func inspectEnvironmentComposeServices(ctx context.Context, services []string, w
 	output, errText := runRestoreCommand(ctx, workspace, command)
 	out := make([]environmentRestoreHealthCheckReport, 0, len(services))
 	expectations := environmentStatusComposeServiceExpectations(healthChecks)
+	applicationProbes := environmentStatusApplicationProbeServices(healthChecks)
 	if errText != "" {
 		if len(services) == 0 {
 			return []environmentRestoreHealthCheckReport{{
@@ -159,6 +160,7 @@ func inspectEnvironmentComposeServices(ctx context.Context, services []string, w
 		}
 		check.Output = truncateReportText(output, 200)
 		check = environmentStatusApplyComposeServiceExpectation(check, expectations[service])
+		check = environmentStatusApplyApplicationProbeRequirement(check, applicationProbes[service])
 		out = append(out, check)
 	}
 	return out
@@ -172,6 +174,21 @@ func environmentStatusComposeServiceExpectations(healthChecks []any) map[string]
 			continue
 		}
 		out[check.Service] = check
+	}
+	return out
+}
+
+func environmentStatusApplicationProbeServices(healthChecks []any) map[string]bool {
+	out := map[string]bool{}
+	for _, raw := range healthChecks {
+		check, ok := environmentRestoreHealthCheckFromAny(raw)
+		if !ok || strings.TrimSpace(check.Service) == "" {
+			continue
+		}
+		switch check.Kind {
+		case "url", "tcp", "command", "container":
+			out[check.Service] = true
+		}
 	}
 	return out
 }
@@ -193,6 +210,15 @@ func environmentStatusApplyComposeServiceExpectation(check environmentRestoreHea
 	if check.OK {
 		check.Error = ""
 	}
+	return check
+}
+
+func environmentStatusApplyApplicationProbeRequirement(check environmentRestoreHealthCheckReport, required bool) environmentRestoreHealthCheckReport {
+	if !required || check.Kind != "compose-service" || !check.OK || strings.TrimSpace(check.Health) != "" {
+		return check
+	}
+	check.OK = false
+	check.Error = "application readiness requires an explicit health probe; container state alone is not enough"
 	return check
 }
 
