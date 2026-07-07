@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -13,6 +15,8 @@ import (
 
 	"agent-testbench/internal/store"
 )
+
+const caseConfigScopeTypeStep = "step"
 
 type caseConfigUpsertReport struct {
 	OK               bool                      `json:"ok"`
@@ -26,7 +30,11 @@ type caseConfigUpsertReport struct {
 }
 
 type caseConfigUpsertConfigRef struct {
-	ID string `json:"id"`
+	ID         string `json:"id"`
+	ScopeType  string `json:"scopeType,omitempty"`
+	ScopeID    string `json:"scopeId,omitempty"`
+	WorkflowID string `json:"workflowId,omitempty"`
+	StepID     string `json:"stepId,omitempty"`
 }
 
 func runCaseConfig(ctx context.Context, args []string) error {
@@ -47,11 +55,14 @@ func runCaseConfigUpsert(ctx context.Context, args []string) error {
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
 	caseID := flags.String("case", "", "API case id")
+	workflowID := flags.String("workflow", "", "Workflow id when updating a workflow step execution config")
+	stepID := flags.String(caseConfigScopeTypeStep, "", "Workflow step id when updating a workflow step execution config")
 	method := flags.String("method", "", "HTTP method")
 	path := flags.String("path", "", "Request path")
 	bodyJSON := flags.String("body-json", "", "Request body JSON")
 	nodeID := flags.String("node-id", "", "Override interface node id")
 	configID := flags.String("config-id", "", "Template config id to update")
+	status := flags.String("status", "", "Template config status; new configs default to active")
 	authJSON := flags.String("auth-json", "", "Request auth JSON")
 	headersJSON := flags.String("headers-json", "", "Request headers JSON object")
 	defaultOverridesJSON := flags.String("default-overrides-json", "", "Default request overrides JSON object persisted on the catalog case")
@@ -79,6 +90,9 @@ func runCaseConfigUpsert(ctx context.Context, args []string) error {
 	if strings.TrimSpace(*caseID) == "" {
 		return errors.New("--case is required")
 	}
+	if (strings.TrimSpace(*workflowID) == "") != (strings.TrimSpace(*stepID) == "") {
+		return errors.New("--workflow and --step must be provided together")
+	}
 	storeDSN, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return err
@@ -93,7 +107,10 @@ func runCaseConfigUpsert(ctx context.Context, args []string) error {
 		var upsertErr error
 		report, upsertErr = upsertCaseExecutionConfig(ctx, runtime, caseConfigUpsertOptions{
 			CaseID:               *caseID,
+			WorkflowID:           *workflowID,
+			StepID:               *stepID,
 			ConfigID:             *configID,
+			Status:               *status,
 			Method:               *method,
 			Path:                 *path,
 			BodyJSON:             *bodyJSON,
@@ -125,7 +142,10 @@ func runCaseConfigUpsert(ctx context.Context, args []string) error {
 
 type caseConfigUpsertOptions struct {
 	CaseID               string
+	WorkflowID           string
+	StepID               string
 	ConfigID             string
+	Status               string
 	Method               string
 	Path                 string
 	BodyJSON             string
@@ -154,78 +174,22 @@ func upsertCaseExecutionConfig(ctx context.Context, runtime store.Store, options
 	if !ok {
 		return caseConfigUpsertReport{}, fmt.Errorf("api case not found in Store catalog: %s", caseID)
 	}
-	body, hasBody, err := parseOptionalJSONValue("body-json", options.BodyJSON)
+	parsed, err := parseCaseConfigUpsertInputs(options)
 	if err != nil {
 		return caseConfigUpsertReport{}, err
 	}
-	headers, err := parseHeadersOptions(options.Headers, options.HeadersJSON)
+	config, exists, configID, err := prepareCaseExecutionTemplateConfig(catalog, caseID, options)
 	if err != nil {
 		return caseConfigUpsertReport{}, err
 	}
-	auth, hasAuth, err := parseOptionalJSONObject("auth-json", options.AuthJSON)
-	if err != nil {
-		return caseConfigUpsertReport{}, err
-	}
-	defaultOverrides, hasDefaultOverrides, err := parseDefaultOverrideOptions(options.DefaultOverrides, options.DefaultOverridesJSON)
-	if err != nil {
-		return caseConfigUpsertReport{}, err
-	}
-	inputs, hasInputs, err := parseOptionalJSONArrayObjects("inputs-json", options.InputsJSON)
-	if err != nil {
-		return caseConfigUpsertReport{}, err
-	}
-	exports, hasExports, err := parseOptionalJSONArrayObjects("exports-json", options.ExportsJSON)
-	if err != nil {
-		return caseConfigUpsertReport{}, err
-	}
-	statuses, err := parseExpectedStatuses(options.ExpectedStatuses)
-	if err != nil {
-		return caseConfigUpsertReport{}, err
-	}
-	configID := strings.TrimSpace(options.ConfigID)
-	if configID == "" {
-		configID = selectedCaseExecutionTemplateConfigID(catalog, caseID)
-	}
-	if configID == "" {
-		configID = "config." + safeReportID(caseID) + ".execution"
-	}
-	config, exists := findCatalogTemplateConfig(catalog.TemplateConfigs, configID)
-	config.ID = configID
-	if !exists || !isCaseExecutionConfigScope(config.ScopeType) {
-		config.ScopeType = "case"
-	}
-	config.ScopeID = caseID
-	config.Status = "active"
-	configJSON, err := mergeCaseExecutionConfigJSON(config.ConfigJSON, caseID, apiCase, catalog, caseConfigExecutionPatch{
-		Method:              strings.TrimSpace(options.Method),
-		Path:                strings.TrimSpace(options.Path),
-		Body:                body,
-		HasBody:             hasBody,
-		NodeID:              strings.TrimSpace(options.NodeID),
-		Headers:             headers,
-		Auth:                auth,
-		HasAuth:             hasAuth,
-		Signed:              options.Signed,
-		TraceEndpoint:       strings.TrimSpace(options.TraceEndpoint),
-		ExpectedStatuses:    statuses,
-		ResponseContains:    options.ResponseContains,
-		ResponseNotContains: options.ResponseNotContains,
-		Inputs:              inputs,
-		HasInputs:           hasInputs,
-		Exports:             exports,
-		HasExports:          hasExports,
-	})
+	configJSON, err := mergeCaseExecutionConfigJSON(config.ConfigJSON, caseID, apiCase, catalog, parsed.Patch)
 	if err != nil {
 		return caseConfigUpsertReport{}, err
 	}
 	config.ConfigJSON = configJSON
 	catalog.TemplateConfigs = upsertCatalogTemplateConfig(catalog.TemplateConfigs, config)
-	if hasDefaultOverrides {
-		defaultOverrides = mergeCatalogDefaultOverrides(apiCase.DefaultOverridesJSON, defaultOverrides)
-		apiCase.DefaultOverridesJSON = compactJSONObject(defaultOverrides)
-		catalog.APICases = upsertCatalogAPICase(catalog.APICases, apiCase)
-	}
-	selectedID := selectedCaseExecutionTemplateConfigID(catalog, caseID)
+	catalog, parsed.DefaultOverrides = applyCaseConfigDefaultOverrides(catalog, apiCase, parsed)
+	selectedID := selectedCaseExecutionTemplateConfigID(catalog, caseID, options.WorkflowID, options.StepID)
 	catalog.IndexedAt = time.Now().UTC()
 	if err := runtime.ReplaceProfileCatalog(ctx, catalog); err != nil {
 		return caseConfigUpsertReport{}, err
@@ -235,10 +199,127 @@ func upsertCaseExecutionConfig(ctx context.Context, runtime store.Store, options
 		CaseID:           caseID,
 		Created:          !exists,
 		Updated:          exists,
-		Config:           caseConfigUpsertConfigRef{ID: configID},
-		DefaultOverrides: defaultOverrides,
+		Config:           caseConfigUpsertConfigRefFromStore(configID, config),
+		DefaultOverrides: parsed.DefaultOverrides,
 		SelectedByRunner: selectedID == configID,
 	}, nil
+}
+
+type parsedCaseConfigUpsertInputs struct {
+	Patch               caseConfigExecutionPatch
+	DefaultOverrides    map[string]any
+	HasDefaultOverrides bool
+}
+
+func parseCaseConfigUpsertInputs(options caseConfigUpsertOptions) (parsedCaseConfigUpsertInputs, error) {
+	body, hasBody, err := parseOptionalJSONValue("body-json", options.BodyJSON)
+	if err != nil {
+		return parsedCaseConfigUpsertInputs{}, err
+	}
+	headers, err := parseHeadersOptions(options.Headers, options.HeadersJSON)
+	if err != nil {
+		return parsedCaseConfigUpsertInputs{}, err
+	}
+	auth, hasAuth, err := parseOptionalJSONObject("auth-json", options.AuthJSON)
+	if err != nil {
+		return parsedCaseConfigUpsertInputs{}, err
+	}
+	defaultOverrides, hasDefaultOverrides, err := parseDefaultOverrideOptions(options.DefaultOverrides, options.DefaultOverridesJSON)
+	if err != nil {
+		return parsedCaseConfigUpsertInputs{}, err
+	}
+	inputs, hasInputs, err := parseOptionalJSONArrayObjects("inputs-json", options.InputsJSON)
+	if err != nil {
+		return parsedCaseConfigUpsertInputs{}, err
+	}
+	exports, hasExports, err := parseOptionalJSONArrayObjects("exports-json", options.ExportsJSON)
+	if err != nil {
+		return parsedCaseConfigUpsertInputs{}, err
+	}
+	statuses, err := parseExpectedStatuses(options.ExpectedStatuses)
+	if err != nil {
+		return parsedCaseConfigUpsertInputs{}, err
+	}
+	return parsedCaseConfigUpsertInputs{
+		Patch: caseConfigExecutionPatch{
+			Method:              strings.TrimSpace(options.Method),
+			Path:                strings.TrimSpace(options.Path),
+			Body:                body,
+			HasBody:             hasBody,
+			NodeID:              strings.TrimSpace(options.NodeID),
+			Headers:             headers,
+			Auth:                auth,
+			HasAuth:             hasAuth,
+			Signed:              options.Signed,
+			TraceEndpoint:       strings.TrimSpace(options.TraceEndpoint),
+			ExpectedStatuses:    statuses,
+			ResponseContains:    options.ResponseContains,
+			ResponseNotContains: options.ResponseNotContains,
+			Inputs:              inputs,
+			HasInputs:           hasInputs,
+			Exports:             exports,
+			HasExports:          hasExports,
+		},
+		DefaultOverrides:    defaultOverrides,
+		HasDefaultOverrides: hasDefaultOverrides,
+	}, nil
+}
+
+func prepareCaseExecutionTemplateConfig(catalog store.ProfileCatalog, caseID string, options caseConfigUpsertOptions) (store.CatalogTemplateConfig, bool, string, error) {
+	if err := validateCaseConfigWorkflowStepBinding(catalog, caseID, options.WorkflowID, options.StepID); err != nil {
+		return store.CatalogTemplateConfig{}, false, "", err
+	}
+	configID := strings.TrimSpace(options.ConfigID)
+	if configID == "" {
+		if isWorkflowStepCaseExecutionScope(options.WorkflowID, options.StepID) {
+			configID = workflowStepCaseExecutionTemplateConfigID(catalog, caseID, options.WorkflowID, options.StepID)
+		} else {
+			configID = selectedCaseExecutionTemplateConfigID(catalog, caseID, options.WorkflowID, options.StepID)
+		}
+	}
+	if configID == "" {
+		configID = defaultCaseExecutionTemplateConfigID(caseID, options.WorkflowID, options.StepID)
+	}
+	config, exists := findCatalogTemplateConfig(catalog.TemplateConfigs, configID)
+	config.ID = configID
+	if isWorkflowStepCaseExecutionScope(options.WorkflowID, options.StepID) {
+		config.ScopeType = caseConfigScopeTypeStep
+		config.WorkflowID = strings.TrimSpace(options.WorkflowID)
+		config.ScopeID = strings.TrimSpace(options.StepID)
+	} else if !exists || !isCaseExecutionConfigScope(config.ScopeType) {
+		config.ScopeType = "case"
+		config.WorkflowID = ""
+		config.ScopeID = caseID
+	}
+	if strings.TrimSpace(options.Status) != "" {
+		config.Status = strings.TrimSpace(options.Status)
+	} else if !exists || strings.TrimSpace(config.Status) == "" {
+		config.Status = "active"
+	}
+	return config, exists, configID, nil
+}
+
+func applyCaseConfigDefaultOverrides(catalog store.ProfileCatalog, apiCase store.CatalogAPICase, parsed parsedCaseConfigUpsertInputs) (store.ProfileCatalog, map[string]any) {
+	if !parsed.HasDefaultOverrides {
+		return catalog, parsed.DefaultOverrides
+	}
+	defaultOverrides := mergeCatalogDefaultOverrides(apiCase.DefaultOverridesJSON, parsed.DefaultOverrides)
+	apiCase.DefaultOverridesJSON = compactJSONObject(defaultOverrides)
+	catalog.APICases = upsertCatalogAPICase(catalog.APICases, apiCase)
+	return catalog, defaultOverrides
+}
+
+func caseConfigUpsertConfigRefFromStore(configID string, config store.CatalogTemplateConfig) caseConfigUpsertConfigRef {
+	ref := caseConfigUpsertConfigRef{
+		ID:         configID,
+		ScopeType:  config.ScopeType,
+		ScopeID:    config.ScopeID,
+		WorkflowID: config.WorkflowID,
+	}
+	if strings.TrimSpace(config.ScopeType) == caseConfigScopeTypeStep {
+		ref.StepID = config.ScopeID
+	}
+	return ref
 }
 
 type caseConfigExecutionPatch struct {
@@ -455,7 +536,10 @@ func findCatalogTemplateConfig(items []store.CatalogTemplateConfig, id string) (
 	return store.CatalogTemplateConfig{}, false
 }
 
-func selectedCaseExecutionTemplateConfigID(catalog store.ProfileCatalog, caseID string) string {
+func selectedCaseExecutionTemplateConfigID(catalog store.ProfileCatalog, caseID string, workflowID string, stepID string) string {
+	if id := workflowStepCaseExecutionTemplateConfigID(catalog, caseID, workflowID, stepID); id != "" {
+		return id
+	}
 	for _, config := range catalog.TemplateConfigs {
 		if config.Status != "" && config.Status != "active" {
 			continue
@@ -466,22 +550,84 @@ func selectedCaseExecutionTemplateConfigID(catalog store.ProfileCatalog, caseID 
 		if config.ScopeID != "" && config.ScopeID != caseID {
 			continue
 		}
-		var parsed struct {
-			CaseID        string         `json:"caseId"`
-			CaseExecution map[string]any `json:"caseExecution"`
-		}
-		if err := json.Unmarshal([]byte(config.ConfigJSON), &parsed); err != nil {
-			continue
-		}
-		if parsed.CaseID != caseID {
-			continue
-		}
-		if valueString(parsed.CaseExecution["method"]) == "" && valueString(parsed.CaseExecution["path"]) == "" && valueString(parsed.CaseExecution["nodeId"]) == "" {
+		if !configContainsCaseExecution(config, caseID) {
 			continue
 		}
 		return config.ID
 	}
 	return ""
+}
+
+func workflowStepCaseExecutionTemplateConfigID(catalog store.ProfileCatalog, caseID string, workflowID string, stepID string) string {
+	workflowID = strings.TrimSpace(workflowID)
+	stepID = strings.TrimSpace(stepID)
+	if !isWorkflowStepCaseExecutionScope(workflowID, stepID) {
+		return ""
+	}
+	for _, config := range catalog.TemplateConfigs {
+		if !isActiveCaseConfigStatus(config.Status) || strings.TrimSpace(config.ScopeType) != caseConfigScopeTypeStep || strings.TrimSpace(config.WorkflowID) != workflowID || strings.TrimSpace(config.ScopeID) != stepID {
+			continue
+		}
+		if !configContainsCaseExecution(config, caseID) {
+			continue
+		}
+		return config.ID
+	}
+	return ""
+}
+
+func defaultCaseExecutionTemplateConfigID(caseID string, workflowID string, stepID string) string {
+	if isWorkflowStepCaseExecutionScope(workflowID, stepID) {
+		key := strings.TrimSpace(workflowID) + "\x00" + strings.TrimSpace(stepID)
+		sum := sha256.Sum256([]byte(key))
+		return "cfg.workflow-step." + safeReportID(workflowID) + "." + safeReportID(stepID) + "." + hex.EncodeToString(sum[:6])
+	}
+	return "config." + safeReportID(caseID) + ".execution"
+}
+
+func validateCaseConfigWorkflowStepBinding(catalog store.ProfileCatalog, caseID string, workflowID string, stepID string) error {
+	workflowID = strings.TrimSpace(workflowID)
+	stepID = strings.TrimSpace(stepID)
+	if !isWorkflowStepCaseExecutionScope(workflowID, stepID) {
+		return nil
+	}
+	binding, ok := findCatalogWorkflowBinding(catalog.WorkflowBindings, workflowID, stepID)
+	if !ok {
+		return fmt.Errorf("workflow step binding not found: workflow=%s step=%s", workflowID, stepID)
+	}
+	if strings.TrimSpace(binding.CaseID) != caseID {
+		return fmt.Errorf("workflow step %s in workflow %s is bound to case %s, not %s", stepID, workflowID, binding.CaseID, caseID)
+	}
+	return nil
+}
+
+func configContainsCaseExecution(config store.CatalogTemplateConfig, caseID string) bool {
+	var parsed struct {
+		CaseID        string         `json:"caseId"`
+		CaseExecution map[string]any `json:"caseExecution"`
+	}
+	if err := json.Unmarshal([]byte(config.ConfigJSON), &parsed); err != nil {
+		return false
+	}
+	if parsed.CaseID != caseID {
+		return false
+	}
+	return caseExecutionHasRequestTarget(parsed.CaseExecution)
+}
+
+func caseExecutionHasRequestTarget(execution map[string]any) bool {
+	return valueString(execution["method"]) != "" ||
+		valueString(execution["path"]) != "" ||
+		valueString(execution["nodeId"]) != ""
+}
+
+func isWorkflowStepCaseExecutionScope(workflowID string, stepID string) bool {
+	return strings.TrimSpace(workflowID) != "" && strings.TrimSpace(stepID) != ""
+}
+
+func isActiveCaseConfigStatus(status string) bool {
+	status = strings.TrimSpace(strings.ToLower(status))
+	return status == "" || status == "active"
 }
 
 func isCaseExecutionConfigScope(scopeType string) bool {

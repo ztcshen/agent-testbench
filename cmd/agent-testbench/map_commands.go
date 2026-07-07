@@ -12,15 +12,8 @@ import (
 
 	"agent-testbench/internal/domain/commandline"
 	"agent-testbench/internal/domain/mapplanner"
-	"agent-testbench/internal/domain/plangraph"
 	"agent-testbench/internal/store"
 )
-
-type mapImportReport struct {
-	OK     bool              `json:"ok"`
-	Map    store.TestPlanMap `json:"map"`
-	Counts mapCountsReport   `json:"counts"`
-}
 
 type mapUpdateReport struct {
 	OK     bool              `json:"ok"`
@@ -523,56 +516,6 @@ func runMapPlansWithOptions(ctx context.Context, options mapPlansOptions) error 
 	return nil
 }
 
-func runMapImportWorkflows(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("map import-workflows", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	storeRef := flags.String("store", "", "Named Store config or Store DSN")
-	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
-	mapID := flags.String("map", "", "Plan map id")
-	displayName := flags.String("display-name", "", "Plan map display name")
-	description := flags.String("description", "", "Plan map description")
-	var workflowIDs stringListFlag
-	flags.Var(&workflowIDs, "workflow", "Workflow id to import into the map; repeat for multiple workflows")
-	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	if flags.NArg() > 0 {
-		return fmt.Errorf("map import-workflows does not accept positional arguments: %s", strings.Join(flags.Args(), " "))
-	}
-	runtime, cleanup, err := openRequiredCLIStore(ctx, *storeRef, *storeURL)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
-	catalog, err := runtime.GetProfileCatalog(ctx)
-	if err != nil {
-		return err
-	}
-	graph, err := plangraph.ImportCatalog(catalog, plangraph.ImportOptions{
-		MapID:       *mapID,
-		DisplayName: *displayName,
-		Description: *description,
-		WorkflowIDs: workflowIDs.Values(),
-	})
-	if err != nil {
-		return err
-	}
-	if err := runtime.ReplaceTestPlanGraph(ctx, graph); err != nil {
-		return err
-	}
-	report := mapImportReport{
-		OK:     true,
-		Map:    graph.Map,
-		Counts: mapCountsFromGraph(graph),
-	}
-	if *jsonOutput {
-		return writeIndentedJSON(report)
-	}
-	printMapImportReport(report)
-	return nil
-}
-
 type mapWorkflowsOptions struct {
 	StoreRef   string
 	StoreURL   string
@@ -695,15 +638,6 @@ func openRequiredMapGraphForCLI(ctx context.Context, storeRef string, storeURL s
 		return nil, store.TestPlanGraph{}, func() {}, errors.New("--map is required")
 	}
 	return openMapGraphForCLI(ctx, storeRef, storeURL, mapID)
-}
-
-func printMapImportReport(report mapImportReport) {
-	fmt.Println("Workflow Map")
-	fmt.Printf("Map: %s\n", report.Map.ID)
-	fmt.Printf("Profile: %s\n", report.Map.ProfileID)
-	fmt.Printf("Nodes: %d\n", report.Counts.Nodes)
-	fmt.Printf("Paths: %d\n", report.Counts.Paths)
-	fmt.Printf("Materializations: %d\n", report.Counts.Materializations)
 }
 
 func printMapUpdateReport(report mapUpdateReport) {

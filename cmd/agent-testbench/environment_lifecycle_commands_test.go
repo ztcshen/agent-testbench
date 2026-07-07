@@ -90,6 +90,73 @@ func TestEnvironmentStatusReportsComposeStateWithoutHeavyRestore(t *testing.T) {
 	}
 }
 
+func TestEnvironmentStatusDoesNotTreatRunningAppContainerAsReadyWhenAppProbeExists(t *testing.T) {
+	fixture := newEnvironmentRestoreDockerCLIFixture(t)
+	fixture.writeDockerTool(t, `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
+if [ "$1" = compose ] && [ "$2" = version ]; then
+  printf 'Docker Compose version v2.0.0\n'
+  exit 0
+fi
+if [ "$1" = compose ] && [[ "$*" == *" ps -a --format json"* ]]; then
+  printf '{"Name":"demo-app","Service":"app","State":"running"}\n'
+  exit 0
+fi
+exit 0
+`)
+	composeSource := filepath.Join(t.TempDir(), "compose.yml")
+	writeFile(t, composeSource, "services:\n  app:\n    image: alpine:3.20\n")
+	runCLI(t, "environment", "register",
+		"--store", fixture.StoreDSN,
+		"--id", "env.status.app-probe",
+		"--compose-file", "compose.yml",
+		"--compose-generated-file", "compose.yml="+composeSource,
+		"--compose-service", "app",
+		"--verification-workflow", "workflow.core-10",
+	)
+	graphPath := filepath.Join(t.TempDir(), "graph.json")
+	writeFile(t, graphPath, mustJSON(t, store.EnvironmentComponentGraph{
+		Components: []store.EnvironmentComponent{{
+			ComponentID: "app", Kind: "app", Role: "business-service", ComposeService: "app", Required: true,
+			HealthCheckJSON: `{"kind":"url","url":"http://127.0.0.1:18080/actuator/health"}`,
+			RuntimeJSON:     `{}`, SummaryJSON: `{}`,
+		}},
+	}))
+	runCLI(t, "environment", "components", "replace", "--store", fixture.StoreDSN, "--file", graphPath, "env.status.app-probe")
+
+	out := runCLIFailsWithEnv(t, fixture.DockerEnv, "environment", "status", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--json", "env.status.app-probe")
+	var report struct {
+		OK     bool `json:"ok"`
+		Docker struct {
+			Summary struct {
+				Ready  int `json:"ready"`
+				Failed int `json:"failed"`
+			} `json:"summary"`
+			Services []struct {
+				Service string `json:"service"`
+				State   string `json:"state"`
+				OK      bool   `json:"ok"`
+				Error   string `json:"error"`
+			} `json:"services"`
+		} `json:"docker"`
+	}
+	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
+		t.Fatalf("decode app probe status report: %v\n%s", err, out)
+	}
+	if report.OK || report.Docker.Summary.Ready != 0 || report.Docker.Summary.Failed != 1 || len(report.Docker.Services) != 1 ||
+		report.Docker.Services[0].Service != "app" || report.Docker.Services[0].State != "running" || report.Docker.Services[0].OK ||
+		!strings.Contains(report.Docker.Services[0].Error, "container state alone is not enough") {
+		t.Fatalf("app probe status report = %#v", report)
+	}
+	dockerCalls, err := os.ReadFile(fixture.DockerCallsPath)
+	if err != nil {
+		t.Fatalf("read fake docker calls: %v", err)
+	}
+	if strings.Contains(string(dockerCalls), "actuator") {
+		t.Fatalf("environment status should not execute application probes directly:\n%s", dockerCalls)
+	}
+}
+
 func TestEnvironmentStatusMaterializesWorkspaceEnvFile(t *testing.T) {
 	fixture := newEnvironmentRestoreDockerCLIFixture(t)
 	composeSource := filepath.Join(t.TempDir(), "compose.yml")
