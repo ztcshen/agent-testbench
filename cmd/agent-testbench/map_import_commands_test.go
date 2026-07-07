@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"agent-testbench/internal/store"
 )
 
 func TestMapImportWorkflowsAndExplainUsesStoreCatalog(t *testing.T) {
@@ -144,6 +147,84 @@ func TestMapImportWorkflowsAppendPreservesExistingPaths(t *testing.T) {
 	}
 }
 
+func TestMapImportWorkflowsAppendRejectsMergedCycle(t *testing.T) {
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "map-append-cycle.sqlite")
+	storeRef := "sqlite://" + storePath
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if err := runtime.ReplaceTestPlanGraph(ctx, store.TestPlanGraph{
+		Map: store.TestPlanMap{ID: "map.profile.flow", ProfileID: "profile.flow"},
+		Nodes: []store.TestPlanNode{
+			{MapID: "map.profile.flow", ID: "case.prepare", CaseID: "case.prepare"},
+			{MapID: "map.profile.flow", ID: "case.submit.success", CaseID: "case.submit.success"},
+		},
+		Paths: []store.TestPlanPath{{
+			MapID: "map.profile.flow", ID: "workflow.reverse", WorkflowID: "workflow.reverse",
+		}},
+		PathSteps: []store.TestPlanPathStep{
+			{MapID: "map.profile.flow", PathID: "workflow.reverse", StepIndex: 1, NodeID: "case.submit.success", CaseID: "case.submit.success"},
+			{MapID: "map.profile.flow", PathID: "workflow.reverse", StepIndex: 2, NodeID: "case.prepare", CaseID: "case.prepare"},
+		},
+		Edges: []store.TestPlanEdge{{
+			MapID: "map.profile.flow", ID: "edge.reverse", FromNodeID: "case.submit.success", ToNodeID: "case.prepare", Kind: "control", PathID: "workflow.reverse",
+		}},
+	}); err != nil {
+		t.Fatalf("seed reverse graph: %v", err)
+	}
+	closeCLIStore(runtime)
+	seedMapCommandProfileCatalog(t, storeRef, mapCommandProfileCatalogFixture())
+
+	out := runCLIFails(t, "map", "import-workflows", "--store", storeRef, "--map", "map.profile.flow", "--workflow", "workflow.flow.create", "--append", "--json")
+	if !strings.Contains(out, "plan graph contains cycle") {
+		t.Fatalf("append cycle should fail before storing graph:\n%s", out)
+	}
+
+	runtime, err = openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	defer closeCLIStore(runtime)
+	graph, err := runtime.GetTestPlanGraph(ctx, "map.profile.flow")
+	if err != nil {
+		t.Fatalf("get graph after failed append: %v", err)
+	}
+	if len(graph.Edges) != 1 || graph.Edges[0].ID != "edge.reverse" {
+		t.Fatalf("failed append should not replace stored graph: %#v", graph.Edges)
+	}
+}
+
+func TestMapImportWorkflowsAppendDropsStaleFixtureDataForRefreshedPath(t *testing.T) {
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "map-append-stale-fixture.sqlite")
+	storeRef := "sqlite://" + storePath
+	seedMapCommandProfileCatalog(t, storeRef, mapCommandProfileCatalogFixture())
+	runCLI(t, "map", "import-workflows", "--store", storeRef, "--json")
+
+	seedMapCommandProfileCatalog(t, storeRef, mapCommandProfileCatalogWithoutFixtures())
+	runCLI(t, "map", "import-workflows", "--store", storeRef, "--map", "map.profile.flow", "--workflow", "workflow.flow.create", "--append", "--json")
+
+	runtime, err := openStore(ctx, storeRef)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	defer closeCLIStore(runtime)
+	graph, err := runtime.GetTestPlanGraph(ctx, "map.profile.flow")
+	if err != nil {
+		t.Fatalf("get refreshed graph: %v", err)
+	}
+	if len(graph.Materializations) != 0 {
+		t.Fatalf("refreshed path should drop stale materializations: %#v", graph.Materializations)
+	}
+	for _, edge := range graph.Edges {
+		if edge.Kind == "fixture" || edge.MaterializationID != "" {
+			t.Fatalf("refreshed path should drop stale fixture edges: %#v", graph.Edges)
+		}
+	}
+}
+
 func TestMapImportWorkflowsReplaceWarnsWhenFilteredImportShrinksExistingMap(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "map-replace-warning.sqlite")
 	storeRef := "sqlite://" + storePath
@@ -168,6 +249,13 @@ func TestMapImportWorkflowsReplaceWarnsWhenFilteredImportShrinksExistingMap(t *t
 	if !replaceReport.OK || replaceReport.Mode != "replace" || replaceReport.Before.Paths != 2 || replaceReport.Counts.Paths != 1 || len(replaceReport.Warnings) != 1 || !strings.Contains(replaceReport.Warnings[0], "--append") {
 		t.Fatalf("replace warning report = %#v", replaceReport)
 	}
+}
+
+func mapCommandProfileCatalogWithoutFixtures() store.ProfileCatalog {
+	catalog := mapCommandProfileCatalogFixture()
+	catalog.Fixtures = nil
+	catalog.CaseDependencies = nil
+	return catalog
 }
 
 func TestMapImportWorkflowsRejectsPositionalArgsBeforeOpeningStore(t *testing.T) {

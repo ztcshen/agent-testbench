@@ -292,6 +292,89 @@ func TestCaseConfigUpsertUpdatesWorkflowStepExecutionConfigForAudit(t *testing.T
 	}
 }
 
+func TestCaseConfigUpsertCreatesStepConfigWithoutRescopingGenericConfig(t *testing.T) {
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "step-new-config.sqlite")
+	storeRef := "sqlite://" + storePath
+	genericConfigID := "config.case.generic.prepare"
+	replaceCaseConfigUpsertCatalog(t, storePath, caseConfigWorkflowCatalog("/generic",
+		[]store.CatalogTemplateConfig{{
+			ID:         genericConfigID,
+			ScopeType:  "case",
+			ScopeID:    "case.generic.prepare",
+			Status:     "active",
+			ConfigJSON: `{"caseId":"case.generic.prepare","caseExecution":{"method":"POST","nodeId":"node.generic","path":"/generic/prepare"}}`,
+		}},
+	))
+
+	out := runCLI(t, "case", "config", "upsert",
+		"--store", storeRef,
+		"--case", "case.generic.prepare",
+		"--workflow", "workflow.generic",
+		"--step", "prepare",
+		"--exports-json", `[{"name":"transaction_id","from":"responseBody","path":"transaction_id"}]`,
+		"--json",
+	)
+	var report struct {
+		OK      bool `json:"ok"`
+		Created bool `json:"created"`
+		Config  struct {
+			ID        string `json:"id"`
+			ScopeType string `json:"scopeType"`
+			StepID    string `json:"stepId"`
+		} `json:"config"`
+		SelectedByRunner bool `json:"selectedByRunner"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode step config create report: %v\n%s", err, out)
+	}
+	if !report.OK || !report.Created || report.Config.ID == genericConfigID || report.Config.ScopeType != "step" || report.Config.StepID != "prepare" || !report.SelectedByRunner {
+		t.Fatalf("step config create report = %#v", report)
+	}
+
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer s.Close()
+	catalog, err := s.GetProfileCatalog(ctx)
+	if err != nil {
+		t.Fatalf("get catalog: %v", err)
+	}
+	genericConfig, ok := findCatalogTemplateConfig(catalog.TemplateConfigs, genericConfigID)
+	if !ok || genericConfig.ScopeType != "case" || genericConfig.ScopeID != "case.generic.prepare" {
+		t.Fatalf("generic config should remain case scoped: %#v", genericConfig)
+	}
+	stepConfig, ok := findCatalogTemplateConfig(catalog.TemplateConfigs, report.Config.ID)
+	if !ok || stepConfig.ScopeType != "step" || stepConfig.ScopeID != "prepare" || stepConfig.WorkflowID != "workflow.generic" {
+		t.Fatalf("step config should be separate: %#v", stepConfig)
+	}
+}
+
+func TestCaseConfigUpsertRejectsMismatchedWorkflowStepCase(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "step-mismatch.sqlite")
+	seedCaseConfigUpsertWorkflowStepCatalog(t, storePath)
+	out := runCLIFails(t, "case", "config", "upsert",
+		"--store", "sqlite://"+storePath,
+		"--case", "case.generic.prepare",
+		"--workflow", "workflow.generic",
+		"--step", "callback",
+		"--exports-json", `[{"name":"transaction_id","from":"responseBody","path":"transaction_id"}]`,
+		"--json",
+	)
+	if !strings.Contains(out, "bound to case case.generic.callback, not case.generic.prepare") {
+		t.Fatalf("unexpected mismatched step error:\n%s", out)
+	}
+}
+
+func TestCaseConfigStepDefaultIDsAvoidTupleCollisions(t *testing.T) {
+	left := defaultCaseExecutionTemplateConfigID("case.left", "workflow.flow", "create.submit")
+	right := defaultCaseExecutionTemplateConfigID("case.right", "workflow.flow.create", "submit")
+	if left == right {
+		t.Fatalf("step config default IDs should be collision-free: %q", left)
+	}
+}
+
 func writeCaseConfigSigningKey(t *testing.T) string {
 	t.Helper()
 	keyPath := filepath.Join(t.TempDir(), "request-signing-key.pem")

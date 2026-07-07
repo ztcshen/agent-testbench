@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -176,7 +178,10 @@ func upsertCaseExecutionConfig(ctx context.Context, runtime store.Store, options
 	if err != nil {
 		return caseConfigUpsertReport{}, err
 	}
-	config, exists, configID := prepareCaseExecutionTemplateConfig(catalog, caseID, options)
+	config, exists, configID, err := prepareCaseExecutionTemplateConfig(catalog, caseID, options)
+	if err != nil {
+		return caseConfigUpsertReport{}, err
+	}
 	configJSON, err := mergeCaseExecutionConfigJSON(config.ConfigJSON, caseID, apiCase, catalog, parsed.Patch)
 	if err != nil {
 		return caseConfigUpsertReport{}, err
@@ -260,10 +265,17 @@ func parseCaseConfigUpsertInputs(options caseConfigUpsertOptions) (parsedCaseCon
 	}, nil
 }
 
-func prepareCaseExecutionTemplateConfig(catalog store.ProfileCatalog, caseID string, options caseConfigUpsertOptions) (store.CatalogTemplateConfig, bool, string) {
+func prepareCaseExecutionTemplateConfig(catalog store.ProfileCatalog, caseID string, options caseConfigUpsertOptions) (store.CatalogTemplateConfig, bool, string, error) {
+	if err := validateCaseConfigWorkflowStepBinding(catalog, caseID, options.WorkflowID, options.StepID); err != nil {
+		return store.CatalogTemplateConfig{}, false, "", err
+	}
 	configID := strings.TrimSpace(options.ConfigID)
 	if configID == "" {
-		configID = selectedCaseExecutionTemplateConfigID(catalog, caseID, options.WorkflowID, options.StepID)
+		if isWorkflowStepCaseExecutionScope(options.WorkflowID, options.StepID) {
+			configID = workflowStepCaseExecutionTemplateConfigID(catalog, caseID, options.WorkflowID, options.StepID)
+		} else {
+			configID = selectedCaseExecutionTemplateConfigID(catalog, caseID, options.WorkflowID, options.StepID)
+		}
 	}
 	if configID == "" {
 		configID = defaultCaseExecutionTemplateConfigID(caseID, options.WorkflowID, options.StepID)
@@ -284,7 +296,7 @@ func prepareCaseExecutionTemplateConfig(catalog store.ProfileCatalog, caseID str
 	} else if !exists || strings.TrimSpace(config.Status) == "" {
 		config.Status = "active"
 	}
-	return config, exists, configID
+	return config, exists, configID, nil
 }
 
 func applyCaseConfigDefaultOverrides(catalog store.ProfileCatalog, apiCase store.CatalogAPICase, parsed parsedCaseConfigUpsertInputs) (store.ProfileCatalog, map[string]any) {
@@ -566,9 +578,27 @@ func workflowStepCaseExecutionTemplateConfigID(catalog store.ProfileCatalog, cas
 
 func defaultCaseExecutionTemplateConfigID(caseID string, workflowID string, stepID string) string {
 	if isWorkflowStepCaseExecutionScope(workflowID, stepID) {
-		return "cfg.workflow-step." + safeReportID(workflowID) + "." + safeReportID(stepID)
+		key := strings.TrimSpace(workflowID) + "\x00" + strings.TrimSpace(stepID)
+		sum := sha256.Sum256([]byte(key))
+		return "cfg.workflow-step." + safeReportID(workflowID) + "." + safeReportID(stepID) + "." + hex.EncodeToString(sum[:6])
 	}
 	return "config." + safeReportID(caseID) + ".execution"
+}
+
+func validateCaseConfigWorkflowStepBinding(catalog store.ProfileCatalog, caseID string, workflowID string, stepID string) error {
+	workflowID = strings.TrimSpace(workflowID)
+	stepID = strings.TrimSpace(stepID)
+	if !isWorkflowStepCaseExecutionScope(workflowID, stepID) {
+		return nil
+	}
+	binding, ok := findCatalogWorkflowBinding(catalog.WorkflowBindings, workflowID, stepID)
+	if !ok {
+		return fmt.Errorf("workflow step binding not found: workflow=%s step=%s", workflowID, stepID)
+	}
+	if strings.TrimSpace(binding.CaseID) != caseID {
+		return fmt.Errorf("workflow step %s in workflow %s is bound to case %s, not %s", stepID, workflowID, binding.CaseID, caseID)
+	}
+	return nil
 }
 
 func configContainsCaseExecution(config store.CatalogTemplateConfig, caseID string) bool {

@@ -75,6 +75,9 @@ func runMapImportWorkflows(ctx context.Context, args []string) error {
 			}
 			graph = appendImportedMapGraph(existing, graph, *displayName, *description)
 		}
+		if err := plangraph.ValidateDAG(graph); err != nil {
+			return fmt.Errorf("validate appended map graph: %w", err)
+		}
 	}
 	if err := runtime.ReplaceTestPlanGraph(ctx, graph); err != nil {
 		return err
@@ -122,11 +125,12 @@ func appendImportedMapGraph(existing store.TestPlanGraph, imported store.TestPla
 	for _, path := range imported.Paths {
 		pathIDs[path.ID] = true
 	}
+	materializations, materializationIDs := removeMapMaterializationsForPaths(out.Materializations, pathIDs)
 	out.Paths = upsertMapPaths(out.Paths, imported.Paths)
 	out.PathSteps = replaceMapPathSteps(out.PathSteps, imported.PathSteps, pathIDs)
 	out.Nodes = upsertMapNodes(out.Nodes, imported.Nodes)
-	out.Edges = upsertMapEdges(removeMapEdgesForPaths(out.Edges, pathIDs), imported.Edges)
-	out.Materializations = upsertMapMaterializations(out.Materializations, imported.Materializations)
+	out.Edges = upsertMapEdges(removeMapEdgesForPathsAndMaterializations(out.Edges, pathIDs, materializationIDs), imported.Edges)
+	out.Materializations = upsertMapMaterializations(materializations, imported.Materializations)
 	return out
 }
 
@@ -174,14 +178,28 @@ func upsertMapNodes(existing []store.TestPlanNode, incoming []store.TestPlanNode
 	return out
 }
 
-func removeMapEdgesForPaths(existing []store.TestPlanEdge, pathIDs map[string]bool) []store.TestPlanEdge {
+func removeMapEdgesForPathsAndMaterializations(existing []store.TestPlanEdge, pathIDs map[string]bool, materializationIDs map[string]bool) []store.TestPlanEdge {
 	out := make([]store.TestPlanEdge, 0, len(existing))
 	for _, item := range existing {
-		if !pathIDs[item.PathID] {
-			out = append(out, item)
+		if pathIDs[item.PathID] || materializationIDs[item.MaterializationID] {
+			continue
 		}
+		out = append(out, item)
 	}
 	return out
+}
+
+func removeMapMaterializationsForPaths(existing []store.TestPlanMaterialization, pathIDs map[string]bool) ([]store.TestPlanMaterialization, map[string]bool) {
+	removedIDs := map[string]bool{}
+	out := make([]store.TestPlanMaterialization, 0, len(existing))
+	for _, item := range existing {
+		if pathIDs[item.SourcePathID] {
+			removedIDs[item.ID] = true
+			continue
+		}
+		out = append(out, item)
+	}
+	return out, removedIDs
 }
 
 func upsertMapEdges(existing []store.TestPlanEdge, incoming []store.TestPlanEdge) []store.TestPlanEdge {
