@@ -147,15 +147,7 @@ from service_config_assets;`); err != nil {
 	return nil
 }
 
-func ensureLegacyProfileCatalogAnchor(ctx context.Context, tx *sql.Tx) error {
-	hasKV, err := txHasTable(ctx, tx, "kv")
-	if err != nil {
-		return err
-	}
-	if !hasKV {
-		return nil
-	}
-	if _, err := tx.ExecContext(ctx, `
+const legacyProfileCatalogAnchorSQL = `
 insert or ignore into profile_catalogs (
   profile_id, indexed_at, catalog_json, services, workflows, interface_nodes, api_cases,
   request_templates, workflow_bindings, case_dependencies, fixtures, templates, template_configs
@@ -272,7 +264,17 @@ select
   (select count(*) from template),
   (select count(*) from template_config)
 from kv
-where key = 'active_profile_id' and value <> '';`, time.Now().UTC()); err != nil {
+where key = 'active_profile_id' and value <> '';`
+
+func ensureLegacyProfileCatalogAnchor(ctx context.Context, tx *sql.Tx) error {
+	hasKV, err := txHasTable(ctx, tx, "kv")
+	if err != nil {
+		return err
+	}
+	if !hasKV {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, legacyProfileCatalogAnchorSQL, time.Now().UTC()); err != nil {
 		return fmt.Errorf("anchor legacy profile catalog: %w", err)
 	}
 	return nil
@@ -296,6 +298,7 @@ func ensureLegacySharedColumns(ctx context.Context, tx *sql.Tx) error {
 		{"api_case_runs", "test_plan_node_id", legacyTextDefaultEmpty},
 		{"api_case_runs", "test_plan_operation", legacyTextDefaultEmpty},
 		{"api_case_runs", "planner_summary_json", legacyTextDefaultObject},
+		{"agent_tasks", "claim_token", legacyTextDefaultEmpty},
 	}
 	for _, item := range columns {
 		hasTable, err := txHasTable(ctx, tx, item.table)

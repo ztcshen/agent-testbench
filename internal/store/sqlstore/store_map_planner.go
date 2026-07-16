@@ -85,6 +85,72 @@ limit %s;`, s.dialect.BindVar(1), s.dialect.BindVar(2))
 	return queryStoreRows(ctx, s.db, query, scanTestMapPlanInstance, mapID, limit)
 }
 
+func (s *Store) UpdateTestMapPlanInstance(ctx context.Context, item store.TestMapPlanInstance) error {
+	return s.updateTestMapPlanInstanceRow(ctx, s.db, item)
+}
+
+func (s *Store) updateTestMapPlanInstanceRow(ctx context.Context, exec sqlExecer, item store.TestMapPlanInstance) error {
+	query := fmt.Sprintf(`
+update test_map_plan_instances
+set status = %s, summary_json = %s, started_at = %s, finished_at = %s
+where plan_id = %s;`, s.dialect.BindVar(1), s.dialect.BindVar(2), s.dialect.BindVar(3), s.dialect.BindVar(4), s.dialect.BindVar(5))
+	result, err := exec.ExecContext(
+		ctx,
+		query,
+		item.Status,
+		jsonForDB(item.SummaryJSON, "{}"),
+		dbTimeArg(s.dialect, item.StartedAt),
+		dbTimeArg(s.dialect, item.FinishedAt),
+		item.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("update test map plan instance %q: %w", item.ID, err)
+	}
+	return requireUpdatedMapPlannerRow(result, "test map plan instance", item.ID)
+}
+
+func (s *Store) UpdateTestMapPlanTask(ctx context.Context, item store.TestMapPlanTask) error {
+	return s.updateTestMapPlanTaskRow(ctx, s.db, item)
+}
+
+func (s *Store) updateTestMapPlanTaskRow(ctx context.Context, exec sqlExecer, item store.TestMapPlanTask) error {
+	query := fmt.Sprintf(`
+update test_map_plan_tasks
+set status = %s, reason = %s, workflow_run_id = %s, api_case_run_id = %s,
+  evidence_root = %s, summary_json = %s, started_at = %s, finished_at = %s
+where plan_id = %s and task_id = %s;`, s.dialect.BindVar(1), s.dialect.BindVar(2), s.dialect.BindVar(3), s.dialect.BindVar(4),
+		s.dialect.BindVar(5), s.dialect.BindVar(6), s.dialect.BindVar(7), s.dialect.BindVar(8), s.dialect.BindVar(9), s.dialect.BindVar(10))
+	result, err := exec.ExecContext(
+		ctx,
+		query,
+		item.Status,
+		item.Reason,
+		item.WorkflowRunID,
+		item.APICaseRunID,
+		item.EvidenceRoot,
+		jsonForDB(item.SummaryJSON, "{}"),
+		dbTimeArg(s.dialect, item.StartedAt),
+		dbTimeArg(s.dialect, item.FinishedAt),
+		item.PlanID,
+		item.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("update test map plan task %q: %w", item.ID, err)
+	}
+	return requireUpdatedMapPlannerRow(result, "test map plan task", item.ID)
+}
+
+func requireUpdatedMapPlannerRow(result sql.Result, kind string, id string) error {
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("inspect updated %s %q: %w", kind, id, err)
+	}
+	if updated == 0 {
+		return fmt.Errorf("%s %q: %w", kind, id, store.ErrNotFound)
+	}
+	return nil
+}
+
 func prepareTestMapPlanRecord(record store.TestMapPlanRecord, now time.Time) store.TestMapPlanRecord {
 	instance := &record.Instance
 	if instance.Status == "" {

@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"os/exec"
 	"path/filepath"
@@ -60,6 +61,98 @@ func TestSQLiteSchemaUpgradesAreIdempotent(t *testing.T) {
 	}
 	if second.CurrentVersion != sqlstore.CurrentSchemaVersion || second.AppliedCount != 0 || second.HasPending() {
 		t.Fatalf("second upgraded status = %#v", second)
+	}
+}
+
+func TestSQLiteSchemaVersionNineteenBackfillsProfileCatalogHistory(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite database: %v", err)
+	}
+	legacyCatalog := `{"ProfileID":"profile.alpha","Services":[],"Workflows":[],"InterfaceNodes":[],"InterfaceFields":[],"APICases":[],"RequestTemplates":[],"WorkflowBindings":[],"CaseDependencies":[],"Fixtures":[],"TemplateConfigs":[]}`
+	statements := []string{
+		`create table schema_versions (version integer primary key, name text not null, applied_at text not null);`,
+		`insert into schema_versions (version, name, applied_at) values (18, 'schema v18', '2026-07-16T09:00:00Z');`,
+		`create table profile_catalogs (profile_id text primary key, indexed_at text not null, catalog_json text not null);`,
+		`insert into profile_catalogs (profile_id, indexed_at, catalog_json) values ('profile.alpha', '2026-07-16T09:00:00Z', '` + legacyCatalog + `');`,
+	}
+	for _, statement := range statements {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			db.Close()
+			t.Fatalf("prepare schema v18 database: %v", err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close schema v18 database: %v", err)
+	}
+
+	status, err := sqlite.UpgradeSchema(ctx, sqlite.Config{Path: dbPath})
+	if err != nil {
+		t.Fatalf("upgrade schema v18 database: %v", err)
+	}
+	if status.CurrentVersion != sqlstore.CurrentSchemaVersion {
+		t.Fatalf("upgraded schema status = %#v", status)
+	}
+
+	db, err = sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("reopen upgraded sqlite database: %v", err)
+	}
+	defer db.Close()
+	var headRevision int64
+	if err := db.QueryRowContext(ctx, `select revision from profile_catalog_heads where profile_id = 'profile.alpha';`).Scan(&headRevision); err != nil {
+		t.Fatalf("read backfilled profile catalog head: %v", err)
+	}
+	if headRevision != 1 {
+		t.Fatalf("backfilled head revision = %d, want 1", headRevision)
+	}
+	var historyRevision int64
+	var operation string
+	if err := db.QueryRowContext(ctx, `select revision, operation from profile_catalog_versions where profile_id = 'profile.alpha';`).Scan(&historyRevision, &operation); err != nil {
+		t.Fatalf("read backfilled profile catalog history: %v", err)
+	}
+	if historyRevision != 1 || operation != "migration-v19" {
+		t.Fatalf("backfilled history = revision %d operation %q", historyRevision, operation)
+	}
+}
+
+func TestSQLiteAgentTaskClaimTokenMigrationMatrix(t *testing.T) {
+	ctx := context.Background()
+	for _, version := range []int{18, 19, 20, 21} {
+		t.Run("v"+strconv.Itoa(version), func(t *testing.T) {
+			dbPath := filepath.Join(t.TempDir(), "store.sqlite")
+			createLegacySQLiteSchemaThroughVersion(t, dbPath, version)
+			status, err := sqlite.UpgradeSchema(ctx, sqlite.Config{Path: dbPath})
+			if err != nil {
+				t.Fatalf("upgrade schema v%d database: %v", version, err)
+			}
+			if status.CurrentVersion != sqlstore.CurrentSchemaVersion || status.HasPending() {
+				t.Fatalf("upgraded schema v%d status = %#v", version, status)
+			}
+			if columns := sqliteTableColumns(t, dbPath, "agent_tasks"); !columns["claim_token"] {
+				t.Fatalf("schema v%d upgrade missing agent_tasks.claim_token: %#v", version, columns)
+			}
+		})
+	}
+}
+
+func TestSQLiteAgentTaskClaimTokenMigrationCrashReplay(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "store.sqlite")
+	createLegacySQLiteSchemaThroughVersion(t, dbPath, 21)
+	sqliteExec(t, dbPath, `alter table agent_tasks add column claim_token text not null default '';`)
+
+	status, err := sqlite.UpgradeSchema(ctx, sqlite.Config{Path: dbPath})
+	if err != nil {
+		t.Fatalf("replay schema upgrade after claim-token ALTER: %v", err)
+	}
+	if status.CurrentVersion != sqlstore.CurrentSchemaVersion || status.HasPending() {
+		t.Fatalf("claim-token replay schema status = %#v", status)
+	}
+	if columns := sqliteTableColumns(t, dbPath, "agent_tasks"); !columns["claim_token"] {
+		t.Fatalf("claim-token replay missing column: %#v", columns)
 	}
 }
 

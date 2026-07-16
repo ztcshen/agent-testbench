@@ -11,78 +11,126 @@ import (
 )
 
 func TestStoreRecordsAgentTasksAndRunsThroughDatabaseSQL(t *testing.T) {
-	for _, tt := range []struct {
-		name    string
-		dialect sqlstore.Dialect
-		upsert  []string
-	}{
+	for _, tt := range []agentTaskSQLDialectCase{
 		{
-			name:    "postgres",
-			dialect: sqlstore.PostgresDialect{},
-			upsert:  []string{"on conflict(id) do update", "summary_json = excluded.summary_json"},
+			name:      "postgres",
+			dialect:   sqlstore.PostgresDialect{},
+			bindVar10: "$10",
 		},
 		{
-			name:    "mysql",
-			dialect: sqlstore.MySQLDialect{},
-			upsert:  []string{"on duplicate key update", "summary_json = values(summary_json)"},
+			name:      "mysql",
+			dialect:   sqlstore.MySQLDialect{},
+			bindVar10: "?",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-			db, state := openFakeSQLDB(t)
-			defer db.Close()
-			s := sqlstore.New(db, tt.dialect)
-
-			task, err := s.UpsertAgentTask(ctx, agentTaskFixture())
-			if err != nil {
-				t.Fatalf("upsert agent task: %v", err)
-			}
-			exec := state.lastExec(t)
-			assertSQLContains(t, exec.query, tt.name+" task upsert", "insert into agent_tasks", sqlValuesClause(tt.dialect, 10))
-			assertSQLContains(t, exec.query, tt.name+" task upsert", tt.upsert...)
-			if task.CreatedAt.IsZero() || exec.args[1] != "catalog-smoke" || exec.args[7] != `{"owner":"qa"}` {
-				t.Fatalf("%s agent task/args = %#v %#v", tt.name, task, exec.args)
-			}
-
-			queueAgentTaskRows(state, task)
-			loaded, err := s.GetAgentTask(ctx, "catalog-smoke")
-			if err != nil {
-				t.Fatalf("get agent task: %v", err)
-			}
-			if loaded.ID != "agent-task-001" || loaded.Name != "catalog-smoke" || loaded.LatestStatus != store.StatusPassed {
-				t.Fatalf("%s loaded task = %#v", tt.name, loaded)
-			}
-			query := state.lastQuery(t)
-			assertSQLContains(t, query.query, tt.name+" task get", "from agent_tasks")
-
-			run, err := s.RecordAgentTaskRun(ctx, agentTaskRunFixture(task))
-			if err != nil {
-				t.Fatalf("record agent task run: %v", err)
-			}
-			exec = state.lastExec(t)
-			assertSQLContains(t, exec.query, tt.name+" task run insert", "insert into agent_task_runs", sqlValuesClause(tt.dialect, 12))
-			if run.DurationMs != 250 || exec.args[1] != "agent-task-001" || exec.args[6] != int64(250) {
-				t.Fatalf("%s agent task run/args = %#v %#v", tt.name, run, exec.args)
-			}
-
-			queueAgentTaskRows(state, task)
-			tasks, err := s.ListAgentTasks(ctx)
-			if err != nil {
-				t.Fatalf("list agent tasks: %v", err)
-			}
-			if len(tasks) != 1 || tasks[0].RunCount != 1 || tasks[0].LatestStatus != store.StatusPassed {
-				t.Fatalf("%s tasks = %#v", tt.name, tasks)
-			}
-
-			queueAgentTaskRunRows(state, run)
-			runs, err := s.ListAgentTaskRuns(ctx, task.ID, 1)
-			if err != nil {
-				t.Fatalf("list agent task runs: %v", err)
-			}
-			if len(runs) != 1 || runs[0].ID != run.ID || runs[0].Output != `{"ok":true}` {
-				t.Fatalf("%s task runs = %#v", tt.name, runs)
-			}
+			requireAgentTaskSQLDialect(t, tt)
 		})
+	}
+}
+
+type agentTaskSQLDialectCase struct {
+	name      string
+	dialect   sqlstore.Dialect
+	bindVar10 string
+}
+
+func requireAgentTaskSQLDialect(t *testing.T, tt agentTaskSQLDialectCase) {
+	t.Helper()
+	ctx := context.Background()
+	db, state := openFakeSQLDB(t)
+	defer db.Close()
+	s := sqlstore.New(db, tt.dialect)
+
+	task := requireAgentTaskUpsertSQL(t, ctx, s, state, tt)
+	requireAgentTaskTransitionsSQL(t, ctx, s, state, tt, task)
+	requireAgentTaskQueriesSQL(t, ctx, s, state, tt, task)
+}
+
+func requireAgentTaskUpsertSQL(t *testing.T, ctx context.Context, s *sqlstore.Store, state *fakeSQLState, tt agentTaskSQLDialectCase) store.AgentTask {
+	t.Helper()
+	state.queueExecRowsAffected(0)
+	state.queueRows(fakeRows{})
+	task, err := s.UpsertAgentTask(ctx, agentTaskFixture())
+	if err != nil {
+		t.Fatalf("upsert agent task: %v", err)
+	}
+	exec := state.lastExec(t)
+	assertSQLContains(t, exec.query, tt.name+" task upsert", "insert into agent_tasks", sqlValuesClause(tt.dialect, 11))
+	if task.CreatedAt.IsZero() || exec.args[1] != "catalog-smoke" || exec.args[7] != `{"owner":"qa"}` {
+		t.Fatalf("%s agent task/args = %#v %#v", tt.name, task, exec.args)
+	}
+	upsertCalls := state.lastExecs(t, 2)
+	assertSQLContains(t, upsertCalls[0].query, tt.name+" task update guard", "update agent_tasks", "status <>", tt.bindVar10)
+	return task
+}
+
+func requireAgentTaskTransitionsSQL(t *testing.T, ctx context.Context, s *sqlstore.Store, state *fakeSQLState, tt agentTaskSQLDialectCase, task store.AgentTask) {
+	t.Helper()
+	claim, claimed, err := s.ClaimScheduledAgentTask(ctx, task.ID, task.UpdatedAt, task.UpdatedAt.Add(time.Second))
+	if err != nil || !claimed {
+		t.Fatalf("%s claim agent task: claimed=%t err=%v", tt.name, claimed, err)
+	}
+	exec := state.lastExec(t)
+	assertSQLContains(t, exec.query, tt.name+" task claim", "update agent_tasks", "where id =", "and status =", "and updated_at =")
+	if exec.args[0] != store.StatusRunning || exec.args[3] != task.ID || exec.args[4] != "scheduled" || exec.args[5] != task.UpdatedAt || exec.args[2] != claim.Token || claim.Token == "" {
+		t.Fatalf("%s claim args = %#v", tt.name, exec.args)
+	}
+	released, err := s.ReleaseScheduledAgentTask(ctx, claim, task.UpdatedAt.Add(2*time.Second))
+	if err != nil || !released {
+		t.Fatalf("%s release agent task: released=%t err=%v", tt.name, released, err)
+	}
+	exec = state.lastExec(t)
+	if exec.args[0] != "scheduled" || exec.args[2] != task.ID || exec.args[3] != store.StatusRunning || exec.args[4] != claim.Token {
+		t.Fatalf("%s release args = %#v", tt.name, exec.args)
+	}
+	recovered, err := s.RecoverScheduledAgentTask(ctx, task.ID, task.UpdatedAt.Add(3*time.Second))
+	if err != nil || !recovered {
+		t.Fatalf("%s recover agent task: recovered=%t err=%v", tt.name, recovered, err)
+	}
+	exec = state.lastExec(t)
+	assertSQLContains(t, exec.query, tt.name+" task recovery", "claim_token = ''", "and status =")
+}
+
+func requireAgentTaskQueriesSQL(t *testing.T, ctx context.Context, s *sqlstore.Store, state *fakeSQLState, tt agentTaskSQLDialectCase, task store.AgentTask) {
+	t.Helper()
+	queueAgentTaskRows(state, task)
+	loaded, err := s.GetAgentTask(ctx, "catalog-smoke")
+	if err != nil {
+		t.Fatalf("get agent task: %v", err)
+	}
+	if loaded.ID != "agent-task-001" || loaded.Name != "catalog-smoke" || loaded.LatestStatus != store.StatusPassed {
+		t.Fatalf("%s loaded task = %#v", tt.name, loaded)
+	}
+	query := state.lastQuery(t)
+	assertSQLContains(t, query.query, tt.name+" task get", "from agent_tasks")
+
+	run, err := s.RecordAgentTaskRun(ctx, agentTaskRunFixture(task))
+	if err != nil {
+		t.Fatalf("record agent task run: %v", err)
+	}
+	exec := state.lastExec(t)
+	assertSQLContains(t, exec.query, tt.name+" task run insert", "insert into agent_task_runs", sqlValuesClause(tt.dialect, 12))
+	if run.DurationMs != 250 || exec.args[1] != "agent-task-001" || exec.args[6] != int64(250) {
+		t.Fatalf("%s agent task run/args = %#v %#v", tt.name, run, exec.args)
+	}
+
+	queueAgentTaskRows(state, task)
+	tasks, err := s.ListAgentTasks(ctx)
+	if err != nil {
+		t.Fatalf("list agent tasks: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].RunCount != 1 || tasks[0].LatestStatus != store.StatusPassed {
+		t.Fatalf("%s tasks = %#v", tt.name, tasks)
+	}
+
+	queueAgentTaskRunRows(state, run)
+	runs, err := s.ListAgentTaskRuns(ctx, task.ID, 1)
+	if err != nil {
+		t.Fatalf("list agent task runs: %v", err)
+	}
+	if len(runs) != 1 || runs[0].ID != run.ID || runs[0].Output != `{"ok":true}` {
+		t.Fatalf("%s task runs = %#v", tt.name, runs)
 	}
 }
 

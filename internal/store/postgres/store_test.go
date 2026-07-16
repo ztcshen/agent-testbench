@@ -94,7 +94,7 @@ func TestOpenUsesConfiguredSQLDriverAndDelegatesRuntimeStoreMethods(t *testing.T
 	if err != nil {
 		t.Fatalf("replace profile catalog through postgres store: %v", err)
 	}
-	exec = state.lastExec(t)
+	exec = findPostgresExec(t, state.execsSnapshot(), "insert into profile_catalogs")
 	if !strings.Contains(exec.query, "insert into profile_catalogs") || !strings.Contains(exec.query, "values ($1, $2, $3") {
 		t.Fatalf("delegated profile catalog did not use postgres sqlstore dialect:\n%s", exec.query)
 	}
@@ -120,6 +120,10 @@ func TestSchemaStatusAndUpgradeUseConfiguredSQLDriver(t *testing.T) {
 	state.queueRows(fakePostgresRows{
 		columns: []string{"exists"},
 		values:  [][]driver.Value{{int64(0)}},
+	})
+	state.queueRows(fakePostgresRows{
+		columns: []string{"column_exists"},
+		values:  [][]driver.Value{{int64(1)}},
 	})
 	state.queueRows(fakePostgresRows{
 		columns: []string{"exists"},
@@ -162,6 +166,17 @@ func openFakePostgresDriver(t *testing.T) *fakePostgresState {
 type fakePostgresCall struct {
 	query string
 	args  []any
+}
+
+func findPostgresExec(t *testing.T, calls []fakePostgresCall, fragment string) fakePostgresCall {
+	t.Helper()
+	for _, call := range calls {
+		if strings.Contains(call.query, fragment) {
+			return call
+		}
+	}
+	t.Fatalf("exec containing %q not found in %#v", fragment, calls)
+	return fakePostgresCall{}
 }
 
 type fakePostgresState struct {
@@ -231,7 +246,12 @@ func (c fakePostgresConn) Prepare(string) (driver.Stmt, error) {
 	return nil, errors.New("prepare not supported")
 }
 func (c fakePostgresConn) Close() error              { return nil }
-func (c fakePostgresConn) Begin() (driver.Tx, error) { return nil, errors.New("tx not supported") }
+func (c fakePostgresConn) Begin() (driver.Tx, error) { return fakePostgresTx{}, nil }
+
+type fakePostgresTx struct{}
+
+func (fakePostgresTx) Commit() error   { return nil }
+func (fakePostgresTx) Rollback() error { return nil }
 
 func (c fakePostgresConn) Ping(context.Context) error {
 	c.state.mu.Lock()

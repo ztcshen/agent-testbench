@@ -45,3 +45,13 @@ create index if not exists idx_agent_task_runs_status_created
   on agent_task_runs(status, created_at, id);`,
 	},
 }
+
+var agentTaskClaimChanges = []Change{
+	{
+		Version: 22,
+		Name:    "add agent task claim token",
+		SQL: `
+alter table agent_tasks
+  add column claim_token text not null default '';`,
+	},
+}

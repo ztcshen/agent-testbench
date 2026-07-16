@@ -156,6 +156,10 @@ func TestOpenUsesConfiguredSQLDriverAndDelegatesRuntimeStoreMethods(t *testing.T
 		values:  [][]driver.Value{{int64(0)}},
 	})
 	state.queueRows(fakeMySQLRows{
+		columns: []string{"column_exists"},
+		values:  [][]driver.Value{{int64(1)}},
+	})
+	state.queueRows(fakeMySQLRows{
 		columns: []string{"table_exists"},
 		values:  [][]driver.Value{{int64(1)}},
 	})
@@ -215,7 +219,7 @@ func TestOpenUsesConfiguredSQLDriverAndDelegatesRuntimeStoreMethods(t *testing.T
 	if err != nil {
 		t.Fatalf("replace profile catalog through mysql store: %v", err)
 	}
-	exec = state.lastExec(t)
+	exec = findMySQLExec(t, state.execsSnapshot(), "insert into profile_catalogs")
 	if !strings.Contains(exec.query, "insert into profile_catalogs") || !strings.Contains(exec.query, "values (?, ?, ?") {
 		t.Fatalf("delegated profile catalog did not use mysql sqlstore dialect:\n%s", exec.query)
 	}
@@ -245,6 +249,10 @@ func TestSchemaStatusAndUpgradeUseConfiguredSQLDriver(t *testing.T) {
 	state.queueRows(fakeMySQLRows{
 		columns: []string{"table_exists"},
 		values:  [][]driver.Value{{int64(0)}},
+	})
+	state.queueRows(fakeMySQLRows{
+		columns: []string{"column_exists"},
+		values:  [][]driver.Value{{int64(1)}},
 	})
 	state.queueRows(fakeMySQLRows{
 		columns: []string{"table_exists"},
@@ -328,6 +336,17 @@ type fakeMySQLCall struct {
 	args  []any
 }
 
+func findMySQLExec(t *testing.T, calls []fakeMySQLCall, fragment string) fakeMySQLCall {
+	t.Helper()
+	for _, call := range calls {
+		if strings.Contains(call.query, fragment) {
+			return call
+		}
+	}
+	t.Fatalf("exec containing %q not found in %#v", fragment, calls)
+	return fakeMySQLCall{}
+}
+
 type fakeMySQLState struct {
 	name  string
 	mu    sync.Mutex
@@ -395,7 +414,12 @@ func (c fakeMySQLConn) Prepare(string) (driver.Stmt, error) {
 	return nil, errors.New("prepare not supported")
 }
 func (c fakeMySQLConn) Close() error              { return nil }
-func (c fakeMySQLConn) Begin() (driver.Tx, error) { return nil, errors.New("tx not supported") }
+func (c fakeMySQLConn) Begin() (driver.Tx, error) { return fakeMySQLTx{}, nil }
+
+type fakeMySQLTx struct{}
+
+func (fakeMySQLTx) Commit() error   { return nil }
+func (fakeMySQLTx) Rollback() error { return nil }
 
 func (c fakeMySQLConn) Ping(context.Context) error {
 	c.state.mu.Lock()

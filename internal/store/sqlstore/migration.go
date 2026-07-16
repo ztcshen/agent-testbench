@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	CurrentSchemaVersion = 18
+	CurrentSchemaVersion = 22
 	CoreSchemaName       = "create shared sql store schema"
 	mysqlVarchar255Type  = "varchar(255)"
 	sha256ColumnName     = "sha256"
@@ -50,6 +50,19 @@ func UpgradeSchema(ctx context.Context, db *sql.DB, d Dialect) (SchemaStatusResu
 			return SchemaStatusResult{}, fmt.Errorf("apply shared sql store schema %q: %w", schemaStatementSummary(statement), err)
 		}
 	}
+	addAgentTaskClaimToken, err := agentTaskClaimTokenMigrationRequired(ctx, db, d)
+	if err != nil {
+		return SchemaStatusResult{}, err
+	}
+	if addAgentTaskClaimToken {
+		statement := agentTaskClaimTokenMigrationSQL(d)
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			exists, probeErr := agentTaskClaimTokenColumnExists(ctx, db, d)
+			if probeErr != nil || !exists {
+				return SchemaStatusResult{}, fmt.Errorf("apply shared sql store migration %q: %w", schemaStatementSummary(statement), err)
+			}
+		}
+	}
 	for _, statement := range incrementalSchemaSQL(d, current) {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
 			if isIdempotentSchemaReplayError(d, statement, err) {
@@ -62,6 +75,21 @@ func UpgradeSchema(ctx context.Context, db *sql.DB, d Dialect) (SchemaStatusResu
 		for _, statement := range schemaCommentSQL(d) {
 			if _, err := db.ExecContext(ctx, statement); err != nil {
 				return SchemaStatusResult{}, fmt.Errorf("apply shared sql store comments: %w", err)
+			}
+		}
+	} else if current < 19 {
+		commentTypes := schemaCommentMySQLTypes{
+			v128:     "varchar(128)",
+			v255:     mysqlVarchar255Type,
+			intType:  "integer",
+			text:     "mediumtext",
+			jsonType: "json",
+			timeType: "datetime(6)",
+			boolType: "boolean",
+		}
+		for _, statement := range schemaCommentSQLForSpecs(d, profileCatalogVersionCommentSpecs(commentTypes)) {
+			if _, err := db.ExecContext(ctx, statement); err != nil {
+				return SchemaStatusResult{}, fmt.Errorf("apply profile catalog version comments: %w", err)
 			}
 		}
 	}
@@ -123,6 +151,7 @@ func CoreSchemaSQL(d Dialect) []string {
 	statements = append(statements, coreObservabilitySchemaSQL(d, types)...)
 	statements = append(statements, coreAgentTaskSchemaSQL(d, types)...)
 	statements = append(statements, coreProfileConfigSchemaSQL(d, types)...)
+	statements = append(statements, coreProfileCatalogVersionSchemaSQL(d, types)...)
 	statements = append(statements, corePlanGraphSchemaSQL(d, types)...)
 	statements = append(statements, coreMapPlannerSchemaSQL(d, types)...)
 	return append(statements, coreEnvironmentCatalogSchemaSQL(d, types)...)
@@ -262,9 +291,10 @@ create table if not exists agent_tasks (
   status %s not null,
   notify_json %s not null,
   summary_json %s not null,
+  claim_token %s not null default '',
   created_at %s not null,
   updated_at %s not null
-);`, types.runIDText, types.keyText, types.keyText, types.text, types.text, types.keyText, types.jsonType, types.jsonType, types.timeType, types.timeType),
+);`, types.runIDText, types.keyText, types.keyText, types.text, types.text, types.keyText, types.jsonType, types.jsonType, types.keyText, types.timeType, types.timeType),
 		d.CreateIndexSQL("idx_agent_tasks_status_updated", "agent_tasks", []string{"status", "updated_at", "id"}),
 		fmt.Sprintf(`
 create table if not exists agent_task_runs (
@@ -354,42 +384,7 @@ func incrementalSchemaSQL(d Dialect, current int) []string {
 	if current == 0 || current >= CurrentSchemaVersion {
 		return nil
 	}
-	var statements []string
-	if d.Name() == "mysql" && current < 5 {
-		statements = append(statements,
-			"alter table `runs` modify column `id` varchar(255) not null;",
-			"alter table `api_case_runs` modify column `id` varchar(255) not null, modify column `run_id` varchar(255) not null;",
-			"alter table `evidence_records` modify column `id` varchar(255) not null, modify column `run_id` varchar(255) not null, modify column `case_run_id` varchar(255) not null;",
-			"alter table `trace_topologies` modify column `id` varchar(255) not null, modify column `workflow_run_id` varchar(255) not null, modify column `request_id` varchar(255) not null, modify column `trace_id` varchar(255) not null;",
-			"alter table `post_process_tasks` modify column `id` varchar(255) not null, modify column `run_id` varchar(255) not null;",
-			"alter table `environments` modify column `last_verification_run_id` varchar(255) not null;",
-		)
-	}
-	if current < 6 && (d.Name() == "postgres" || d.Name() == "mysql") {
-		statements = append(statements,
-			fmt.Sprintf("alter table %s add column %s %s not null default '';", d.QuoteIdent("runs"), d.QuoteIdent("environment_id"), d.KeyTextType()),
-			fmt.Sprintf("drop table if exists %s;", d.QuoteIdent("service_config_assets")),
-			fmt.Sprintf("drop table if exists %s;", d.QuoteIdent("service_dependencies")),
-		)
-	}
-	if d.Name() == "mysql" && current < 7 {
-		statements = append(statements, mysqlMediumTextMigrationSQL()...)
-	}
-	if d.Name() == "mysql" && current < 8 {
-		statements = append(statements,
-			"alter table `config_versions` modify column `id` varchar(255) not null;",
-			"alter table `config_read_model` modify column `config_version_id` varchar(255) not null;",
-		)
-	}
-	if d.Name() == "mysql" && current < 9 {
-		statements = append(statements,
-			"alter table `baseline_gates` modify column `profile_id` varchar(255) not null;",
-			"alter table `profile_indexes` modify column `profile_id` varchar(255) not null;",
-			"alter table `config_versions` modify column `profile_id` varchar(255) not null;",
-			"alter table `config_read_model` modify column `profile_id` varchar(255) not null, modify column `model_key` varchar(255) not null;",
-			"alter table `profile_catalogs` modify column `profile_id` varchar(255) not null;",
-		)
-	}
+	statements := legacyCompatibilitySchemaSQL(d, current)
 	if current < 13 {
 		statements = append(statements,
 			fmt.Sprintf(`
@@ -457,7 +452,94 @@ create table if not exists environment_files (
 			jsonType: d.JSONType(),
 		})...)
 	}
+	if current < 19 {
+		statements = append(statements, profileCatalogVersionBackfillSQL(d)...)
+	}
+	if current < 20 {
+		statements = append(statements, testMapPlanLeaseSchemaSQL(d, coreSchemaTypes{
+			runIDText: runIdentifierTextType(d),
+			keyText:   d.KeyTextType(),
+			timeType:  d.TimeType(),
+		})...)
+	}
 	return statements
+}
+
+func legacyCompatibilitySchemaSQL(d Dialect, current int) []string {
+	var statements []string
+	if d.Name() == "mysql" && current < 5 {
+		statements = append(statements,
+			"alter table `runs` modify column `id` varchar(255) not null;",
+			"alter table `api_case_runs` modify column `id` varchar(255) not null, modify column `run_id` varchar(255) not null;",
+			"alter table `evidence_records` modify column `id` varchar(255) not null, modify column `run_id` varchar(255) not null, modify column `case_run_id` varchar(255) not null;",
+			"alter table `trace_topologies` modify column `id` varchar(255) not null, modify column `workflow_run_id` varchar(255) not null, modify column `request_id` varchar(255) not null, modify column `trace_id` varchar(255) not null;",
+			"alter table `post_process_tasks` modify column `id` varchar(255) not null, modify column `run_id` varchar(255) not null;",
+			"alter table `environments` modify column `last_verification_run_id` varchar(255) not null;",
+		)
+	}
+	if current < 6 && (d.Name() == "postgres" || d.Name() == "mysql") {
+		statements = append(statements,
+			fmt.Sprintf("alter table %s add column %s %s not null default '';", d.QuoteIdent("runs"), d.QuoteIdent("environment_id"), d.KeyTextType()),
+			fmt.Sprintf("drop table if exists %s;", d.QuoteIdent("service_config_assets")),
+			fmt.Sprintf("drop table if exists %s;", d.QuoteIdent("service_dependencies")),
+		)
+	}
+	if d.Name() == "mysql" && current < 7 {
+		statements = append(statements, mysqlMediumTextMigrationSQL()...)
+	}
+	if d.Name() == "mysql" && current < 8 {
+		statements = append(statements,
+			"alter table `config_versions` modify column `id` varchar(255) not null;",
+			"alter table `config_read_model` modify column `config_version_id` varchar(255) not null;",
+		)
+	}
+	if d.Name() == "mysql" && current < 9 {
+		statements = append(statements,
+			"alter table `baseline_gates` modify column `profile_id` varchar(255) not null;",
+			"alter table `profile_indexes` modify column `profile_id` varchar(255) not null;",
+			"alter table `config_versions` modify column `profile_id` varchar(255) not null;",
+			"alter table `config_read_model` modify column `profile_id` varchar(255) not null, modify column `model_key` varchar(255) not null;",
+			"alter table `profile_catalogs` modify column `profile_id` varchar(255) not null;",
+		)
+	}
+	return statements
+}
+
+func agentTaskClaimTokenMigrationRequired(ctx context.Context, db *sql.DB, d Dialect) (bool, error) {
+	exists, err := agentTaskClaimTokenColumnExists(ctx, db, d)
+	if err != nil {
+		return false, fmt.Errorf("inspect agent task claim token schema: %w", err)
+	}
+	return !exists, nil
+}
+
+func agentTaskClaimTokenColumnExists(ctx context.Context, db *sql.DB, d Dialect) (bool, error) {
+	var query string
+	switch d.Name() {
+	case "postgres":
+		query = `select case when exists (
+  select 1 from information_schema.columns
+  where table_schema = current_schema() and table_name = 'agent_tasks' and column_name = 'claim_token'
+) then 1 else 0 end as column_exists`
+	case "mysql":
+		query = `select case when exists (
+  select 1 from information_schema.columns
+  where table_schema = database() and table_name = 'agent_tasks' and column_name = 'claim_token'
+) then 1 else 0 end as column_exists`
+	default:
+		query = `select case when exists (
+  select 1 from pragma_table_info('agent_tasks') where name = 'claim_token'
+) then 1 else 0 end as column_exists`
+	}
+	var exists int
+	if err := db.QueryRowContext(ctx, query).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists != 0, nil
+}
+
+func agentTaskClaimTokenMigrationSQL(d Dialect) string {
+	return fmt.Sprintf("alter table %s add column %s %s not null default '';", d.QuoteIdent("agent_tasks"), d.QuoteIdent("claim_token"), d.KeyTextType())
 }
 
 func plannerAssociationMigrationSQL(d Dialect) []string {

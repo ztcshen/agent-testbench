@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -13,6 +14,18 @@ import (
 
 type sqlExecer interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func execStoreRowMutation(ctx context.Context, execer sqlExecer, operation string, query string, args ...any) (int64, error) {
+	result, err := execer.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", operation, err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("%s rows affected: %w", operation, err)
+	}
+	return changed, nil
 }
 
 func utcNow() time.Time {
