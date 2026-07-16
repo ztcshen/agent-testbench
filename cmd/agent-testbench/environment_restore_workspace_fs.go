@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,7 +11,7 @@ import (
 
 var environmentRestoreWorkspaceTempCounter atomic.Uint64
 
-func writeEnvironmentRestoreWorkspaceFile(workspace string, relativePath string, content []byte, mode os.FileMode) error {
+func writeEnvironmentRestoreWorkspaceFile(workspace string, relativePath string, content []byte, mode os.FileMode) (resultErr error) {
 	clean, err := environmentRestoreWorkspaceRelativePath(relativePath)
 	if err != nil {
 		return err
@@ -19,7 +20,11 @@ func writeEnvironmentRestoreWorkspaceFile(workspace string, relativePath string,
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() {
+		if err := root.Close(); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("close restore workspace root: %w", err))
+		}
+	}()
 	parent := filepath.Dir(clean)
 	if err := rejectEnvironmentRestoreWorkspaceSymlinks(root, parent); err != nil {
 		return err
@@ -39,16 +44,16 @@ func writeEnvironmentRestoreWorkspaceFile(workspace string, relativePath string,
 	keepTemp := true
 	defer func() {
 		if keepTemp {
-			_ = root.Remove(tempPath)
+			if err := root.Remove(tempPath); err != nil && !os.IsNotExist(err) {
+				resultErr = errors.Join(resultErr, fmt.Errorf("remove restore workspace temporary file %s: %w", tempPath, err))
+			}
 		}
 	}()
 	if err := file.Chmod(mode.Perm()); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("set restore workspace file permissions for %s: %w", clean, err)
+		return closeEnvironmentRestoreWorkspaceTempFile(file, clean, fmt.Errorf("set restore workspace file permissions for %s: %w", clean, err))
 	}
 	if _, err := file.Write(content); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("write restore workspace file %s: %w", clean, err)
+		return closeEnvironmentRestoreWorkspaceTempFile(file, clean, fmt.Errorf("write restore workspace file %s: %w", clean, err))
 	}
 	if err := file.Close(); err != nil {
 		return fmt.Errorf("close restore workspace file %s: %w", clean, err)
@@ -58,6 +63,13 @@ func writeEnvironmentRestoreWorkspaceFile(workspace string, relativePath string,
 	}
 	keepTemp = false
 	return nil
+}
+
+func closeEnvironmentRestoreWorkspaceTempFile(file *os.File, path string, operationErr error) error {
+	if err := file.Close(); err != nil {
+		return errors.Join(operationErr, fmt.Errorf("close restore workspace temporary file for %s: %w", path, err))
+	}
+	return operationErr
 }
 
 func createEnvironmentRestoreWorkspaceTempFile(root *os.Root, parent string, base string) (string, *os.File, error) {
@@ -83,7 +95,7 @@ func readEnvironmentRestoreWorkspaceFile(workspace string, relativePath string) 
 	return raw, err
 }
 
-func readEnvironmentRestoreWorkspaceFileWithInfo(workspace string, relativePath string) ([]byte, os.FileInfo, error) {
+func readEnvironmentRestoreWorkspaceFileWithInfo(workspace string, relativePath string) (raw []byte, info os.FileInfo, resultErr error) {
 	clean, err := environmentRestoreWorkspaceRelativePath(relativePath)
 	if err != nil {
 		return nil, nil, err
@@ -92,15 +104,19 @@ func readEnvironmentRestoreWorkspaceFileWithInfo(workspace string, relativePath 
 	if err != nil {
 		return nil, nil, err
 	}
-	defer root.Close()
+	defer func() {
+		if err := root.Close(); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("close restore workspace root: %w", err))
+		}
+	}()
 	if err := rejectEnvironmentRestoreWorkspaceSymlinks(root, clean); err != nil {
 		return nil, nil, err
 	}
-	info, err := root.Lstat(clean)
+	info, err = root.Lstat(clean)
 	if err != nil {
 		return nil, nil, fmt.Errorf("inspect restore workspace file %s: %w", clean, err)
 	}
-	raw, err := root.ReadFile(clean)
+	raw, err = root.ReadFile(clean)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read restore workspace file %s: %w", clean, err)
 	}

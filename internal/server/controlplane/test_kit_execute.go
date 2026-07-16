@@ -160,7 +160,7 @@ func evaluateTestKitResponse(statusCode int, responseBody string, request caseHT
 }
 
 func executeTestKitFileCase(ctx context.Context, item runnableAPICase, payload map[string]any, overrides map[string]any, timeout time.Duration) caseExecutionResult {
-	evidenceDir := firstNonEmpty(valueString(payload["evidenceDir"]), item.Case.EvidenceDir, filepath.Join(".runtime", "cases"))
+	evidenceDir := firstNonEmpty(valueString(payload[apiFieldEvidenceDir]), item.Case.EvidenceDir, filepath.Join(".runtime", "cases"))
 	baseURL := firstNonEmpty(valueString(payload["baseUrl"]), item.CaseBaseURL, item.Case.BaseURL)
 	executionCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -177,9 +177,9 @@ func executeTestKitFileCase(ctx context.Context, item runnableAPICase, payload m
 	}
 	payload[testKitAPICaseRunResultKey] = result
 	payload["runId"] = result.RunID
-	payload["evidenceDir"] = evidenceDir
-	request, _ := jsonFileObject(filepath.Join(result.EvidencePath, "request.json"))
-	response, _ := jsonFileObject(filepath.Join(result.EvidencePath, "response.json"))
+	payload[apiFieldEvidenceDir] = evidenceDir
+	request, _ := jsonFileObject(filepath.Join(result.EvidencePath, apiCaseEvidenceFileRequest))
+	response, _ := jsonFileObject(filepath.Join(result.EvidencePath, apiCaseEvidenceFileResponse))
 	if request == nil {
 		request = map[string]any{"caseId": item.Case.ID}
 	}

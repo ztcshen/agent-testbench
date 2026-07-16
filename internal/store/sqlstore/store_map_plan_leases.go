@@ -11,24 +11,16 @@ import (
 	"agent-testbench/internal/store"
 )
 
-func (s *Store) ClaimTestMapPlanLease(ctx context.Context, requested store.TestMapPlanLease, now time.Time, allowUnleasedRunning bool) (store.TestMapPlanLease, error) {
-	requested.PlanID = strings.TrimSpace(requested.PlanID)
-	requested.OwnerID = strings.TrimSpace(requested.OwnerID)
-	requested.Token = strings.TrimSpace(requested.Token)
-	if requested.PlanID == "" || requested.OwnerID == "" || requested.Token == "" {
-		return store.TestMapPlanLease{}, errors.New("claim test map plan lease: plan id, owner id, and token are required")
-	}
-	if now.IsZero() {
-		now = utcNow()
-	}
-	if !requested.ExpiresAt.After(now) {
-		return store.TestMapPlanLease{}, errors.New("claim test map plan lease: expiry must be after claim time")
+func (s *Store) ClaimTestMapPlanLease(ctx context.Context, requested store.TestMapPlanLease, now time.Time, allowUnleasedRunning bool) (_ store.TestMapPlanLease, err error) {
+	requested, now, err = prepareTestMapPlanLeaseClaim(requested, now)
+	if err != nil {
+		return store.TestMapPlanLease{}, err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return store.TestMapPlanLease{}, fmt.Errorf("begin test map plan lease claim: %w", err)
 	}
-	defer tx.Rollback()
+	defer rollbackTxOnError(tx, &err)
 
 	status, err := s.testMapPlanStatus(ctx, tx, requested.PlanID)
 	if err != nil {
@@ -43,8 +35,10 @@ func (s *Store) ClaimTestMapPlanLease(ctx context.Context, requested store.TestM
 				Reason: "plan is already running without a lease; verify side effects and use --resume for explicit recovery",
 			}
 		}
-		if err := s.insertTestMapPlanLease(ctx, tx, requested, now); err != nil {
-			_ = tx.Rollback()
+		if insertErr := s.insertTestMapPlanLease(ctx, tx, requested, now); insertErr != nil {
+			if rollbackErr := rollbackTxBeforeConflict(tx, "test map plan lease insert conflict"); rollbackErr != nil {
+				return store.TestMapPlanLease{}, errors.Join(insertErr, rollbackErr)
+			}
 			return store.TestMapPlanLease{}, s.testMapPlanLeaseConflict(ctx, requested.PlanID, "another executor claimed the plan")
 		}
 	case err != nil:
@@ -59,7 +53,9 @@ func (s *Store) ClaimTestMapPlanLease(ctx context.Context, requested store.TestM
 			return store.TestMapPlanLease{}, err
 		}
 		if !changed {
-			_ = tx.Rollback()
+			if rollbackErr := rollbackTxBeforeConflict(tx, "expired test map plan lease conflict"); rollbackErr != nil {
+				return store.TestMapPlanLease{}, rollbackErr
+			}
 			return store.TestMapPlanLease{}, s.testMapPlanLeaseConflict(ctx, requested.PlanID, "another executor renewed or claimed the plan")
 		}
 	}
@@ -73,12 +69,28 @@ func (s *Store) ClaimTestMapPlanLease(ctx context.Context, requested store.TestM
 	return requested, nil
 }
 
-func (s *Store) RenewTestMapPlanLease(ctx context.Context, lease store.TestMapPlanLease, now time.Time, expiresAt time.Time) (store.TestMapPlanLease, error) {
+func prepareTestMapPlanLeaseClaim(requested store.TestMapPlanLease, now time.Time) (store.TestMapPlanLease, time.Time, error) {
+	requested.PlanID = strings.TrimSpace(requested.PlanID)
+	requested.OwnerID = strings.TrimSpace(requested.OwnerID)
+	requested.Token = strings.TrimSpace(requested.Token)
+	if requested.PlanID == "" || requested.OwnerID == "" || requested.Token == "" {
+		return store.TestMapPlanLease{}, time.Time{}, errors.New("claim test map plan lease: plan id, owner id, and token are required")
+	}
+	if now.IsZero() {
+		now = utcNow()
+	}
+	if !requested.ExpiresAt.After(now) {
+		return store.TestMapPlanLease{}, time.Time{}, errors.New("claim test map plan lease: expiry must be after claim time")
+	}
+	return requested, now, nil
+}
+
+func (s *Store) RenewTestMapPlanLease(ctx context.Context, lease store.TestMapPlanLease, now time.Time, expiresAt time.Time) (_ store.TestMapPlanLease, err error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return store.TestMapPlanLease{}, fmt.Errorf("begin test map plan lease renewal: %w", err)
 	}
-	defer tx.Rollback()
+	defer rollbackTxOnError(tx, &err)
 	next, err := s.renewTestMapPlanLease(ctx, tx, lease, now, expiresAt)
 	if err != nil {
 		return store.TestMapPlanLease{}, err
@@ -89,7 +101,7 @@ func (s *Store) RenewTestMapPlanLease(ctx context.Context, lease store.TestMapPl
 	return next, nil
 }
 
-func (s *Store) ResetTestMapPlanWithLease(ctx context.Context, lease store.TestMapPlanLease, record store.TestMapPlanRecord, now time.Time, expiresAt time.Time) (store.TestMapPlanLease, error) {
+func (s *Store) ResetTestMapPlanWithLease(ctx context.Context, lease store.TestMapPlanLease, record store.TestMapPlanRecord, now time.Time, expiresAt time.Time) (_ store.TestMapPlanLease, err error) {
 	if err := validateTestMapPlanLeaseTarget(lease, record.Instance.ID); err != nil {
 		return store.TestMapPlanLease{}, err
 	}
@@ -102,7 +114,7 @@ func (s *Store) ResetTestMapPlanWithLease(ctx context.Context, lease store.TestM
 	if err != nil {
 		return store.TestMapPlanLease{}, fmt.Errorf("begin claimed test map plan reset: %w", err)
 	}
-	defer tx.Rollback()
+	defer rollbackTxOnError(tx, &err)
 	next, err := s.renewTestMapPlanLease(ctx, tx, lease, now, expiresAt)
 	if err != nil {
 		return store.TestMapPlanLease{}, err
@@ -133,7 +145,7 @@ func (s *Store) UpdateTestMapPlanInstanceWithLease(ctx context.Context, lease st
 	})
 }
 
-func (s *Store) checkpointTestMapPlanWithLease(ctx context.Context, lease store.TestMapPlanLease, planID string, subject string, subjectID string, now time.Time, expiresAt time.Time, update func(*sql.Tx) error) (store.TestMapPlanLease, error) {
+func (s *Store) checkpointTestMapPlanWithLease(ctx context.Context, lease store.TestMapPlanLease, planID string, subject string, subjectID string, now time.Time, expiresAt time.Time, update func(*sql.Tx) error) (_ store.TestMapPlanLease, err error) {
 	if err := validateTestMapPlanLeaseTarget(lease, planID); err != nil {
 		return store.TestMapPlanLease{}, err
 	}
@@ -141,7 +153,7 @@ func (s *Store) checkpointTestMapPlanWithLease(ctx context.Context, lease store.
 	if err != nil {
 		return store.TestMapPlanLease{}, fmt.Errorf("begin claimed test map %s checkpoint: %w", subject, err)
 	}
-	defer tx.Rollback()
+	defer rollbackTxOnError(tx, &err)
 	next, err := s.renewTestMapPlanLease(ctx, tx, lease, now, expiresAt)
 	if err != nil {
 		return store.TestMapPlanLease{}, err
@@ -155,7 +167,7 @@ func (s *Store) checkpointTestMapPlanWithLease(ctx context.Context, lease store.
 	return next, nil
 }
 
-func (s *Store) ReleaseTestMapPlanLease(ctx context.Context, lease store.TestMapPlanLease, final store.TestMapPlanInstance, now time.Time) error {
+func (s *Store) ReleaseTestMapPlanLease(ctx context.Context, lease store.TestMapPlanLease, final store.TestMapPlanInstance, now time.Time) (err error) {
 	if err := validateTestMapPlanLeaseTarget(lease, final.ID); err != nil {
 		return err
 	}
@@ -166,7 +178,7 @@ func (s *Store) ReleaseTestMapPlanLease(ctx context.Context, lease store.TestMap
 	if err != nil {
 		return fmt.Errorf("begin test map plan lease release: %w", err)
 	}
-	defer tx.Rollback()
+	defer rollbackTxOnError(tx, &err)
 	if err := s.requireActiveTestMapPlanLease(ctx, tx, lease, now); err != nil {
 		return err
 	}

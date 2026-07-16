@@ -181,8 +181,8 @@ func caseSuitePlanOptionsFromRequest(r *http.Request) casesuite.PlanOptions {
 		RequestID:      query.Get("requestId"),
 		Actions:        queryStringList(query["action"], query["actions"]),
 		BaseURL:        query.Get("baseUrl"),
-		EvidenceDir:    query.Get("evidenceDir"),
-		TimeoutSeconds: queryIntValue(query.Get("timeoutSeconds")),
+		EvidenceDir:    query.Get(apiFieldEvidenceDir),
+		TimeoutSeconds: queryIntValue(query.Get(apiFieldTimeoutSeconds)),
 	}
 }
 
@@ -197,8 +197,8 @@ func caseSuitePriorityOptionsFromRequest(r *http.Request) casesuite.PriorityOpti
 		Limit:          queryIntValue(query.Get("limit")),
 		RequestID:      query.Get("requestId"),
 		BaseURL:        query.Get("baseUrl"),
-		EvidenceDir:    query.Get("evidenceDir"),
-		TimeoutSeconds: queryIntValue(query.Get("timeoutSeconds")),
+		EvidenceDir:    query.Get(apiFieldEvidenceDir),
+		TimeoutSeconds: queryIntValue(query.Get(apiFieldTimeoutSeconds)),
 	}
 }
 
@@ -210,8 +210,8 @@ func caseSuiteBriefOptionsFromRequest(r *http.Request) casesuite.BriefOptions {
 		StabilityLimit: queryIntValue(query.Get("stabilityLimit")),
 		RequestID:      query.Get("requestId"),
 		BaseURL:        query.Get("baseUrl"),
-		EvidenceDir:    query.Get("evidenceDir"),
-		TimeoutSeconds: queryIntValue(query.Get("timeoutSeconds")),
+		EvidenceDir:    query.Get(apiFieldEvidenceDir),
+		TimeoutSeconds: queryIntValue(query.Get(apiFieldTimeoutSeconds)),
 	}
 }
 
@@ -220,8 +220,8 @@ func caseSuitePlanOptionsFromPayload(payload map[string]any) casesuite.PlanOptio
 		RequestID:      valueString(payload["requestId"]),
 		Actions:        stringListValue(firstNonNil(payload["action"], payload["actions"])),
 		BaseURL:        valueString(payload["baseUrl"]),
-		EvidenceDir:    valueString(payload["evidenceDir"]),
-		TimeoutSeconds: intValue(payload["timeoutSeconds"]),
+		EvidenceDir:    valueString(payload[apiFieldEvidenceDir]),
+		TimeoutSeconds: intValue(payload[apiFieldTimeoutSeconds]),
 	}
 }
 

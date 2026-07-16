@@ -12,6 +12,11 @@ import (
 	"agent-testbench/internal/store"
 )
 
+const (
+	taskCommandWorker   = "worker"
+	taskStatusScheduled = "scheduled"
+)
+
 func runTask(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("missing task command")
@@ -27,7 +32,7 @@ func runTask(ctx context.Context, args []string) error {
 		return runTaskRun(ctx, args[1:])
 	case "schedule":
 		return runTaskSchedule(ctx, args[1:])
-	case "worker":
+	case taskCommandWorker:
 		return runTaskWorker(ctx, args[1:])
 	case "watch":
 		return runTaskWatch(ctx, args[1:])
@@ -147,7 +152,7 @@ func runTaskSchedule(ctx context.Context, args []string) error {
 	if *shellMode {
 		kind = "shell"
 	}
-	task, err := upsertTask(ctx, runtime, flags.Arg(0), *command, schedule, "scheduled", kind, taskNotificationOptions{File: *notifyFile, Webhook: *notifyWebhook})
+	task, err := upsertTask(ctx, runtime, flags.Arg(0), *command, schedule, taskStatusScheduled, kind, taskNotificationOptions{File: *notifyFile, Webhook: *notifyWebhook})
 	if err != nil {
 		return err
 	}

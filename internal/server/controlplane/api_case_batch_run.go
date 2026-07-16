@@ -35,7 +35,7 @@ func handleAPICaseBatchRunStart(w http.ResponseWriter, r *http.Request, bundle p
 }
 
 func applyAPICaseBatchRunOptionsFromPayload(request *apiCaseBatchRunRequest, payload map[string]any) {
-	request.TimeoutSeconds = intValue(payload["timeoutSeconds"])
+	request.TimeoutSeconds = intValue(payload[apiFieldTimeoutSeconds])
 	request.Overrides = mapValue(payload["overrides"])
 }
 

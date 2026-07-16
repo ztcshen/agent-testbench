@@ -127,7 +127,7 @@ func buildWorkflowAcceptanceReport(ctx context.Context, runtime store.Store, rep
 		{ID: "workflow-steps", OK: stepsOK, Message: fmt.Sprintf("%d/%d workflow steps completed", acceptance.CompletedSteps, acceptance.ExpectedSteps)},
 		{ID: "passed-steps", OK: passedOK, Message: fmt.Sprintf("%d/%d workflow steps passed", acceptance.PassedSteps, acceptance.ExpectedSteps)},
 		{ID: "node-health", OK: healthOK, Message: fmt.Sprintf("%d/%d environment health checks passed", acceptance.HealthSummary.Passed, acceptance.HealthSummary.Total)},
-		{ID: "evidence", OK: evidenceOK, Message: "each workflow interface step must have indexed Evidence"},
+		{ID: apiFieldEvidence, OK: evidenceOK, Message: "each workflow interface step must have indexed Evidence"},
 		{ID: "skywalking-topology", OK: topologyRequirementOK, Message: topologyMessage},
 	}
 	for _, requirement := range acceptance.Requirements {

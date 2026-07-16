@@ -75,7 +75,7 @@ func (request TrustedTestKitRunRequest) payload() map[string]any {
 		"workflowId":         strings.TrimSpace(request.WorkflowID),
 		"stepId":             strings.TrimSpace(request.StepID),
 		"baseUrl":            strings.TrimSpace(request.BaseURL),
-		"evidenceDir":        strings.TrimSpace(request.EvidenceDir),
+		apiFieldEvidenceDir:  strings.TrimSpace(request.EvidenceDir),
 		"runId":              strings.TrimSpace(request.RunID),
 		"environmentId":      strings.TrimSpace(request.EnvironmentID),
 		"testPlanMapId":      strings.TrimSpace(request.TestPlanMapID),
@@ -88,7 +88,7 @@ func (request TrustedTestKitRunRequest) payload() map[string]any {
 		payload["overrides"] = request.Overrides
 	}
 	if request.TimeoutSeconds != 0 {
-		payload["timeoutSeconds"] = request.TimeoutSeconds
+		payload[apiFieldTimeoutSeconds] = request.TimeoutSeconds
 	}
 	if len(request.PlannerSummary) > 0 {
 		payload["plannerSummary"] = request.PlannerSummary
@@ -172,7 +172,7 @@ func validatePublicTestKitRunPayload(payload map[string]any) error {
 	rejected := make([]string, 0)
 	for _, field := range []string{
 		"baseUrl",
-		"evidenceDir",
+		apiFieldEvidenceDir,
 		"environmentId",
 		"inlineTraceCollect",
 		"plannerSummary",
@@ -206,9 +206,9 @@ func readPublicTestKitRunPayload(w http.ResponseWriter, r *http.Request) (map[st
 	}
 	if err := validatePublicTestKitRunPayload(payload); err != nil {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{
-			"ok":    false,
-			"error": err.Error(),
-			"code":  "trusted_execution_context_rejected",
+			"ok":         false,
+			"error":      err.Error(),
+			apiFieldCode: "trusted_execution_context_rejected",
 		})
 		return nil, false
 	}
@@ -231,10 +231,10 @@ func handleTestKitRunBatch(w http.ResponseWriter, r *http.Request, bundle profil
 	started := time.Now()
 	for _, caseID := range caseIDs {
 		itemPayload := map[string]any{
-			"caseId":         caseID,
-			"baseUrl":        payload["baseUrl"],
-			"timeoutSeconds": payload["timeoutSeconds"],
-			"overrides":      payload["overrides"],
+			"caseId":               caseID,
+			"baseUrl":              payload["baseUrl"],
+			apiFieldTimeoutSeconds: payload[apiFieldTimeoutSeconds],
+			"overrides":            payload["overrides"],
 		}
 		result, _ := testKitCaseResult(r.Context(), bundle, runtime, itemPayload)
 		runID, err := recordTestKitRunWithContext(r.Context(), bundle, runtime, itemPayload, result)
@@ -276,16 +276,16 @@ func testKitCaseResult(ctx context.Context, bundle profile.Bundle, runtime store
 	started := time.Now()
 	caseID := valueString(payload["caseId"])
 	if caseID == "" {
-		return map[string]any{"ok": false, "error": "caseId is required", "code": http.StatusBadRequest}, http.StatusBadRequest
+		return map[string]any{"ok": false, "error": "caseId is required", apiFieldCode: http.StatusBadRequest}, http.StatusBadRequest
 	}
 	item, ok := findRunnableAPICase(ctx, bundle, runtime, caseID, payload)
 	if !ok {
 		return map[string]any{
-			"ok":     false,
-			"caseId": caseID,
-			"status": store.StatusFailed,
-			"error":  "api case not found",
-			"code":   http.StatusNotFound,
+			"ok":         false,
+			"caseId":     caseID,
+			"status":     store.StatusFailed,
+			"error":      "api case not found",
+			apiFieldCode: http.StatusNotFound,
 		}, http.StatusNotFound
 	}
 
@@ -297,12 +297,12 @@ func testKitCaseResult(ctx context.Context, bundle profile.Bundle, runtime store
 	}
 	stepID := valueString(payload["stepId"])
 	result := map[string]any{
-		"ok":        runOK,
-		"caseId":    item.Case.ID,
-		"title":     firstNonEmpty(item.Case.DisplayName, item.Case.ID),
-		"stepId":    stepID,
-		"status":    status,
-		"elapsedMs": time.Since(started).Milliseconds(),
+		"ok":          runOK,
+		"caseId":      item.Case.ID,
+		apiFieldTitle: firstNonEmpty(item.Case.DisplayName, item.Case.ID),
+		"stepId":      stepID,
+		"status":      status,
+		"elapsedMs":   time.Since(started).Milliseconds(),
 		"summary": map[string]any{
 			"caseId":        item.Case.ID,
 			"stepId":        stepID,
@@ -323,7 +323,7 @@ func testKitCaseResult(ctx context.Context, bundle profile.Bundle, runtime store
 		responseStatus = http.StatusOK
 	}
 	if responseStatus != http.StatusOK {
-		result["code"] = responseStatus
+		result[apiFieldCode] = responseStatus
 	}
 	return result, responseStatus
 }

@@ -98,7 +98,7 @@ func (PostgresDialect) TextType() string    { return "text" }
 func (PostgresDialect) KeyTextType() string { return "text" }
 func (PostgresDialect) JSONType() string    { return "jsonb" }
 func (PostgresDialect) TimeType() string    { return "timestamptz" }
-func (PostgresDialect) BoolType() string    { return "boolean" }
+func (PostgresDialect) BoolType() string    { return sqlBooleanType }
 func (PostgresDialect) QuoteIdent(name string) string {
 	return quoteDouble(name)
 }
@@ -124,7 +124,7 @@ func (MySQLDialect) KeyTextType() string {
 }
 func (MySQLDialect) JSONType() string { return "json" }
 func (MySQLDialect) TimeType() string { return "datetime(6)" }
-func (MySQLDialect) BoolType() string { return "boolean" }
+func (MySQLDialect) BoolType() string { return sqlBooleanType }
 func (MySQLDialect) QuoteIdent(name string) string {
 	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
 }
@@ -158,7 +158,7 @@ func (SQLiteDialect) KeyTextType() string {
 }
 func (SQLiteDialect) JSONType() string { return "text" }
 func (SQLiteDialect) TimeType() string { return "text" }
-func (SQLiteDialect) BoolType() string { return "integer" }
+func (SQLiteDialect) BoolType() string { return sqlIntegerType }
 func (SQLiteDialect) QuoteIdent(name string) string {
 	return quoteDouble(name)
 }

@@ -67,34 +67,34 @@ func agentTestCapabilities(bundle profile.Bundle) []map[string]any {
 	}
 	capabilities := []map[string]any{
 		{
-			"id":          "evidence-index",
-			"title":       "Evidence Diagnosis Index",
-			"status":      "available",
-			"description": "Run summaries expose diagnosis, evidence roots, status counts, and next-step hints.",
-			"evidence":    []string{"runs.summary_json", "evidence_records"},
+			"id":                "evidence-index",
+			apiFieldTitle:       "Evidence Diagnosis Index",
+			"status":            evidenceLifecycleAvailable,
+			apiFieldDescription: "Run summaries expose diagnosis, evidence roots, status counts, and next-step hints.",
+			apiFieldEvidence:    []string{"runs.summary_json", "evidence_records"},
 		},
 		{
-			"id":          "profile-workbench",
-			"title":       "Profile Workbench",
-			"status":      "available",
-			"description": "Active profile metadata is available for local-first run review.",
-			"evidence":    []string{"profile.json", "profile_index"},
+			"id":                "profile-workbench",
+			apiFieldTitle:       "Profile Workbench",
+			"status":            evidenceLifecycleAvailable,
+			apiFieldDescription: "Active profile metadata is available for local-first run review.",
+			apiFieldEvidence:    []string{"profile.json", "profile_index"},
 		},
 		{
-			"id":          "case-evidence",
-			"title":       "API Case Evidence",
-			"status":      "available",
-			"description": "API case runs and evidence records are linked from Store data.",
-			"evidence":    []string{"api_case_runs", "evidence_records"},
+			"id":                "case-evidence",
+			apiFieldTitle:       "API Case Evidence",
+			"status":            evidenceLifecycleAvailable,
+			apiFieldDescription: "API case runs and evidence records are linked from Store data.",
+			apiFieldEvidence:    []string{"api_case_runs", "evidence_records"},
 		},
 	}
 	if strings.TrimSpace(bundle.ConfigAuthoring.Role) != "" {
 		capabilities = append(capabilities, map[string]any{
-			"id":          "config-authoring-contract",
-			"title":       "Subagent Config Authoring",
-			"status":      "available",
-			"description": "Active profile declares who may author concrete template configuration and what evidence the handoff must include.",
-			"evidence":    []string{"config-authoring.json", "agent-test-profiles.json"},
+			"id":                "config-authoring-contract",
+			apiFieldTitle:       "Subagent Config Authoring",
+			"status":            evidenceLifecycleAvailable,
+			apiFieldDescription: "Active profile declares who may author concrete template configuration and what evidence the handoff must include.",
+			apiFieldEvidence:    []string{"config-authoring.json", "agent-test-profiles.json"},
 		})
 	}
 	return capabilities
@@ -107,7 +107,7 @@ func agentTestProfiles(bundle profile.Bundle) []map[string]any {
 			probeCount := len(item.Probes) + len(item.MySQLProbes)
 			items = append(items, map[string]any{
 				"id":              item.ID,
-				"title":           firstNonEmpty(item.Title, item.ID),
+				apiFieldTitle:     firstNonEmpty(item.Title, item.ID),
 				"stepCount":       len(item.Steps),
 				"workflowCount":   countAgentTestSteps(item.Steps, "workflow"),
 				"caseCount":       countAgentTestSteps(item.Steps, "case"),
@@ -125,7 +125,7 @@ func agentTestProfiles(bundle profile.Bundle) []map[string]any {
 	}
 	return []map[string]any{{
 		"id":             bundle.ID,
-		"title":          firstNonEmpty(bundle.DisplayName, bundle.ID),
+		apiFieldTitle:    firstNonEmpty(bundle.DisplayName, bundle.ID),
 		"stepCount":      len(bundle.Workflows),
 		"workflowCount":  len(bundle.Workflows),
 		"caseCount":      len(bundle.APICases),

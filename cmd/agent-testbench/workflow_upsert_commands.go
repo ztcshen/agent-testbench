@@ -247,8 +247,8 @@ func upsertWorkflowCatalogWorkflow(ctx context.Context, runtime store.Store, opt
 	}
 	catalog.Workflows = upsertCatalogWorkflow(catalog.Workflows, workflow)
 	written, err := saveProfileCatalogMutation(ctx, runtime, snapshot.Revision, catalog, "workflow-upsert", map[string]any{
-		"workflowId": workflow.ID,
-		"created":    !exists,
+		"workflowId":                       workflow.ID,
+		profileCatalogMutationFieldCreated: !exists,
 	})
 	if err != nil {
 		return workflowCatalogUpsertReport{}, err
@@ -313,9 +313,9 @@ func upsertWorkflowCatalogBinding(ctx context.Context, runtime store.Store, opti
 	}
 	catalog.WorkflowBindings = upsertCatalogWorkflowBinding(catalog.WorkflowBindings, binding)
 	written, err := saveProfileCatalogMutation(ctx, runtime, snapshot.Revision, catalog, "workflow-binding-upsert", map[string]any{
-		"workflowId": binding.WorkflowID,
-		"stepId":     binding.StepID,
-		"created":    !exists,
+		"workflowId":                       binding.WorkflowID,
+		"stepId":                           binding.StepID,
+		profileCatalogMutationFieldCreated: !exists,
 	})
 	if err != nil {
 		return workflowCatalogUpsertReport{}, err

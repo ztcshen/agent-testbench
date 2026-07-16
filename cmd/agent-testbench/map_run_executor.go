@@ -197,7 +197,7 @@ func (e mapRunExecutor) checkpointTask(task store.TestMapPlanTask) {
 	}
 	checkpointStore, ok := e.runtime.(store.MapPlannerCheckpointStore)
 	if !ok {
-		e.recordCheckpointError(errors.New("Store does not support test map task checkpoints"))
+		e.recordCheckpointError(errors.New("store does not support test map task checkpoints"))
 		return
 	}
 	e.recordCheckpointError(checkpointStore.UpdateTestMapPlanTask(e.ctx, task))
@@ -215,7 +215,7 @@ func (e mapRunExecutor) checkpointInstance(instance store.TestMapPlanInstance) {
 	}
 	checkpointStore, ok := e.runtime.(store.MapPlannerCheckpointStore)
 	if !ok {
-		e.recordCheckpointError(errors.New("Store does not support test map plan checkpoints"))
+		e.recordCheckpointError(errors.New("store does not support test map plan checkpoints"))
 		return
 	}
 	e.recordCheckpointError(checkpointStore.UpdateTestMapPlanInstance(e.ctx, instance))

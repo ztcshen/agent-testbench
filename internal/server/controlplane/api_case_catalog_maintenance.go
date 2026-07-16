@@ -131,7 +131,11 @@ func handleCaseCatalogPatch(w http.ResponseWriter, r *http.Request, runtime stor
 		writeCaseCatalogPatchError(w, err)
 		return
 	}
-	summary, _ := json.Marshal(map[string]any{"caseId": changedCase.ID, "created": created})
+	summary, err := json.Marshal(map[string]any{"caseId": changedCase.ID, "created": created})
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": fmt.Errorf("encode case catalog mutation summary: %w", err).Error()})
+		return
+	}
 	updated, err := request.Store.CompareAndSwapProfileCatalog(r.Context(), request.ExpectedRevision, catalogValue, store.ProfileCatalogMutation{
 		Operation:   caseCatalogPatchOperation,
 		SummaryJSON: string(summary),
@@ -212,10 +216,14 @@ func handleCaseCatalogRollback(w http.ResponseWriter, r *http.Request, runtime s
 		})
 		return
 	}
-	summary, _ := json.Marshal(map[string]any{
+	summary, err := json.Marshal(map[string]any{
 		"targetRevision":   target.Revision,
 		"previousRevision": request.Current.Revision,
 	})
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": fmt.Errorf("encode case catalog rollback summary: %w", err).Error()})
+		return
+	}
 	rollbackCatalog := target.Catalog
 	rollbackCatalog.IndexedAt = request.Current.Catalog.IndexedAt
 	updated, err := request.Store.CompareAndSwapProfileCatalog(r.Context(), request.ExpectedRevision, rollbackCatalog, store.ProfileCatalogMutation{
@@ -299,18 +307,18 @@ func requireCaseCatalogIfMatch(w http.ResponseWriter, r *http.Request, current s
 	header := strings.TrimSpace(r.Header.Get("If-Match"))
 	if header == "" {
 		writeJSONStatus(w, http.StatusPreconditionRequired, map[string]any{
-			"ok":    false,
-			"error": "If-Match is required",
-			"code":  "if_match_required",
+			"ok":         false,
+			"error":      "If-Match is required",
+			apiFieldCode: "if_match_required",
 		})
 		return 0, false
 	}
 	expectedRevision, err := parseCaseCatalogETag(header)
 	if err != nil {
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{
-			"ok":    false,
-			"error": "If-Match must contain one strong case catalog ETag",
-			"code":  "invalid_if_match",
+			"ok":         false,
+			"error":      "If-Match must contain one strong case catalog ETag",
+			apiFieldCode: "invalid_if_match",
 		})
 		return 0, false
 	}
@@ -338,7 +346,7 @@ func writeCaseCatalogPreconditionFailed(w http.ResponseWriter, expectedRevision 
 	writeJSONStatus(w, http.StatusPreconditionFailed, map[string]any{
 		"ok":               false,
 		"error":            "profile catalog revision changed",
-		"code":             "catalog_revision_conflict",
+		apiFieldCode:       "catalog_revision_conflict",
 		"expectedRevision": expectedRevision,
 		"currentRevision":  actualRevision,
 	})

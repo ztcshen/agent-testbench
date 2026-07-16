@@ -48,7 +48,7 @@ func (s *Store) CompareAndSwapProfileCatalog(
 	expectedRevision int64,
 	catalog store.ProfileCatalog,
 	mutation store.ProfileCatalogMutation,
-) (store.ProfileCatalogSnapshot, error) {
+) (_ store.ProfileCatalogSnapshot, err error) {
 	change, err := prepareProfileCatalogChange(expectedRevision, catalog, mutation)
 	if err != nil {
 		return store.ProfileCatalogSnapshot{}, err
@@ -57,7 +57,7 @@ func (s *Store) CompareAndSwapProfileCatalog(
 	if err != nil {
 		return store.ProfileCatalogSnapshot{}, fmt.Errorf("begin profile catalog transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer rollbackTxOnError(tx, &err)
 
 	revision, unchanged, err := s.claimProfileCatalogChange(ctx, tx, change)
 	if err != nil {
@@ -159,7 +159,9 @@ func (s *Store) createProfileCatalogHead(ctx context.Context, tx *sql.Tx, change
 insert into profile_catalog_heads (profile_id, revision, catalog_sha256, updated_at)
 values (%s);`, s.bindVars(4))
 	if _, err := tx.ExecContext(ctx, query, change.catalog.ProfileID, 1, change.digest, dbTimeArg(s.dialect, change.now)); err != nil {
-		_ = tx.Rollback()
+		if rollbackErr := rollbackTxBeforeConflict(tx, "profile catalog create conflict"); rollbackErr != nil {
+			return errors.Join(fmt.Errorf("create profile catalog head %q: %w", change.catalog.ProfileID, err), rollbackErr)
+		}
 		return s.profileCatalogConflictOrError(ctx, change.catalog.ProfileID, change.expectedRevision, err)
 	}
 	return nil
@@ -181,7 +183,9 @@ where profile_id = %s and revision = %s;`, s.dialect.BindVar(1), s.dialect.BindV
 	if matched == 1 {
 		return nil
 	}
-	_ = tx.Rollback()
+	if err := rollbackTxBeforeConflict(tx, "profile catalog claim conflict"); err != nil {
+		return err
+	}
 	return s.profileCatalogConflict(ctx, change.catalog.ProfileID, change.expectedRevision)
 }
 

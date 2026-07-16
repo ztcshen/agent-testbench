@@ -19,6 +19,8 @@ type environmentStatusReport struct {
 	Error                string                           `json:"error,omitempty"`
 }
 
+const environmentLifecycleActionInspectStatusCommand = "inspect-status-command"
+
 type environmentStatusDockerReport struct {
 	OK           bool                                  `json:"ok"`
 	Action       string                                `json:"action"`
@@ -157,7 +159,7 @@ func environmentStatusStartCommand(ctx context.Context, compose map[string]any, 
 func environmentStatusRunCommand(ctx context.Context, workspace string, statusCommand string) environmentStatusDockerReport {
 	result := runAgentObservedCommand(ctx, agentObservedCommandOptions{
 		Workdir:             workspace,
-		Command:             []string{"/bin/sh", "-c", statusCommand},
+		Command:             []string{posixShellPath, "-c", statusCommand},
 		SuppressEventOutput: true,
 	})
 	check := environmentRestoreHealthCheckReport{
@@ -172,7 +174,7 @@ func environmentStatusRunCommand(ctx context.Context, workspace string, statusCo
 	}
 	report := environmentStatusDockerReport{
 		OK:           check.OK,
-		Action:       "inspect-status-command",
+		Action:       environmentLifecycleActionInspectStatusCommand,
 		HealthChecks: []environmentRestoreHealthCheckReport{check},
 	}
 	if !check.OK {

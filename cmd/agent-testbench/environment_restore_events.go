@@ -17,6 +17,7 @@ import (
 type agentEventStreamContextKey struct{}
 
 const (
+	posixShellPath            = "/bin/sh"
 	cliOutputFormatText       = "text"
 	cliOutputFormatJSON       = "json"
 	cliOutputFormatStreamJSON = "stream-json"

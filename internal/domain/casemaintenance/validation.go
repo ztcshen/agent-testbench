@@ -248,7 +248,10 @@ func executionHasRequestTarget(execution map[string]any) bool {
 }
 
 func stringValue(value any) string {
-	text, _ := value.(string)
+	text, ok := value.(string)
+	if !ok {
+		return ""
+	}
 	return strings.TrimSpace(text)
 }
 

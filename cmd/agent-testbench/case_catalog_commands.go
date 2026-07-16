@@ -224,8 +224,8 @@ func upsertCaseCatalogCase(ctx context.Context, runtime store.Store, options cas
 		return caseCatalogUpsertReport{}, err
 	}
 	written, err := saveProfileCatalogMutation(ctx, runtime, snapshot.Revision, catalog, "case-upsert", map[string]any{
-		"caseId":  apiCase.ID,
-		"created": !exists,
+		"caseId":                           apiCase.ID,
+		profileCatalogMutationFieldCreated: !exists,
 	})
 	if err != nil {
 		return caseCatalogUpsertReport{}, err

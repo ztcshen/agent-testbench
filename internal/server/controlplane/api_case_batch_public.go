@@ -20,10 +20,10 @@ func (e publicAPICaseBatchPayloadError) Error() string {
 }
 
 func validatePublicAPICaseBatchRunPayload(payload map[string]any) error {
-	if err := validatePublicAPICaseBatchRunFields(payload, []string{"baseUrl", "environmentId", "evidenceDir"}); err != nil {
+	if err := validatePublicAPICaseBatchRunFields(payload, []string{"baseUrl", "environmentId", apiFieldEvidenceDir}); err != nil {
 		return err
 	}
-	value, present := payload["timeoutSeconds"]
+	value, present := payload[apiFieldTimeoutSeconds]
 	return validateAPICaseBatchTimeoutSeconds(value, present)
 }
 
@@ -40,10 +40,10 @@ func readPublicAPICaseBatchRunPayload(w http.ResponseWriter, r *http.Request) (m
 }
 
 func validatePublicEnvironmentAcceptanceRunPayload(payload map[string]any) error {
-	if err := validatePublicAPICaseBatchRunFields(payload, []string{"baseUrl", "evidenceDir"}); err != nil {
+	if err := validatePublicAPICaseBatchRunFields(payload, []string{"baseUrl", apiFieldEvidenceDir}); err != nil {
 		return err
 	}
-	value, present := payload["timeoutSeconds"]
+	value, present := payload[apiFieldTimeoutSeconds]
 	return validateAPICaseBatchTimeoutSeconds(value, present)
 }
 
@@ -130,9 +130,9 @@ func writePublicAPICaseBatchPayloadError(w http.ResponseWriter, err error) bool 
 	}
 	_ = errors.As(err, &payloadErr)
 	writeJSONStatus(w, http.StatusBadRequest, map[string]any{
-		"ok":    false,
-		"error": payloadErr.message,
-		"code":  payloadErr.code,
+		"ok":         false,
+		"error":      payloadErr.message,
+		apiFieldCode: payloadErr.code,
 	})
 	return true
 }

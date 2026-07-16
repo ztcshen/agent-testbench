@@ -9,8 +9,6 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	"agent-testbench/internal/store"
 )
 
 type caseCatalogHistoryReport struct {
@@ -66,7 +64,10 @@ func runCaseCatalogHistory(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	versioned := runtime.(store.VersionedProfileCatalogStore)
+	versioned, err := requireVersionedProfileCatalogStore(runtime)
+	if err != nil {
+		return err
+	}
 	versions, err := versioned.ListProfileCatalogVersions(ctx, snapshot.Catalog.ProfileID, *limit)
 	if err != nil {
 		return err
@@ -140,7 +141,10 @@ func runCaseCatalogRollback(ctx context.Context, args []string) error {
 		); err != nil {
 			return err
 		}
-		versioned := runtime.(store.VersionedProfileCatalogStore)
+		versioned, err := requireVersionedProfileCatalogStore(runtime)
+		if err != nil {
+			return err
+		}
 		target, err := versioned.GetProfileCatalogVersion(ctx, snapshot.Catalog.ProfileID, *sourceRevision)
 		if err != nil {
 			return err
@@ -179,7 +183,7 @@ func safeCatalogMutationSummary(raw string) map[string]any {
 		return nil
 	}
 	safe := map[string]any{}
-	for _, key := range []string{"caseId", "configId", "workflowId", "stepId", "sourceRevision", "created"} {
+	for _, key := range []string{"caseId", "configId", "workflowId", "stepId", "sourceRevision", profileCatalogMutationFieldCreated} {
 		if value, ok := decoded[key]; ok {
 			safe[key] = value
 		}

@@ -184,7 +184,7 @@ func environmentStopStartCommand(ctx context.Context, compose map[string]any, wo
 	}
 	result := runAgentObservedCommand(ctx, agentObservedCommandOptions{
 		Workdir:             workspace,
-		Command:             []string{"/bin/sh", "-c", stopCommand},
+		Command:             []string{posixShellPath, "-c", stopCommand},
 		SuppressEventOutput: true,
 	})
 	report := environmentStopDockerReport{

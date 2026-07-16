@@ -213,9 +213,9 @@ func upsertCaseExecutionConfig(ctx context.Context, runtime store.Store, options
 	}
 	selectedID := selectedCaseExecutionTemplateConfigID(catalog, caseID, options.WorkflowID, options.StepID)
 	written, err := saveProfileCatalogMutation(ctx, runtime, snapshot.Revision, catalog, "case-config-upsert", map[string]any{
-		"caseId":   caseID,
-		"configId": configID,
-		"created":  !exists,
+		"caseId":                           caseID,
+		"configId":                         configID,
+		profileCatalogMutationFieldCreated: !exists,
 	})
 	if err != nil {
 		return caseConfigUpsertReport{}, err

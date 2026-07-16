@@ -126,7 +126,7 @@ func runSandboxServiceStartup(ctx context.Context, service store.CatalogService,
 	commandCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	commandResult := runAgentObservedCommand(commandCtx, agentObservedCommandOptions{
-		Command: []string{"/bin/sh", "-c", command},
+		Command: []string{posixShellPath, "-c", command},
 	})
 	result.Output = commandResult.Output
 	if commandCtx.Err() == context.DeadlineExceeded {

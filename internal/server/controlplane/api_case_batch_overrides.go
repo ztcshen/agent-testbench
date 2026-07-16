@@ -9,8 +9,8 @@ import (
 
 func apiCaseBatchEvidenceOverridesForPlan(plan apiCaseBatchCasePlan, evidencePath string) map[string]any {
 	out := apiCaseBatchEvidenceOverrides(evidencePath)
-	request, _ := jsonFileObject(filepath.Join(evidencePath, "request.json"))
-	response, _ := jsonFileObject(filepath.Join(evidencePath, "response.json"))
+	request, _ := jsonFileObject(filepath.Join(evidencePath, apiCaseEvidenceFileRequest))
+	response, _ := jsonFileObject(filepath.Join(evidencePath, apiCaseEvidenceFileResponse))
 	requestBody := apiCaseBatchJSONBody(request)
 	responseBody := apiCaseBatchJSONBody(response)
 	for _, export := range plan.Exports {
@@ -97,7 +97,7 @@ func apiCaseBatchPathValue(root any, path string) (any, bool) {
 
 func apiCaseBatchEvidenceOverrides(evidencePath string) map[string]any {
 	out := map[string]any{}
-	for _, name := range []string{"request.json", "response.json"} {
+	for _, name := range []string{apiCaseEvidenceFileRequest, apiCaseEvidenceFileResponse} {
 		payload, _ := jsonFileObject(filepath.Join(evidencePath, name))
 		collectAPICaseBatchOverrideFields(out, payload)
 		if body := strings.TrimSpace(valueString(payload["body"])); body != "" {

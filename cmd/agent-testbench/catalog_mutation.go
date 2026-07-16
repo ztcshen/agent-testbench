@@ -17,6 +17,16 @@ type mutableProfileCatalogSnapshot struct {
 	SHA256   string
 }
 
+const profileCatalogMutationFieldCreated = "created"
+
+func requireVersionedProfileCatalogStore(runtime store.Store) (store.VersionedProfileCatalogStore, error) {
+	versioned, ok := runtime.(store.VersionedProfileCatalogStore)
+	if !ok {
+		return nil, errors.New("store does not support versioned profile catalog writes; upgrade the Store implementation")
+	}
+	return versioned, nil
+}
+
 func loadMutableProfileCatalogSnapshot(ctx context.Context, runtime store.Store, requestedProfileID string) (mutableProfileCatalogSnapshot, error) {
 	requestedProfileID = strings.TrimSpace(requestedProfileID)
 	var catalog store.ProfileCatalog
@@ -44,9 +54,9 @@ func loadMutableProfileCatalogSnapshot(ctx context.Context, runtime store.Store,
 	if requestedProfileID != "" && catalog.ProfileID != requestedProfileID {
 		return mutableProfileCatalogSnapshot{}, fmt.Errorf("store profile catalog is %q, not %q", catalog.ProfileID, requestedProfileID)
 	}
-	versioned, ok := runtime.(store.VersionedProfileCatalogStore)
-	if !ok {
-		return mutableProfileCatalogSnapshot{}, errors.New("Store does not support versioned profile catalog writes; upgrade the Store implementation")
+	versioned, err := requireVersionedProfileCatalogStore(runtime)
+	if err != nil {
+		return mutableProfileCatalogSnapshot{}, err
 	}
 	current, err := versioned.GetProfileCatalogSnapshot(ctx, catalog.ProfileID)
 	if err != nil {
@@ -63,9 +73,9 @@ func saveProfileCatalogMutation(
 	operation string,
 	summary map[string]any,
 ) (store.ProfileCatalogSnapshot, error) {
-	versioned, ok := runtime.(store.VersionedProfileCatalogStore)
-	if !ok {
-		return store.ProfileCatalogSnapshot{}, errors.New("Store does not support versioned profile catalog writes; upgrade the Store implementation")
+	versioned, err := requireVersionedProfileCatalogStore(runtime)
+	if err != nil {
+		return store.ProfileCatalogSnapshot{}, err
 	}
 	summaryJSON, err := json.Marshal(summary)
 	if err != nil {

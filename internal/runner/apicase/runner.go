@@ -1,3 +1,5 @@
+// Package apicase loads and executes HTTP API cases while recording bounded
+// local Evidence for requests, responses, assertions, and run outcomes.
 package apicase
 
 import (

@@ -14,6 +14,8 @@ import (
 	"agent-testbench/internal/store"
 )
 
+const mapRunFailureInterruptedUnknownOutcome = "interrupted-unknown-outcome"
+
 type mapRunOptions struct {
 	storeRef         string
 	storeURL         string
@@ -264,9 +266,9 @@ func prepareExistingMapRunRecordAt(record store.TestMapPlanRecord, options mapRu
 		task := &record.Tasks[i]
 		if task.Status == mapplanner.TaskStatusRunning {
 			task.Status = store.StatusFailed
-			task.Reason = "interrupted-unknown-outcome"
+			task.Reason = mapRunFailureInterruptedUnknownOutcome
 			task.SummaryJSON = mustCompactJSON(map[string]any{
-				"failureCategory": "interrupted-unknown-outcome",
+				"failureCategory": mapRunFailureInterruptedUnknownOutcome,
 				"resumable":       false,
 			})
 			task.FinishedAt = now
@@ -334,8 +336,8 @@ func mapRunTaskSelectedForExecution(task store.TestMapPlanTask, options mapRunOp
 }
 
 func mapRunTaskInterruptedUnknownOutcome(task store.TestMapPlanTask) bool {
-	return strings.TrimSpace(task.Reason) == "interrupted-unknown-outcome" ||
-		valueString(jsonObjectString(task.SummaryJSON)["failureCategory"]) == "interrupted-unknown-outcome"
+	return strings.TrimSpace(task.Reason) == mapRunFailureInterruptedUnknownOutcome ||
+		valueString(jsonObjectString(task.SummaryJSON)["failureCategory"]) == mapRunFailureInterruptedUnknownOutcome
 }
 
 func mapRunSelectedTaskIDs(ids []string) map[string]bool {

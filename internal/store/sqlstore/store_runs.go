@@ -98,11 +98,12 @@ where %s;`,
 		s.dialect.BindVar(12),
 		condition,
 	)
-	args := []any{
+	args := make([]any, 0, 12+len(conditionArgs))
+	args = append(args,
 		r.ProfileID, r.EnvironmentID, r.WorkflowID, r.Status, r.EvidenceRoot, r.SummaryJSON,
 		r.TestPlanMapID, r.TestPlanPathID, r.PlannerSummaryJSON,
 		dbTimeArg(s.dialect, r.StartedAt), dbTimeArg(s.dialect, r.FinishedAt), dbTimeArg(s.dialect, r.UpdatedAt),
-	}
+	)
 	args = append(args, conditionArgs...)
 	affected, err := execStoreRowMutation(ctx, s.db, fmt.Sprintf("update run %q", r.ID), query, args...)
 	if err != nil {

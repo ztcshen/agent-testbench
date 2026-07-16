@@ -363,7 +363,7 @@ func environmentRegistrationFromAPIPayload(payload map[string]any) (environmentA
 		env: store.Environment{
 			ID:                     id,
 			DisplayName:            strings.TrimSpace(valueString(payload["displayName"])),
-			Description:            strings.TrimSpace(valueString(payload["description"])),
+			Description:            strings.TrimSpace(valueString(payload[apiFieldDescription])),
 			Status:                 firstNonEmpty(strings.TrimSpace(valueString(payload["status"])), "draft"),
 			ServicesJSON:           "[]",
 			ReposJSON:              "{}",
@@ -419,7 +419,7 @@ func environmentAPIPayload(env store.Environment) map[string]any {
 	payload := map[string]any{
 		"id":                     env.ID,
 		"displayName":            env.DisplayName,
-		"description":            env.Description,
+		apiFieldDescription:      env.Description,
 		"status":                 env.Status,
 		"verified":               env.Verified,
 		"services":               jsonArray(env.ServicesJSON),

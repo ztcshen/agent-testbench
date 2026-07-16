@@ -106,7 +106,7 @@ func runTaskWorkerPass(ctx context.Context, runtime store.Store, now time.Time) 
 	}
 	report.Checked = len(tasks)
 	for _, task := range tasks {
-		if task.Status != "scheduled" {
+		if task.Status != taskStatusScheduled {
 			continue
 		}
 		report.Scheduled++

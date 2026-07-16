@@ -67,11 +67,11 @@ func schemaCommentSpecs() []schemaTableComment {
 	types := schemaCommentMySQLTypes{
 		v128:     "varchar(128)",
 		v255:     mysqlVarchar255Type,
-		intType:  "integer",
+		intType:  sqlIntegerType,
 		text:     "mediumtext",
 		jsonType: "json",
 		timeType: "datetime(6)",
-		boolType: "boolean",
+		boolType: sqlBooleanType,
 	}
 	specs := coreRunCommentSpecs(types)
 	specs = append(specs, observabilityCommentSpecs(types)...)

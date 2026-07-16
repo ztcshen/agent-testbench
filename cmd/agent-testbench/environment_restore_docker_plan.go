@@ -164,7 +164,7 @@ func environmentRestorePlanStartCommand(workspace string, startCommand string, c
 		OK:       true,
 		Workdir:  workspace,
 		Action:   "plan-start-command",
-		Commands: [][]string{{"/bin/sh", "-c", startCommand}},
+		Commands: [][]string{{posixShellPath, "-c", startCommand}},
 	}
 	if cleanupOptions.Requested {
 		report.OK = false

@@ -60,7 +60,8 @@ set name = %s, kind = %s, command = %s, schedule = %s, status = %s,
 where id = %s`,
 		bindVar(1), bindVar(2), bindVar(3), bindVar(4),
 		bindVar(5), bindVar(6), bindVar(7), bindVar(8), bindVar(9))
-	args := []any{t.Name, t.Kind, t.Command, t.Schedule, t.Status, t.NotifyJSON, t.SummaryJSON, dbTimeArg(s.dialect, t.UpdatedAt), t.ID}
+	args := make([]any, 0, 10)
+	args = append(args, t.Name, t.Kind, t.Command, t.Schedule, t.Status, t.NotifyJSON, t.SummaryJSON, dbTimeArg(s.dialect, t.UpdatedAt), t.ID)
 	query += " and status <> " + bindVar(10)
 	args = append(args, store.StatusRunning)
 	query += ";"

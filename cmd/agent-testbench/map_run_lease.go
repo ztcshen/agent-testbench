@@ -36,7 +36,7 @@ type mapRunLeaseState struct {
 func claimMapRunPlan(ctx context.Context, runtime store.Store, record store.TestMapPlanRecord, options mapRunOptions) (store.MapPlannerLeaseStore, store.TestMapPlanLease, store.TestMapPlanRecord, error) {
 	leaseStore, ok := runtime.(store.MapPlannerLeaseStore)
 	if !ok {
-		return nil, store.TestMapPlanLease{}, store.TestMapPlanRecord{}, errors.New("Store does not support claimed test map plan execution")
+		return nil, store.TestMapPlanLease{}, store.TestMapPlanRecord{}, errors.New("store does not support claimed test map plan execution")
 	}
 	if options.planID == "" {
 		if err := runtime.SaveTestMapPlan(ctx, record); err != nil {
@@ -78,7 +78,10 @@ func newMapRunLeaseIdentity() (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	hostname, _ := os.Hostname()
+	hostname, err := os.Hostname()
+	if err != nil {
+		return "", "", fmt.Errorf("resolve hostname for test map plan lease identity: %w", err)
+	}
 	hostname = strings.TrimSpace(hostname)
 	if hostname == "" {
 		hostname = "local"

@@ -13,14 +13,19 @@ import (
 )
 
 const (
-	builtInTaskMapMaintain    = "map-maintain"
-	builtInTaskMapExecute     = "map-execute"
-	builtInTaskCaseMaintain   = "case-maintain"
-	builtInTaskJSONCount      = "count"
-	builtInTaskFlagMap        = "--map"
-	builtInTaskFlagWorkspace  = "--workspace"
-	builtInTaskInputWorkspace = "workspace"
-	builtInTaskStepEvidence   = "evidence"
+	builtInTaskMapMaintain        = "map-maintain"
+	builtInTaskMapExecute         = "map-execute"
+	builtInTaskCaseMaintain       = "case-maintain"
+	builtInTaskJSONCount          = "count"
+	builtInTaskFlagMap            = "--map"
+	builtInTaskFlagWorkspace      = "--workspace"
+	builtInTaskInputWorkspace     = "workspace"
+	builtInTaskStepEvidence       = "evidence"
+	builtInTaskTagMaintainCase    = "maintain case"
+	builtInTaskTagCaseMaintenance = "case maintenance"
+	builtInTaskTagAPICase         = "API case"
+	builtInTaskTagCatalog         = "catalog"
+	builtInTaskTagQuality         = "quality"
 )
 
 type builtInTaskDescriptor struct {
@@ -226,7 +231,7 @@ func builtInTaskDescriptors() []builtInTaskDescriptor {
 			Name:    "Maintain API case catalog",
 			Goal:    "Inspect and maintain API cases and their Store-backed execution readiness.",
 			Summary: "Reviews immutable catalog history, maintained cases, quality gaps, and the repair plan before editing.",
-			Tags:    []string{"maintain case", "case maintenance", "API case", "catalog", "quality"},
+			Tags:    []string{builtInTaskTagMaintainCase, builtInTaskTagCaseMaintenance, builtInTaskTagAPICase, builtInTaskTagCatalog, builtInTaskTagQuality},
 			Steps: []builtInTaskStepPattern{
 				{ID: "history", Title: "Review catalog revisions", Command: "case catalog history", ReadOnly: true},
 				{ID: "discover", Title: "Discover maintained cases", Command: "case discover", ReadOnly: true},

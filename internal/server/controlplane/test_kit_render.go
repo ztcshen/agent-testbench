@@ -135,7 +135,7 @@ const (
 
 func testKitTimeout(payload map[string]any, configuredSeconds int) (time.Duration, error) {
 	seconds := int64(configuredSeconds)
-	if raw, ok := payload["timeoutSeconds"]; ok && raw != nil && strings.TrimSpace(valueString(raw)) != "" {
+	if raw, ok := payload[apiFieldTimeoutSeconds]; ok && raw != nil && strings.TrimSpace(valueString(raw)) != "" {
 		parsed, err := testKitTimeoutSeconds(raw)
 		if err != nil {
 			return 0, err

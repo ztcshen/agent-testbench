@@ -13,6 +13,8 @@ const (
 	CoreSchemaName       = "create shared sql store schema"
 	mysqlVarchar255Type  = "varchar(255)"
 	sha256ColumnName     = "sha256"
+	sqlIntegerType       = "integer"
+	sqlBooleanType       = "boolean"
 )
 
 type SchemaStatusResult struct {
@@ -81,11 +83,11 @@ func UpgradeSchema(ctx context.Context, db *sql.DB, d Dialect) (SchemaStatusResu
 		commentTypes := schemaCommentMySQLTypes{
 			v128:     "varchar(128)",
 			v255:     mysqlVarchar255Type,
-			intType:  "integer",
+			intType:  sqlIntegerType,
 			text:     "mediumtext",
 			jsonType: "json",
 			timeType: "datetime(6)",
-			boolType: "boolean",
+			boolType: sqlBooleanType,
 		}
 		for _, statement := range schemaCommentSQLForSpecs(d, profileCatalogVersionCommentSpecs(commentTypes)) {
 			if _, err := db.ExecContext(ctx, statement); err != nil {
@@ -142,7 +144,7 @@ func CoreSchemaSQL(d Dialect) []string {
 		profileIDText:       profileIdentifierTextType(d),
 		runIDText:           runIdentifierTextType(d),
 		configVersionIDText: configVersionIdentifierTextType(d),
-		intType:             "integer",
+		intType:             sqlIntegerType,
 		timeType:            d.TimeType(),
 		jsonType:            d.JSONType(),
 		boolType:            d.BoolType(),
@@ -400,7 +402,7 @@ create table if not exists environment_files (
   updated_at %s not null,
   primary key (env_id, file_path, file_kind),
   foreign key (env_id) references environments(id) on delete cascade
-);`, d.KeyTextType(), d.KeyTextType(), d.KeyTextType(), d.TextType(), d.BoolType(), "integer", d.JSONType(), d.TimeType(), d.TimeType()),
+);`, d.KeyTextType(), d.KeyTextType(), d.KeyTextType(), d.TextType(), d.BoolType(), sqlIntegerType, d.JSONType(), d.TimeType(), d.TimeType()),
 			d.CreateIndexSQL("idx_environment_files_kind_order", "environment_files", []string{"env_id", "file_kind", "apply_order", "file_path"}),
 		)
 	}
@@ -409,7 +411,7 @@ create table if not exists environment_files (
 			coreEnvironmentRuntimeMetadataSchemaSQL(d, coreSchemaTypes{
 				text:     d.TextType(),
 				keyText:  d.KeyTextType(),
-				intType:  "integer",
+				intType:  sqlIntegerType,
 				timeType: d.TimeType(),
 				jsonType: d.JSONType(),
 			})...,
@@ -422,7 +424,7 @@ create table if not exists environment_files (
 				keyText:       d.KeyTextType(),
 				profileIDText: profileIdentifierTextType(d),
 				runIDText:     runIdentifierTextType(d),
-				intType:       "integer",
+				intType:       sqlIntegerType,
 				timeType:      d.TimeType(),
 				jsonType:      d.JSONType(),
 				boolType:      d.BoolType(),
@@ -438,7 +440,7 @@ create table if not exists environment_files (
 			keyText:       d.KeyTextType(),
 			profileIDText: profileIdentifierTextType(d),
 			runIDText:     runIdentifierTextType(d),
-			intType:       "integer",
+			intType:       sqlIntegerType,
 			timeType:      d.TimeType(),
 			jsonType:      d.JSONType(),
 			boolType:      d.BoolType(),

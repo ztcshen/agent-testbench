@@ -13,6 +13,8 @@ import (
 
 type environmentOutputRedactorContextKey struct{}
 
+const environmentSensitiveTokenSecret = "secret"
+
 type environmentOutputRedactor struct {
 	secrets []string
 }
@@ -77,7 +79,7 @@ func environmentStatusReportForOutput(report environmentStatusReport, compose ma
 			commandFailure = true
 		}
 	}
-	if report.Docker.Error != "" && report.Docker.Action == "inspect-status-command" {
+	if report.Docker.Error != "" && report.Docker.Action == environmentLifecycleActionInspectStatusCommand {
 		if len(report.Docker.HealthChecks) > 0 {
 			report.Docker.Error = environmentLifecycleCommandExitMessage("statusCommand", report.Docker.HealthChecks[0].ExitCode)
 		} else {
@@ -454,7 +456,7 @@ func isEnvironmentOutputSensitiveKey(normalized string) bool {
 		"credential",
 		"password",
 		"privatekey",
-		"secret",
+		environmentSensitiveTokenSecret,
 		"setcookie",
 		"token",
 	} {

@@ -36,11 +36,11 @@ type caseCatalogCasePatch struct {
 }
 
 var caseCatalogPatchFields = map[string]struct{}{
-	"id": {}, "displayName": {}, "description": {}, "nodeId": {}, "caseType": {},
+	"id": {}, "displayName": {}, apiFieldDescription: {}, "nodeId": {}, "caseType": {},
 	"scenario": {}, "tags": {}, "priority": {}, "owner": {}, "requestTemplateId": {},
 	"renderMode": {}, "requiredForAdmission": {}, "status": {}, "sortOrder": {},
 	"casePath": {}, "sourceKind": {}, "sourcePath": {}, "executorId": {}, "baseUrl": {},
-	"evidenceDir": {}, "timeoutSeconds": {},
+	apiFieldEvidenceDir: {}, apiFieldTimeoutSeconds: {},
 }
 
 func patchCaseCatalog(catalogValue store.ProfileCatalog, payload map[string]any) (store.ProfileCatalog, store.CatalogAPICase, bool, error) {

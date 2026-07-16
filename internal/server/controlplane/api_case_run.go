@@ -25,9 +25,9 @@ const (
 
 func handleAPICaseRun(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store) {
 	writeJSONStatus(w, http.StatusGone, map[string]any{
-		"ok":    false,
-		"code":  "file_path_execution_disabled",
-		"error": "public file-path execution is disabled; register the case in the Store catalog and POST /api/test-kit/run with caseId, or use the local case run CLI",
+		"ok":         false,
+		apiFieldCode: "file_path_execution_disabled",
+		"error":      "public file-path execution is disabled; register the case in the Store catalog and POST /api/test-kit/run with caseId, or use the local case run CLI",
 	})
 }
 
@@ -122,7 +122,7 @@ func recordAPICaseRunRow(ctx context.Context, runtime store.Store, result apicas
 }
 
 func recordAPICaseEvidenceRecords(ctx context.Context, runtime store.Store, result apicase.RunResult, caseRunID string, stepID string, createdAt time.Time) error {
-	for _, name := range []string{"case.json", "request.json", "response.json", "assertions.json", "error.json", "summary.json"} {
+	for _, name := range apiCaseEvidenceFiles() {
 		path := filepath.Join(result.EvidencePath, name)
 		info, err := os.Stat(path)
 		if errors.Is(err, os.ErrNotExist) {
@@ -189,11 +189,11 @@ func apiCaseEvidenceCategory(kind string) string {
 }
 
 func apiCaseEvidenceSummaries(result apicase.RunResult) (string, string, error) {
-	requestSummary, err := apiCaseEvidenceSummary(filepath.Join(result.EvidencePath, "request.json"), apiCaseEvidenceKindRequest, 0)
+	requestSummary, err := apiCaseEvidenceSummary(filepath.Join(result.EvidencePath, apiCaseEvidenceFileRequest), apiCaseEvidenceKindRequest, 0)
 	if err != nil {
 		return "", "", err
 	}
-	assertionPath := filepath.Join(result.EvidencePath, "assertions.json")
+	assertionPath := filepath.Join(result.EvidencePath, apiCaseEvidenceFileAssertions)
 	assertionSummary, err := apiCaseEvidenceSummary(assertionPath, apiCaseEvidenceKindAssertions, 0)
 	if errors.Is(err, os.ErrNotExist) {
 		assertionSummary = compactJSON(map[string]any{"status": result.Status, "errorCount": 0})
@@ -261,14 +261,14 @@ func apiCaseRunReport(result apicase.RunResult) map[string]any {
 	if result.Error != "" {
 		report["error"] = result.Error
 	}
-	if request, ok := jsonFileObject(filepath.Join(result.EvidencePath, "request.json")); ok {
+	if request, ok := jsonFileObject(filepath.Join(result.EvidencePath, apiCaseEvidenceFileRequest)); ok {
 		method := strings.ToUpper(valueString(request["method"]))
 		path := valueString(request["path"])
 		report["method"] = method
 		report["path"] = path
 		report["operation"] = strings.TrimSpace(method + " " + path)
 	}
-	if response, ok := jsonFileObject(filepath.Join(result.EvidencePath, "response.json")); ok {
+	if response, ok := jsonFileObject(filepath.Join(result.EvidencePath, apiCaseEvidenceFileResponse)); ok {
 		report["actual_http_code"] = intValue(response["statusCode"])
 		report["response_body_bytes"] = len(valueString(response["body"]))
 	}

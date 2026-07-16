@@ -84,7 +84,7 @@ func readPlanSourceInput(w http.ResponseWriter, r *http.Request) (planSourceInpu
 	return planSourceInput{
 		SourcePath:  sourcePath,
 		ServiceID:   valueString(payload["serviceId"]),
-		EvidenceDir: valueString(payload["evidenceDir"]),
+		EvidenceDir: valueString(payload[apiFieldEvidenceDir]),
 		Raw:         raw,
 	}, true
 }

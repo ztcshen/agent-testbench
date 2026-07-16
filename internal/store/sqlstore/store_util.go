@@ -132,6 +132,13 @@ func rollbackTxOnError(tx *sql.Tx, errp *error) {
 	}
 }
 
+func rollbackTxBeforeConflict(tx *sql.Tx, operation string) error {
+	if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+		return fmt.Errorf("rollback %s: %w", operation, err)
+	}
+	return nil
+}
+
 func (s *Store) runEnvironmentReplaceTx(ctx context.Context, replace func(sqlExecer) error) (err error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

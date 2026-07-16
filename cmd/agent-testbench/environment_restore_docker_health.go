@@ -170,7 +170,7 @@ func waitEnvironmentRestoreHealthPoll(ctx context.Context, check environmentRest
 }
 
 func waitEnvironmentRestoreCommandHealthCheck(ctx context.Context, check environmentRestoreHealthCheckReport, timeout time.Duration, workspace string) environmentRestoreHealthCheckReport {
-	return waitEnvironmentRestoreCommand(ctx, check, timeout, workspace, []string{"/bin/sh", "-c", check.Command}, func(check *environmentRestoreHealthCheckReport, output string) bool {
+	return waitEnvironmentRestoreCommand(ctx, check, timeout, workspace, []string{posixShellPath, "-c", check.Command}, func(check *environmentRestoreHealthCheckReport, output string) bool {
 		check.Output = truncateReportText(output, 200)
 		return true
 	})

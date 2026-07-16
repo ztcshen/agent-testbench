@@ -16,8 +16,8 @@ func collectAPICaseBatchTraceTopology(ctx context.Context, runtime store.Store, 
 	if runtime == nil || result.Status != store.StatusPassed {
 		return
 	}
-	request, _ := jsonFileObject(filepath.Join(result.EvidencePath, "request.json"))
-	response, _ := jsonFileObject(filepath.Join(result.EvidencePath, "response.json"))
+	request, _ := jsonFileObject(filepath.Join(result.EvidencePath, apiCaseEvidenceFileRequest))
+	response, _ := jsonFileObject(filepath.Join(result.EvidencePath, apiCaseEvidenceFileResponse))
 	payload := map[string]any{
 		"workflowId": workflowID,
 		"stepId":     plan.StepID,

@@ -248,7 +248,7 @@ func writeProfileCatalogConflict(w http.ResponseWriter, err error) bool {
 	writeJSONStatus(w, http.StatusConflict, map[string]any{
 		"ok":               false,
 		"error":            "profile catalog revision conflict",
-		"code":             "profile_catalog_revision_conflict",
+		apiFieldCode:       "profile_catalog_revision_conflict",
 		"expectedRevision": conflict.ExpectedRevision,
 		"actualRevision":   conflict.ActualRevision,
 	})

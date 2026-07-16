@@ -305,7 +305,7 @@ func interfaceNodeAdmissionState(cases []interfaceCase) (int, []map[string]any) 
 		if len(run) == 0 || valueString(run["runId"]) == "" {
 			blockers = append(blockers, map[string]any{
 				"caseId":        item.ID,
-				"title":         firstNonEmpty(item.Title, item.ID),
+				apiFieldTitle:   firstNonEmpty(item.Title, item.ID),
 				"status":        "missing_run",
 				"failureReason": "required case has no run",
 			})
@@ -325,7 +325,7 @@ func interfaceNodeAdmissionState(cases []interfaceCase) (int, []map[string]any) 
 		runID := valueString(run["runId"])
 		blocker := map[string]any{
 			"caseId":        item.ID,
-			"title":         firstNonEmpty(item.Title, item.ID),
+			apiFieldTitle:   firstNonEmpty(item.Title, item.ID),
 			"status":        blockerStatus,
 			"runId":         runID,
 			"elapsedMs":     run["elapsedMs"],

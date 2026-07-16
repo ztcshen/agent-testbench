@@ -240,7 +240,7 @@ func caseEvidencePayload(run store.Run, item store.APICaseRun, caseRuns []store.
 	assertions["passed"] = strings.EqualFold(valueString(assertions["status"]), store.StatusPassed)
 	evidence := map[string]any{
 		"ok": true,
-		"evidence": map[string]any{
+		apiFieldEvidence: map[string]any{
 			"summary":                     summary,
 			"trace":                       trace,
 			"request":                     request,
@@ -253,7 +253,7 @@ func caseEvidencePayload(run store.Run, item store.APICaseRun, caseRuns []store.
 			topologyPayloadField:          topology,
 		},
 	}
-	evidence["evidence"] = redaction.Value(evidence["evidence"])
+	evidence[apiFieldEvidence] = redaction.Value(evidence[apiFieldEvidence])
 	return evidence
 }
 

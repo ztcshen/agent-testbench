@@ -47,7 +47,7 @@ func recordTestKitRunWithContext(ctx context.Context, bundle profile.Bundle, run
 		times := apiCaseRunRecordTimesFromResult(caseResult, now)
 		startedAt, finishedAt = times.StartedAt, times.FinishedAt
 	} else {
-		caseResult, err = writeTestKitEvidenceFiles(result, status, valueString(payload["evidenceDir"]), runID, startedAt, finishedAt)
+		caseResult, err = writeTestKitEvidenceFiles(result, status, valueString(payload[apiFieldEvidenceDir]), runID, startedAt, finishedAt)
 		if err != nil {
 			return "", err
 		}
@@ -76,7 +76,7 @@ func recordTestKitRunWithContext(ctx context.Context, bundle profile.Bundle, run
 	if caseID == "" {
 		return runID, nil
 	}
-	assertionSummary, err := apiCaseEvidenceSummary(filepath.Join(evidenceRoot, "assertions.json"), apiCaseEvidenceKindAssertions, 0)
+	assertionSummary, err := apiCaseEvidenceSummary(filepath.Join(evidenceRoot, apiCaseEvidenceFileAssertions), apiCaseEvidenceKindAssertions, 0)
 	if err != nil {
 		return "", err
 	}
@@ -179,25 +179,25 @@ func writeTestKitEvidenceFiles(result map[string]any, status string, evidenceDir
 		CreatedAt:       startedAt.UTC().Format(time.RFC3339Nano),
 	}
 	files := map[string]any{
-		"case.json": map[string]any{
-			"id":      caseID,
-			"title":   valueString(result["title"]),
-			"request": request,
+		apiCaseEvidenceFileCase: map[string]any{
+			"id":          caseID,
+			apiFieldTitle: valueString(result[apiFieldTitle]),
+			"request":     request,
 		},
-		"request.json":    request,
-		"response.json":   response,
-		"assertions.json": assertions,
-		"summary.json":    caseResult,
+		apiCaseEvidenceFileRequest:    request,
+		apiCaseEvidenceFileResponse:   response,
+		apiCaseEvidenceFileAssertions: assertions,
+		apiCaseEvidenceFileSummary:    caseResult,
 	}
 	if status == store.StatusFailed {
-		files["error.json"] = apicase.ErrorEvidence{
+		files[apiCaseEvidenceFileError] = apicase.ErrorEvidence{
 			Status:   status,
 			Phase:    failurePhase,
 			Category: failureCategory,
 			Message:  failureReason,
 		}
 	}
-	for _, name := range []string{"case.json", "request.json", "response.json", "assertions.json", "error.json", "summary.json"} {
+	for _, name := range apiCaseEvidenceFiles() {
 		payload, ok := files[name]
 		if !ok {
 			continue

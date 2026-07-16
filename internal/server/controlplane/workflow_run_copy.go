@@ -294,6 +294,6 @@ func copiedWorkflowPostProcessTaskID(runID string, stepID string, row store.Post
 }
 
 func copiedWorkflowEvidenceID(runID string, stepID string, row store.EvidenceRecord) string {
-	suffix := firstNonEmpty(row.Kind, row.ID, "evidence")
+	suffix := firstNonEmpty(row.Kind, row.ID, apiFieldEvidence)
 	return runID + "." + safeRuntimeLogPathSegment(stepID) + "." + safeRuntimeLogPathSegment(suffix)
 }
