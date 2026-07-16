@@ -114,10 +114,13 @@ func runCaseRunCatalogCase(ctx context.Context, storeURL string, options caseRun
 		return err
 	}
 	if options.jsonOutput {
-		return writeIndentedJSON(result)
+		if err := writeIndentedJSON(result); err != nil {
+			return err
+		}
+	} else {
+		printStoreCatalogCaseRun(result)
 	}
-	printStoreCatalogCaseRun(result)
-	return nil
+	return catalogCaseRunFailure(result)
 }
 
 func runCaseRunFile(ctx context.Context, storeURL string, options caseRunCommandOptions) error {
@@ -138,13 +141,43 @@ func runCaseRunFile(ctx context.Context, storeURL string, options caseRunCommand
 		return err
 	}
 	if options.jsonOutput {
-		return writeIndentedJSON(result)
+		if err := writeIndentedJSON(result); err != nil {
+			return err
+		}
+	} else {
+		fmt.Printf("Case Run: %s\n", result.RunID)
+		fmt.Printf("Case: %s\n", result.CaseID)
+		fmt.Printf("Status: %s\n", result.Status)
+		fmt.Printf("Evidence: %s\n", result.EvidencePath)
 	}
-	fmt.Printf("Case Run: %s\n", result.RunID)
-	fmt.Printf("Case: %s\n", result.CaseID)
-	fmt.Printf("Status: %s\n", result.Status)
-	fmt.Printf("Evidence: %s\n", result.EvidencePath)
-	return nil
+	return fileCaseRunFailure(result)
+}
+
+func fileCaseRunFailure(result apicase.RunResult) error {
+	if result.Status != store.StatusFailed {
+		return nil
+	}
+	message := strings.TrimSpace(result.Error)
+	if message == "" {
+		message = "case assertions failed"
+	}
+	return fmt.Errorf("case run %s failed: %s", result.RunID, message)
+}
+
+func catalogCaseRunFailure(result map[string]any) error {
+	status := strings.TrimSpace(strings.ToLower(valueString(result["status"])))
+	failed := status == store.StatusFailed || status == "error" || status == "cancelled"
+	if ok, present := result["ok"]; present && !boolFromReportAny(ok) {
+		failed = true
+	}
+	if !failed {
+		return nil
+	}
+	message := strings.TrimSpace(valueString(result["error"]))
+	if message == "" {
+		message = "case execution or assertions failed"
+	}
+	return fmt.Errorf("case run %s failed: %s", valueString(result["runId"]), message)
 }
 
 func printCaseRunDryRun(plan apicase.DryRunPlan) {
@@ -252,7 +285,7 @@ func recordIndexedAPICaseRun(ctx context.Context, s store.Store, result apicase.
 }
 
 func recordIndexedCaseRunEvidence(ctx context.Context, s store.Store, result apicase.RunResult, createdAt time.Time) error {
-	for _, name := range []string{"case.json", "request.json", "response.json", "assertions.json", "summary.json"} {
+	for _, name := range []string{"case.json", "request.json", "response.json", "assertions.json", "error.json", "summary.json"} {
 		path := filepath.Join(result.EvidencePath, name)
 		if _, err := os.Stat(path); err != nil {
 			if errors.Is(err, os.ErrNotExist) {

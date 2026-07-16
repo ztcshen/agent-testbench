@@ -12,7 +12,7 @@ import (
 	"agent-testbench/internal/store/sqlite"
 )
 
-func TestCaseCatalogUpsertCreatesActiveStoreBackedAPICase(t *testing.T) {
+func TestCaseCatalogUpsertCreatesDraftStoreBackedAPICase(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "case-catalog.sqlite")
 	storeRef := "sqlite://" + storePath
 	ctx := context.Background()
@@ -31,9 +31,11 @@ func TestCaseCatalogUpsertCreatesActiveStoreBackedAPICase(t *testing.T) {
 		"--json",
 	)
 	var report struct {
-		OK      bool `json:"ok"`
-		Created bool `json:"created"`
-		Case    struct {
+		OK             bool  `json:"ok"`
+		Created        bool  `json:"created"`
+		BeforeRevision int64 `json:"beforeRevision"`
+		Revision       int64 `json:"revision"`
+		Case           struct {
 			ID                string         `json:"id"`
 			DisplayName       string         `json:"displayName"`
 			NodeID            string         `json:"nodeId"`
@@ -54,8 +56,11 @@ func TestCaseCatalogUpsertCreatesActiveStoreBackedAPICase(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode case catalog upsert json: %v\n%s", err, out)
 	}
-	if !report.OK || !report.Created || report.Case.ID != "case.submit.smoke" || report.Case.Status != "active" || report.Case.RenderMode != "template_patch" {
+	if !report.OK || !report.Created || report.Case.ID != "case.submit.smoke" || report.Case.Status != "draft" || report.Case.RenderMode != "template_patch" {
 		t.Fatalf("case catalog upsert report = %#v", report)
+	}
+	if report.BeforeRevision != 1 || report.Revision != 2 {
+		t.Fatalf("case catalog revisions = before %d after %d", report.BeforeRevision, report.Revision)
 	}
 	if report.Case.DefaultOverrides["executorParam"] != "sample-runner" || report.Counts.Before.APICases != 0 || report.Counts.After.APICases != 1 {
 		t.Fatalf("case catalog counts/defaults = %#v", report)
@@ -73,6 +78,90 @@ func TestCaseCatalogUpsertCreatesActiveStoreBackedAPICase(t *testing.T) {
 	item, ok := findCatalogAPICase(catalog.APICases, "case.submit.smoke")
 	if !ok || item.NodeID != "node.submit" || item.RequestTemplateID != "template.submit" || item.DefaultOverridesJSON != `{"executorParam":"sample-runner"}` {
 		t.Fatalf("persisted api case = %#v", item)
+	}
+}
+
+func TestCaseCatalogRevisionConflictHistoryAndRollback(t *testing.T) {
+	storePath := filepath.Join(t.TempDir(), "case-catalog-history.sqlite")
+	storeRef := "sqlite://" + storePath
+	ctx := context.Background()
+	seedCaseCatalogUpsertStore(t, ctx, storePath)
+
+	runCLI(t, "case", "catalog", "upsert",
+		"--store", storeRef,
+		"--case", "case.submit.smoke",
+		"--node", "node.submit",
+		"--default-overrides-json", `{"token":"sentinel-history-secret"}`,
+		"--expected-revision", "1",
+		"--json",
+	)
+	runCLI(t, "case", "catalog", "upsert",
+		"--store", storeRef,
+		"--case", "case.submit.smoke",
+		"--node", "node.submit",
+		"--description", "second editor version",
+		"--expected-revision", "2",
+		"--json",
+	)
+
+	stale := runCLIFails(t, "case", "catalog", "upsert",
+		"--store", storeRef,
+		"--case", "case.submit.smoke",
+		"--node", "node.submit",
+		"--description", "stale overwrite",
+		"--expected-revision", "2",
+		"--json",
+	)
+	if !strings.Contains(stale, "revision conflict") || !strings.Contains(stale, "current 3") {
+		t.Fatalf("stale catalog write error = %s", stale)
+	}
+
+	historyOut := runCLI(t, "case", "catalog", "history", "--store", storeRef, "--json")
+	if strings.Contains(historyOut, "sentinel-history-secret") {
+		t.Fatalf("catalog history leaked secret: %s", historyOut)
+	}
+	var history struct {
+		Revision int64 `json:"revision"`
+		Versions []struct {
+			Revision int64 `json:"revision"`
+		} `json:"versions"`
+	}
+	if err := json.Unmarshal([]byte(historyOut), &history); err != nil {
+		t.Fatalf("decode catalog history: %v\n%s", err, historyOut)
+	}
+	if history.Revision != 3 || len(history.Versions) != 3 {
+		t.Fatalf("catalog history = %#v", history)
+	}
+
+	rollbackOut := runCLI(t, "case", "catalog", "rollback",
+		"--store", storeRef,
+		"--revision", "2",
+		"--expected-revision", "3",
+		"--json",
+	)
+	var rollback struct {
+		BeforeRevision int64 `json:"beforeRevision"`
+		Revision       int64 `json:"revision"`
+	}
+	if err := json.Unmarshal([]byte(rollbackOut), &rollback); err != nil {
+		t.Fatalf("decode catalog rollback: %v\n%s", err, rollbackOut)
+	}
+	if rollback.BeforeRevision != 3 || rollback.Revision != 4 {
+		t.Fatalf("catalog rollback = %#v", rollback)
+	}
+
+	s, err := sqlite.Open(ctx, sqlite.Config{Path: storePath})
+	if err != nil {
+		t.Fatalf("reopen rolled back store: %v", err)
+	}
+	defer s.Close()
+	catalog, err := s.GetProfileCatalog(ctx)
+	if err != nil {
+		t.Fatalf("read rolled back catalog: %v", err)
+	}
+	item, ok := findCatalogAPICase(catalog.APICases, "case.submit.smoke")
+	if !ok || item.Description != "" {
+		t.Fatalf("rolled back case = %#v", item)
 	}
 }
 

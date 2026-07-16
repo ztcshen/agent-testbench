@@ -8,7 +8,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"time"
 
 	"agent-testbench/internal/domain/commandline"
 	"agent-testbench/internal/domain/profilecatalog"
@@ -17,16 +16,18 @@ import (
 )
 
 type workflowCatalogUpsertReport struct {
-	OK          bool                        `json:"ok"`
-	Operation   string                      `json:"operation"`
-	ProfileID   string                      `json:"profileId"`
-	Created     bool                        `json:"created"`
-	Updated     bool                        `json:"updated"`
-	Workflow    *workflowUpsertWorkflow     `json:"workflow,omitempty"`
-	Binding     *workflowUpsertBinding      `json:"binding,omitempty"`
-	Counts      workflowCatalogUpsertCounts `json:"counts"`
-	Audit       *workflowaudit.Report       `json:"audit,omitempty"`
-	NextActions []string                    `json:"nextActions,omitempty"`
+	OK             bool                        `json:"ok"`
+	Operation      string                      `json:"operation"`
+	ProfileID      string                      `json:"profileId"`
+	BeforeRevision int64                       `json:"beforeRevision"`
+	Revision       int64                       `json:"revision"`
+	Created        bool                        `json:"created"`
+	Updated        bool                        `json:"updated"`
+	Workflow       *workflowUpsertWorkflow     `json:"workflow,omitempty"`
+	Binding        *workflowUpsertBinding      `json:"binding,omitempty"`
+	Counts         workflowCatalogUpsertCounts `json:"counts"`
+	Audit          *workflowaudit.Report       `json:"audit,omitempty"`
+	NextActions    []string                    `json:"nextActions,omitempty"`
 }
 
 type workflowCatalogUpsertCounts struct {
@@ -60,18 +61,20 @@ type workflowRegisterOptions struct {
 	TimeoutOffsetMs   int
 	Audit             bool
 	PassedFlags       map[string]bool
+	ExpectedRevision  *int64
 }
 
 type workflowBindingRegisterOptions struct {
-	ProfileID   string
-	WorkflowID  string
-	StepID      string
-	NodeID      string
-	CaseID      string
-	Required    bool
-	SortOrder   int
-	Audit       bool
-	PassedFlags map[string]bool
+	ProfileID        string
+	WorkflowID       string
+	StepID           string
+	NodeID           string
+	CaseID           string
+	Required         bool
+	SortOrder        int
+	Audit            bool
+	PassedFlags      map[string]bool
+	ExpectedRevision *int64
 }
 
 func runWorkflowRegister(ctx context.Context, args []string) error {
@@ -86,6 +89,7 @@ func runWorkflowRegister(ctx context.Context, args []string) error {
 	baseStepTimeoutMs := flags.Int("base-step-timeout-ms", 0, "Base per-step timeout in milliseconds")
 	timeoutOffsetMs := flags.Int("timeout-offset-ms", 0, "Additional per-step timeout offset in milliseconds")
 	auditOutput := flags.Bool("audit", false, "Run workflow audit after upsert")
+	expectedRevision := flags.Int64("expected-revision", -1, "Required current catalog revision for optimistic concurrency")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -94,6 +98,9 @@ func runWorkflowRegister(ctx context.Context, args []string) error {
 		return fmt.Errorf("unexpected workflow arguments: %s", strings.Join(flags.Args(), " "))
 	}
 	passedFlags := parsedFlagNames(flags)
+	if passedFlags["expected-revision"] && *expectedRevision < 0 {
+		return errors.New("--expected-revision must be non-negative")
+	}
 	if strings.TrimSpace(*workflowID) == "" {
 		return errors.New("--id is required")
 	}
@@ -121,6 +128,7 @@ func runWorkflowRegister(ctx context.Context, args []string) error {
 			TimeoutOffsetMs:   *timeoutOffsetMs,
 			Audit:             *auditOutput,
 			PassedFlags:       passedFlags,
+			ExpectedRevision:  optionalExpectedProfileCatalogRevision(passedFlags["expected-revision"], *expectedRevision),
 		})
 		return upsertErr
 	})
@@ -159,6 +167,7 @@ func runWorkflowBindingRegister(ctx context.Context, args []string) error {
 	required := flags.Bool("required", false, "Mark this workflow step as required; use --required=false to clear")
 	sortOrder := flags.Int("sort-order", 0, "Workflow binding sort order")
 	auditOutput := flags.Bool("audit", false, "Run workflow audit after upsert")
+	expectedRevision := flags.Int64("expected-revision", -1, "Required current catalog revision for optimistic concurrency")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -167,6 +176,9 @@ func runWorkflowBindingRegister(ctx context.Context, args []string) error {
 		return fmt.Errorf("unexpected workflow binding arguments: %s", strings.Join(flags.Args(), " "))
 	}
 	passedFlags := parsedFlagNames(flags)
+	if passedFlags["expected-revision"] && *expectedRevision < 0 {
+		return errors.New("--expected-revision must be non-negative")
+	}
 	if strings.TrimSpace(*workflowID) == "" || strings.TrimSpace(*stepID) == "" || strings.TrimSpace(*nodeID) == "" {
 		return errors.New("--workflow, --step, and --node are required")
 	}
@@ -186,15 +198,16 @@ func runWorkflowBindingRegister(ctx context.Context, args []string) error {
 	err = withProfileCatalogWriteLock(storeDSN, func() error {
 		var upsertErr error
 		report, upsertErr = upsertWorkflowCatalogBinding(ctx, runtime, workflowBindingRegisterOptions{
-			ProfileID:   *profileID,
-			WorkflowID:  *workflowID,
-			StepID:      *stepID,
-			NodeID:      *nodeID,
-			CaseID:      *caseID,
-			Required:    *required,
-			SortOrder:   *sortOrder,
-			Audit:       *auditOutput,
-			PassedFlags: passedFlags,
+			ProfileID:        *profileID,
+			WorkflowID:       *workflowID,
+			StepID:           *stepID,
+			NodeID:           *nodeID,
+			CaseID:           *caseID,
+			Required:         *required,
+			SortOrder:        *sortOrder,
+			Audit:            *auditOutput,
+			PassedFlags:      passedFlags,
+			ExpectedRevision: optionalExpectedProfileCatalogRevision(passedFlags["expected-revision"], *expectedRevision),
 		})
 		return upsertErr
 	})
@@ -209,8 +222,12 @@ func runWorkflowBindingRegister(ctx context.Context, args []string) error {
 }
 
 func upsertWorkflowCatalogWorkflow(ctx context.Context, runtime store.Store, options workflowRegisterOptions) (workflowCatalogUpsertReport, error) {
-	catalog, err := loadMutableProfileCatalog(ctx, runtime, options.ProfileID)
+	snapshot, err := loadMutableProfileCatalogSnapshot(ctx, runtime, options.ProfileID)
 	if err != nil {
+		return workflowCatalogUpsertReport{}, err
+	}
+	catalog := snapshot.Catalog
+	if err := requireExpectedProfileCatalogRevision(catalog.ProfileID, snapshot.Revision, options.ExpectedRevision); err != nil {
 		return workflowCatalogUpsertReport{}, err
 	}
 	beforeCounts := profileImportCountsFromCatalog(catalog)
@@ -229,17 +246,22 @@ func upsertWorkflowCatalogWorkflow(ctx context.Context, runtime store.Store, opt
 		workflow.TimeoutOffsetMs = options.TimeoutOffsetMs
 	}
 	catalog.Workflows = upsertCatalogWorkflow(catalog.Workflows, workflow)
-	catalog.IndexedAt = time.Now().UTC()
-	if err := runtime.ReplaceProfileCatalog(ctx, catalog); err != nil {
+	written, err := saveProfileCatalogMutation(ctx, runtime, snapshot.Revision, catalog, "workflow-upsert", map[string]any{
+		"workflowId": workflow.ID,
+		"created":    !exists,
+	})
+	if err != nil {
 		return workflowCatalogUpsertReport{}, err
 	}
 	report := workflowCatalogUpsertReport{
-		OK:        true,
-		Operation: "workflow upsert",
-		ProfileID: catalog.ProfileID,
-		Created:   !exists,
-		Updated:   exists,
-		Workflow:  workflowUpsertWorkflowFromCatalog(workflow),
+		OK:             true,
+		Operation:      "workflow upsert",
+		ProfileID:      catalog.ProfileID,
+		BeforeRevision: snapshot.Revision,
+		Revision:       written.Revision,
+		Created:        !exists,
+		Updated:        exists,
+		Workflow:       workflowUpsertWorkflowFromCatalog(workflow),
 		Counts: workflowCatalogUpsertCounts{
 			Before: beforeCounts,
 			After:  profileImportCountsFromCatalog(catalog),
@@ -260,8 +282,12 @@ func upsertWorkflowCatalogWorkflow(ctx context.Context, runtime store.Store, opt
 }
 
 func upsertWorkflowCatalogBinding(ctx context.Context, runtime store.Store, options workflowBindingRegisterOptions) (workflowCatalogUpsertReport, error) {
-	catalog, err := loadMutableProfileCatalog(ctx, runtime, options.ProfileID)
+	snapshot, err := loadMutableProfileCatalogSnapshot(ctx, runtime, options.ProfileID)
 	if err != nil {
+		return workflowCatalogUpsertReport{}, err
+	}
+	catalog := snapshot.Catalog
+	if err := requireExpectedProfileCatalogRevision(catalog.ProfileID, snapshot.Revision, options.ExpectedRevision); err != nil {
 		return workflowCatalogUpsertReport{}, err
 	}
 	if _, ok := findCatalogWorkflow(catalog.Workflows, options.WorkflowID); !ok {
@@ -286,17 +312,23 @@ func upsertWorkflowCatalogBinding(ctx context.Context, runtime store.Store, opti
 		binding.SortOrder = nextWorkflowBindingSortOrder(catalog.WorkflowBindings, binding.WorkflowID)
 	}
 	catalog.WorkflowBindings = upsertCatalogWorkflowBinding(catalog.WorkflowBindings, binding)
-	catalog.IndexedAt = time.Now().UTC()
-	if err := runtime.ReplaceProfileCatalog(ctx, catalog); err != nil {
+	written, err := saveProfileCatalogMutation(ctx, runtime, snapshot.Revision, catalog, "workflow-binding-upsert", map[string]any{
+		"workflowId": binding.WorkflowID,
+		"stepId":     binding.StepID,
+		"created":    !exists,
+	})
+	if err != nil {
 		return workflowCatalogUpsertReport{}, err
 	}
 	report := workflowCatalogUpsertReport{
-		OK:        true,
-		Operation: "workflow binding upsert",
-		ProfileID: catalog.ProfileID,
-		Created:   !exists,
-		Updated:   exists,
-		Binding:   workflowUpsertBindingFromCatalog(binding),
+		OK:             true,
+		Operation:      "workflow binding upsert",
+		ProfileID:      catalog.ProfileID,
+		BeforeRevision: snapshot.Revision,
+		Revision:       written.Revision,
+		Created:        !exists,
+		Updated:        exists,
+		Binding:        workflowUpsertBindingFromCatalog(binding),
 		Counts: workflowCatalogUpsertCounts{
 			Before: beforeCounts,
 			After:  profileImportCountsFromCatalog(catalog),
@@ -314,24 +346,6 @@ func upsertWorkflowCatalogBinding(ctx context.Context, runtime store.Store, opti
 		report.Audit = &audit
 	}
 	return report, nil
-}
-
-func loadMutableProfileCatalog(ctx context.Context, runtime store.Store, requestedProfileID string) (store.ProfileCatalog, error) {
-	requestedProfileID = strings.TrimSpace(requestedProfileID)
-	catalog, err := runtime.GetProfileCatalog(ctx)
-	if errors.Is(err, store.ErrNotFound) {
-		return store.ProfileCatalog{ProfileID: firstNonEmpty(requestedProfileID, "default"), IndexedAt: time.Now().UTC()}, nil
-	}
-	if err != nil {
-		return store.ProfileCatalog{}, err
-	}
-	if strings.TrimSpace(catalog.ProfileID) == "" {
-		catalog.ProfileID = firstNonEmpty(requestedProfileID, "default")
-	}
-	if requestedProfileID != "" && catalog.ProfileID != requestedProfileID {
-		return store.ProfileCatalog{}, fmt.Errorf("store profile catalog is %q, not %q", catalog.ProfileID, requestedProfileID)
-	}
-	return catalog, nil
 }
 
 func auditWorkflowCatalog(ctx context.Context, runtime store.Store, catalog store.ProfileCatalog, workflowID string) (workflowaudit.Report, error) {

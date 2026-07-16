@@ -6,7 +6,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,9 +13,7 @@ import (
 	"time"
 
 	"agent-testbench/internal/domain/profile"
-	"agent-testbench/internal/domain/profilecatalog"
 	"agent-testbench/internal/domain/redaction"
-	"agent-testbench/internal/server/controlplane"
 	"agent-testbench/internal/store"
 )
 
@@ -270,13 +267,7 @@ func executeInterfaceNodeCaseReport(ctx context.Context, bundle profile.Bundle, 
 	if err != nil {
 		return interfaceNodeCaseReport{}, err
 	}
-	if err := runtime.ReplaceProfileCatalog(ctx, profilecatalog.FromBundle(bundle, time.Now().UTC())); err != nil {
-		return interfaceNodeCaseReport{}, err
-	}
-	handler := controlplane.NewWithOptions(bundle, controlplane.Options{Runtime: runtime})
-	server := httptest.NewServer(handler)
-	defer server.Close()
-	rawBatch, err := postTestKitRunBatch(server.URL, cases, baseURL, timeoutSeconds, "case batch")
+	rawBatch, err := runTrustedTestKitBatch(ctx, bundle, runtime, cases, baseURL, timeoutSeconds, "case batch")
 	if err != nil {
 		return interfaceNodeCaseReport{}, err
 	}

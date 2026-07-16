@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -357,6 +359,87 @@ func TestMapRunExecutorSchedulesTaskDAGBeforeStoredOrder(t *testing.T) {
 	if executed.Tasks[0].Status != mapplanner.TaskStatusSkipped || executed.Tasks[1].Status != mapplanner.TaskStatusSkipped {
 		t.Fatalf("topological execution statuses = %#v", executed.Tasks)
 	}
+}
+
+func TestMapRunExecutionWavesKeepDependenciesBehindIndependentTasks(t *testing.T) {
+	tasks := []store.TestMapPlanTask{{ID: "task.a"}, {ID: "task.b"}, {ID: "task.c"}}
+	edges := []store.TestMapPlanTaskEdge{{FromTaskID: "task.a", ToTaskID: "task.c", Required: true}}
+
+	waves := mapRunTaskExecutionWaves(tasks, edges)
+
+	if len(waves) != 2 || !reflect.DeepEqual(waves[0], []int{0, 1}) || !reflect.DeepEqual(waves[1], []int{2}) {
+		t.Fatalf("execution waves = %#v", waves)
+	}
+}
+
+func TestMapRunResumeDoesNotReplayInterruptedUnknownOutcome(t *testing.T) {
+	record := mapRunResumeFixture()
+	record.Tasks = []store.TestMapPlanTask{{
+		ID: "task.interrupted", PlanID: record.Instance.ID, Kind: mapplanner.TaskRunPath,
+		PathID: "path.empty", Status: mapplanner.TaskStatusRunning, StartedAt: time.Now().UTC().Add(-time.Minute),
+	}}
+	graph := store.TestPlanGraph{Paths: []store.TestPlanPath{{ID: "path.empty"}}}
+	options := mapRunOptions{resumeRun: true}
+
+	prepared := prepareExistingMapRunRecord(record, options)
+	executed := newMapRunExecutor(context.Background(), nil, graph, options).execute(prepared)
+
+	if executed.Tasks[0].Status != store.StatusFailed || executed.Tasks[0].Reason != "interrupted-unknown-outcome" {
+		t.Fatalf("interrupted task should require an explicit retry = %#v", executed.Tasks[0])
+	}
+}
+
+func TestMapRunRetryFailedDoesNotReplayInterruptedUnknownOutcome(t *testing.T) {
+	record := mapRunResumeFixture()
+	record.Tasks = []store.TestMapPlanTask{{
+		ID: "task.interrupted", PlanID: record.Instance.ID, Kind: mapplanner.TaskRunPath,
+		PathID: "path.empty", Status: mapplanner.TaskStatusRunning, StartedAt: time.Now().UTC().Add(-time.Minute),
+	}}
+	options := mapRunOptions{retryFailed: true}
+
+	prepared := prepareExistingMapRunRecord(record, options)
+	executed := newMapRunExecutor(context.Background(), nil, store.TestPlanGraph{
+		Paths: []store.TestPlanPath{{ID: "path.empty"}},
+	}, options).execute(prepared)
+
+	if executed.Tasks[0].Status != store.StatusFailed || executed.Tasks[0].Reason != "interrupted-unknown-outcome" || !executed.Tasks[0].StartedAt.Equal(record.Tasks[0].StartedAt) {
+		t.Fatalf("retry-failed must not replay an unknown outcome = %#v", executed.Tasks[0])
+	}
+}
+
+func TestMapRunDoesNotExecuteTaskWhenRunningCheckpointFails(t *testing.T) {
+	wantErr := errors.New("checkpoint unavailable")
+	runtime := failingMapCheckpointStore{err: wantErr}
+	record := store.TestMapPlanRecord{
+		Instance: store.TestMapPlanInstance{ID: "plan.checkpoint", MapID: "map.checkpoint", Status: mapplanner.TaskStatusRunning},
+		Tasks: []store.TestMapPlanTask{{
+			ID: "task.checkpoint", PlanID: "plan.checkpoint", Kind: mapplanner.TaskRunCase,
+			CaseID: "case.must-not-run", Status: mapplanner.TaskStatusPlanned,
+		}},
+	}
+
+	executor := newMapRunExecutor(context.Background(), runtime, store.TestPlanGraph{}, mapRunOptions{})
+	executed := executor.execute(record)
+
+	if !errors.Is(executor.checkpointError(), wantErr) {
+		t.Fatalf("checkpoint error = %v, want %v", executor.checkpointError(), wantErr)
+	}
+	if executed.Tasks[0].Status != store.StatusFailed || !strings.Contains(executed.Tasks[0].Reason, "persist running task checkpoint") || executed.Tasks[0].APICaseRunID != "" {
+		t.Fatalf("task should fail before external execution = %#v", executed.Tasks[0])
+	}
+}
+
+type failingMapCheckpointStore struct {
+	store.Store
+	err error
+}
+
+func (s failingMapCheckpointStore) UpdateTestMapPlanInstance(context.Context, store.TestMapPlanInstance) error {
+	return s.err
+}
+
+func (s failingMapCheckpointStore) UpdateTestMapPlanTask(context.Context, store.TestMapPlanTask) error {
+	return s.err
 }
 
 type mapRunCommandReport struct {

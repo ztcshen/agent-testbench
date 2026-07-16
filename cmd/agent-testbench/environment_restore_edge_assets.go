@@ -282,7 +282,7 @@ func environmentRestoreEdgeAssetContent(asset store.ComponentConfigAsset, worksp
 	if targetPath == "." || targetPath == "" || targetPath == ".." || filepath.IsAbs(targetPath) || strings.HasPrefix(targetPath, ".."+string(os.PathSeparator)) {
 		return "", fmt.Errorf("edge asset target path is required")
 	}
-	raw, err := os.ReadFile(restoreWorkspacePath(workspace, targetPath))
+	raw, err := readEnvironmentRestoreWorkspaceFile(workspace, targetPath)
 	if err != nil {
 		return "", fmt.Errorf("read edge asset content from %s: %w", targetPath, err)
 	}

@@ -54,8 +54,11 @@ func environmentServiceRowsFromJSON(services []any, repos map[string]any) []stor
 	return store.EnvironmentServicesFromJSON(services, repos, "environment.legacy-json")
 }
 
-func environmentComposeConfig(composeFiles stringListFlag, generatedFiles stringListFlag, startCommand string, projectName string, envFiles stringListFlag, envs stringListFlag, profiles stringListFlag, services stringListFlag, skipPull bool, skipBuild bool, packageRepo string, packageBranch string, packageRef string) (map[string]any, error) {
+func environmentComposeConfig(composeFiles stringListFlag, generatedFiles stringListFlag, startCommand string, statusCommand string, stopCommand string, projectName string, envFiles stringListFlag, envs stringListFlag, profiles stringListFlag, services stringListFlag, skipPull bool, skipBuild bool, packageRepo string, packageBranch string, packageRef string) (map[string]any, error) {
 	files := composeFiles.Values()
+	if err := validateEnvironmentCommandLifecycle(files, startCommand, statusCommand, stopCommand); err != nil {
+		return nil, err
+	}
 	composeFile := ""
 	if len(files) > 0 {
 		composeFile = strings.TrimSpace(files[0])
@@ -63,6 +66,12 @@ func environmentComposeConfig(composeFiles stringListFlag, generatedFiles string
 	out := map[string]any{
 		"composeFile":  composeFile,
 		"startCommand": strings.TrimSpace(startCommand),
+	}
+	if strings.TrimSpace(statusCommand) != "" {
+		out["statusCommand"] = strings.TrimSpace(statusCommand)
+	}
+	if strings.TrimSpace(stopCommand) != "" {
+		out["stopCommand"] = strings.TrimSpace(stopCommand)
 	}
 	if len(files) > 0 {
 		out["composeFiles"] = files
@@ -110,6 +119,22 @@ func environmentComposeConfig(composeFiles stringListFlag, generatedFiles string
 		out["package"] = packageConfig
 	}
 	return out, nil
+}
+
+func validateEnvironmentCommandLifecycle(composeFiles []string, startCommand string, statusCommand string, stopCommand string) error {
+	startCommand = strings.TrimSpace(startCommand)
+	statusCommand = strings.TrimSpace(statusCommand)
+	stopCommand = strings.TrimSpace(stopCommand)
+	if statusCommand == "" && stopCommand == "" {
+		return nil
+	}
+	if startCommand == "" {
+		return fmt.Errorf("--status-command and --stop-command require --start-command")
+	}
+	if len(composeFiles) > 0 {
+		return fmt.Errorf("--status-command and --stop-command are only valid for non-Compose --start-command environments")
+	}
+	return nil
 }
 
 func environmentComposeConfigWithoutGeneratedFiles(compose map[string]any) map[string]any {

@@ -284,7 +284,10 @@ func waitEnvironmentRestoreCommand(ctx context.Context, check environmentRestore
 			return check
 		}
 		if errText != "" {
-			lastErr = errText
+			lastErr = "health command did not complete"
+			if commandCtx.Err() == context.DeadlineExceeded {
+				lastErr = "health command timed out: " + context.DeadlineExceeded.Error()
+			}
 		} else {
 			lastErr = "health command did not report ready"
 		}

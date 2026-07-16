@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
+	"agent-testbench/internal/domain/casemaintenance"
 	"agent-testbench/internal/domain/commandline"
 	"agent-testbench/internal/store"
 )
@@ -16,13 +16,15 @@ import (
 const caseCatalogCommandUpsert = "upsert"
 
 type caseCatalogUpsertReport struct {
-	OK          bool                        `json:"ok"`
-	ProfileID   string                      `json:"profileId"`
-	Created     bool                        `json:"created"`
-	Updated     bool                        `json:"updated"`
-	Case        caseCatalogUpsertCaseRef    `json:"case"`
-	Counts      workflowCatalogUpsertCounts `json:"counts"`
-	NextActions []string                    `json:"nextActions,omitempty"`
+	OK             bool                        `json:"ok"`
+	ProfileID      string                      `json:"profileId"`
+	BeforeRevision int64                       `json:"beforeRevision"`
+	Revision       int64                       `json:"revision"`
+	Created        bool                        `json:"created"`
+	Updated        bool                        `json:"updated"`
+	Case           caseCatalogUpsertCaseRef    `json:"case"`
+	Counts         workflowCatalogUpsertCounts `json:"counts"`
+	NextActions    []string                    `json:"nextActions,omitempty"`
 }
 
 type caseCatalogUpsertCaseRef struct {
@@ -63,6 +65,7 @@ type caseCatalogUpsertOptions struct {
 	DefaultOverrides     map[string]any
 	DefaultOverridesJSON string
 	PassedFlags          map[string]bool
+	ExpectedRevision     *int64
 }
 
 func runCaseCatalog(ctx context.Context, args []string) error {
@@ -72,6 +75,10 @@ func runCaseCatalog(ctx context.Context, args []string) error {
 	switch args[0] {
 	case caseCatalogCommandUpsert:
 		return runCaseCatalogUpsert(ctx, args[1:])
+	case "history":
+		return runCaseCatalogHistory(ctx, args[1:])
+	case "rollback":
+		return runCaseCatalogRollback(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown case catalog command: %s", args[0])
 	}
@@ -92,7 +99,8 @@ func runCaseCatalogUpsert(ctx context.Context, args []string) error {
 	scenario := flags.String("scenario", "", "Scenario metadata")
 	priority := flags.String("priority", "", "Case priority metadata")
 	owner := flags.String("owner", "", "Case owner metadata")
-	status := flags.String("status", "", "Case status; new cases default to active")
+	status := flags.String("status", "", "Case status; new cases default to draft")
+	expectedRevision := flags.Int64("expected-revision", -1, "Required current catalog revision for optimistic concurrency")
 	sortOrder := flags.Int("sort-order", 0, "Case sort order")
 	casePath := flags.String("case-path", "", "Runnable case file path")
 	sourceKind := flags.String("source-kind", "", "External source kind")
@@ -125,47 +133,38 @@ func runCaseCatalogUpsert(ctx context.Context, args []string) error {
 	if *sortOrder < 0 || *timeoutSeconds < 0 {
 		return errors.New("--sort-order and --timeout-seconds must be non-negative")
 	}
-	storeDSN, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
-	if err != nil {
-		return err
+	passedFlags := parsedFlagNames(flags)
+	if passedFlags["expected-revision"] && *expectedRevision < 0 {
+		return errors.New("--expected-revision must be non-negative")
 	}
-	runtime, err := openStore(ctx, storeDSN)
-	if err != nil {
-		return err
-	}
-	defer closeCLIStore(runtime)
-	var report caseCatalogUpsertReport
-	err = withProfileCatalogWriteLock(storeDSN, func() error {
-		var upsertErr error
-		report, upsertErr = upsertCaseCatalogCase(ctx, runtime, caseCatalogUpsertOptions{
-			ProfileID:            *profileID,
-			CaseID:               *caseID,
-			NodeID:               *nodeID,
-			DisplayName:          *displayName,
-			Description:          *description,
-			RequestTemplateID:    *requestTemplateID,
-			CaseType:             *caseType,
-			Scenario:             *scenario,
-			Tags:                 tags.Values(),
-			Priority:             *priority,
-			Owner:                *owner,
-			Status:               *status,
-			SortOrder:            *sortOrder,
-			CasePath:             *casePath,
-			SourceKind:           *sourceKind,
-			SourcePath:           *sourcePath,
-			ExecutorID:           *executorID,
-			BaseURL:              *baseURL,
-			EvidenceDir:          *evidenceDir,
-			TimeoutSeconds:       *timeoutSeconds,
-			RenderMode:           *renderMode,
-			PatchJSON:            *patchJSON,
-			ExpectedJSON:         *expectedJSON,
-			DefaultOverrides:     defaultOverrides.Values(),
-			DefaultOverridesJSON: *defaultOverridesJSON,
-			PassedFlags:          parsedFlagNames(flags),
-		})
-		return upsertErr
+	report, err := persistCaseCatalogUpsert(ctx, *storeRef, *storeURL, caseCatalogUpsertOptions{
+		ProfileID:            *profileID,
+		CaseID:               *caseID,
+		NodeID:               *nodeID,
+		DisplayName:          *displayName,
+		Description:          *description,
+		RequestTemplateID:    *requestTemplateID,
+		CaseType:             *caseType,
+		Scenario:             *scenario,
+		Tags:                 tags.Values(),
+		Priority:             *priority,
+		Owner:                *owner,
+		Status:               *status,
+		SortOrder:            *sortOrder,
+		CasePath:             *casePath,
+		SourceKind:           *sourceKind,
+		SourcePath:           *sourcePath,
+		ExecutorID:           *executorID,
+		BaseURL:              *baseURL,
+		EvidenceDir:          *evidenceDir,
+		TimeoutSeconds:       *timeoutSeconds,
+		RenderMode:           *renderMode,
+		PatchJSON:            *patchJSON,
+		ExpectedJSON:         *expectedJSON,
+		DefaultOverrides:     defaultOverrides.Values(),
+		DefaultOverridesJSON: *defaultOverridesJSON,
+		PassedFlags:          passedFlags,
+		ExpectedRevision:     optionalExpectedProfileCatalogRevision(passedFlags["expected-revision"], *expectedRevision),
 	})
 	if err != nil {
 		return err
@@ -177,9 +176,35 @@ func runCaseCatalogUpsert(ctx context.Context, args []string) error {
 	return nil
 }
 
-func upsertCaseCatalogCase(ctx context.Context, runtime store.Store, options caseCatalogUpsertOptions) (caseCatalogUpsertReport, error) {
-	catalog, err := loadMutableProfileCatalog(ctx, runtime, options.ProfileID)
+func persistCaseCatalogUpsert(ctx context.Context, storeRef string, storeURL string, options caseCatalogUpsertOptions) (caseCatalogUpsertReport, error) {
+	storeDSN, err := resolveRequiredDailyStoreReference(storeRef, storeURL)
 	if err != nil {
+		return caseCatalogUpsertReport{}, err
+	}
+	runtime, err := openStore(ctx, storeDSN)
+	if err != nil {
+		return caseCatalogUpsertReport{}, err
+	}
+	defer closeCLIStore(runtime)
+	var report caseCatalogUpsertReport
+	err = withProfileCatalogWriteLock(storeDSN, func() error {
+		var upsertErr error
+		report, upsertErr = upsertCaseCatalogCase(ctx, runtime, options)
+		return upsertErr
+	})
+	if err != nil {
+		return caseCatalogUpsertReport{}, err
+	}
+	return report, nil
+}
+
+func upsertCaseCatalogCase(ctx context.Context, runtime store.Store, options caseCatalogUpsertOptions) (caseCatalogUpsertReport, error) {
+	snapshot, err := loadMutableProfileCatalogSnapshot(ctx, runtime, options.ProfileID)
+	if err != nil {
+		return caseCatalogUpsertReport{}, err
+	}
+	catalog := snapshot.Catalog
+	if err := requireExpectedProfileCatalogRevision(catalog.ProfileID, snapshot.Revision, options.ExpectedRevision); err != nil {
 		return caseCatalogUpsertReport{}, err
 	}
 	beforeCounts := profileImportCountsFromCatalog(catalog)
@@ -190,17 +215,29 @@ func upsertCaseCatalogCase(ctx context.Context, runtime store.Store, options cas
 	if err := applyCaseCatalogJSONFields(&apiCase, options); err != nil {
 		return caseCatalogUpsertReport{}, err
 	}
+	apiCase.Status, err = casemaintenance.NormalizeCaseStatus(apiCase.Status, !exists)
+	if err != nil {
+		return caseCatalogUpsertReport{}, err
+	}
 	catalog.APICases = upsertCatalogAPICase(catalog.APICases, apiCase)
-	catalog.IndexedAt = time.Now().UTC()
-	if err := runtime.ReplaceProfileCatalog(ctx, catalog); err != nil {
+	if err := casemaintenance.ValidateCase(catalog, apiCase); err != nil {
+		return caseCatalogUpsertReport{}, err
+	}
+	written, err := saveProfileCatalogMutation(ctx, runtime, snapshot.Revision, catalog, "case-upsert", map[string]any{
+		"caseId":  apiCase.ID,
+		"created": !exists,
+	})
+	if err != nil {
 		return caseCatalogUpsertReport{}, err
 	}
 	return caseCatalogUpsertReport{
-		OK:        true,
-		ProfileID: catalog.ProfileID,
-		Created:   !exists,
-		Updated:   exists,
-		Case:      caseCatalogUpsertCaseRefFromCatalog(apiCase),
+		OK:             true,
+		ProfileID:      catalog.ProfileID,
+		BeforeRevision: snapshot.Revision,
+		Revision:       written.Revision,
+		Created:        !exists,
+		Updated:        exists,
+		Case:           caseCatalogUpsertCaseRefFromCatalog(apiCase),
 		Counts: workflowCatalogUpsertCounts{
 			Before: beforeCounts,
 			After:  profileImportCountsFromCatalog(catalog),
@@ -239,8 +276,6 @@ func applyCaseCatalogMetadataFields(apiCase *store.CatalogAPICase, existingCases
 	}
 	if options.PassedFlags["status"] {
 		apiCase.Status = strings.TrimSpace(options.Status)
-	} else if !exists {
-		apiCase.Status = "active"
 	}
 	if options.PassedFlags["sort-order"] {
 		apiCase.SortOrder = options.SortOrder

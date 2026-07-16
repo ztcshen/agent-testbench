@@ -18,8 +18,14 @@ import (
 
 func TestDailyReportExecutionsUseSelectedStoreWithoutSQLiteDefault(t *testing.T) {
 	fixture := newSelectedStoreReportFixture(t)
+	if _, err := fixture.sourceStore.GetProfileCatalog(fixture.ctx); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("selected Store unexpectedly had a catalog before reports: %v", err)
+	}
 	assertInterfaceNodeReportUsesSelectedStore(t, fixture)
 	assertCaseSuiteReportUsesSelectedStore(t, fixture)
+	if _, err := fixture.sourceStore.GetProfileCatalog(fixture.ctx); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("report execution mutated the selected Store catalog: %v", err)
+	}
 }
 
 type selectedStoreReportFixture struct {

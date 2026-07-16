@@ -1,22 +1,36 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
 	"agent-testbench/internal/store"
 )
 
+func TestEnvironmentRestoreWorkflowRejectsPublicExecutionOverrides(t *testing.T) {
+	for _, options := range []environmentRestoreWorkflowOptions{
+		{EnvironmentID: "env.alpha", ServerURL: "http://127.0.0.1:1", BaseURL: "http://target.invalid"},
+		{EnvironmentID: "env.alpha", ServerURL: "http://127.0.0.1:1", OutputDir: t.TempDir()},
+	} {
+		report := environmentRestoreRunWorkflow(context.Background(), "workflow.alpha", t.TempDir(), options)
+		if report.Error == "" || !strings.Contains(report.Error, "Store catalog") {
+			t.Fatalf("restore override report = %#v", report)
+		}
+	}
+}
+
 func TestEnvironmentRestoreRunsVerificationWorkflowAfterDockerHealth(t *testing.T) {
 	fixture := newEnvironmentRestoreWorkflowRunFixture(t)
 	fixture.registerEnvironment(t)
 
 	report := decodeRestoreWorkflowReport(t, fixture.runRestore(t))
-	assertRestoreWorkflowRunReport(t, report, fixture.outputDir)
+	assertRestoreWorkflowRunReport(t, report)
 	fixture.assertAcceptancePayload(t)
 	fixture.assertPersistedVerification(t, report.Workflow.RunID)
 }
@@ -49,7 +63,6 @@ func TestEnvironmentRestoreStreamJSONEmitsWorkflowAcceptanceWaiting(t *testing.T
 		"--execute",
 		"--run-workflow",
 		"--server-url", fixture.acceptanceServer.URL,
-		"--workflow-output-dir", fixture.outputDir,
 		"--output-format", "stream-json",
 		"--health-timeout-seconds", "5",
 		fixture.envID,
@@ -193,8 +206,6 @@ func (fixture *environmentRestoreWorkflowRunFixture) runRestore(t *testing.T) st
 		"--execute",
 		"--run-workflow",
 		"--server-url", fixture.acceptanceServer.URL,
-		"--base-url", "http://127.0.0.1:18080",
-		"--workflow-output-dir", fixture.outputDir,
 		"--json",
 		fixture.envID,
 	)
@@ -209,19 +220,19 @@ func decodeRestoreWorkflowReport(t *testing.T, out string) restoreWorkflowRunRep
 	return report
 }
 
-func assertRestoreWorkflowRunReport(t *testing.T, report restoreWorkflowRunReportForTest, outputDir string) {
+func assertRestoreWorkflowRunReport(t *testing.T, report restoreWorkflowRunReportForTest) {
 	t.Helper()
 	if !report.OK || !report.Executed || !report.Docker.OK || !report.Workflow.OK || report.Workflow.Action != "run-acceptance-workflow" || report.Workflow.WorkflowID != "workflow.alpha" || report.Workflow.RunID != "batch.env.restore.acceptance.001" {
 		t.Fatalf("restore workflow report = %#v", report)
 	}
-	if report.Workflow.OutputDir != outputDir || report.Workflow.ReportURL == "" || !report.Workflow.Acceptance.OK || report.Workflow.Acceptance.TemplateID != "environment.workflow.skywalking.v1" || report.Workflow.Acceptance.ExpectedSteps != 10 || report.Workflow.Acceptance.CompletedSteps != 10 || report.Workflow.Acceptance.PassedSteps != 10 || report.Workflow.Acceptance.FailedSteps != 0 || report.Workflow.Acceptance.TopologyProvider != "skywalking" {
+	if report.Workflow.OutputDir != "" || report.Workflow.ReportURL == "" || !report.Workflow.Acceptance.OK || report.Workflow.Acceptance.TemplateID != "environment.workflow.skywalking.v1" || report.Workflow.Acceptance.ExpectedSteps != 10 || report.Workflow.Acceptance.CompletedSteps != 10 || report.Workflow.Acceptance.PassedSteps != 10 || report.Workflow.Acceptance.FailedSteps != 0 || report.Workflow.Acceptance.TopologyProvider != "skywalking" {
 		t.Fatalf("restore workflow acceptance = %#v", report.Workflow)
 	}
 }
 
 func (fixture *environmentRestoreWorkflowRunFixture) assertAcceptancePayload(t *testing.T) {
 	t.Helper()
-	if fixture.acceptancePayload["baseUrl"] != "http://127.0.0.1:18080" || fixture.acceptancePayload["evidenceDir"] != fixture.outputDir {
+	if fixture.acceptancePayload["baseUrl"] != nil || fixture.acceptancePayload["evidenceDir"] != nil {
 		t.Fatalf("restore acceptance payload = %#v", fixture.acceptancePayload)
 	}
 }
@@ -260,7 +271,6 @@ func TestEnvironmentRestoreUsesNamedMySQLActiveStore(t *testing.T) {
 func runEnvironmentRestoreUsesNamedActiveStore(t *testing.T, suffixLabel string, label string) {
 	t.Helper()
 	workspace := filepath.Join(t.TempDir(), "workspace")
-	outputDir := filepath.Join(t.TempDir(), "workflow-evidence")
 	envID := uniqueTestID(t, "env.restore."+suffixLabel)
 	fakeDockerEnv, _ := fakeDockerCommand(t)
 	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -328,8 +338,6 @@ func runEnvironmentRestoreUsesNamedActiveStore(t *testing.T, suffixLabel string,
 		"--execute",
 		"--run-workflow",
 		"--server-url", acceptanceServer.URL,
-		"--base-url", "http://127.0.0.1:18080",
-		"--workflow-output-dir", outputDir,
 		"--json",
 	)
 	var report struct {

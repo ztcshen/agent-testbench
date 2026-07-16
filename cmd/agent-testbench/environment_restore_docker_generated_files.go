@@ -48,13 +48,7 @@ func prepareEnvironmentRestoreGeneratedFiles(compose map[string]any, workspace s
 		}
 		if execute {
 			report.Action = environmentRestoreGeneratedFileActionWrite
-			if err := os.MkdirAll(filepath.Dir(report.Path), 0o755); err != nil {
-				report.OK = false
-				report.Error = err.Error()
-			} else if err := os.WriteFile(report.Path, []byte(content), mode); err != nil {
-				report.OK = false
-				report.Error = err.Error()
-			} else if err := os.Chmod(report.Path, mode); err != nil {
+			if err := writeEnvironmentRestoreWorkspaceFile(workspace, path, []byte(content), mode); err != nil {
 				report.OK = false
 				report.Error = err.Error()
 			}
@@ -135,16 +129,25 @@ func environmentRestoreGeneratedEnvFilePath(workspace string) string {
 }
 
 func writeEnvironmentRestoreGeneratedEnvFile(workspace string, compose map[string]any) (string, error) {
+	content := environmentRestoreGeneratedEnvFileContent(workspace, compose)
+	if content == "" {
+		return "", nil
+	}
+	workspace = filepath.Clean(strings.TrimSpace(workspace))
+	path := environmentRestoreGeneratedEnvFilePath(workspace)
+	if err := writeEnvironmentRestoreWorkspaceFile(workspace, filepath.Join(".agent-testbench", "restore.env"), []byte(content), 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func environmentRestoreGeneratedEnvFileContent(workspace string, compose map[string]any) string {
 	values := stringMapFromAny(compose["env"])
 	if strings.TrimSpace(workspace) != "" {
 		values["AGENT_TESTBENCH_WORKSPACE"] = workspace
 	}
 	if len(values) == 0 {
-		return "", nil
-	}
-	path := environmentRestoreGeneratedEnvFilePath(workspace)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", err
+		return ""
 	}
 	keys := make([]string, 0, len(values))
 	for key := range values {
@@ -159,8 +162,5 @@ func writeEnvironmentRestoreGeneratedEnvFile(workspace string, compose map[strin
 		b.WriteString(value)
 		b.WriteString("\n")
 	}
-	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
-		return "", err
-	}
-	return path, nil
+	return b.String()
 }

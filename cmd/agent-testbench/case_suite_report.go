@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,9 +13,7 @@ import (
 
 	"agent-testbench/internal/domain/casesuite"
 	"agent-testbench/internal/domain/profile"
-	"agent-testbench/internal/domain/profilecatalog"
 	"agent-testbench/internal/runner/junit"
-	"agent-testbench/internal/server/controlplane"
 	"agent-testbench/internal/store"
 )
 
@@ -216,13 +213,7 @@ func executeCaseSuiteReport(ctx context.Context, bundle profile.Bundle, cases []
 	if err != nil {
 		return caseSuiteReport{}, err
 	}
-	if err := runtime.ReplaceProfileCatalog(ctx, profilecatalog.FromBundle(bundle, time.Now().UTC())); err != nil {
-		return caseSuiteReport{}, err
-	}
-	handler := controlplane.NewWithOptions(bundle, controlplane.Options{Runtime: runtime})
-	server := httptest.NewServer(handler)
-	defer server.Close()
-	rawBatch, err := postTestKitRunBatch(server.URL, cases, baseURL, timeoutSeconds, "case suite batch")
+	rawBatch, err := runTrustedTestKitBatch(ctx, bundle, runtime, cases, baseURL, timeoutSeconds, "case suite batch")
 	if err != nil {
 		return caseSuiteReport{}, err
 	}

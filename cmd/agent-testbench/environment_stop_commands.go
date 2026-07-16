@@ -12,7 +12,10 @@ import (
 	"agent-testbench/internal/store"
 )
 
-const environmentStopActionComposeStop = "compose-stop"
+const (
+	environmentStopActionComposeStop = "compose-stop"
+	environmentStopActionCommand     = "run-stop-command"
+)
 
 type environmentStopOptions struct {
 	environmentLifecycleOptions
@@ -28,12 +31,13 @@ type environmentStopReport struct {
 }
 
 type environmentStopDockerReport struct {
-	OK      bool                                          `json:"ok"`
-	Action  string                                        `json:"action"`
-	Linkage *environmentRestoreDockerCleanupLinkageReport `json:"linkage,omitempty"`
-	Command []string                                      `json:"command,omitempty"`
-	Output  string                                        `json:"output,omitempty"`
-	Error   string                                        `json:"error,omitempty"`
+	OK       bool                                          `json:"ok"`
+	Action   string                                        `json:"action"`
+	Linkage  *environmentRestoreDockerCleanupLinkageReport `json:"linkage,omitempty"`
+	Command  []string                                      `json:"command,omitempty"`
+	Output   string                                        `json:"output,omitempty"`
+	ExitCode int                                           `json:"exitCode,omitempty"`
+	Error    string                                        `json:"error,omitempty"`
 }
 
 func runEnvironmentStop(ctx context.Context, args []string) error {
@@ -52,7 +56,8 @@ func runEnvironmentStop(ctx context.Context, args []string) error {
 		report.OK = false
 		report.Error = report.Docker.Error
 	}
-	persisted, persistErr := persistEnvironmentStopSummary(ctx, runtime, env, report, plan.Workspace)
+	persistReport := environmentStopReportForOutput(report, plan.Compose)
+	persisted, persistErr := persistEnvironmentStopSummary(ctx, runtime, env, persistReport, plan.Workspace)
 	if persistErr != nil {
 		report.OK = false
 		report.Error = persistErr.Error()
@@ -60,12 +65,13 @@ func runEnvironmentStop(ctx context.Context, args []string) error {
 		env = persisted
 	}
 	report.Environment = environmentPayload(env)
+	outputReport := environmentStopReportForOutput(report, plan.Compose)
 	if options.JSONOutput {
-		if err := writeIndentedJSON(report); err != nil {
+		if err := writeIndentedJSON(outputReport); err != nil {
 			return err
 		}
 	} else {
-		printEnvironmentStopReport(report)
+		printEnvironmentStopReport(outputReport)
 	}
 	if !report.OK {
 		return errors.New("environment stop did not complete")
@@ -113,13 +119,16 @@ func parseEnvironmentStopOptions(args []string) (environmentStopOptions, error) 
 }
 
 func environmentStopDocker(ctx context.Context, compose map[string]any, graph store.EnvironmentComponentGraph, workspace string, options environmentStopOptions) environmentStopDockerReport {
-	statusReport := environmentStatusDockerReport{OK: true}
-	if !prepareEnvironmentLifecycleComposeFiles(&statusReport, compose, workspace) {
-		return environmentStopDockerReport{OK: false, Action: statusReport.Action, Error: statusReport.Error}
-	}
 	composeFiles := environmentRestoreComposeFiles(compose)
 	if len(composeFiles) == 0 {
-		return environmentStopDockerReport{OK: false, Action: "no-compose-plan", Error: "environment stop requires a recorded composeFile"}
+		if strings.TrimSpace(valueString(compose["startCommand"])) != "" {
+			return environmentStopStartCommand(ctx, compose, workspace, options)
+		}
+		return environmentStopDockerReport{OK: false, Action: "no-compose-plan", Error: "environment stop requires a recorded composeFile or startCommand"}
+	}
+	statusReport := environmentStatusDockerReport{OK: true}
+	if !validateEnvironmentLifecycleComposeFiles(&statusReport, compose, workspace) {
+		return environmentStopDockerReport{OK: false, Action: statusReport.Action, Error: statusReport.Error}
 	}
 	composeBaseArgs := environmentRestoreComposeBaseArgs(compose, workspace, environmentRestoreResolvedComposeFiles(workspace, composeFiles))
 	command := append([]string{"docker", "compose"}, composeBaseArgs...)
@@ -157,16 +166,54 @@ func environmentStopDocker(ctx context.Context, compose map[string]any, graph st
 	return report
 }
 
+func environmentStopStartCommand(ctx context.Context, compose map[string]any, workspace string, options environmentStopOptions) environmentStopDockerReport {
+	if options.Down {
+		return environmentStopDockerReport{
+			OK:     false,
+			Action: "stop-command-down-blocked",
+			Error:  "--down is only valid for a Compose environment; startCommand environments use the recorded stopCommand",
+		}
+	}
+	stopCommand := strings.TrimSpace(valueString(compose["stopCommand"]))
+	if stopCommand == "" {
+		return environmentStopDockerReport{
+			OK:     false,
+			Action: "missing-stop-command",
+			Error:  "startCommand environment stop requires a recorded stopCommand",
+		}
+	}
+	result := runAgentObservedCommand(ctx, agentObservedCommandOptions{
+		Workdir:             workspace,
+		Command:             []string{"/bin/sh", "-c", stopCommand},
+		SuppressEventOutput: true,
+	})
+	report := environmentStopDockerReport{
+		OK:       result.Err == nil,
+		Action:   environmentStopActionCommand,
+		ExitCode: result.ExitCode,
+	}
+	if result.Err != nil {
+		report.Error = fmt.Sprintf("stopCommand exited with code %d", result.ExitCode)
+	}
+	return report
+}
+
 func persistEnvironmentStopSummary(ctx context.Context, runtime store.Store, env store.Environment, report environmentStopReport, workspace string) (store.Environment, error) {
 	summary := jsonObjectString(env.SummaryJSON)
-	summary["lastStop"] = map[string]any{
+	lastStop := map[string]any{
 		"attemptedAt": time.Now().UTC().Format(time.RFC3339Nano),
 		"ok":          report.Docker.OK,
 		"action":      report.Docker.Action,
 		"workspace":   workspace,
-		"command":     report.Docker.Command,
 		"error":       report.Docker.Error,
 	}
+	if len(report.Docker.Command) > 0 {
+		lastStop["command"] = report.Docker.Command
+	}
+	if report.Docker.Action == environmentStopActionCommand {
+		lastStop["exitCode"] = report.Docker.ExitCode
+	}
+	summary["lastStop"] = lastStop
 	env.SummaryJSON = mustCompactJSON(summary)
 	env.UpdatedAt = time.Now().UTC()
 	return runtime.UpsertEnvironment(ctx, env)

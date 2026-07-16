@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -68,7 +67,7 @@ func environmentRestoreApplyMySQLSQLEdgeAsset(ctx context.Context, content strin
 		return item
 	}
 	if execute {
-		projected, err := os.ReadFile(restoreWorkspacePath(workspace, filepath.Clean(item.TargetPath)))
+		projected, err := readEnvironmentRestoreWorkspaceFile(workspace, item.TargetPath)
 		if err != nil {
 			item.OK = false
 			item.Error = err.Error()
@@ -92,7 +91,7 @@ func environmentRestoreMySQLInitDBMountsTarget(compose map[string]any, workspace
 		cleanCompose := filepath.Clean(composeFile)
 		content := generatedFileContentMapFromAny(compose["generatedFiles"])[cleanCompose]
 		if content == "" {
-			raw, err := os.ReadFile(restoreWorkspacePath(workspace, cleanCompose))
+			raw, err := readEnvironmentRestoreWorkspaceFile(workspace, cleanCompose)
 			if err == nil {
 				content = string(raw)
 			}
@@ -390,13 +389,7 @@ func environmentRestoreProjectMySQLInitDBAsset(asset store.ComponentConfigAsset,
 		item.Error = "mysql edge asset requires SQL content"
 		return false
 	}
-	target := restoreWorkspacePath(workspace, filepath.Clean(item.TargetPath))
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		item.OK = false
-		item.Error = err.Error()
-		return false
-	}
-	if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
+	if err := writeEnvironmentRestoreWorkspaceFile(workspace, item.TargetPath, []byte(content), 0o644); err != nil {
 		item.OK = false
 		item.Error = err.Error()
 		return false

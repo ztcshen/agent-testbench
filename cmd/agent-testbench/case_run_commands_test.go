@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"agent-testbench/internal/runner/apicase"
+	"agent-testbench/internal/store"
 	"agent-testbench/internal/store/sqlite"
 )
 
@@ -149,6 +150,77 @@ func TestCaseRunCommandExecutesHTTPCase(t *testing.T) {
 	}
 }
 
+func TestCaseRunCommandReturnsNonZeroAfterIndexingAssertionFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprint(w, `{"status":"rejected"}`)
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	casePath := filepath.Join(dir, "case.json")
+	writeAPICaseFile(t, casePath)
+	storePath := filepath.Join(dir, "store.sqlite")
+	evidenceDir := filepath.Join(dir, "evidence")
+
+	out := runCLIFails(t, "case", "run", "--case", casePath, "--base-url", server.URL, "--run-id", "case-run-failed", "--evidence-dir", evidenceDir, "--store", "sqlite://"+storePath, "--profile", "sample", "--json")
+	for _, want := range []string{`"runId": "case-run-failed"`, `"status": "failed"`, `"failureCategory": "assertion-mismatch"`, "case run case-run-failed failed"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("failed case output missing %q:\n%s", want, out)
+		}
+	}
+
+	s := openCaseRunSQLiteStore(t, storePath)
+	defer s.Close()
+	run, err := s.GetRun(context.Background(), "case-run-failed")
+	if err != nil {
+		t.Fatalf("get failed run: %v", err)
+	}
+	if run.Status != "failed" {
+		t.Fatalf("failed run was not indexed: %#v", run)
+	}
+}
+
+func TestCaseRunCommandIndexesTransportFailureEvidenceBeforeNonZeroExit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	serverURL := server.URL
+	server.Close()
+
+	dir := t.TempDir()
+	casePath := filepath.Join(dir, "case.json")
+	writeAPICaseFile(t, casePath)
+	storePath := filepath.Join(dir, "store.sqlite")
+	evidenceDir := filepath.Join(dir, "evidence")
+
+	out := runCLIFails(t, "case", "run", "--case", casePath, "--base-url", serverURL, "--run-id", "case-run-transport", "--evidence-dir", evidenceDir, "--store", "sqlite://"+storePath, "--json")
+	for _, want := range []string{`"status": "failed"`, `"failurePhase": "request-send"`, `"failureCategory": "transport-error"`} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("transport failure output missing %q:\n%s", want, out)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(evidenceDir, "case-run-transport", "error.json")); err != nil {
+		t.Fatalf("transport error evidence missing: %v", err)
+	}
+	s := openCaseRunSQLiteStore(t, storePath)
+	defer s.Close()
+	records, err := s.ListEvidence(context.Background(), "case-run-transport")
+	if err != nil {
+		t.Fatalf("list transport failure evidence: %v", err)
+	}
+	if !hasEvidenceKind(records, "error") {
+		t.Fatalf("transport error evidence was not indexed: %#v", records)
+	}
+}
+
+func hasEvidenceKind(records []store.EvidenceRecord, kind string) bool {
+	for _, record := range records {
+		if record.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
 func TestCaseRunCommandIndexesStoreRecords(t *testing.T) {
 	storePath, evidenceDir := runStoredFileCase(t, "case-run-003")
 	s := openCaseRunSQLiteStore(t, storePath)
@@ -190,7 +262,7 @@ func TestCaseDiagnoseCommandSummarizesFailedCaseRunEvidence(t *testing.T) {
 	storePath := filepath.Join(dir, "store.sqlite")
 	evidenceDir := filepath.Join(dir, "evidence")
 
-	runCLI(t, "case", "run", "--case", casePath, "--base-url", server.URL, "--run-id", "case-run-diagnose", "--evidence-dir", evidenceDir, "--store", "sqlite://"+storePath, "--profile", "sample")
+	runCLIFails(t, "case", "run", "--case", casePath, "--base-url", server.URL, "--run-id", "case-run-diagnose", "--evidence-dir", evidenceDir, "--store", "sqlite://"+storePath, "--profile", "sample")
 	out := runCLI(t, "case", "diagnose", "--case-run", "case-run-diagnose.case", "--store", "sqlite://"+storePath, "--json")
 
 	var report struct {
@@ -278,6 +350,25 @@ func TestCaseRunCommandExecutesStoreCatalogCaseID(t *testing.T) {
 	out := runCLI(t, "case", "run", "--case-id", "case.catalog", "--base-url", server.URL, "--run-id", "catalog-run-001", "--evidence-dir", evidenceDir, "--store", "sqlite://"+storePath, "--profile", "sample", "--override", "id=item-override", "--json")
 	assertCatalogCaseRunPayload(t, out)
 	assertCatalogCaseRunStore(t, storePath, evidenceDir)
+}
+
+func TestCaseRunCommandReturnsNonZeroForFailedStoreCatalogCase(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprint(w, `{"status":"rejected"}`)
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	storePath := filepath.Join(dir, "store.sqlite")
+	seedCatalogCaseStore(t, storePath)
+
+	out := runCLIFails(t, "case", "run", "--case-id", "case.catalog", "--base-url", server.URL, "--run-id", "catalog-run-failed", "--evidence-dir", filepath.Join(dir, "evidence"), "--store", "sqlite://"+storePath, "--profile", "sample", "--override", "id=item-override", "--json")
+	for _, want := range []string{`"runId": "catalog-run-failed"`, `"status": "failed"`, "case run catalog-run-failed failed"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("failed catalog case output missing %q:\n%s", want, out)
+		}
+	}
 }
 
 func TestCaseRunIndexTimesSeparatesEqualStartAndFinish(t *testing.T) {

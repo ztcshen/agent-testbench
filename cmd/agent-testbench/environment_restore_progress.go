@@ -20,7 +20,11 @@ func environmentRestoreProgressf(ctx context.Context, format string, args ...any
 	if !ok || writer == nil {
 		return
 	}
-	if _, err := fmt.Fprintf(writer, format, args...); err != nil {
+	message := fmt.Sprintf(format, args...)
+	if redactor, ok := environmentOutputRedactorFromContext(ctx); ok {
+		message = valueString(redactor.redactValue(message, "error"))
+	}
+	if _, err := io.WriteString(writer, message); err != nil {
 		return
 	}
 }

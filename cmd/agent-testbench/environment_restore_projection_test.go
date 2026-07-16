@@ -303,3 +303,60 @@ func TestEnvironmentRestoreMaterializesRemoteDockerNativeStoreAsset(t *testing.T
 		t.Fatalf("remote projected secret mode = %v err=%v, want 0600", info.Mode().Perm(), err)
 	}
 }
+
+func TestEnvironmentRestoreRemoteComponentAssetRejectsSourceSymlinkEscapes(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		linkRelative string
+		linkTarget   func(t *testing.T) string
+	}{
+		{
+			name:         "file",
+			linkRelative: "config/app.yml",
+			linkTarget: func(t *testing.T) string {
+				outside := filepath.Join(t.TempDir(), "outside.yml")
+				writeFile(t, outside, "outside-file-secret\n")
+				return outside
+			},
+		},
+		{
+			name:         "parent-directory",
+			linkRelative: "config",
+			linkTarget: func(t *testing.T) string {
+				outside := t.TempDir()
+				writeFile(t, filepath.Join(outside, "app.yml"), "outside-parent-secret\n")
+				return outside
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			checkout := filepath.Join(t.TempDir(), "asset-source")
+			runGit(t, "", "init", "-b", "main", checkout)
+			linkPath := filepath.Join(checkout, filepath.FromSlash(tc.linkRelative))
+			if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
+				t.Fatalf("create source path parent: %v", err)
+			}
+			if err := os.Symlink(tc.linkTarget(t), linkPath); err != nil {
+				t.Fatalf("create source symlink: %v", err)
+			}
+			runGit(t, checkout, "add", ".")
+			runGit(t, checkout, "-c", "user.name=Open Test", "-c", "user.email=open-test@example.com", "commit", "-m", "symlink source")
+			runGit(t, checkout, "remote", "add", "origin", "git@example.com:team/assets.git")
+
+			workspace := t.TempDir()
+			reports := environmentRestoreRemoteComponentAssets(context.Background(), "env.remote.source-symlink", store.EnvironmentComponentGraph{
+				Assets: []store.ComponentConfigAsset{{
+					AssetID:       "app.remote.config",
+					TargetPath:    ".agent-testbench/restore/config/app.yml",
+					RemoteRefJSON: `{"url":"git@example.com:team/assets.git","checkout":"` + filepath.ToSlash(checkout) + `","path":"config/app.yml"}`,
+				}},
+			}, workspace, true, false)
+			if len(reports) != 1 || reports[0].OK || !strings.Contains(reports[0].Error, "symlink") {
+				t.Fatalf("source symlink report = %#v", reports)
+			}
+			if _, err := os.Lstat(filepath.Join(workspace, ".agent-testbench", "restore", "config", "app.yml")); !os.IsNotExist(err) {
+				t.Fatalf("source symlink unexpectedly materialized a target: %v", err)
+			}
+		})
+	}
+}

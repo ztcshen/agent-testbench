@@ -30,6 +30,8 @@ func runEnvironmentRegister(ctx context.Context, args []string) error {
 	packageBranch := flags.String("package-branch", "", "Environment package Git branch")
 	packageRef := flags.String("package-ref", "", "Environment package Git ref to checkout detached")
 	startCommand := flags.String("start-command", "", "Local startup command")
+	statusCommand := flags.String("status-command", "", "Local status command for a non-Compose start command; exit zero means ready")
+	stopCommand := flags.String("stop-command", "", "Local stop command for a non-Compose start command")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	var services, repos, branches, repoRefs, checkouts, healthURLs, healthTCPs, healthCommands, healthComposeServices, composeFiles, composeGeneratedFiles, composeEnvFiles, composeEnvs, composeProfiles, composeServices stringListFlag
 	flags.Var(&services, "service", "Service id; repeat for multiple services")
@@ -61,7 +63,7 @@ func runEnvironmentRegister(ctx context.Context, args []string) error {
 		return err
 	}
 	defer cleanup()
-	composeConfig, err := environmentComposeConfig(composeFiles, composeGeneratedFiles, *startCommand, *composeProjectName, composeEnvFiles, composeEnvs, composeProfiles, composeServices, *composeSkipPull, *composeSkipBuild, *packageRepo, *packageBranch, *packageRef)
+	composeConfig, err := environmentComposeConfig(composeFiles, composeGeneratedFiles, *startCommand, *statusCommand, *stopCommand, *composeProjectName, composeEnvFiles, composeEnvs, composeProfiles, composeServices, *composeSkipPull, *composeSkipBuild, *packageRepo, *packageBranch, *packageRef)
 	if err != nil {
 		return err
 	}

@@ -128,7 +128,7 @@ func assertEnvironmentAcceptanceStart(t *testing.T, started environmentAcceptanc
 	if !started.OK || started.EnvironmentID != "env.team" || started.BatchRunID != "batch.env.acceptance.001" || started.WorkflowID != "workflow.core-10" {
 		t.Fatalf("environment acceptance start = %#v", started)
 	}
-	if startPayload["requestId"] != "env-acceptance-001" || startPayload["baseUrl"] != "http://127.0.0.1:18080" {
+	if startPayload["requestId"] != "env-acceptance-001" || startPayload["baseUrl"] != nil || startPayload["evidenceDir"] != nil {
 		t.Fatalf("environment acceptance start payload = %#v", startPayload)
 	}
 }

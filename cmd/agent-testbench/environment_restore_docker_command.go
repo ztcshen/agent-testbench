@@ -21,11 +21,12 @@ func runRestoreCommandWithInput(ctx context.Context, workdir string, command []s
 
 func runRestoreExecCommand(ctx context.Context, workdir string, command []string, input string, hasInput bool) (string, string) {
 	result := runAgentObservedCommand(ctx, agentObservedCommandOptions{
-		Workdir:   workdir,
-		Command:   command,
-		Input:     input,
-		HasInput:  hasInput,
-		Configure: configureRestoreCommandCancellation,
+		Workdir:             workdir,
+		Command:             command,
+		Input:               input,
+		HasInput:            hasInput,
+		SuppressEventOutput: true,
+		Configure:           configureRestoreCommandCancellation,
 	})
 	return result.Output, result.Error
 }

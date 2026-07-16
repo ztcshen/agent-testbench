@@ -28,6 +28,7 @@ func TestEnvironmentStatusReportsComposeStateWithoutHeavyRestore(t *testing.T) {
 		"--verification-workflow", "workflow.core-10",
 	)
 
+	materializeEnvironmentLifecycleProjectionForTest(t, fixture, "env.status")
 	out := runCLIWithEnv(t, fixture.DockerEnv, "environment", "status", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--json", "env.status")
 	var report struct {
 		OK          bool `json:"ok"`
@@ -124,6 +125,7 @@ exit 0
 	}))
 	runCLI(t, "environment", "components", "replace", "--store", fixture.StoreDSN, "--file", graphPath, "env.status.app-probe")
 
+	materializeEnvironmentLifecycleProjectionForTest(t, fixture, "env.status.app-probe")
 	out := runCLIFailsWithEnv(t, fixture.DockerEnv, "environment", "status", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--json", "env.status.app-probe")
 	var report struct {
 		OK     bool `json:"ok"`
@@ -157,7 +159,7 @@ exit 0
 	}
 }
 
-func TestEnvironmentStatusMaterializesWorkspaceEnvFile(t *testing.T) {
+func TestEnvironmentStatusUsesMaterializedWorkspaceEnvFile(t *testing.T) {
 	fixture := newEnvironmentRestoreDockerCLIFixture(t)
 	composeSource := filepath.Join(t.TempDir(), "compose.yml")
 	writeFile(t, composeSource, "services:\n  web:\n    image: alpine:3.20\n    volumes:\n      - ${AGENT_TESTBENCH_WORKSPACE}/app:/workspace/app\n")
@@ -171,6 +173,7 @@ func TestEnvironmentStatusMaterializesWorkspaceEnvFile(t *testing.T) {
 		"--verification-workflow", "workflow.core-10",
 	)
 
+	materializeEnvironmentLifecycleProjectionForTest(t, fixture, "env.status.workspace")
 	runCLIWithEnv(t, fixture.DockerEnv, "environment", "status", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--json", "env.status.workspace")
 	rawEnv, err := os.ReadFile(environmentRestoreGeneratedEnvFilePath(fixture.Workspace))
 	if err != nil {
@@ -228,6 +231,7 @@ func TestEnvironmentStatusExposesLastRestoreSummary(t *testing.T) {
 		t.Fatalf("upsert environment summary: %v", err)
 	}
 
+	materializeEnvironmentLifecycleProjectionForTest(t, fixture, "env.status.restore-summary")
 	out := runCLIWithEnv(t, fixture.DockerEnv, "environment", "status", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--json", "env.status.restore-summary")
 	var report struct {
 		OK          bool `json:"ok"`
@@ -282,6 +286,7 @@ exit 0
 	defer runtime.Close()
 	replaceStatusOneShotHealthCheck(t, runtime, "env.status.oneshot")
 
+	materializeEnvironmentLifecycleProjectionForTest(t, fixture, "env.status.oneshot")
 	out := runCLIWithEnv(t, fixture.DockerEnv, "environment", "status", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--json", "env.status.oneshot")
 	var report struct {
 		OK     bool `json:"ok"`
@@ -352,6 +357,7 @@ exit 0
 	defer runtime.Close()
 	replaceStatusOneShotHealthCheck(t, runtime, "env.status.oneshot.no-exit")
 
+	materializeEnvironmentLifecycleProjectionForTest(t, fixture, "env.status.oneshot.no-exit")
 	out := runCLIFailsWithEnv(t, fixture.DockerEnv, "environment", "status", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--json", "env.status.oneshot.no-exit")
 	var report struct {
 		OK     bool `json:"ok"`
@@ -388,6 +394,7 @@ func TestEnvironmentStatusFailsWhenNoComposeServicesCanBeInspected(t *testing.T)
 		"--verification-workflow", "workflow.core-10",
 	)
 
+	materializeEnvironmentLifecycleProjectionForTest(t, fixture, "env.status.empty")
 	out := runCLIFailsWithEnv(t, fixture.DockerEnv, "environment", "status", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--json", "env.status.empty")
 	var report struct {
 		OK     bool `json:"ok"`
@@ -431,7 +438,7 @@ func TestEnvironmentStatusRequiresRecordedComposeFileBeforeComposeOptions(t *tes
 	}
 }
 
-func TestEnvironmentStatusPreservesComposePSErrorWithoutServiceHints(t *testing.T) {
+func TestEnvironmentStatusSuppressesComposePSErrorWithoutServiceHints(t *testing.T) {
 	fixture := newEnvironmentRestoreDockerCLIFixture(t)
 	fixture.writeDockerTool(t, `#!/usr/bin/env bash
 printf '%s\n' "$*" >> "$DOCKER_CALLS_FILE"
@@ -455,6 +462,7 @@ exit 0
 		"--verification-workflow", "workflow.core-10",
 	)
 
+	materializeEnvironmentLifecycleProjectionForTest(t, fixture, "env.status.ps-error")
 	out := runCLIFailsWithEnv(t, fixture.DockerEnv, "environment", "status", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--json", "env.status.ps-error")
 	var report struct {
 		OK     bool `json:"ok"`
@@ -471,7 +479,10 @@ exit 0
 	if err := json.Unmarshal([]byte(extractJSONObject(t, out)), &report); err != nil {
 		t.Fatalf("decode compose ps error status report: %v\n%s", err, out)
 	}
-	if report.OK || report.Docker.OK || len(report.Docker.Services) != 1 || report.Docker.Services[0].Service != "docker compose ps" || report.Docker.Services[0].OK || !strings.Contains(report.Docker.Services[0].Error, "missing required env file") || !strings.Contains(report.Docker.Error, "missing required env file") {
+	if strings.Contains(out, "missing required env file") {
+		t.Fatalf("compose ps stderr must not be exposed:\n%s", out)
+	}
+	if report.OK || report.Docker.OK || len(report.Docker.Services) != 1 || report.Docker.Services[0].Service != "docker compose ps" || report.Docker.Services[0].OK || report.Docker.Services[0].Error != "environment service is not ready" || report.Docker.Error != "inspect-compose-services command did not complete" {
 		t.Fatalf("compose ps error status report = %#v", report)
 	}
 }
@@ -507,6 +518,7 @@ exit 0
 	defer runtime.Close()
 	replaceStatusOneShotHealthCheck(t, runtime, "env.status.oneshot.running")
 
+	materializeEnvironmentLifecycleProjectionForTest(t, fixture, "env.status.oneshot.running")
 	out := runCLIFailsWithEnv(t, fixture.DockerEnv, "environment", "status", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--json", "env.status.oneshot.running")
 	var report struct {
 		OK     bool `json:"ok"`
@@ -547,6 +559,7 @@ func TestEnvironmentStopDefaultsToComposeStopAndPersistsLastStop(t *testing.T) {
 		"--verification-workflow", "workflow.core-10",
 	)
 
+	materializeEnvironmentLifecycleProjectionForTest(t, fixture, "env.stop")
 	out := runCLIWithEnv(t, fixture.DockerEnv, "environment", "stop", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--json", "env.stop")
 	var report struct {
 		OK          bool `json:"ok"`
@@ -729,6 +742,7 @@ func TestEnvironmentStopDownRemoveOrphansRequiresExplicitFlags(t *testing.T) {
 		t.Fatalf("remove-orphans without down should fail clearly: %q", out)
 	}
 
+	materializeEnvironmentLifecycleProjectionForTest(t, fixture, "env.stop.down")
 	out = runCLIWithEnv(t, fixture.DockerEnv, "environment", "stop", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--down", "--remove-orphans", "--json", "env.stop.down")
 	var report struct {
 		OK     bool `json:"ok"`
@@ -759,6 +773,7 @@ func TestEnvironmentStopDownBlocksWithoutCompleteLinkage(t *testing.T) {
 		"--verification-workflow", "workflow.core-10",
 	)
 
+	materializeEnvironmentLifecycleProjectionForTest(t, fixture, "env.stop.down.blocked")
 	out := runCLIFailsWithEnv(t, fixture.DockerEnv, "environment", "stop", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--down", "--remove-orphans", "--json", "env.stop.down.blocked")
 	var report struct {
 		OK     bool `json:"ok"`
@@ -808,6 +823,7 @@ func TestEnvironmentStopDefaultRequiresInspectableComposeServices(t *testing.T) 
 		"--verification-workflow", "workflow.core-10",
 	)
 
+	materializeEnvironmentLifecycleProjectionForTest(t, fixture, "env.stop.empty")
 	out := runCLIFailsWithEnv(t, fixture.DockerEnv, "environment", "stop", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--json", "env.stop.empty")
 	if !strings.Contains(out, "found no compose services") {
 		t.Fatalf("empty default stop should fail clearly: %q", out)
@@ -823,5 +839,34 @@ func TestEnvironmentStopDefaultRequiresInspectableComposeServices(t *testing.T) 
 	out = runCLIFailsWithEnv(t, fixture.DockerEnv, "environment", "stop", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--down", "--json", "env.stop.empty")
 	if !strings.Contains(out, "compose-down-blocked") || !strings.Contains(out, "Store-to-Compose environment linkage") {
 		t.Fatalf("explicit down without linkage should fail safely: %q", out)
+	}
+}
+
+func materializeEnvironmentLifecycleProjectionForTest(t *testing.T, fixture environmentRestoreDockerCLIFixture, environmentID string) {
+	t.Helper()
+	runtime, err := openStore(context.Background(), fixture.StoreDSN)
+	if err != nil {
+		t.Fatalf("open lifecycle projection Store: %v", err)
+	}
+	defer closeCLIStore(runtime)
+	env, err := runtime.GetEnvironment(context.Background(), environmentID)
+	if err != nil {
+		t.Fatalf("get lifecycle projection environment: %v", err)
+	}
+	files, err := runtime.ListEnvironmentFiles(context.Background(), environmentID)
+	if err != nil {
+		t.Fatalf("list lifecycle projection files: %v", err)
+	}
+	compose, err := environmentRestoreComposeForPlan(env, files)
+	if err != nil {
+		t.Fatalf("build lifecycle projection: %v", err)
+	}
+	for _, item := range prepareEnvironmentRestoreGeneratedFiles(compose, fixture.Workspace, true) {
+		if !item.OK {
+			t.Fatalf("materialize lifecycle projection %s: %s", item.Path, item.Error)
+		}
+	}
+	if _, err := writeEnvironmentRestoreGeneratedEnvFile(fixture.Workspace, compose); err != nil {
+		t.Fatalf("materialize lifecycle projection env file: %v", err)
 	}
 }
