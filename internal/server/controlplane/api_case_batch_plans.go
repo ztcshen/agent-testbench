@@ -184,12 +184,19 @@ func apiCaseBatchPlanFromCase(ctx context.Context, bundle profile.Bundle, runtim
 		CasePath:        resolveBatchAPICasePath(ctx, runtime, bundle, casePath),
 		BaseURL:         firstNonEmpty(request.BaseURL, item.BaseURL),
 		EvidenceDir:     firstNonEmpty(request.EvidenceDir, item.EvidenceDir, filepath.Join(".runtime", "case-batches")),
-		TimeoutSeconds:  firstPositive(request.TimeoutSeconds, item.TimeoutSeconds),
+		TimeoutSeconds:  selectedAPICaseBatchTimeoutSeconds(request.TimeoutSeconds, item.TimeoutSeconds),
 		Overrides:       mergeStringAnyMaps(item.DefaultOverrides, request.Overrides),
 		Execution:       execution,
 		Exports:         exports,
 		Case:            item,
 	}, true
+}
+
+func selectedAPICaseBatchTimeoutSeconds(requestTimeout int, catalogTimeout int) int {
+	if requestTimeout != 0 {
+		return requestTimeout
+	}
+	return catalogTimeout
 }
 
 func apiCaseBatchPlanMethod(node profile.InterfaceNode, execution *caseExecutionConfig) string {

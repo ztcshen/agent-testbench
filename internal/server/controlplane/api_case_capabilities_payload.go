@@ -1,42 +1,50 @@
 package controlplane
 
 import (
+	"time"
+
+	"agent-testbench/internal/domain/casemaintenance"
 	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/domain/profilecatalog"
 	"agent-testbench/internal/store"
 )
 
 type apiCaseCapabilitiesPayload struct {
-	OK    bool                `json:"ok"`
-	Cases []apiCaseCapability `json:"cases"`
-	Graph map[string][]string `json:"graph,omitempty"`
+	OK              bool                `json:"ok"`
+	ProfileID       string              `json:"profileId,omitempty"`
+	CatalogRevision int64               `json:"catalogRevision,omitempty"`
+	Cases           []apiCaseCapability `json:"cases"`
+	Graph           map[string][]string `json:"graph,omitempty"`
 }
 
 type apiCaseCapability struct {
-	ID               string              `json:"id"`
-	Title            string              `json:"title,omitempty"`
-	Description      string              `json:"description,omitempty"`
-	NodeID           string              `json:"nodeId,omitempty"`
-	CaseType         string              `json:"caseType,omitempty"`
-	Scenario         string              `json:"scenario,omitempty"`
-	Tags             []string            `json:"tags"`
-	Priority         string              `json:"priority,omitempty"`
-	Owner            string              `json:"owner,omitempty"`
-	Status           string              `json:"status"`
-	Required         bool                `json:"requiredForAdmission"`
-	SortOrder        int                 `json:"sortOrder,omitempty"`
-	Operation        string              `json:"operation,omitempty"`
-	CasePath         string              `json:"casePath,omitempty"`
-	SourceKind       string              `json:"sourceKind,omitempty"`
-	SourcePath       string              `json:"sourcePath,omitempty"`
-	ExecutorID       string              `json:"executorId,omitempty"`
-	BaseURL          string              `json:"baseUrl,omitempty"`
-	EvidenceDir      string              `json:"evidenceDir,omitempty"`
-	TimeoutSeconds   int                 `json:"timeoutSeconds,omitempty"`
-	DefaultOverrides map[string]any      `json:"defaultOverrides,omitempty"`
-	Workflow         map[string]string   `json:"workflow,omitempty"`
-	Graph            apiCaseServiceGraph `json:"graph"`
-	RunCount         int                 `json:"runCount"`
-	LatestRun        map[string]any      `json:"latestRun,omitempty"`
+	ID                string              `json:"id"`
+	Title             string              `json:"title,omitempty"`
+	Description       string              `json:"description,omitempty"`
+	NodeID            string              `json:"nodeId,omitempty"`
+	CaseType          string              `json:"caseType,omitempty"`
+	Scenario          string              `json:"scenario,omitempty"`
+	Tags              []string            `json:"tags"`
+	Priority          string              `json:"priority,omitempty"`
+	Owner             string              `json:"owner,omitempty"`
+	Status            string              `json:"status"`
+	Required          bool                `json:"requiredForAdmission"`
+	SortOrder         int                 `json:"sortOrder,omitempty"`
+	Operation         string              `json:"operation,omitempty"`
+	CasePath          string              `json:"casePath,omitempty"`
+	RequestTemplateID string              `json:"requestTemplateId,omitempty"`
+	SourceKind        string              `json:"sourceKind,omitempty"`
+	SourcePath        string              `json:"sourcePath,omitempty"`
+	ExecutorID        string              `json:"executorId,omitempty"`
+	BaseURL           string              `json:"baseUrl,omitempty"`
+	EvidenceDir       string              `json:"evidenceDir,omitempty"`
+	TimeoutSeconds    int                 `json:"timeoutSeconds,omitempty"`
+	DefaultOverrides  map[string]any      `json:"defaultOverrides,omitempty"`
+	ExecutionReady    bool                `json:"executionReady"`
+	Workflow          map[string]string   `json:"workflow,omitempty"`
+	Graph             apiCaseServiceGraph `json:"graph"`
+	RunCount          int                 `json:"runCount"`
+	LatestRun         map[string]any      `json:"latestRun,omitempty"`
 }
 
 type apiCaseServiceGraph struct {
@@ -52,37 +60,7 @@ type apiCaseServiceNode struct {
 }
 
 func apiCaseCapabilitiesFromBundle(bundle profile.Bundle) apiCaseCapabilitiesPayload {
-	nodeByID := make(map[string]profile.InterfaceNode)
-	for _, node := range bundle.InterfaceNodes {
-		nodeByID[node.ID] = node
-	}
-	serviceByID := make(map[string]profile.Service)
-	for _, service := range bundle.Services {
-		serviceByID[service.ID] = service
-	}
-
-	cases := make([]apiCaseCapability, 0, len(bundle.APICases))
-	for _, item := range bundle.APICases {
-		node := nodeByID[item.NodeID]
-		service := serviceByID[node.ServiceID]
-		capability := newAPICaseCapability(item.ID, item.DisplayName, item.NodeID, node.DisplayName, node.ServiceID, service.DisplayName, service.Kind, item.CasePath, item.SourceKind, item.SourcePath, item.ExecutorID, item.BaseURL, item.EvidenceDir, item.TimeoutSeconds, item.DefaultOverrides)
-		capability.Description = item.Description
-		capability.NodeID = item.NodeID
-		capability.CaseType = item.CaseType
-		capability.Scenario = item.Scenario
-		capability.Tags = append([]string{}, item.Tags...)
-		capability.Priority = item.Priority
-		capability.Owner = item.Owner
-		capability.Status = firstNonEmpty(item.Status, "active")
-		capability.Required = item.RequiredForAdmission
-		capability.SortOrder = item.SortOrder
-		cases = append(cases, capability)
-	}
-	return apiCaseCapabilitiesPayload{
-		OK:    true,
-		Cases: cases,
-		Graph: map[string][]string{},
-	}
+	return apiCaseCapabilitiesFromCatalog(profilecatalog.FromBundle(bundle, time.Time{}))
 }
 
 func apiCaseCapabilitiesFromCatalog(catalog store.ProfileCatalog) apiCaseCapabilitiesPayload {
@@ -99,6 +77,7 @@ func apiCaseCapabilitiesFromCatalog(catalog store.ProfileCatalog) apiCaseCapabil
 		node := nodeByID[item.NodeID]
 		service := serviceByID[node.ServiceID]
 		capability := newAPICaseCapability(item.ID, item.DisplayName, item.NodeID, node.DisplayName, node.ServiceID, service.DisplayName, service.Kind, item.CasePath, item.SourceKind, item.SourcePath, item.ExecutorID, item.BaseURL, item.EvidenceDir, item.TimeoutSeconds, jsonObject(item.DefaultOverridesJSON))
+		capability.RequestTemplateID = item.RequestTemplateID
 		capability.Description = item.Description
 		capability.NodeID = item.NodeID
 		capability.CaseType = item.CaseType
@@ -109,12 +88,14 @@ func apiCaseCapabilitiesFromCatalog(catalog store.ProfileCatalog) apiCaseCapabil
 		capability.Status = firstNonEmpty(item.Status, "active")
 		capability.Required = item.RequiredForAdmission
 		capability.SortOrder = item.SortOrder
+		capability.ExecutionReady = casemaintenance.ExecutionReady(catalog, item)
 		cases = append(cases, capability)
 	}
 	return apiCaseCapabilitiesPayload{
-		OK:    true,
-		Cases: cases,
-		Graph: map[string][]string{},
+		OK:        true,
+		ProfileID: catalog.ProfileID,
+		Cases:     cases,
+		Graph:     map[string][]string{},
 	}
 }
 

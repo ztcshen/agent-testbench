@@ -3,7 +3,6 @@ package controlplane_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -20,7 +19,6 @@ import (
 
 type interfaceGreenStateFixture struct {
 	Server *httptest.Server
-	Target *httptest.Server
 }
 
 type interfaceGreenStateBatchPayload struct {
@@ -48,15 +46,15 @@ func newInterfaceGreenStateFixture(t *testing.T) interfaceGreenStateFixture {
 			t.Errorf("close store: %v", err)
 		}
 	})
-	if err := s.ReplaceProfileCatalog(ctx, interfaceGreenStateCatalog()); err != nil {
+	if err := s.ReplaceProfileCatalog(ctx, interfaceGreenStateCatalog(target.URL)); err != nil {
 		t.Fatalf("replace profile catalog: %v", err)
 	}
 	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample", DisplayName: "Sample Profile"}, s))
 	t.Cleanup(server.Close)
-	return interfaceGreenStateFixture{Server: server, Target: target}
+	return interfaceGreenStateFixture{Server: server}
 }
 
-func interfaceGreenStateCatalog() store.ProfileCatalog {
+func interfaceGreenStateCatalog(baseURL string) store.ProfileCatalog {
 	return store.ProfileCatalog{
 		ProfileID: "sample",
 		IndexedAt: time.Now().UTC(),
@@ -64,9 +62,9 @@ func interfaceGreenStateCatalog() store.ProfileCatalog {
 			{ID: "interface.alpha", DisplayName: "Alpha", Status: "active"},
 		},
 		APICases: []store.CatalogAPICase{
-			{ID: "case.alpha.one", DisplayName: "Alpha one", NodeID: "interface.alpha", CaseType: "success", RequiredForAdmission: true, Status: "active"},
-			{ID: "case.alpha.two", DisplayName: "Alpha two", NodeID: "interface.alpha", CaseType: "success", RequiredForAdmission: true, Status: "active"},
-			{ID: "case.alpha.optional", DisplayName: "Alpha optional", NodeID: "interface.alpha", CaseType: "success", RequiredForAdmission: false, Status: "active"},
+			{ID: "case.alpha.one", DisplayName: "Alpha one", NodeID: "interface.alpha", CaseType: "success", RequiredForAdmission: true, Status: "active", BaseURL: baseURL},
+			{ID: "case.alpha.two", DisplayName: "Alpha two", NodeID: "interface.alpha", CaseType: "success", RequiredForAdmission: true, Status: "active", BaseURL: baseURL},
+			{ID: "case.alpha.optional", DisplayName: "Alpha optional", NodeID: "interface.alpha", CaseType: "success", RequiredForAdmission: false, Status: "active", BaseURL: baseURL},
 		},
 		TemplateConfigs: []store.CatalogTemplateConfig{
 			{ID: "cfg.one", ScopeType: "step", ScopeID: "one", Status: "active", ConfigJSON: `{"caseId":"case.alpha.one","caseExecution":{"method":"GET","nodeId":"service.alpha","path":"/ok","expectedHttpCodes":[200]}}`},
@@ -81,7 +79,7 @@ func postInterfaceGreenStateBatch(t *testing.T, fixture interfaceGreenStateFixtu
 	resp, err := http.Post(
 		fixture.Server.URL+"/api/test-kit/run-batch",
 		"application/json",
-		strings.NewReader(fmt.Sprintf(`{"caseIds":["case.alpha.one","case.alpha.two","case.alpha.optional"],"baseUrl":%q}`, fixture.Target.URL)),
+		strings.NewReader(`{"caseIds":["case.alpha.one","case.alpha.two","case.alpha.optional"]}`),
 	)
 	if err != nil {
 		t.Fatalf("post batch: %v", err)

@@ -3,7 +3,6 @@ package controlplane_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,9 +21,8 @@ const (
 )
 
 type traceTopologyRouteFixture struct {
-	store  *sqlite.Store
-	target *httptest.Server
-	server *httptest.Server
+	store           *sqlite.Store
+	traceGraphQLURL string
 }
 
 type traceTopologyGraphQLPayload struct {
@@ -35,7 +33,7 @@ type traceTopologyGraphQLPayload struct {
 func TestServerCollectsTraceTopologyForSingleTestKitRun(t *testing.T) {
 	ctx := context.Background()
 	fixture := newTraceTopologyRouteFixture(t, ctx, singleSpanTraceResponse, true)
-	result := postTraceTopologyTestKitRun(t, fixture.server.URL, fixture.target.URL)
+	result := runTrustedTraceTopologyTestKitRun(t, ctx, fixture.store, fixture.traceGraphQLURL)
 	if result["ok"] != true {
 		t.Fatalf("test kit run result = %#v", result)
 	}
@@ -46,7 +44,7 @@ func TestServerCollectsTraceTopologyForSingleTestKitRun(t *testing.T) {
 func TestServerReturnsTraceTopologyForWorkflowStepTestKitRun(t *testing.T) {
 	ctx := context.Background()
 	fixture := newTraceTopologyRouteFixture(t, ctx, linkedSpanTraceResponse, false)
-	result := postTraceTopologyTestKitRun(t, fixture.server.URL, fixture.target.URL)
+	result := runTrustedTraceTopologyTestKitRun(t, ctx, fixture.store, fixture.traceGraphQLURL)
 	topology := result["traceTopology"].(map[string]any)
 	if topology["provider"] != "skywalking" || topology["status"] != "complete" || topology["traceId"] != "trace.alpha" {
 		t.Fatalf("trace topology should be returned inline: %#v", topology)
@@ -62,11 +60,9 @@ func TestServerRecordsSkippedTraceTopologyTaskWhenTraceProviderMissing(t *testin
 	defer target.Close()
 
 	s := openTestKitSQLiteStore(t, ctx, "store.sqlite")
-	seedTraceTopologyCaseCatalog(t, ctx, s)
-	server := httptest.NewServer(controlplane.NewWithOptions(profile.Bundle{ID: "sample"}, controlplane.Options{Runtime: s}))
-	defer server.Close()
+	seedTraceTopologyCaseCatalog(t, ctx, s, target.URL)
 
-	postTraceTopologyTestKitRun(t, server.URL, target.URL)
+	runTrustedTraceTopologyTestKitRun(t, ctx, s, "")
 	run := requireSingleTestKitRun(t, ctx, s)
 	requireSkippedTraceTopologyTask(t, ctx, s, run.ID)
 }
@@ -79,13 +75,8 @@ func newTraceTopologyRouteFixture(t *testing.T, ctx context.Context, queryTraceR
 	provider := newTraceTopologyProvider(t, queryTraceResponse, assertTraceID)
 	t.Cleanup(provider.Close)
 	s := openTestKitSQLiteStore(t, ctx, "sandbox.sqlite")
-	seedTraceTopologyCaseCatalog(t, ctx, s)
-	server := httptest.NewServer(controlplane.NewWithOptions(profile.Bundle{ID: "sample"}, controlplane.Options{
-		Runtime:         s,
-		TraceGraphQLURL: provider.URL,
-	}))
-	t.Cleanup(server.Close)
-	return traceTopologyRouteFixture{store: s, target: target, server: server}
+	seedTraceTopologyCaseCatalog(t, ctx, s, target.URL)
+	return traceTopologyRouteFixture{store: s, traceGraphQLURL: provider.URL}
 }
 
 func newTraceTopologyTarget() *httptest.Server {
@@ -132,14 +123,14 @@ func writeTraceTopologyGraphQLResponse(t *testing.T, w http.ResponseWriter, payl
 	}
 }
 
-func seedTraceTopologyCaseCatalog(t *testing.T, ctx context.Context, s *sqlite.Store) {
+func seedTraceTopologyCaseCatalog(t *testing.T, ctx context.Context, s *sqlite.Store, baseURL string) {
 	t.Helper()
 
 	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
 		ProfileID: "sample",
 		IndexedAt: time.Now().UTC(),
 		APICases: []store.CatalogAPICase{
-			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha", Status: "active"},
+			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha", Status: "active", BaseURL: baseURL},
 		},
 		TemplateConfigs: []store.CatalogTemplateConfig{
 			{
@@ -167,18 +158,25 @@ func seedTraceTopologyCaseCatalog(t *testing.T, ctx context.Context, s *sqlite.S
 	}
 }
 
-func postTraceTopologyTestKitRun(t *testing.T, serverURL, targetURL string) map[string]any {
+func runTrustedTraceTopologyTestKitRun(t *testing.T, ctx context.Context, runtime store.Store, traceGraphQLURL string) map[string]any {
 	t.Helper()
 
-	var result map[string]any
-	postJSONInto(t, serverURL+"/api/test-kit/run", fmt.Sprintf(`{
-		"caseId":"case.alpha",
-		"workflowId":"workflow.alpha",
-		"stepId":"step.alpha",
-		"baseUrl":%q,
-		"timeoutSeconds":5
-	}`, targetURL), http.StatusOK, &result)
-	return result
+	result, err := controlplane.RunTrustedTestKitCase(ctx, profile.Bundle{ID: "sample"}, runtime, controlplane.TrustedTestKitRunRequest{
+		CaseID: "case.alpha", WorkflowID: "workflow.alpha", StepID: "step.alpha", TimeoutSeconds: 5,
+		TraceGraphQLURL: traceGraphQLURL,
+	})
+	if err != nil {
+		t.Fatalf("run trusted trace topology case: %v", err)
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("encode trusted trace topology result: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode trusted trace topology result: %v", err)
+	}
+	return decoded
 }
 
 func requireSingleTestKitRun(t *testing.T, ctx context.Context, s *sqlite.Store) store.Run {

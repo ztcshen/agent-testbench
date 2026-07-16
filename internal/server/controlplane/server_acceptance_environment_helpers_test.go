@@ -9,9 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/domain/profilecatalog"
 	"agent-testbench/internal/server/controlplane"
 	"agent-testbench/internal/store"
 	"agent-testbench/internal/store/sqlite"
@@ -84,6 +87,13 @@ func environmentAcceptanceBundle(t *testing.T, targetURL string) profile.Bundle 
 			WorkflowID: "workflow.env.acceptance", StepID: "step.env.acceptance",
 			NodeID: "node.env.acceptance", CaseID: "case.env.acceptance", Required: true, SortOrder: 1,
 		}},
+	}
+}
+
+func replaceEnvironmentAcceptanceCatalog(t *testing.T, ctx context.Context, runtime store.Store, bundle profile.Bundle) {
+	t.Helper()
+	if err := runtime.ReplaceProfileCatalog(ctx, profilecatalog.FromBundle(bundle, time.Now().UTC())); err != nil {
+		t.Fatalf("replace environment acceptance catalog: %v", err)
 	}
 }
 
@@ -184,6 +194,7 @@ func TestEnvironmentAcceptanceAllowsOptionalTopologyBusinessPass(t *testing.T) {
 	target := newEnvironmentAcceptanceTarget(t)
 	defer target.Close()
 	bundle := environmentAcceptanceBundle(t, target.URL)
+	replaceEnvironmentAcceptanceCatalog(t, ctx, s, bundle)
 	server := httptest.NewServer(controlplane.NewWithOptions(bundle, controlplane.Options{Runtime: s}))
 	defer server.Close()
 
@@ -204,4 +215,54 @@ func TestEnvironmentAcceptanceAllowsOptionalTopologyBusinessPass(t *testing.T) {
 	if env.LastVerificationStatus != store.StatusPassed || !env.EvidenceComplete || env.TopologyComplete {
 		t.Fatalf("optional topology environment state = %#v", env)
 	}
+}
+
+func TestEnvironmentAcceptanceRejectsPublicTrustedExecutionFields(t *testing.T) {
+	ctx := context.Background()
+	runtime := openAcceptanceRouteStore(t, ctx)
+	defer runtime.Close()
+	var catalogTargetCalls atomic.Int32
+	var injectedTargetCalls atomic.Int32
+	catalogTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		catalogTargetCalls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer catalogTarget.Close()
+	injectedTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		injectedTargetCalls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer injectedTarget.Close()
+
+	bundle := environmentAcceptanceBundle(t, catalogTarget.URL)
+	replaceEnvironmentAcceptanceCatalog(t, ctx, runtime, bundle)
+	server := httptest.NewServer(controlplane.NewWithOptions(bundle, controlplane.Options{Runtime: runtime}))
+	defer server.Close()
+	registerEnvironmentAcceptance(t, server.URL)
+	victimRoot := t.TempDir()
+	victimMarker := filepath.Join(victimRoot, "keep.txt")
+	if err := os.WriteFile(victimMarker, []byte("keep-me"), 0o600); err != nil {
+		t.Fatalf("write environment victim marker: %v", err)
+	}
+
+	for _, item := range []struct {
+		body string
+		code string
+	}{
+		{body: fmt.Sprintf(`{"requestId":"reject-env-base","baseUrl":%q,"timeoutSeconds":3}`, injectedTarget.URL), code: "trusted_execution_context_rejected"},
+		{body: fmt.Sprintf(`{"requestId":"reject-env-evidence","evidenceDir":%q}`, victimRoot), code: "trusted_execution_context_rejected"},
+		{body: `{"requestId":"reject-env-timeout","timeoutSeconds":601}`, code: "invalid_timeout_seconds"},
+	} {
+		rejected := postJSONResponse(t, server.URL+"/api/environments/env.acceptance/acceptance-runs", item.body, http.StatusBadRequest)
+		if rejected["code"] != item.code {
+			t.Fatalf("environment trusted field rejection = %#v", rejected)
+		}
+	}
+	if catalogTargetCalls.Load() != 0 || injectedTargetCalls.Load() != 0 {
+		t.Fatalf("rejected environment requests reached targets: catalog=%d injected=%d", catalogTargetCalls.Load(), injectedTargetCalls.Load())
+	}
+	if runs, err := runtime.ListRuns(ctx); err != nil || len(runs) != 0 {
+		t.Fatalf("rejected environment requests created runs: %#v err=%v", runs, err)
+	}
+	requireUnchangedBatchVictimRoot(t, victimRoot, victimMarker)
 }

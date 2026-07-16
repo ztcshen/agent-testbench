@@ -19,6 +19,9 @@ func joinCaseURL(baseURL string, path string, query map[string]any) (string, err
 	if err != nil {
 		return "", err
 	}
+	if pathURL.IsAbs() || pathURL.Host != "" || pathURL.Opaque != "" {
+		return "", fmt.Errorf("case request path must not override the configured target origin")
+	}
 	parsed = parsed.ResolveReference(pathURL)
 	values := parsed.Query()
 	for key, raw := range query {

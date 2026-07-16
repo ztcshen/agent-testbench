@@ -6,9 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/domain/profilecatalog"
 	"agent-testbench/internal/store"
 )
 
@@ -62,8 +65,10 @@ func TestServerExposesCaseSuiteImpactPlan(t *testing.T) {
 }
 
 func TestServerStartsCaseSuiteImpactBatchRun(t *testing.T) {
-	_, s := openCaseSuiteRouteStore(t)
+	ctx, s := openCaseSuiteRouteStore(t)
+	var catalogTargetCalls atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		catalogTargetCalls.Add(1)
 		if r.URL.Path != "/v1/items" {
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -96,9 +101,40 @@ func TestServerStartsCaseSuiteImpactBatchRun(t *testing.T) {
 			{ID: "case.create", DisplayName: "Create default", NodeID: "node.create", CasePath: casePath, BaseURL: target.URL, EvidenceDir: filepath.Join(dir, "evidence"), Tags: []string{"regression"}, Status: "active", SortOrder: 1},
 		},
 	}
+	if err := s.ReplaceProfileCatalog(ctx, profilecatalog.FromBundle(bundle, time.Now().UTC())); err != nil {
+		t.Fatalf("replace suite impact catalog: %v", err)
+	}
 	server := serveCaseSuiteRouteBundle(t, bundle, s)
 
-	body := `{"requestId":"change-004","signals":["/v1/items"],"status":"active","actions":["run"],"baseUrl":"` + target.URL + `"}`
+	var injectedTargetCalls atomic.Int32
+	injectedTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		injectedTargetCalls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer injectedTarget.Close()
+	victimRoot := t.TempDir()
+	victimMarker := filepath.Join(victimRoot, "keep.txt")
+	if err := os.WriteFile(victimMarker, []byte("keep-me"), 0o600); err != nil {
+		t.Fatalf("write suite impact victim marker: %v", err)
+	}
+	malicious := `{"requestId":"reject-impact","signals":["/v1/items"],"status":"active","actions":["run"],"baseUrl":"` + injectedTarget.URL + `","evidenceDir":"` + victimRoot + `","environmentId":"forged"}`
+	rejected := postJSONResponse(t, server.URL+"/api/case/suite-impact-runs", malicious, http.StatusBadRequest)
+	if rejected["code"] != "trusted_execution_context_rejected" {
+		t.Fatalf("suite impact trusted field rejection = %#v", rejected)
+	}
+	overflowTimeout := postJSONResponse(t, server.URL+"/api/case/suite-impact-runs", `{"requestId":"reject-impact-timeout","signals":["/v1/items"],"status":"active","actions":["run"],"timeoutSeconds":999999999999999999999999999999999999}`, http.StatusBadRequest)
+	if overflowTimeout["code"] != "invalid_timeout_seconds" {
+		t.Fatalf("suite impact timeout rejection = %#v", overflowTimeout)
+	}
+	if catalogTargetCalls.Load() != 0 || injectedTargetCalls.Load() != 0 {
+		t.Fatalf("rejected suite impact reached targets: catalog=%d injected=%d", catalogTargetCalls.Load(), injectedTargetCalls.Load())
+	}
+	if runs, err := s.ListRuns(ctx); err != nil || len(runs) != 0 {
+		t.Fatalf("rejected suite impact created runs: %#v err=%v", runs, err)
+	}
+	requireUnchangedBatchVictimRoot(t, victimRoot, victimMarker)
+
+	body := `{"requestId":"change-004","signals":["/v1/items"],"status":"active","actions":["run"],"timeoutSeconds":3,"overrides":{"id":"declared"}}`
 	var created struct {
 		OK         bool   `json:"ok"`
 		BatchRunID string `json:"batchRunId"`
@@ -117,4 +153,8 @@ func TestServerStartsCaseSuiteImpactBatchRun(t *testing.T) {
 	if !report.OK || report.Status != store.StatusPassed || report.Passed != 1 || report.Failed != 0 || len(report.Cases) != 1 {
 		t.Fatalf("suite impact batch report = %#v", report)
 	}
+	if catalogTargetCalls.Load() != 1 || injectedTargetCalls.Load() != 0 {
+		t.Fatalf("Store-native suite impact targets: catalog=%d injected=%d", catalogTargetCalls.Load(), injectedTargetCalls.Load())
+	}
+	requireUnchangedBatchVictimRoot(t, victimRoot, victimMarker)
 }

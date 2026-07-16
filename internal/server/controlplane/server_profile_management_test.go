@@ -218,6 +218,51 @@ func TestServerImportsProfileBundleWithAudit(t *testing.T) {
 	}
 }
 
+func TestServerProfilePublishReturnsSafeCatalogRevisionConflict(t *testing.T) {
+	for _, endpoint := range []string{"/api/profile/import", "/api/profile/verify"} {
+		t.Run(endpoint, func(t *testing.T) {
+			ctx := context.Background()
+			runtime, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})
+			if err != nil {
+				t.Fatalf("open sqlite store: %v", err)
+			}
+			defer runtime.Close()
+			conflicting := &profileCatalogConflictRuntime{
+				Store: runtime,
+				Err: &store.ProfileCatalogRevisionConflictError{
+					ProfileID:        "sensitive-profile-id",
+					ExpectedRevision: 7,
+					ActualRevision:   8,
+				},
+			}
+			server := httptest.NewServer(controlplane.NewWithStore(loadEmptyProfile(t), conflicting))
+			defer server.Close()
+
+			profileDir := writeEmptyProfileBundle(t)
+			payload := postJSONResponse(t, server.URL+endpoint, `{"path":`+mustJSON(t, profileDir)+`}`, http.StatusConflict)
+
+			if payload["ok"] != false || payload["error"] != "profile catalog revision conflict" || payload["code"] != "profile_catalog_revision_conflict" {
+				t.Fatalf("profile publish conflict response = %#v", payload)
+			}
+			if payload["expectedRevision"] != float64(7) || payload["actualRevision"] != float64(8) {
+				t.Fatalf("profile publish conflict revisions = %#v", payload)
+			}
+			if strings.Contains(fmt.Sprint(payload), "sensitive-profile-id") {
+				t.Fatalf("profile publish conflict leaked profile identity: %#v", payload)
+			}
+		})
+	}
+}
+
+type profileCatalogConflictRuntime struct {
+	store.Store
+	Err error
+}
+
+func (s *profileCatalogConflictRuntime) ReplaceProfileCatalog(context.Context, store.ProfileCatalog) error {
+	return s.Err
+}
+
 func TestServerCanRequireCleanProfileAuditBeforeImport(t *testing.T) {
 	ctx := context.Background()
 	s, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(t.TempDir(), "sandbox.sqlite")})

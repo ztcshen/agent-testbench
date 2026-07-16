@@ -4,19 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/runner/apicase"
 	"agent-testbench/internal/store"
 )
 
-func recordTestKitRun(r *http.Request, bundle profile.Bundle, runtime store.Store, payload map[string]any, result map[string]any) (string, error) {
-	return recordTestKitRunWithContext(r.Context(), bundle, runtime, payload, result)
-}
+var testKitRunCounter uint64
 
 func recordTestKitRunWithContext(ctx context.Context, bundle profile.Bundle, runtime store.Store, payload map[string]any, result map[string]any) (string, error) {
 	if runtime == nil {
@@ -38,11 +37,22 @@ func recordTestKitRunWithContext(ctx context.Context, bundle profile.Bundle, run
 	}
 	now := time.Now().UTC()
 	startedAt, finishedAt := testKitResultTimes(result, now)
-	runID := firstNonEmpty(valueString(payload["runId"]), workflowRunID(now))
-	evidenceRoot, err := writeTestKitEvidenceFiles(result, status, valueString(payload["evidenceDir"]), runID)
+	runID := firstNonEmpty(valueString(payload["runId"]), nextTestKitRunID(now))
+	caseID := valueString(result["caseId"])
+	caseResult, reused, err := takeTestKitAPICaseRunResult(payload, runID, caseID, status)
 	if err != nil {
 		return "", err
 	}
+	if reused {
+		times := apiCaseRunRecordTimesFromResult(caseResult, now)
+		startedAt, finishedAt = times.StartedAt, times.FinishedAt
+	} else {
+		caseResult, err = writeTestKitEvidenceFiles(result, status, valueString(payload["evidenceDir"]), runID, startedAt, finishedAt)
+		if err != nil {
+			return "", err
+		}
+	}
+	evidenceRoot := caseResult.EvidencePath
 	result["evidenceRoot"] = evidenceRoot
 	_, err = runtime.CreateRun(ctx, store.Run{
 		ID:                 runID,
@@ -63,9 +73,12 @@ func recordTestKitRunWithContext(ctx context.Context, bundle profile.Bundle, run
 	if err != nil {
 		return "", err
 	}
-	caseID := valueString(result["caseId"])
 	if caseID == "" {
 		return runID, nil
+	}
+	assertionSummary, err := apiCaseEvidenceSummary(filepath.Join(evidenceRoot, "assertions.json"), apiCaseEvidenceKindAssertions, 0)
+	if err != nil {
+		return "", err
 	}
 	_, err = runtime.RecordAPICaseRun(ctx, store.APICaseRun{
 		ID:                   runID + ".case",
@@ -73,7 +86,7 @@ func recordTestKitRunWithContext(ctx context.Context, bundle profile.Bundle, run
 		CaseID:               caseID,
 		Status:               status,
 		RequestSummaryJSON:   compactJSON(testKitRequestSummary(result, valueString(payload["stepId"]), caseID)),
-		AssertionSummaryJSON: compactJSON(map[string]any{"status": status}),
+		AssertionSummaryJSON: assertionSummary,
 		TestPlanNodeID:       valueString(payload["testPlanNodeId"]),
 		TestPlanOperation:    valueString(payload["testPlanOperation"]),
 		PlannerSummaryJSON:   testKitPlannerSummaryJSON(payload),
@@ -84,10 +97,14 @@ func recordTestKitRunWithContext(ctx context.Context, bundle profile.Bundle, run
 	if err != nil {
 		return "", err
 	}
-	if err := recordTestKitEvidence(ctx, runtime, runID, runID+".case", valueString(payload["stepId"]), caseID, evidenceRoot, finishedAt); err != nil {
+	if err := recordAPICaseEvidenceRecords(ctx, runtime, caseResult, runID+".case", valueString(payload["stepId"]), finishedAt); err != nil {
 		return "", err
 	}
 	return runID, nil
+}
+
+func nextTestKitRunID(now time.Time) string {
+	return fmt.Sprintf("%s.%d", workflowRunID(now), atomic.AddUint64(&testKitRunCounter, 1))
 }
 
 func testKitPlannerSummaryJSON(payload map[string]any) string {
@@ -100,84 +117,118 @@ func testKitPlannerSummaryJSON(payload map[string]any) string {
 	return "{}"
 }
 
-func writeTestKitEvidenceFiles(result map[string]any, status string, evidenceDir string, runID string) (string, error) {
+func takeTestKitAPICaseRunResult(payload map[string]any, runID string, caseID string, status string) (apicase.RunResult, bool, error) {
+	value, ok := payload[testKitAPICaseRunResultKey]
+	delete(payload, testKitAPICaseRunResultKey)
+	if !ok {
+		return apicase.RunResult{}, false, nil
+	}
+	result, ok := value.(apicase.RunResult)
+	if !ok {
+		return apicase.RunResult{}, false, fmt.Errorf("invalid in-process api case Evidence handoff")
+	}
+	if result.RunID != runID || result.CaseID != caseID || result.Status != status || strings.TrimSpace(result.EvidencePath) == "" {
+		return apicase.RunResult{}, false, fmt.Errorf(
+			"api case Evidence handoff does not match recorded run: run=%q case=%q status=%q",
+			result.RunID,
+			result.CaseID,
+			result.Status,
+		)
+	}
+	return result, true, nil
+}
+
+func writeTestKitEvidenceFiles(result map[string]any, status string, evidenceDir string, runID string, startedAt time.Time, finishedAt time.Time) (apicase.RunResult, error) {
 	root := ""
 	var err error
 	if strings.TrimSpace(evidenceDir) != "" {
 		root = filepath.Join(evidenceDir, runID)
 		if err := os.MkdirAll(root, 0o755); err != nil {
-			return "", fmt.Errorf("create test-kit evidence directory: %w", err)
+			return apicase.RunResult{}, fmt.Errorf("create test-kit evidence directory: %w", err)
 		}
 	} else {
 		root, err = os.MkdirTemp("", "agent-testbench-test-kit-evidence-*")
 		if err != nil {
-			return "", fmt.Errorf("create test-kit evidence dir: %w", err)
+			return apicase.RunResult{}, fmt.Errorf("create test-kit evidence dir: %w", err)
 		}
 	}
 	request := mapFromAny(mapFromAny(result["result"])["request"])
 	response := mapFromAny(mapFromAny(result["result"])["response"])
+	caseID := valueString(result["caseId"])
+	failureReason := testKitFailureReason(result)
+	failurePhase, failureCategory := testKitFailureClassification(result, status)
 	assertions := map[string]any{
 		"status": status,
 		"passed": status == store.StatusPassed,
 	}
-	if reason := strings.TrimSpace(valueString(result["failureReason"])); reason != "" {
-		assertions["errors"] = []string{reason}
+	if failureReason != "" {
+		assertions["errors"] = []string{failureReason}
 	}
-	for name, payload := range map[string]map[string]any{
+	caseResult := apicase.RunResult{
+		OK:              status == store.StatusPassed,
+		RunID:           runID,
+		CaseID:          caseID,
+		Status:          status,
+		FailurePhase:    failurePhase,
+		FailureCategory: failureCategory,
+		Error:           failureReason,
+		EvidencePath:    root,
+		StartedAt:       startedAt.UTC().Format(time.RFC3339Nano),
+		FinishedAt:      finishedAt.UTC().Format(time.RFC3339Nano),
+		ElapsedMs:       finishedAt.Sub(startedAt).Milliseconds(),
+		CreatedAt:       startedAt.UTC().Format(time.RFC3339Nano),
+	}
+	files := map[string]any{
+		"case.json": map[string]any{
+			"id":      caseID,
+			"title":   valueString(result["title"]),
+			"request": request,
+		},
 		"request.json":    request,
 		"response.json":   response,
 		"assertions.json": assertions,
-	} {
+		"summary.json":    caseResult,
+	}
+	if status == store.StatusFailed {
+		files["error.json"] = apicase.ErrorEvidence{
+			Status:   status,
+			Phase:    failurePhase,
+			Category: failureCategory,
+			Message:  failureReason,
+		}
+	}
+	for _, name := range []string{"case.json", "request.json", "response.json", "assertions.json", "error.json", "summary.json"} {
+		payload, ok := files[name]
+		if !ok {
+			continue
+		}
 		raw, err := json.MarshalIndent(payload, "", "  ")
 		if err != nil {
-			return "", err
+			return apicase.RunResult{}, err
 		}
 		if err := os.WriteFile(filepath.Join(root, name), append(raw, '\n'), 0o644); err != nil {
-			return "", err
+			return apicase.RunResult{}, err
 		}
 	}
-	return root, nil
+	return caseResult, nil
 }
 
-func recordTestKitEvidence(ctx context.Context, runtime store.Store, runID string, caseRunID string, stepID string, caseID string, evidenceRoot string, createdAt time.Time) error {
-	for _, name := range []string{"request.json", "response.json", "assertions.json"} {
-		path := filepath.Join(evidenceRoot, name)
-		info, err := os.Stat(path)
-		if err != nil {
-			return err
-		}
-		kind := strings.TrimSuffix(name, ".json")
-		summary, err := apiCaseEvidenceSummary(path, kind, info.Size())
-		if err != nil {
-			return err
-		}
-		labels := map[string]any{
-			"caseId": caseID,
-			"kind":   kind,
-			"runId":  runID,
-		}
-		if strings.TrimSpace(stepID) != "" {
-			labels["stepId"] = stepID
-		}
-		if _, err := runtime.RecordEvidence(ctx, store.EvidenceRecord{
-			ID:         runID + "." + name,
-			RunID:      runID,
-			CaseRunID:  caseRunID,
-			StepID:     stepID,
-			Kind:       kind,
-			URI:        path,
-			MediaType:  "application/json",
-			SizeBytes:  info.Size(),
-			Summary:    summary,
-			Category:   apiCaseEvidenceCategory(kind),
-			Visibility: "public",
-			LabelsJSON: compactJSON(labels),
-			CreatedAt:  createdAt,
-		}); err != nil {
-			return err
-		}
+func testKitFailureReason(result map[string]any) string {
+	return firstNonEmpty(
+		valueString(result["error"]),
+		valueString(result["failureReason"]),
+		valueString(mapFromAny(result["summary"])["failureReason"]),
+	)
+}
+
+func testKitFailureClassification(result map[string]any, status string) (string, string) {
+	if status == store.StatusPassed {
+		return "", ""
 	}
-	return nil
+	if intValue(mapFromAny(result["summary"])["httpCode"]) > 0 {
+		return "assertion", "assertion-mismatch"
+	}
+	return "execution", "execution-error"
 }
 
 func testKitResultTimes(result map[string]any, finishedAt time.Time) (time.Time, time.Time) {

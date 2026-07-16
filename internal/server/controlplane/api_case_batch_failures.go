@@ -17,6 +17,9 @@ func apiCaseBatchFailureMessage(result apicase.RunResult) string {
 	if result.Status != store.StatusFailed {
 		return ""
 	}
+	if message := strings.TrimSpace(result.Error); message != "" {
+		return message
+	}
 	if strings.TrimSpace(result.EvidencePath) == "" {
 		return "case run failed"
 	}
@@ -37,6 +40,9 @@ func apiCaseBatchFailureMessage(result apicase.RunResult) string {
 func apiCaseBatchFailureCategory(result apicase.RunResult) string {
 	if result.Status != store.StatusFailed {
 		return ""
+	}
+	if category := strings.TrimSpace(result.FailureCategory); category != "" {
+		return category
 	}
 	if strings.TrimSpace(result.EvidencePath) == "" {
 		return "case-failure"

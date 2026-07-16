@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { buildCaseCoverageBoard, buildCaseManagement, buildWorkflowCaseContext } from "./apiCasesModel.mjs";
+import { CaseCatalogMaintenance } from "./apiCaseMaintenance.jsx";
+import { runStoreCase } from "./apiCasesApi.mjs";
+import { buildCaseCoverageBoard, buildCaseManagement, buildWorkflowCaseContext, isStoreCaseRunnable } from "./apiCasesModel.mjs";
 
 async function requestJSON(path, options = undefined) {
   const response = await fetch(path, {
@@ -54,16 +56,6 @@ function selectedCaseForWorkflow(payload, workflowContext, preferredID = "") {
     cases.find((caseDef) => workflowContext.enabled && workflowContext.caseIds.includes(caseDef.id)) ||
     selectedCaseFromPayload(payload, preferredID)
   );
-}
-
-function caseRunPayload(caseDef) {
-  return {
-    casePath: caseDef.casePath || "",
-    baseUrl: caseDef.baseUrl || "",
-    evidenceDir: caseDef.evidenceDir || ".runtime/cases",
-    timeoutSeconds: caseDef.timeoutSeconds || 90,
-    overrides: caseDef.defaultOverrides || {},
-  };
 }
 
 function formatDuration(ms) {
@@ -451,11 +443,7 @@ function ApiCasesApp() {
     if (!selectedCase) return;
     setStatus("running...");
     try {
-      const payload = await requestJSON("/api/cases/run", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(caseRunPayload(selectedCase)),
-      });
+      const payload = await runStoreCase(selectedCase);
       setResult(payload);
       await loadCapabilities(selectedCase.id, payload.ok ? "ready" : "case failed");
     } catch (error) {
@@ -569,8 +557,8 @@ function ApiCasesApp() {
           </div>
           <LatestRunSummary caseDef={selectedCase} />
           <div className="api-case-trigger">
-            <p>使用 Catalog 中声明的 case 文件、网关地址、默认参数和证据目录运行；页面不暴露请求参数。</p>
-            <button className="primary-action" type="button" disabled={!selectedCase || status === "running..."} onClick={runSelectedCase}>
+            <p>仅发送所选 caseId，由服务端从当前 Store Catalog 解析执行定义；页面不把 casePath 或请求覆盖值作为执行来源。</p>
+            <button className="primary-action" type="button" disabled={!selectedCase || !isStoreCaseRunnable(selectedCase) || status === "running..."} onClick={runSelectedCase}>
               运行 Case
             </button>
           </div>
@@ -578,6 +566,11 @@ function ApiCasesApp() {
           </section>
         </aside>
       </section>
+
+      <CaseCatalogMaintenance
+        selectedCaseID={selectedCase?.id || ""}
+        onCatalogChanged={(caseID) => loadCapabilities(caseID || selectedCase?.id || "", "catalog updated")}
+      />
 
       <section className="api-case-shell">
         <section className="api-case-panel">

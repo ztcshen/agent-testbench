@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,40 +15,16 @@ import (
 	"agent-testbench/internal/store"
 )
 
-func recordAPICaseBatchReportArtifacts(ctx context.Context, runtime store.Store, profileID string, workflowID string, report apiCaseBatchRunReport) {
+func recordAPICaseBatchReportArtifacts(ctx context.Context, runtime store.Store, report apiCaseBatchRunReport) error {
 	if runtime == nil || strings.TrimSpace(report.BatchRunID) == "" {
-		return
+		return nil
 	}
-	startedAt := parseAPICaseBatchReportTime(report.StartedAt, time.Now().UTC())
 	finishedAt := parseAPICaseBatchReportTime(report.FinishedAt, time.Now().UTC())
-	if finishedAt.Before(startedAt) {
-		finishedAt = startedAt
-	}
-	evidenceRoot := strings.TrimSpace(filepath.Dir(report.HTMLReportPath))
-	if evidenceRoot == "." {
-		evidenceRoot = strings.TrimSpace(filepath.Dir(report.ArtifactManifestPath))
-	}
-	if evidenceRoot == "." {
-		evidenceRoot = ""
-	}
-	if _, err := runtime.CreateRun(ctx, store.Run{
-		ID:            report.BatchRunID,
-		ProfileID:     strings.TrimSpace(profileID),
-		EnvironmentID: strings.TrimSpace(report.EnvironmentID),
-		WorkflowID:    strings.TrimSpace(workflowID),
-		Status:        report.Status,
-		EvidenceRoot:  evidenceRoot,
-		SummaryJSON:   compactJSON(apiCaseBatchRunStoreSummary(report)),
-		StartedAt:     startedAt,
-		FinishedAt:    finishedAt,
-		CreatedAt:     startedAt,
-		UpdatedAt:     finishedAt,
-	}); err != nil {
-		return
-	}
+	var failures []error
 	for _, artifact := range apiCaseBatchReportEvidenceArtifacts(report) {
 		info, err := os.Stat(artifact.Path)
 		if err != nil {
+			failures = append(failures, fmt.Errorf("stat %s report artifact: %w", artifact.Kind, err))
 			continue
 		}
 		if _, err := runtime.RecordEvidence(ctx, store.EvidenceRecord{
@@ -66,9 +44,11 @@ func recordAPICaseBatchReportArtifacts(ctx context.Context, runtime store.Store,
 			}),
 			CreatedAt: finishedAt,
 		}); err != nil {
+			failures = append(failures, fmt.Errorf("record %s report artifact: %w", artifact.Kind, err))
 			continue
 		}
 	}
+	return errors.Join(failures...)
 }
 
 func apiCaseBatchRunStoreSummary(report apiCaseBatchRunReport) map[string]any {

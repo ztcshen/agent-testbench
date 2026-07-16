@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -23,23 +24,47 @@ type Request = apicasespec.Request
 type Assertions = apicasespec.Assertions
 
 type RunOptions struct {
-	CasePath    string
-	EvidenceDir string
-	RunID       string
-	BaseURL     string
-	Overrides   map[string]any
+	CasePath            string
+	EvidenceDir         string
+	RunID               string
+	BaseURL             string
+	Overrides           map[string]any
+	BeforeEvidenceWrite func(context.Context) error
 }
 
 type RunResult struct {
-	RunID        string `json:"runId"`
-	CaseID       string `json:"caseId"`
-	Status       string `json:"status"`
-	EvidencePath string `json:"evidencePath"`
-	StartedAt    string `json:"startedAt"`
-	FinishedAt   string `json:"finishedAt"`
-	ElapsedMs    int64  `json:"elapsedMs"`
-	CreatedAt    string `json:"createdAt"`
+	OK              bool   `json:"ok"`
+	RunID           string `json:"runId"`
+	CaseID          string `json:"caseId"`
+	Status          string `json:"status"`
+	FailurePhase    string `json:"failurePhase,omitempty"`
+	FailureCategory string `json:"failureCategory,omitempty"`
+	Error           string `json:"error,omitempty"`
+	EvidencePath    string `json:"evidencePath"`
+	StartedAt       string `json:"startedAt"`
+	FinishedAt      string `json:"finishedAt"`
+	ElapsedMs       int64  `json:"elapsedMs"`
+	CreatedAt       string `json:"createdAt"`
 }
+
+type ErrorEvidence struct {
+	Status   string `json:"status"`
+	Phase    string `json:"phase"`
+	Category string `json:"category"`
+	Message  string `json:"message"`
+}
+
+// MaxResponseBodyBytes bounds the response body retained as local Evidence.
+const MaxResponseBodyBytes int64 = 1 << 20
+
+type executionError struct {
+	phase    string
+	category string
+	err      error
+}
+
+func (e *executionError) Error() string { return e.err.Error() }
+func (e *executionError) Unwrap() error { return e.err }
 
 type DryRunPlan struct {
 	OK         bool                `json:"ok"`
@@ -125,6 +150,9 @@ func Plan(options RunOptions) (DryRunPlan, error) {
 
 func Run(ctx context.Context, options RunOptions) (RunResult, error) {
 	started := time.Now().UTC()
+	if err := validateExplicitRunID(options.RunID); err != nil {
+		return RunResult{}, err
+	}
 	item, err := Load(options.CasePath)
 	if err != nil {
 		return RunResult{}, err
@@ -132,11 +160,8 @@ func Run(ctx context.Context, options RunOptions) (RunResult, error) {
 	applyOverrides(&item, options.Overrides)
 	runID := plannedCaseRunID(options.RunID)
 	evidencePath := caseRunEvidencePath(options.EvidenceDir, runID)
-	if err := os.MkdirAll(evidencePath, 0o755); err != nil {
-		return RunResult{}, fmt.Errorf("create evidence directory: %w", err)
-	}
-
 	result := RunResult{
+		OK:           true,
 		RunID:        runID,
 		CaseID:       item.ID,
 		Status:       "passed",
@@ -144,32 +169,96 @@ func Run(ctx context.Context, options RunOptions) (RunResult, error) {
 		StartedAt:    started.Format(time.RFC3339Nano),
 		CreatedAt:    started.Format(time.RFC3339Nano),
 	}
+	if err := beforeEvidenceWrite(ctx, options.BeforeEvidenceWrite); err != nil {
+		return evidencePersistenceFailure(started, result, err)
+	}
+	if err := os.MkdirAll(evidencePath, 0o755); err != nil {
+		return evidencePersistenceFailure(started, result, fmt.Errorf("create evidence directory: %w", err))
+	}
+	if err := beforeEvidenceWrite(ctx, options.BeforeEvidenceWrite); err != nil {
+		return evidencePersistenceFailure(started, result, err)
+	}
 	if err := writeJSON(filepath.Join(evidencePath, "case.json"), item); err != nil {
-		return RunResult{}, err
+		return evidencePersistenceFailure(started, result, err)
+	}
+	if err := beforeEvidenceWrite(ctx, options.BeforeEvidenceWrite); err != nil {
+		return evidencePersistenceFailure(started, result, err)
 	}
 	if err := writeJSON(filepath.Join(evidencePath, "request.json"), item.Request); err != nil {
-		return RunResult{}, err
+		return evidencePersistenceFailure(started, result, err)
 	}
 	response, assertions, err := executeHTTP(ctx, item, options.BaseURL)
 	if err != nil {
-		return RunResult{}, err
+		phase, category := executionFailureDetails(err)
+		result.OK = false
+		result.Status = "failed"
+		result.FailurePhase = phase
+		result.FailureCategory = category
+		result.Error = err.Error()
+		return writeFailureOutcome(ctx, started, result, options.BeforeEvidenceWrite)
 	}
 	if assertions.Status != "passed" {
+		result.OK = false
 		result.Status = "failed"
+		result.FailurePhase = "assertion"
+		result.FailureCategory = "assertion-mismatch"
+		result.Error = strings.Join(assertions.Errors, "; ")
+	}
+	if err := beforeEvidenceWrite(ctx, options.BeforeEvidenceWrite); err != nil {
+		return evidencePersistenceFailure(started, result, err)
 	}
 	if err := writeJSON(filepath.Join(evidencePath, "response.json"), response); err != nil {
-		return RunResult{}, err
+		return evidencePersistenceFailure(started, result, err)
+	}
+	if err := beforeEvidenceWrite(ctx, options.BeforeEvidenceWrite); err != nil {
+		return evidencePersistenceFailure(started, result, err)
 	}
 	if err := writeJSON(filepath.Join(evidencePath, "assertions.json"), assertions); err != nil {
-		return RunResult{}, err
+		return evidencePersistenceFailure(started, result, err)
 	}
+	return finishRun(ctx, started, result, options.BeforeEvidenceWrite)
+}
+
+func finishRun(ctx context.Context, started time.Time, result RunResult, beforeWrite func(context.Context) error) (RunResult, error) {
 	finished := time.Now().UTC()
 	result.FinishedAt = finished.Format(time.RFC3339Nano)
 	result.ElapsedMs = finished.Sub(started).Milliseconds()
-	if err := writeJSON(filepath.Join(evidencePath, "summary.json"), result); err != nil {
-		return RunResult{}, err
+	if err := beforeEvidenceWrite(ctx, beforeWrite); err != nil {
+		return evidencePersistenceFailure(started, result, err)
+	}
+	if err := writeJSON(filepath.Join(result.EvidencePath, "summary.json"), result); err != nil {
+		return evidencePersistenceFailure(started, result, err)
 	}
 	return result, nil
+}
+
+func executionFailureDetails(err error) (string, string) {
+	var runErr *executionError
+	if errors.As(err, &runErr) {
+		return runErr.phase, runErr.category
+	}
+	return "execution", executionFailureCategory(err)
+}
+
+func executionFailureCategory(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "cancelled"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "timeout"
+	}
+	return "transport-error"
+}
+
+func wrapExecutionError(phase string, category string, err error) error {
+	if category == "" {
+		category = executionFailureCategory(err)
+	}
+	return &executionError{phase: phase, category: category, err: err}
 }
 
 func applyOverrides(item *Case, overrides map[string]any) {
@@ -235,6 +324,28 @@ func plannedCaseRunID(runID string) string {
 	return "case-run-" + time.Now().UTC().Format("20060102T150405")
 }
 
+func validateExplicitRunID(runID string) error {
+	value := strings.TrimSpace(runID)
+	if value == "" {
+		return nil
+	}
+	if value == "." || value == ".." || filepath.IsAbs(value) {
+		return fmt.Errorf("run id %q must be a single path segment", runID)
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') {
+			continue
+		}
+		switch char {
+		case '.', '-', '_':
+			continue
+		default:
+			return fmt.Errorf("run id %q must be a single path segment using ASCII letters, digits, dot, dash, or underscore", runID)
+		}
+	}
+	return nil
+}
+
 func caseRunEvidencePath(root string, runID string) string {
 	if strings.TrimSpace(root) == "" {
 		root = filepath.Join(".runtime", "cases")
@@ -274,19 +385,19 @@ type AssertionEvidence struct {
 func executeHTTP(ctx context.Context, item Case, baseURL string) (ResponseEvidence, AssertionEvidence, error) {
 	endpoint, err := buildURL(baseURL, item.Request.Path)
 	if err != nil {
-		return ResponseEvidence{}, AssertionEvidence{}, err
+		return ResponseEvidence{}, AssertionEvidence{}, wrapExecutionError("request-materialization", "configuration-error", err)
 	}
 	var body io.Reader
 	if item.Request.Body != nil {
 		raw, err := json.Marshal(item.Request.Body)
 		if err != nil {
-			return ResponseEvidence{}, AssertionEvidence{}, fmt.Errorf("encode request body: %w", err)
+			return ResponseEvidence{}, AssertionEvidence{}, wrapExecutionError("request-materialization", "request-materialization", fmt.Errorf("encode request body: %w", err))
 		}
 		body = bytes.NewReader(raw)
 	}
 	req, err := http.NewRequestWithContext(ctx, strings.ToUpper(item.Request.Method), endpoint, body)
 	if err != nil {
-		return ResponseEvidence{}, AssertionEvidence{}, fmt.Errorf("create request: %w", err)
+		return ResponseEvidence{}, AssertionEvidence{}, wrapExecutionError("request-materialization", "request-materialization", fmt.Errorf("create request: %w", err))
 	}
 	for key, value := range item.Request.Headers {
 		req.Header.Set(key, value)
@@ -294,14 +405,24 @@ func executeHTTP(ctx context.Context, item Case, baseURL string) (ResponseEviden
 	if item.Request.Body != nil && req.Header.Get("Content-Type") == "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := http.DefaultClient.Do(req)
+	client := http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	resp, err := client.Do(req)
 	if err != nil {
-		return ResponseEvidence{}, AssertionEvidence{}, fmt.Errorf("send request: %w", err)
+		return ResponseEvidence{}, AssertionEvidence{}, wrapExecutionError("request-send", "", fmt.Errorf("send request: %w", err))
 	}
 	defer resp.Body.Close()
-	rawBody, err := io.ReadAll(resp.Body)
+	rawBody, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBodyBytes+1))
 	if err != nil {
-		return ResponseEvidence{}, AssertionEvidence{}, fmt.Errorf("read response: %w", err)
+		return ResponseEvidence{}, AssertionEvidence{}, wrapExecutionError("response-read", "transport-error", fmt.Errorf("read response: %w", err))
+	}
+	if int64(len(rawBody)) > MaxResponseBodyBytes {
+		return ResponseEvidence{}, AssertionEvidence{}, wrapExecutionError(
+			"response-read",
+			"response-too-large",
+			fmt.Errorf("response body exceeds %d byte limit", MaxResponseBodyBytes),
+		)
 	}
 	response := ResponseEvidence{
 		StatusCode: resp.StatusCode,
@@ -325,6 +446,9 @@ func buildURL(baseURL string, path string) (string, error) {
 	relative, err := url.Parse(path)
 	if err != nil {
 		return "", fmt.Errorf("parse request path: %w", err)
+	}
+	if relative.IsAbs() || relative.Host != "" || relative.Opaque != "" {
+		return "", errors.New("api case request path must not override the configured target origin")
 	}
 	return base.ResolveReference(relative).String(), nil
 }

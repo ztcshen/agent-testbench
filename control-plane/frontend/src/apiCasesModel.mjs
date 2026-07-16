@@ -263,12 +263,14 @@ function caseRow(item = {}) {
     priority: item.priority || "unset",
     tags,
     casePath: item.casePath || "",
+    requestTemplateId: item.requestTemplateId || "",
     sourceKind: item.sourceKind || "",
     sourcePath: item.sourcePath || "",
     executorId: item.executorId || "",
     baseUrl: item.baseUrl || "",
     evidenceDir: item.evidenceDir || "",
     timeoutSeconds: item.timeoutSeconds || 0,
+    executionReady: item.executionReady === true,
     runCount: Number(item.runCount || 0),
     latestStatus,
     latestRunId: latestRun.runId || latestRun.id || item.latestRunId || "",
@@ -282,13 +284,14 @@ function caseRow(item = {}) {
 }
 
 function readiness(row) {
-  if (row.status !== "active") {
-    return "needs-review";
-  }
-  if (!row.casePath || !row.sourceKind || !row.executorId) {
+  if (!isStoreCaseRunnable(row)) {
     return "needs-review";
   }
   return "ready";
+}
+
+export function isStoreCaseRunnable(caseDef = {}) {
+  return (caseDef.status || "active") === "active" && caseDef.executionReady === true;
 }
 
 function rowMatchesFilters(row, filters) {

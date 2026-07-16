@@ -130,6 +130,9 @@ func TestServerExposesAPICaseCapabilitiesFromStoreCatalog(t *testing.T) {
 	if item["description"] != "Maintained in the Store catalog." || item["status"] != "active" || item["owner"] != "quality-team" || item["priority"] != "p0" {
 		t.Fatalf("api case store maintenance metadata = %#v", item)
 	}
+	if item["executionReady"] != true {
+		t.Fatalf("file-backed Store case should be execution-ready = %#v", item)
+	}
 	tags := item["tags"].([]any)
 	if len(tags) != 2 || tags[0] != "smoke" || tags[1] != "regression" {
 		t.Fatalf("api case store tags = %#v", tags)

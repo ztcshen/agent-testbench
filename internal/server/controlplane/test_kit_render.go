@@ -1,7 +1,9 @@
 package controlplane
 
 import (
+	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -126,12 +128,79 @@ func expectedHTTPCode(status int, expected []int) bool {
 	return false
 }
 
-func testKitTimeout(payload map[string]any) time.Duration {
-	seconds := intValue(payload["timeoutSeconds"])
-	if seconds <= 0 {
-		seconds = 90
+const (
+	defaultTestKitTimeoutSeconds = 90
+	maxTestKitTimeoutSeconds     = 600
+)
+
+func testKitTimeout(payload map[string]any, configuredSeconds int) (time.Duration, error) {
+	seconds := int64(configuredSeconds)
+	if raw, ok := payload["timeoutSeconds"]; ok && raw != nil && strings.TrimSpace(valueString(raw)) != "" {
+		parsed, err := testKitTimeoutSeconds(raw)
+		if err != nil {
+			return 0, err
+		}
+		seconds = parsed
+		if seconds == 0 {
+			seconds = defaultTestKitTimeoutSeconds
+		}
+	} else if seconds == 0 {
+		seconds = defaultTestKitTimeoutSeconds
 	}
-	return time.Duration(seconds) * time.Second
+	if seconds < 0 || seconds > maxTestKitTimeoutSeconds {
+		return 0, fmt.Errorf("timeoutSeconds must be between 0 and %d", maxTestKitTimeoutSeconds)
+	}
+	return time.Duration(seconds) * time.Second, nil
+}
+
+func testKitTimeoutSeconds(value any) (int64, error) {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed), nil
+	case int8:
+		return int64(typed), nil
+	case int16:
+		return int64(typed), nil
+	case int32:
+		return int64(typed), nil
+	case int64:
+		return typed, nil
+	case uint:
+		if uint64(typed) > math.MaxInt64 {
+			return 0, fmt.Errorf("timeoutSeconds is outside the supported integer range")
+		}
+		return int64(typed), nil
+	case uint8:
+		return int64(typed), nil
+	case uint16:
+		return int64(typed), nil
+	case uint32:
+		return int64(typed), nil
+	case uint64:
+		if typed > math.MaxInt64 {
+			return 0, fmt.Errorf("timeoutSeconds is outside the supported integer range")
+		}
+		return int64(typed), nil
+	case json.Number:
+		seconds, err := typed.Int64()
+		if err != nil {
+			return 0, fmt.Errorf("timeoutSeconds must be an integer: %w", err)
+		}
+		return seconds, nil
+	case float32:
+		return testKitFloatTimeoutSeconds(float64(typed))
+	case float64:
+		return testKitFloatTimeoutSeconds(typed)
+	default:
+		return 0, fmt.Errorf("timeoutSeconds must be an integer")
+	}
+}
+
+func testKitFloatTimeoutSeconds(value float64) (int64, error) {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value != math.Trunc(value) || value < math.MinInt64 || value > math.MaxInt64 {
+		return 0, fmt.Errorf("timeoutSeconds must be an integer")
+	}
+	return int64(value), nil
 }
 
 func failedCaseExecution(caseID string, reason string) caseExecutionResult {

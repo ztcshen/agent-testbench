@@ -122,8 +122,11 @@ func TestServerRunsWorkflowCaseWithStoreExecutionConfigWithoutCaseFile(t *testin
 		ProfileID: "sample",
 		IndexedAt: now,
 		Workflows: []store.CatalogWorkflow{{ID: "workflow.store-execution", DisplayName: "Store Execution Workflow"}},
-		APICases:  []store.CatalogAPICase{{ID: "case.store-execution", DisplayName: "Store Execution Case", NodeID: "node.store-execution", Status: "active"}},
-		Services:  []store.CatalogService{{ID: "service.store-execution", Kind: "app", ServicePort: 18080, Status: "active"}},
+		APICases: []store.CatalogAPICase{{
+			ID: "case.store-execution", DisplayName: "Store Execution Case", NodeID: "node.store-execution", Status: "active",
+			BaseURL: target.URL, EvidenceDir: filepath.Join(t.TempDir(), "evidence"),
+		}},
+		Services: []store.CatalogService{{ID: "service.store-execution", Kind: "app", ServicePort: 18080, Status: "active"}},
 		InterfaceNodes: []store.CatalogInterfaceNode{{
 			ID: "node.store-execution", ServiceID: "service.store-execution", Method: "POST", Path: "/store-execution", Status: "active",
 		}},
@@ -154,7 +157,7 @@ func TestServerRunsWorkflowCaseWithStoreExecutionConfigWithoutCaseFile(t *testin
 		ReportURL string `json:"reportUrl"`
 		Total     int    `json:"total"`
 	}
-	postJSONInto(t, server.URL+"/api/cases/batch-runs", fmt.Sprintf(`{"requestId":"store-execution-001","workflowId":"workflow.store-execution","baseUrl":%q}`, target.URL), http.StatusAccepted, &created)
+	postJSONInto(t, server.URL+"/api/cases/batch-runs", `{"requestId":"store-execution-001","workflowId":"workflow.store-execution"}`, http.StatusAccepted, &created)
 	if created.Total != 1 {
 		t.Fatalf("store execution workflow should plan one case, got %d", created.Total)
 	}
@@ -183,7 +186,10 @@ func TestServerBatchRunHonorsStoreExecutionExpectedResponseContains(t *testing.T
 		ProfileID: "sample",
 		IndexedAt: now,
 		Workflows: []store.CatalogWorkflow{{ID: "workflow.store-execution", DisplayName: "Store Execution Workflow"}},
-		APICases:  []store.CatalogAPICase{{ID: "case.store-execution", DisplayName: "Store Execution Case", NodeID: "node.store-execution", Status: "active"}},
+		APICases: []store.CatalogAPICase{{
+			ID: "case.store-execution", DisplayName: "Store Execution Case", NodeID: "node.store-execution", Status: "active",
+			BaseURL: target.URL, EvidenceDir: filepath.Join(t.TempDir(), "evidence"),
+		}},
 		InterfaceNodes: []store.CatalogInterfaceNode{{
 			ID: "node.store-execution", Method: "GET", Path: "/store-execution", Status: "active",
 		}},
@@ -213,7 +219,7 @@ func TestServerBatchRunHonorsStoreExecutionExpectedResponseContains(t *testing.T
 	var created struct {
 		ReportURL string `json:"reportUrl"`
 	}
-	postJSONInto(t, server.URL+"/api/cases/batch-runs", fmt.Sprintf(`{"requestId":"store-execution-assertion-001","workflowId":"workflow.store-execution","baseUrl":%q}`, target.URL), http.StatusAccepted, &created)
+	postJSONInto(t, server.URL+"/api/cases/batch-runs", `{"requestId":"store-execution-assertion-001","workflowId":"workflow.store-execution"}`, http.StatusAccepted, &created)
 	report := waitAPICaseBatchReport(t, server.URL+created.ReportURL)
 	if report.OK || report.Status != store.StatusFailed || report.Passed != 0 || report.Failed != 1 || !strings.Contains(report.Cases[0].Error, "response did not contain") {
 		t.Fatalf("store execution assertion report = %#v", report)
@@ -257,8 +263,8 @@ func TestServerBatchRunAppliesWorkflowStepExportsAsOverrides(t *testing.T) {
 		IndexedAt: now,
 		Workflows: []store.CatalogWorkflow{{ID: "workflow.exports", DisplayName: "Export Workflow"}},
 		APICases: []store.CatalogAPICase{
-			{ID: "case.trial", DisplayName: "Trial", NodeID: "node.trial", Status: "active"},
-			{ID: "case.apply", DisplayName: "Apply", NodeID: "node.apply", Status: "active"},
+			{ID: "case.trial", DisplayName: "Trial", NodeID: "node.trial", Status: "active", BaseURL: target.URL, EvidenceDir: filepath.Join(t.TempDir(), "evidence")},
+			{ID: "case.apply", DisplayName: "Apply", NodeID: "node.apply", Status: "active", BaseURL: target.URL, EvidenceDir: filepath.Join(t.TempDir(), "evidence")},
 		},
 		InterfaceNodes: []store.CatalogInterfaceNode{
 			{ID: "node.trial", Method: "GET", Path: "/trial", Status: "active"},
@@ -298,7 +304,7 @@ func TestServerBatchRunAppliesWorkflowStepExportsAsOverrides(t *testing.T) {
 	var created struct {
 		ReportURL string `json:"reportUrl"`
 	}
-	postJSONInto(t, server.URL+"/api/cases/batch-runs", fmt.Sprintf(`{"requestId":"workflow-exports-001","workflowId":"workflow.exports","baseUrl":%q}`, target.URL), http.StatusAccepted, &created)
+	postJSONInto(t, server.URL+"/api/cases/batch-runs", `{"requestId":"workflow-exports-001","workflowId":"workflow.exports"}`, http.StatusAccepted, &created)
 	report := waitAPICaseBatchReport(t, server.URL+created.ReportURL)
 	if !report.OK || report.Passed != 2 || appliedAmount != "500000" {
 		t.Fatalf("workflow export report = %#v appliedAmount=%q", report, appliedAmount)
@@ -316,6 +322,7 @@ func TestServerStartsEnvironmentAcceptanceRunWithHealthSummary(t *testing.T) {
 	defer provider.Close()
 
 	bundle := environmentAcceptanceBundle(t, target.URL)
+	replaceEnvironmentAcceptanceCatalog(t, ctx, s, bundle)
 	server := httptest.NewServer(controlplane.NewWithOptions(bundle, controlplane.Options{Runtime: s, TraceGraphQLURL: provider.URL}))
 	defer server.Close()
 

@@ -10,6 +10,7 @@ func registerCaseRoutes(mux *http.ServeMux, deps routeDeps) {
 	runtime := deps.runtime
 	collector := deps.collector
 	caseBatchRunner := deps.caseBatchRunner
+	registerCaseCatalogMaintenanceRoutes(mux, runtime)
 	handleCurrentProfileMethod(mux, "/api/case/runs", http.MethodGet, deps, func(w http.ResponseWriter, r *http.Request, bundle profile.Bundle) {
 		handleCaseRuns(w, r, bundle, runtime)
 	})
@@ -61,8 +62,20 @@ func registerCaseRoutes(mux *http.ServeMux, deps routeDeps) {
 	handleMethod(mux, "/api/replay/evidence", http.MethodGet, func(w http.ResponseWriter, r *http.Request) {
 		handleReplayEvidence(w, r)
 	})
-	handleCurrentProfileMethod(mux, "/api/cases/capabilities", http.MethodGet, deps, func(w http.ResponseWriter, r *http.Request, bundle profile.Bundle) {
-		payload, err := apiCaseCapabilitiesFromBundleWithRuns(r.Context(), bundle, runtime)
+	handleMethod(mux, "/api/cases/capabilities", http.MethodGet, func(w http.ResponseWriter, r *http.Request) {
+		bundle := deps.profiles.Current()
+		catalogRevision := int64(0)
+		var err error
+		if deps.caseCatalogSnapshot != nil {
+			bundle = *deps.caseCatalogSnapshot
+		} else {
+			bundle, catalogRevision, err = currentProfileBundleSnapshot(r.Context(), runtime, bundle)
+			if err != nil {
+				writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+				return
+			}
+		}
+		payload, err := apiCaseCapabilitiesFromBundleWithRuns(r.Context(), bundle, catalogRevision, runtime)
 		if err != nil {
 			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 			return
@@ -76,7 +89,7 @@ func registerCaseRoutes(mux *http.ServeMux, deps routeDeps) {
 		handleAPICaseBatchRunStart(w, r, bundle, runtime, caseBatchRunner, collector)
 	})
 	handleMethod(mux, "/api/cases/batch-runs/", http.MethodGet, func(w http.ResponseWriter, r *http.Request) {
-		handleAPICaseBatchRunReport(w, r, caseBatchRunner)
+		handleAPICaseBatchRunReport(w, r, runtime, caseBatchRunner)
 	})
 	handleCurrentProfileMethod(mux, "/api/test-kit/run", http.MethodPost, deps, func(w http.ResponseWriter, r *http.Request, bundle profile.Bundle) {
 		handleTestKitRun(w, r, bundle, runtime, collector)
@@ -88,6 +101,10 @@ func registerCaseRoutes(mux *http.ServeMux, deps routeDeps) {
 
 func handleCurrentProfileMethod(mux *http.ServeMux, path string, method string, deps routeDeps, handler func(http.ResponseWriter, *http.Request, profile.Bundle)) {
 	handleMethod(mux, path, method, func(w http.ResponseWriter, r *http.Request) {
+		if deps.caseCatalogSnapshot != nil {
+			handler(w, r, *deps.caseCatalogSnapshot)
+			return
+		}
 		bundle, err := currentProfileBundle(r.Context(), deps.runtime, deps.profiles.Current())
 		if err != nil {
 			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})

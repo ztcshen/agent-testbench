@@ -2,6 +2,8 @@ package controlplane
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
@@ -37,10 +39,11 @@ func collectAPICaseBatchTraceTopology(ctx context.Context, runtime store.Store, 
 	collectAndRecordTestKitTraceTopology(ctx, runtime, collector, result.RunID, payload, resultPayload)
 }
 
-func copyAPICaseBatchTraceTopologies(ctx context.Context, runtime store.Store, report apiCaseBatchRunReport) {
+func copyAPICaseBatchTraceTopologies(ctx context.Context, runtime store.Store, report apiCaseBatchRunReport) error {
 	if runtime == nil || strings.TrimSpace(report.BatchRunID) == "" {
-		return
+		return nil
 	}
+	var failures []error
 	for _, item := range report.Cases {
 		sourceRunID := strings.TrimSpace(item.RunID)
 		if sourceRunID == "" {
@@ -48,6 +51,7 @@ func copyAPICaseBatchTraceTopologies(ctx context.Context, runtime store.Store, r
 		}
 		rows, err := runtime.ListTraceTopologies(ctx, sourceRunID)
 		if err != nil {
+			failures = append(failures, fmt.Errorf("list trace topologies for case %s: %w", item.CaseID, err))
 			continue
 		}
 		for _, row := range rows {
@@ -62,8 +66,10 @@ func copyAPICaseBatchTraceTopologies(ctx context.Context, runtime store.Store, r
 			copied.CaseID = firstNonEmpty(item.CaseID, row.CaseID)
 			copied.CreatedAt = time.Now().UTC()
 			if _, err := runtime.SaveTraceTopology(ctx, copied); err != nil {
+				failures = append(failures, fmt.Errorf("save trace topology for case %s: %w", item.CaseID, err))
 				continue
 			}
 		}
 	}
+	return errors.Join(failures...)
 }

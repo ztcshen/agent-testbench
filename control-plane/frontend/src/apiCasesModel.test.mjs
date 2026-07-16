@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { buildCaseCoverageBoard, buildCaseManagement, buildWorkflowCaseContext } from "./apiCasesModel.mjs";
+import { buildCaseCoverageBoard, buildCaseManagement, buildWorkflowCaseContext, isStoreCaseRunnable } from "./apiCasesModel.mjs";
 
 describe("buildCaseManagement", () => {
   const cases = [
@@ -16,6 +16,7 @@ describe("buildCaseManagement", () => {
       casePath: "cases/create.json",
       sourceKind: "karate",
       executorId: "executor.karate",
+      executionReady: true,
       runCount: 4,
       latestRun: { status: "failed", runId: "run-1", elapsedMs: 1300, failureReason: "assertion mismatch" },
     },
@@ -40,6 +41,7 @@ describe("buildCaseManagement", () => {
       casePath: "cases/cleanup.json",
       sourceKind: "http",
       executorId: "executor.http",
+      executionReady: true,
       runCount: 1,
       latestRun: { status: "passed", runId: "run-2", elapsedMs: 450 },
     },
@@ -90,6 +92,30 @@ describe("buildCaseManagement", () => {
       { key: "ready", count: 2 },
       { key: "needs-review", count: 1 },
     ]);
+  });
+
+  it("uses the backend execution-ready decision for every supported active case shape", () => {
+    const management = buildCaseManagement([
+      { id: "case.file", status: "active", casePath: "cases/file.json", executionReady: true },
+      { id: "case.template", status: "active", requestTemplateId: "template.alpha", executionReady: true },
+      { id: "case.config", status: "active", executionReady: true },
+      { id: "case.external", status: "active", sourceKind: "karate", sourcePath: "tests/api.feature", executorId: "executor.karate", executionReady: false },
+      { id: "case.invalid", status: "active", executionReady: false },
+      { id: "case.review", status: "review", executionReady: true },
+    ]);
+
+    const readinessByID = Object.fromEntries(management.rows.map((row) => [row.id, row.readiness]));
+    assert.deepEqual(readinessByID, {
+      "case.config": "ready",
+      "case.external": "needs-review",
+      "case.file": "ready",
+      "case.invalid": "needs-review",
+      "case.review": "needs-review",
+      "case.template": "ready",
+    });
+    assert.equal(isStoreCaseRunnable({ status: "active", executionReady: true }), true);
+    assert.equal(isStoreCaseRunnable({ status: "active", executionReady: false }), false);
+    assert.equal(isStoreCaseRunnable({ status: "review", executionReady: true }), false);
   });
 
   it("focuses case management on the cases mapped by a workflow catalog", () => {

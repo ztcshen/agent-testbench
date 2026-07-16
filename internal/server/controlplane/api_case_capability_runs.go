@@ -7,8 +7,9 @@ import (
 	"agent-testbench/internal/store"
 )
 
-func apiCaseCapabilitiesFromBundleWithRuns(ctx context.Context, bundle profile.Bundle, runtime store.Store) (apiCaseCapabilitiesPayload, error) {
+func apiCaseCapabilitiesFromBundleWithRuns(ctx context.Context, bundle profile.Bundle, catalogRevision int64, runtime store.Store) (apiCaseCapabilitiesPayload, error) {
 	payload := apiCaseCapabilitiesFromBundle(bundle)
+	payload.CatalogRevision = catalogRevision
 	if runtime == nil {
 		return payload, nil
 	}
