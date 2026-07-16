@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"agent-testbench/internal/domain/profile"
-	"agent-testbench/internal/domain/profilecatalog"
 	"agent-testbench/internal/store"
 )
 
@@ -58,7 +57,6 @@ func startAPICaseBatchRun(ctx context.Context, bundle profile.Bundle, runtime st
 	if status, err := validateAPICaseBatchEnvironmentWorkflowGate(ctx, runtime, request); err != nil {
 		return apiCaseBatchRunReport{}, status, err
 	}
-	bundle = apiCaseBatchPlanningBundle(ctx, runtime, bundle)
 	plans, err := apiCaseBatchPlans(ctx, bundle, runtime, request)
 	if err != nil {
 		var planErr apiCaseBatchPlanError
@@ -131,21 +129,6 @@ func startAPICaseBatchRun(ctx context.Context, bundle profile.Bundle, runtime st
 
 	go runner.run(context.Background(), batchRunID, bundle, request.EnvironmentID, request.WorkflowID, plans, runtime, bundle.FailureCategories, collector)
 	return report, http.StatusAccepted, nil
-}
-
-func apiCaseBatchPlanningBundle(ctx context.Context, runtime store.Store, bootstrap profile.Bundle) profile.Bundle {
-	if runtime == nil {
-		return bootstrap
-	}
-	catalog, err := runtime.GetProfileCatalog(ctx)
-	if err != nil || strings.TrimSpace(catalog.ProfileID) == "" {
-		return bootstrap
-	}
-	refreshed := profilecatalog.ToBundle(catalog)
-	if len(refreshed.FailureCategories) == 0 && len(bootstrap.FailureCategories) > 0 && strings.TrimSpace(refreshed.ID) == strings.TrimSpace(bootstrap.ID) {
-		refreshed.FailureCategories = append([]profile.FailureCategoryRule(nil), bootstrap.FailureCategories...)
-	}
-	return refreshed
 }
 
 func validateAPICaseBatchEnvironmentWorkflowGate(ctx context.Context, runtime store.Store, request apiCaseBatchRunRequest) (int, error) {

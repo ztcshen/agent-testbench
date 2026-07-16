@@ -14,6 +14,16 @@ type apiCaseCapabilitiesPayload struct {
 type apiCaseCapability struct {
 	ID               string              `json:"id"`
 	Title            string              `json:"title,omitempty"`
+	Description      string              `json:"description,omitempty"`
+	NodeID           string              `json:"nodeId,omitempty"`
+	CaseType         string              `json:"caseType,omitempty"`
+	Scenario         string              `json:"scenario,omitempty"`
+	Tags             []string            `json:"tags"`
+	Priority         string              `json:"priority,omitempty"`
+	Owner            string              `json:"owner,omitempty"`
+	Status           string              `json:"status"`
+	Required         bool                `json:"requiredForAdmission"`
+	SortOrder        int                 `json:"sortOrder,omitempty"`
 	Operation        string              `json:"operation,omitempty"`
 	CasePath         string              `json:"casePath,omitempty"`
 	SourceKind       string              `json:"sourceKind,omitempty"`
@@ -55,7 +65,18 @@ func apiCaseCapabilitiesFromBundle(bundle profile.Bundle) apiCaseCapabilitiesPay
 	for _, item := range bundle.APICases {
 		node := nodeByID[item.NodeID]
 		service := serviceByID[node.ServiceID]
-		cases = append(cases, newAPICaseCapability(item.ID, item.DisplayName, item.NodeID, node.DisplayName, node.ServiceID, service.DisplayName, service.Kind, item.CasePath, item.SourceKind, item.SourcePath, item.ExecutorID, item.BaseURL, item.EvidenceDir, item.TimeoutSeconds, item.DefaultOverrides))
+		capability := newAPICaseCapability(item.ID, item.DisplayName, item.NodeID, node.DisplayName, node.ServiceID, service.DisplayName, service.Kind, item.CasePath, item.SourceKind, item.SourcePath, item.ExecutorID, item.BaseURL, item.EvidenceDir, item.TimeoutSeconds, item.DefaultOverrides)
+		capability.Description = item.Description
+		capability.NodeID = item.NodeID
+		capability.CaseType = item.CaseType
+		capability.Scenario = item.Scenario
+		capability.Tags = append([]string{}, item.Tags...)
+		capability.Priority = item.Priority
+		capability.Owner = item.Owner
+		capability.Status = firstNonEmpty(item.Status, "active")
+		capability.Required = item.RequiredForAdmission
+		capability.SortOrder = item.SortOrder
+		cases = append(cases, capability)
 	}
 	return apiCaseCapabilitiesPayload{
 		OK:    true,
@@ -77,7 +98,18 @@ func apiCaseCapabilitiesFromCatalog(catalog store.ProfileCatalog) apiCaseCapabil
 	for _, item := range catalog.APICases {
 		node := nodeByID[item.NodeID]
 		service := serviceByID[node.ServiceID]
-		cases = append(cases, newAPICaseCapability(item.ID, item.DisplayName, item.NodeID, node.DisplayName, node.ServiceID, service.DisplayName, service.Kind, item.CasePath, item.SourceKind, item.SourcePath, item.ExecutorID, item.BaseURL, item.EvidenceDir, item.TimeoutSeconds, jsonObject(item.DefaultOverridesJSON)))
+		capability := newAPICaseCapability(item.ID, item.DisplayName, item.NodeID, node.DisplayName, node.ServiceID, service.DisplayName, service.Kind, item.CasePath, item.SourceKind, item.SourcePath, item.ExecutorID, item.BaseURL, item.EvidenceDir, item.TimeoutSeconds, jsonObject(item.DefaultOverridesJSON))
+		capability.Description = item.Description
+		capability.NodeID = item.NodeID
+		capability.CaseType = item.CaseType
+		capability.Scenario = item.Scenario
+		capability.Tags = append([]string{}, item.Tags...)
+		capability.Priority = item.Priority
+		capability.Owner = item.Owner
+		capability.Status = firstNonEmpty(item.Status, "active")
+		capability.Required = item.RequiredForAdmission
+		capability.SortOrder = item.SortOrder
+		cases = append(cases, capability)
 	}
 	return apiCaseCapabilitiesPayload{
 		OK:    true,

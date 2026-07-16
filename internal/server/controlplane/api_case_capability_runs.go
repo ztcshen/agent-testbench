@@ -2,21 +2,15 @@ package controlplane
 
 import (
 	"context"
-	"errors"
 
 	"agent-testbench/internal/domain/profile"
 	"agent-testbench/internal/store"
 )
 
-func apiCaseCapabilitiesFromBundleWithStore(ctx context.Context, bundle profile.Bundle, runtime store.Store) (apiCaseCapabilitiesPayload, error) {
+func apiCaseCapabilitiesFromBundleWithRuns(ctx context.Context, bundle profile.Bundle, runtime store.Store) (apiCaseCapabilitiesPayload, error) {
 	payload := apiCaseCapabilitiesFromBundle(bundle)
 	if runtime == nil {
 		return payload, nil
-	}
-	if catalog, err := runtime.GetProfileCatalog(ctx); err == nil {
-		payload = apiCaseCapabilitiesFromCatalog(catalog)
-	} else if !errors.Is(err, store.ErrNotFound) {
-		return apiCaseCapabilitiesPayload{}, err
 	}
 	runs, err := runtime.ListRuns(ctx)
 	if err != nil {
