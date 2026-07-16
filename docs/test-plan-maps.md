@@ -228,9 +228,10 @@ Run an existing planner instance:
 agent-testbench map run --store STORE_NAME --plan PLAN_ID --json
 ```
 
-By default, running an existing plan resets all non-skipped tasks and performs a
-full rerun. Use resume controls when a large map already has useful child run
-evidence:
+By default, running an existing plan resets all non-skipped tasks with known
+outcomes and performs a full rerun. Interrupted unknown outcomes remain fenced
+from automatic replay. Use resume controls when a large map already has useful
+child run evidence:
 
 ```bash
 agent-testbench map run --store STORE_NAME --plan PLAN_ID --resume --json
@@ -238,13 +239,18 @@ agent-testbench map run --store STORE_NAME --plan PLAN_ID --retry-failed --json
 agent-testbench map run --store STORE_NAME --plan PLAN_ID --rerun-task TASK_ID --json
 ```
 
-`--resume` keeps passed/skipped tasks and reruns incomplete, failed, blocked, or
-previously running tasks. `--retry-failed` selects only failed or blocked tasks.
-`--rerun-task` can be repeated to reset specific task ids while keeping every
-other task and child run reference intact. `--skip-passed` is a lighter modifier
-for preserving passed/skipped tasks when rerunning an existing plan.
+`--resume` keeps passed/skipped tasks and reruns ordinary incomplete, failed, or
+blocked tasks. A task that was still running when its owner was interrupted is
+recorded as `interrupted-unknown-outcome` and is not replayed by either
+`--resume` or the broad `--retry-failed` selector. After checking the tested
+system for side effects, use `--rerun-task TASK_ID` to explicitly reset that
+specific task. `--rerun-task` can be repeated while keeping every other task and
+child run reference intact. `--skip-passed` is a lighter modifier for preserving
+passed/skipped tasks when rerunning an existing plan.
 
-The v1 executor is deliberately deterministic and serial. `run_path` and
+The executor schedules deterministic dependency waves and bounds independent
+tasks with `--concurrency`; steps inside one path remain ordered. Before every
+external case call it renews the Store owner/token lease. `run_path` and
 `run_path_prefix` execute their mapped path steps as Store catalog API cases and
 record an aggregate workflow run for the plan task. `run_case` executes the
 target case as a single Store catalog API case. Every child run is linked back

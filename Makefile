@@ -1,7 +1,7 @@
 QUALITY_GATE_REPORT_DIR ?= build/reports/quality-gate
 QUALITY_GATE_STRICT ?= false
 
-.PHONY: quality quality-report quality-strict lint lint-full test
+.PHONY: quality quality-report quality-strict lint lint-full test test-docker-integration
 
 quality: quality-report
 
@@ -19,3 +19,6 @@ lint-full:
 
 test:
 	go test ./...
+
+test-docker-integration:
+	AGENT_TESTBENCH_DOCKER_INTEGRATION=1 go test ./cmd/agent-testbench -run TestEnvironmentDockerComposeLifecycleIntegration -count=1 -timeout=10m

@@ -155,13 +155,25 @@ Content-Type: application/json
 {
   "requestId": "change-001",
   "nodeIds": ["node.alpha", "node.beta"],
-  "baseUrl": "http://127.0.0.1:8080",
-  "evidenceDir": ".runtime/case-batches",
+  "timeoutSeconds": 30,
   "overrides": {
     "id": "item-override"
   }
 }
 ```
+
+The public batch API resolves each target URL and Evidence root from the active
+Store catalog. It rejects request fields named `baseUrl`, `evidenceDir`, or
+`environmentId`; maintain those values with the Store-backed case catalog
+instead. `timeoutSeconds` is optional, uses the catalog value or the built-in
+90-second default when zero, and must be an integer between 0 and 600. The same
+target/Evidence boundary applies to environment acceptance and suite-impact
+execution endpoints.
+
+Choose exactly one batch selector family: `caseIds`, `nodeIds`, `workflowId`,
+or `suite`. Public JSON mutation requests require
+`Content-Type: application/json`; this also prevents browser simple-request
+CSRF from blindly starting local test execution.
 
 Use `nodeIds` to run all template package API cases attached to one or more interface
 nodes. To run a workflow-shaped regression, send `workflowId` instead:

@@ -131,8 +131,10 @@ run a small smoke check, and print the next commands.
 When a one-off command needs to become repeatable, use the Store-backed task
 surface. Task definitions and run history are stored in the selected SQL Store,
 so a colleague or agent can inspect status and logs later from the same Store.
-`task schedule` records schedule metadata; `task watch` runs a foreground retry
-loop and records each attempt.
+`task schedule` records an interval schedule; `task worker` is the explicit
+foreground process that claims due tasks, records runs, and sends notifications.
+Use `--once` for a single CI or operator poll. `task watch` runs a foreground
+retry loop and records each attempt.
 
 ```sh
 agent-testbench task run catalog-smoke \
@@ -146,6 +148,8 @@ agent-testbench task schedule nightly-cases \
   --interval 24h \
   --store local \
   --json
+
+agent-testbench task worker --store local --once --json
 
 agent-testbench task watch catalog-smoke \
   --command "commands --json" \
@@ -410,7 +414,7 @@ publishing it to the verified discovery list:
 ./bin/agent-testbench.sh environment inspect --store local-personal local-sample
 ./bin/agent-testbench.sh environment bootstrap --store local-personal local-sample
 ./bin/agent-testbench.sh environment restore --store local-personal local-sample --workspace "$HOME/open-test-runtime" --json
-./bin/agent-testbench.sh environment restore --store local-personal local-sample --workspace "$HOME/open-test-runtime" --execute --run-workflow --server-url http://127.0.0.1:58663 --base-url http://127.0.0.1:8080 --json
+./bin/agent-testbench.sh environment restore --store local-personal local-sample --workspace "$HOME/open-test-runtime" --execute --run-workflow --server-url http://127.0.0.1:58663 --json
 ./bin/agent-testbench.sh environment verify --store local-personal local-sample --run RUN_ID --status passed --evidence-complete --topology-complete
 ./bin/agent-testbench.sh environment publish-verified --store local-personal local-sample
 ```
@@ -491,9 +495,9 @@ Restore records Evidence completeness from the workflow result but does not
 mark SkyWalking topology complete or publish the environment as verified; real
 topology collection and `publish-verified` remain separate gates. Use
 `--server-url` points at the AgentTestBench control plane that will run the
-acceptance workflow; `--base-url` is optional target-service context for the
-workflow. Use `--workflow-output-dir` when you want a fixed local report
-directory. When `composeFile` is recorded, the
+acceptance workflow. Target URLs and Evidence roots must already be maintained
+in the Store catalog; restore and acceptance commands do not send local paths
+or target overrides through the public HTTP boundary. When `composeFile` is recorded, the
 file must exist under `--workspace` after optional repository preparation;
 restore fails before invoking Docker if it is missing.
 `environment inspect`, `environment bootstrap`, and `environment restore`

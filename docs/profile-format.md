@@ -289,11 +289,12 @@ review, and assign case suites without editing the core repository:
   Only `active` cases are considered executable-ready by suite quality and
   planning checks.
 - `casePath`: path to the runnable API Case JSON file.
-- `sourceKind`, `sourcePath`, `executorId`: optional external executable source
+- `sourceKind`, `sourcePath`, `executorId`: optional external executor source
   reference for cases owned by tools such as Karate, Playwright, pytest, or
-  custom template package executors. This is a compatibility hook, not a new core DSL.
-  Suite quality treats an external source as runnable only when it references an
-  active template package executor.
+  custom template package executors. This is a compatibility hook, not a new core
+  DSL. External executors are planning-only today and do not make a case locally
+  executable; an `active` case also needs a `casePath`, active request template,
+  or active case execution config. The workbench does not execute external binaries.
 - `baseUrl`: default target URL for live runs.
 - `evidenceDir`: optional runtime Evidence output directory.
 - `timeoutSeconds`: optional request timeout for the control plane run API.
