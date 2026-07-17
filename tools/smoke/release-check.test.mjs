@@ -290,6 +290,43 @@ test("release-check scope-file runs targeted example tests without full Go suite
   }
 });
 
+test("release-check runs the MySQL Store API smoke when its implementation changes", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agent-testbench-release-mysql-smoke-"));
+  const binDir = path.join(tempDir, "bin");
+  const npmLog = path.join(tempDir, "npm.log");
+  const fakeNPM = path.join(binDir, "npm");
+  try {
+    await mkdir(binDir, { recursive: true });
+    await writeFile(fakeNPM, [
+      "#!/usr/bin/env bash",
+      "printf 'args=%s\\n' \"$*\" >> \"$AGENT_TESTBENCH_TEST_NPM_LOG\"",
+      "printf 'dsn=%s\\n' \"${AGENT_TESTBENCH_MYSQL_API_SMOKE_DSN:-}\" >> \"$AGENT_TESTBENCH_TEST_NPM_LOG\"",
+      "",
+    ].join("\n"));
+    await chmod(fakeNPM, 0o755);
+
+    const dsn = "mysql://user@example.com:3306/agent_testbench_scope_smoke?tls=false";
+    const result = runReleaseCheck(releaseCheckEnv({
+      AGENT_TESTBENCH_SMOKE_STORE_DSN: dsn,
+      AGENT_TESTBENCH_SKIP_QUALITY_GATE: "1",
+      AGENT_TESTBENCH_TEST_NPM_LOG: npmLog,
+      PATH: `${binDir}:${process.env.PATH}`,
+    }), ["--scope", "tools/smoke/mysql-store-api-smoke.mjs"]);
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /running scoped Node tests/);
+    assert.match(result.stdout, /tools\/smoke\/mysql-store-api-smoke\.test\.mjs/);
+    assert.match(result.stdout, /running scoped MySQL Store API smoke tests/);
+    const calls = readFileSync(npmLog, "utf8");
+    assert.deepEqual(calls.trim().split("\n"), [
+      "args=run smoke:api:mysql-store",
+      `dsn=${dsn}`,
+    ]);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("release-check scopes release workflow changes to workflow smoke", () => {
   const result = runReleaseCheck(releaseCheckEnv({
     AGENT_TESTBENCH_SKIP_QUALITY_GATE: "1",
