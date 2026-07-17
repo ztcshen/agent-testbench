@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -63,6 +64,10 @@ func copyWorkflowStepEvidenceFromSources(ctx context.Context, runtime store.Stor
 		if err != nil {
 			return nil, fmt.Errorf("list Evidence for source run %s: %w", source.runID, err)
 		}
+		sourceRun, err := runtime.GetRun(ctx, source.runID)
+		if err != nil {
+			return nil, fmt.Errorf("load Evidence source run %s: %w", source.runID, err)
+		}
 		for _, row := range rows {
 			if source.stepID != "" && row.StepID != "" && row.StepID != source.stepID {
 				continue
@@ -76,6 +81,10 @@ func copyWorkflowStepEvidenceFromSources(ctx context.Context, runtime store.Stor
 			copied.RunID = runID
 			copied.CaseRunID = caseRunID
 			copied.StepID = firstNonEmpty(source.stepID, row.StepID)
+			copied.URI, err = stableCopiedWorkflowEvidenceURI(row.URI, sourceRun.EvidenceRoot)
+			if err != nil {
+				return nil, fmt.Errorf("resolve Evidence URI for source run %s: %w", source.runID, err)
+			}
 			copied.CreatedAt = defaultValue
 			labels["runId"] = runID
 			labels["caseRunId"] = caseRunID
@@ -104,6 +113,26 @@ func copyWorkflowStepEvidenceFromSources(ctx context.Context, runtime store.Stor
 		}
 	}
 	return copiedRows, nil
+}
+
+func stableCopiedWorkflowEvidenceURI(uri string, sourceEvidenceRoot string) (string, error) {
+	uri = strings.TrimSpace(uri)
+	if uri == "" || !evidenceURIIsLocalFile(uri) {
+		return uri, nil
+	}
+	localPath := filepath.Clean(evidenceLocalFilePath(uri))
+	if filepath.IsAbs(localPath) {
+		return uri, nil
+	}
+	resolved := evidenceResolvedLocalFilePath(uri, sourceEvidenceRoot)
+	absolute, err := filepath.Abs(resolved)
+	if err != nil {
+		return "", err
+	}
+	if strings.HasPrefix(uri, "file://") {
+		return "file://" + absolute, nil
+	}
+	return absolute, nil
 }
 
 func copyWorkflowStepTraceTopologiesFromSources(ctx context.Context, runtime store.Store, runID string, workflowID string, step map[string]any, defaultValue time.Time) ([]map[string]any, error) {

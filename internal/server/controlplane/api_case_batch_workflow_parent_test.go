@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -44,9 +45,27 @@ func TestMaterializeAPICaseBatchWorkflowParentCopiesStepEvidenceAndTasks(t *test
 	parentRunID := "batch.workflow-parent.001"
 	childRunID := parentRunID + ".step-one.case-one"
 	childCaseRunID := childRunID + ".case"
+	parentEvidenceRoot := filepath.Join(t.TempDir(), "parent-evidence")
+	childEvidenceRootAbsolute := filepath.Join(t.TempDir(), "child-evidence")
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	childEvidenceRoot, err := filepath.Rel(workingDirectory, childEvidenceRootAbsolute)
+	if err != nil {
+		t.Fatalf("make child Evidence root relative: %v", err)
+	}
+	if err := os.MkdirAll(childEvidenceRootAbsolute, 0o755); err != nil {
+		t.Fatalf("create child Evidence root: %v", err)
+	}
+	requestPath := filepath.Join(childEvidenceRootAbsolute, "request.json")
+	requestURI := filepath.Join(childEvidenceRoot, "request.json")
+	if err := os.WriteFile(requestPath, []byte(`{"method":"POST","path":"/copied-evidence"}`), 0o644); err != nil {
+		t.Fatalf("write child request Evidence: %v", err)
+	}
 	for _, run := range []store.Run{
-		{ID: parentRunID, ProfileID: "sample", WorkflowID: "workflow.parent", Status: store.StatusRunning, SummaryJSON: `{}`, CreatedAt: now, UpdatedAt: now},
-		{ID: childRunID, ProfileID: "sample", WorkflowID: "workflow.parent", Status: store.StatusPassed, SummaryJSON: `{}`, CreatedAt: now, UpdatedAt: now},
+		{ID: parentRunID, ProfileID: "sample", WorkflowID: "workflow.parent", Status: store.StatusRunning, EvidenceRoot: parentEvidenceRoot, SummaryJSON: `{}`, CreatedAt: now, UpdatedAt: now},
+		{ID: childRunID, ProfileID: "sample", WorkflowID: "workflow.parent", Status: store.StatusPassed, EvidenceRoot: childEvidenceRoot, SummaryJSON: `{}`, CreatedAt: now, UpdatedAt: now},
 	} {
 		if _, err := runtime.CreateRun(ctx, run); err != nil {
 			t.Fatalf("create run %s: %v", run.ID, err)
@@ -60,7 +79,7 @@ func TestMaterializeAPICaseBatchWorkflowParentCopiesStepEvidenceAndTasks(t *test
 	}
 	if _, err := runtime.RecordEvidence(ctx, store.EvidenceRecord{
 		ID: childRunID + ".request", RunID: childRunID, CaseRunID: childCaseRunID, StepID: "step-one", Kind: "request",
-		URI: "file:///tmp/request.json", MediaType: "application/json", LabelsJSON: `{"caseId":"case-one","stepId":"step-one"}`, CreatedAt: now,
+		URI: requestURI, MediaType: "application/json", LabelsJSON: `{"caseId":"case-one","stepId":"step-one"}`, CreatedAt: now,
 	}); err != nil {
 		t.Fatalf("record child Evidence: %v", err)
 	}
@@ -92,12 +111,61 @@ func TestMaterializeAPICaseBatchWorkflowParentCopiesStepEvidenceAndTasks(t *test
 		t.Fatalf("parent case runs = %#v err=%v", caseRuns, err)
 	}
 	evidence, err := runtime.ListEvidence(ctx, parentRunID)
-	if err != nil || len(evidence) != 1 || evidence[0].RunID != parentRunID || evidence[0].StepID != "step-one" {
+	if err != nil || len(evidence) != 1 || evidence[0].RunID != parentRunID || evidence[0].StepID != "step-one" || evidence[0].URI != requestPath {
 		t.Fatalf("parent Evidence = %#v err=%v", evidence, err)
+	}
+	payload, ok, err := CaseEvidencePayloadForRunID(ctx, runtime, parentRunID, "case-one", "step-one")
+	if err != nil || !ok {
+		t.Fatalf("parent case Evidence payload ok=%t err=%v", ok, err)
+	}
+	request := mapFromAny(mapFromAny(payload[apiFieldEvidence])["request"])
+	if request["path"] != "/copied-evidence" {
+		t.Fatalf("parent request Evidence = %#v", request)
+	}
+	lifecycle := mapFromAny(mapFromAny(request["attachment"])["lifecycle"])
+	if lifecycle[evidenceLifecycleAvailable] != true || lifecycle["path"] != requestPath {
+		t.Fatalf("parent request Evidence lifecycle = %#v", lifecycle)
 	}
 	tasks, err := runtime.ListPostProcessTasks(ctx, parentRunID)
 	if err != nil || len(tasks) != 1 || tasks[0].RunID != parentRunID || tasks[0].StepID != "step-one" || tasks[0].Status != store.StatusPassed {
 		t.Fatalf("parent post-process tasks = %#v err=%v", tasks, err)
+	}
+}
+
+func TestStableCopiedWorkflowEvidenceURI(t *testing.T) {
+	sourceRootAbsolute := filepath.Join(t.TempDir(), "source-evidence")
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	sourceRoot, err := filepath.Rel(workingDirectory, sourceRootAbsolute)
+	if err != nil {
+		t.Fatalf("make source Evidence root relative: %v", err)
+	}
+	wantPath := filepath.Join(sourceRootAbsolute, "request.json")
+	tests := []struct {
+		name string
+		uri  string
+		root string
+		want string
+	}{
+		{name: "bare relative path", uri: "request.json", root: sourceRoot, want: wantPath},
+		{name: "source-root-prefixed relative path", uri: filepath.Join(sourceRoot, "request.json"), root: sourceRoot, want: wantPath},
+		{name: "absolute path", uri: wantPath, root: sourceRoot, want: wantPath},
+		{name: "absolute file URI", uri: "file://" + wantPath, root: sourceRoot, want: "file://" + wantPath},
+		{name: "remote URI", uri: "https://evidence.example.test/request.json", root: sourceRoot, want: "https://evidence.example.test/request.json"},
+		{name: "relative file URI", uri: "file://request.json", root: sourceRoot, want: "file://" + wantPath},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := stableCopiedWorkflowEvidenceURI(test.uri, test.root)
+			if err != nil {
+				t.Fatalf("stable copied Evidence URI: %v", err)
+			}
+			if got != test.want {
+				t.Fatalf("stable copied Evidence URI = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 
