@@ -348,6 +348,7 @@ else
   go_scope_packages=()
   run_frontend_tests=0
   run_frontend_build=0
+  run_mysql_store_api_smoke=0
   ran_scoped_runtime_tests=0
 
   add_go_scope_package() {
@@ -434,6 +435,10 @@ else
         ;;
       control-plane/static/demo-gallery.html|docs/demo-gallery.md|examples/demo-services/*|tools/examples/demo-service-server.mjs|tools/examples/demo-showcase.test.mjs)
         node_scope_tests+=("tools/examples/demo-showcase.test.mjs")
+        ;;
+      tools/smoke/mysql-store-api-smoke.mjs)
+        node_scope_tests+=("tools/smoke/mysql-store-api-smoke.test.mjs")
+        run_mysql_store_api_smoke=1
         ;;
       tools/examples/*.test.mjs|tools/smoke/*.test.mjs)
         node_scope_tests+=("$path")
@@ -542,6 +547,17 @@ else
     printf '  %s\n' "${node_scope_tests[@]}"
     node --test "${node_scope_tests[@]}"
     ran_scoped_runtime_tests=1
+  fi
+
+  if [[ "$run_mysql_store_api_smoke" -eq 1 ]]; then
+    if is_mysql_store_dsn "$smoke_store_dsn"; then
+      step "running scoped MySQL Store API smoke tests"
+      AGENT_TESTBENCH_MYSQL_API_SMOKE_DSN="$smoke_store_dsn" npm run smoke:api:mysql-store
+      ran_scoped_runtime_tests=1
+    else
+      step "skipping scoped MySQL Store API smoke tests"
+      echo "A MySQL smoke Store is required for the runtime smoke; the request-shape tests still ran."
+    fi
   fi
 
   if [[ "$ran_scoped_runtime_tests" -eq 0 ]]; then
