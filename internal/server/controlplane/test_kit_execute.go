@@ -8,38 +8,56 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/runner/apicase"
 	"agent-testbench/internal/store"
 )
 
 type caseExecutionResult struct {
 	ok            bool
 	httpCode      int
+	httpStatus    int
 	baseURL       string
 	failureReason string
+	runID         string
 	result        map[string]any
 }
 
+const testKitAPICaseRunResultKey = "agentTestBenchAPICaseRunResult"
+
 func executeTestKitCase(ctx context.Context, bundle profile.Bundle, runtime store.Store, item runnableAPICase, payload map[string]any) caseExecutionResult {
-	if item.Execution == nil {
-		return caseExecutionResult{
-			ok:            false,
-			failureReason: "api case execution adapter is not configured",
-			result: map[string]any{
-				"request":  map[string]any{"caseId": item.Case.ID},
-				"response": map[string]any{"body": "{}"},
-			},
-		}
-	}
+	// This value is an in-process handoff from the file runner to the Store
+	// recorder. Always clear caller input before deciding how this case runs.
+	delete(payload, testKitAPICaseRunResultKey)
 	overrides := mergeStringAnyMaps(item.Case.DefaultOverrides, mapFromAny(payload["overrides"]))
 	if len(overrides) > 0 {
 		payload["overrides"] = overrides
 	}
 	if missing := missingRequiredCaseInputs(item.Inputs, overrides); len(missing) > 0 {
 		return failedCaseExecution(item.Case.ID, "missing required case input: "+strings.Join(missing, ", "))
+	}
+	timeout, err := testKitTimeout(payload, item.Case.TimeoutSeconds)
+	if err != nil {
+		result := failedCaseExecution(item.Case.ID, err.Error())
+		result.httpStatus = http.StatusBadRequest
+		return result
+	}
+	if strings.TrimSpace(item.Case.CasePath) != "" {
+		return executeTestKitFileCase(ctx, item, payload, overrides, timeout)
+	}
+	return executeInlineTestKitCase(ctx, bundle, runtime, item, payload, timeout)
+}
+
+func executeInlineTestKitCase(ctx context.Context, bundle profile.Bundle, runtime store.Store, item runnableAPICase, payload map[string]any, timeout time.Duration) caseExecutionResult {
+	if item.Execution == nil {
+		if externalCaseSourceConfigured(item.Case) {
+			return unsupportedExternalCaseExecution(item.Case)
+		}
+		return failedCaseExecution(item.Case.ID, "api case execution adapter is not configured")
 	}
 	request, err := buildCaseHTTPRequest(ctx, bundle, runtime, *item.Execution, item.CaseBaseURL, payload)
 	if err != nil {
@@ -51,9 +69,17 @@ func executeTestKitCase(ctx context.Context, bundle profile.Bundle, runtime stor
 	if request.requiresBody() && request.body == nil {
 		return failedCaseExecution(item.Case.ID, fmt.Sprintf("%s caseExecution.body is required for %s; add caseExecution.body or a request template that renders a body", request.method, item.Case.ID))
 	}
-	httpRequest, err := http.NewRequestWithContext(ctx, request.method, request.fullURL, request.bodyReader())
+	httpRequest, err := newTestKitHTTPRequest(ctx, request)
 	if err != nil {
 		return failedCaseExecution(item.Case.ID, err.Error())
+	}
+	return executeTestKitHTTPRequest(item.Case.ID, request, httpRequest, timeout)
+}
+
+func newTestKitHTTPRequest(ctx context.Context, request caseHTTPRequest) (*http.Request, error) {
+	httpRequest, err := http.NewRequestWithContext(ctx, request.method, request.fullURL, request.bodyReader())
+	if err != nil {
+		return nil, err
 	}
 	for key, value := range request.headers {
 		httpRequest.Header.Set(key, value)
@@ -61,19 +87,24 @@ func executeTestKitCase(ctx context.Context, bundle profile.Bundle, runtime stor
 	if _, ok := request.headers["Content-Type"]; !ok && request.body != nil {
 		httpRequest.Header.Set("Content-Type", "application/json")
 	}
+	return httpRequest, nil
+}
+
+func executeTestKitHTTPRequest(caseID string, request caseHTTPRequest, httpRequest *http.Request, timeout time.Duration) caseExecutionResult {
 	started := time.Now()
-	client := http.Client{Timeout: testKitTimeout(payload)}
+	client := http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	response, err := client.Do(httpRequest)
 	if err != nil {
-		return failedCaseExecution(item.Case.ID, err.Error())
+		return failedCaseExecution(caseID, err.Error())
 	}
-	responseBody, readErr := io.ReadAll(io.LimitReader(response.Body, 1<<20))
-	closeErr := response.Body.Close()
-	if readErr != nil {
-		return failedCaseExecution(item.Case.ID, readErr.Error())
-	}
-	if closeErr != nil {
-		return failedCaseExecution(item.Case.ID, closeErr.Error())
+	responseBody, err := readTestKitResponseBody(response)
+	if err != nil {
+		return failedCaseExecution(caseID, err.Error())
 	}
 	responseSummary := map[string]any{
 		"statusCode": response.StatusCode,
@@ -81,37 +112,7 @@ func executeTestKitCase(ctx context.Context, bundle profile.Bundle, runtime stor
 		"body":       string(responseBody),
 		"elapsedMs":  time.Since(started).Milliseconds(),
 	}
-	passed := expectedHTTPCode(response.StatusCode, request.expectedHTTPCodes)
-	failureReason := ""
-	if !passed {
-		failureReason = fmt.Sprintf("unexpected http status %d", response.StatusCode)
-	}
-	if passed {
-		for _, expected := range request.expectedResponse {
-			expected = strings.TrimSpace(expected)
-			if expected == "" {
-				continue
-			}
-			if !strings.Contains(string(responseBody), expected) {
-				passed = false
-				failureReason = fmt.Sprintf("response body missing %q", expected)
-				break
-			}
-		}
-	}
-	if passed {
-		for _, forbidden := range request.forbiddenResponse {
-			forbidden = strings.TrimSpace(forbidden)
-			if forbidden == "" {
-				continue
-			}
-			if strings.Contains(string(responseBody), forbidden) {
-				passed = false
-				failureReason = fmt.Sprintf("response body must not contain %q", forbidden)
-				break
-			}
-		}
-	}
+	passed, failureReason := evaluateTestKitResponse(response.StatusCode, string(responseBody), request)
 	return caseExecutionResult{
 		ok:            passed,
 		httpCode:      response.StatusCode,
@@ -122,6 +123,99 @@ func executeTestKitCase(ctx context.Context, bundle profile.Bundle, runtime stor
 			"response": responseSummary,
 		},
 	}
+}
+
+func readTestKitResponseBody(response *http.Response) ([]byte, error) {
+	responseBody, readErr := io.ReadAll(io.LimitReader(response.Body, apicase.MaxResponseBodyBytes+1))
+	closeErr := response.Body.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	if int64(len(responseBody)) > apicase.MaxResponseBodyBytes {
+		return nil, fmt.Errorf("response body exceeds %d byte limit", apicase.MaxResponseBodyBytes)
+	}
+	return responseBody, nil
+}
+
+func evaluateTestKitResponse(statusCode int, responseBody string, request caseHTTPRequest) (bool, string) {
+	if !expectedHTTPCode(statusCode, request.expectedHTTPCodes) {
+		return false, fmt.Sprintf("unexpected http status %d", statusCode)
+	}
+	for _, expected := range request.expectedResponse {
+		expected = strings.TrimSpace(expected)
+		if expected != "" && !strings.Contains(responseBody, expected) {
+			return false, fmt.Sprintf("response body missing %q", expected)
+		}
+	}
+	for _, forbidden := range request.forbiddenResponse {
+		forbidden = strings.TrimSpace(forbidden)
+		if forbidden != "" && strings.Contains(responseBody, forbidden) {
+			return false, fmt.Sprintf("response body must not contain %q", forbidden)
+		}
+	}
+	return true, ""
+}
+
+func executeTestKitFileCase(ctx context.Context, item runnableAPICase, payload map[string]any, overrides map[string]any, timeout time.Duration) caseExecutionResult {
+	evidenceDir := firstNonEmpty(valueString(payload[apiFieldEvidenceDir]), item.Case.EvidenceDir, filepath.Join(".runtime", "cases"))
+	baseURL := firstNonEmpty(valueString(payload["baseUrl"]), item.CaseBaseURL, item.Case.BaseURL)
+	executionCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	runID := firstNonEmpty(valueString(payload["runId"]), nextTestKitRunID(time.Now().UTC()))
+	result, err := apicase.Run(executionCtx, apicase.RunOptions{
+		CasePath:    item.Case.CasePath,
+		EvidenceDir: evidenceDir,
+		RunID:       runID,
+		BaseURL:     baseURL,
+		Overrides:   overrides,
+	})
+	if err != nil {
+		return failedCaseExecution(item.Case.ID, err.Error())
+	}
+	payload[testKitAPICaseRunResultKey] = result
+	payload["runId"] = result.RunID
+	payload[apiFieldEvidenceDir] = evidenceDir
+	request, _ := jsonFileObject(filepath.Join(result.EvidencePath, apiCaseEvidenceFileRequest))
+	response, _ := jsonFileObject(filepath.Join(result.EvidencePath, apiCaseEvidenceFileResponse))
+	if request == nil {
+		request = map[string]any{"caseId": item.Case.ID}
+	}
+	if response == nil {
+		response = map[string]any{"body": "{}"}
+	}
+	failureReason := strings.TrimSpace(result.Error)
+	if result.Status != store.StatusPassed && failureReason == "" {
+		failureReason = "api case assertions failed"
+	}
+	return caseExecutionResult{
+		ok:            result.Status == store.StatusPassed,
+		httpCode:      intValue(response["statusCode"]),
+		baseURL:       baseURL,
+		failureReason: failureReason,
+		runID:         result.RunID,
+		result: map[string]any{
+			"request":  request,
+			"response": response,
+		},
+	}
+}
+
+func externalCaseSourceConfigured(item profile.APICase) bool {
+	return strings.TrimSpace(item.SourceKind) != "" || strings.TrimSpace(item.SourcePath) != "" || strings.TrimSpace(item.ExecutorID) != ""
+}
+
+func unsupportedExternalCaseExecution(item profile.APICase) caseExecutionResult {
+	reason := fmt.Sprintf(
+		"external executor execution is planning-only for source kind %q and executor %q",
+		strings.TrimSpace(item.SourceKind),
+		strings.TrimSpace(item.ExecutorID),
+	)
+	result := failedCaseExecution(item.ID, reason)
+	result.httpStatus = http.StatusNotImplemented
+	return result
 }
 
 func missingRequiredCaseInputs(inputs []map[string]any, overrides map[string]any) []string {

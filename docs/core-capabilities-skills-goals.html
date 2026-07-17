@@ -619,7 +619,7 @@
             <tr><td>Catalog</td><td><code>GET /api/catalog</code><br><code>GET /api/dashboard</code><br><code>GET /api/template-packages/catalog-index</code></td><td>提供服务、工作流、接口节点、用例、模板、夹具和绑定的页面视图。</td></tr>
             <tr><td>Interface</td><td><code>GET /api/interface-nodes</code><br><code>GET /api/interface-node</code><br><code>GET /api/interface-node/coverage</code><br><code>GET /api/interface-node/coverage-gaps</code></td><td>接口节点目录、节点详情、工作流覆盖和缺口视图。</td></tr>
             <tr><td>Runs</td><td><code>GET /api/runs</code><br><code>POST /api/workflow-runs</code><br><code>GET /api/workflow-runs/{id}</code><br><code>GET /api/workflow-runs/step</code></td><td>运行索引、工作流快照、步骤详情和最新步骤结果。</td></tr>
-            <tr><td>Cases</td><td><code>GET /api/cases/capabilities</code><br><code>POST /api/cases/run</code><br><code>POST /api/cases/batch-runs</code><br><code>GET /api/cases/batch-runs/{id}</code></td><td>可运行用例矩阵、单用例执行、异步批量执行和报告查询。</td></tr>
+            <tr><td>Cases</td><td><code>GET /api/cases/capabilities</code><br><code>POST /api/test-kit/run</code><br><code>POST /api/cases/batch-runs</code><br><code>GET /api/cases/batch-runs/{id}</code></td><td>可运行用例矩阵、Store-native 单用例执行、异步批量执行和报告查询；旧 <code>POST /api/cases/run</code> 文件路径入口已停用。</td></tr>
             <tr><td>Evidence</td><td><code>GET /api/case/runs</code><br><code>GET /api/case/evidence</code><br><code>GET /api/case-run/evidence</code><br><code>GET /api/case/timing</code></td><td>用例运行列表、详情证据、耗时与预算视图。</td></tr>
             <tr><td>Observability</td><td><code>POST /api/trace-topology/collect</code><br><code>GET /api/replay/evidence</code></td><td>拓扑和回放证据入口，供页面和报告复用。</td></tr>
           </tbody>

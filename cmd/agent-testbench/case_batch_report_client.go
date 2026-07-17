@@ -1,40 +1,42 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
-	"net/http"
-	"os"
-	"strings"
+	"time"
 
 	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/server/controlplane"
+	"agent-testbench/internal/store"
 )
 
-func postTestKitRunBatch(serverURL string, cases []profile.APICase, baseURL string, timeoutSeconds int, failureLabel string) (map[string]any, error) {
-	caseIDs := make([]string, 0, len(cases))
+func runTrustedTestKitBatch(ctx context.Context, bundle profile.Bundle, runtime store.Store, cases []profile.APICase, baseURL string, timeoutSeconds int, failureLabel string) (map[string]any, error) {
+	started := time.Now()
+	results := make([]map[string]any, 0, len(cases))
+	passed := 0
 	for _, item := range cases {
-		caseIDs = append(caseIDs, item.ID)
-	}
-	requestPayload := map[string]any{"caseIds": caseIDs, "baseUrl": baseURL, "timeoutSeconds": timeoutSeconds}
-	rawRequest, err := json.Marshal(requestPayload)
-	if err != nil {
-		return nil, err
-	}
-	response, err := http.Post(serverURL+"/api/test-kit/run-batch", "application/json", strings.NewReader(string(rawRequest)))
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if closeErr := response.Body.Close(); closeErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: close test-kit batch response body: %v\n", closeErr)
+		result, err := controlplane.RunTrustedTestKitCase(ctx, bundle, runtime, controlplane.TrustedTestKitRunRequest{
+			CaseID:         item.ID,
+			BaseURL:        baseURL,
+			TimeoutSeconds: timeoutSeconds,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("%s: execute case %s: %w", failureLabel, item.ID, err)
 		}
-	}()
-	var rawBatch map[string]any
-	if err := json.NewDecoder(response.Body).Decode(&rawBatch); err != nil {
-		return nil, err
+		delete(result, "httpStatus")
+		if result["ok"] == true {
+			passed++
+		}
+		results = append(results, result)
 	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("%s failed with http status %d", failureLabel, response.StatusCode)
-	}
-	return rawBatch, nil
+	return map[string]any{
+		"ok":        passed == len(results),
+		"results":   results,
+		"elapsedMs": time.Since(started).Milliseconds(),
+		"summary": map[string]any{
+			"caseCount": len(results),
+			"passed":    passed,
+			"failed":    len(results) - passed,
+		},
+	}, nil
 }

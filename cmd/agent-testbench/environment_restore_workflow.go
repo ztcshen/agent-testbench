@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -63,24 +62,16 @@ func environmentRestoreRunWorkflow(ctx context.Context, workflowID string, works
 		report.Error = "environment id is required for async environment acceptance"
 		return report
 	}
-	outputDir := strings.TrimSpace(options.OutputDir)
-	if outputDir == "" {
-		outputDir = filepath.Join(workspace, ".agent-testbench", "reports", "acceptance."+safeReportID(workflowID)+"."+time.Now().UTC().Format("20060102T150405.000000000Z"))
-	}
-	absOutputDir, err := filepath.Abs(outputDir)
-	if err != nil {
-		report.Error = err.Error()
+	if strings.TrimSpace(options.BaseURL) != "" {
+		report.Error = "--base-url cannot cross the public acceptance API; configure the case target in the Store catalog before restore"
 		return report
 	}
-	report.OutputDir = absOutputDir
+	if strings.TrimSpace(options.OutputDir) != "" {
+		report.Error = "--workflow-output-dir cannot cross the public acceptance API; configure the Evidence directory in the Store catalog"
+		return report
+	}
 	requestID := "restore." + safeReportID(options.EnvironmentID) + "." + time.Now().UTC().Format("20060102T150405.000000000Z")
-	payload := map[string]any{
-		"requestId":   requestID,
-		"evidenceDir": absOutputDir,
-	}
-	if strings.TrimSpace(options.BaseURL) != "" {
-		payload["baseUrl"] = strings.TrimSpace(options.BaseURL)
-	}
+	payload := map[string]any{"requestId": requestID}
 	if options.TimeoutSeconds > 0 {
 		payload["timeoutSeconds"] = options.TimeoutSeconds
 	}

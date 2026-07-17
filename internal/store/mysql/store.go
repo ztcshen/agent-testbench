@@ -207,7 +207,7 @@ func driverDSNFromURL(parsed *url.URL) (string, error) {
 			continue
 		}
 		switch strings.ToLower(strings.TrimSpace(key)) {
-		case "parsetime", "loc":
+		case "parsetime", "loc", "clientfoundrows":
 			continue
 		}
 		key = canonicalMySQLParamKey(key)
@@ -226,6 +226,8 @@ func driverDSNFromURL(parsed *url.URL) (string, error) {
 	cfg.Addr = host
 	cfg.DBName = dbName
 	cfg.Params = params
+	// SQL Store CAS and ownership checks require matched-row semantics.
+	cfg.ClientFoundRows = true
 	cfg.ParseTime = true
 	cfg.Loc = time.UTC
 	return cfg.FormatDSN(), nil

@@ -113,58 +113,6 @@ func (s *Store) GetReadModel(ctx context.Context, profileID string, key string) 
 	return s.core.GetReadModel(ctx, profileID, key)
 }
 
-func (s *Store) ReplaceProfileCatalog(ctx context.Context, catalog store.ProfileCatalog) error {
-	return s.core.ReplaceProfileCatalog(ctx, catalog)
-}
-
-func (s *Store) GetProfileCatalog(ctx context.Context) (store.ProfileCatalog, error) {
-	return s.core.GetProfileCatalog(ctx)
-}
-
-func (s *Store) GetProfileCatalogByID(ctx context.Context, profileID string) (store.ProfileCatalog, error) {
-	return s.core.GetProfileCatalogByID(ctx, profileID)
-}
-
-func (s *Store) GetProfileCatalogIndex(ctx context.Context) (store.ProfileCatalogIndex, error) {
-	return s.core.GetProfileCatalogIndex(ctx)
-}
-
-func (s *Store) ListProfileCatalogIndexes(ctx context.Context) ([]store.ProfileCatalogIndex, error) {
-	return s.core.ListProfileCatalogIndexes(ctx)
-}
-
-func (s *Store) ReplaceTestPlanGraph(ctx context.Context, graph store.TestPlanGraph) error {
-	return s.core.ReplaceTestPlanGraph(ctx, graph)
-}
-
-func (s *Store) GetTestPlanGraph(ctx context.Context, mapID string) (store.TestPlanGraph, error) {
-	return s.core.GetTestPlanGraph(ctx, mapID)
-}
-
-func (s *Store) ListTestPlanMaps(ctx context.Context) ([]store.TestPlanMapSummary, error) {
-	return s.core.ListTestPlanMaps(ctx)
-}
-
-func (s *Store) SaveTestPlanMapVersion(ctx context.Context, item store.TestPlanMapVersion) (store.TestPlanMapVersion, error) {
-	return s.core.SaveTestPlanMapVersion(ctx, item)
-}
-
-func (s *Store) ListTestPlanMapVersions(ctx context.Context, mapID string) ([]store.TestPlanMapVersion, error) {
-	return s.core.ListTestPlanMapVersions(ctx, mapID)
-}
-
-func (s *Store) SaveTestMapPlan(ctx context.Context, record store.TestMapPlanRecord) error {
-	return s.core.SaveTestMapPlan(ctx, record)
-}
-
-func (s *Store) GetTestMapPlan(ctx context.Context, planID string) (store.TestMapPlanRecord, error) {
-	return s.core.GetTestMapPlan(ctx, planID)
-}
-
-func (s *Store) ListTestMapPlans(ctx context.Context, mapID string, limit int) ([]store.TestMapPlanInstance, error) {
-	return s.core.ListTestMapPlans(ctx, mapID, limit)
-}
-
 func (s *Store) UpsertEnvironment(ctx context.Context, e store.Environment) (store.Environment, error) {
 	return s.core.UpsertEnvironment(ctx, e)
 }

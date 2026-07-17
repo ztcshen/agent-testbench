@@ -396,8 +396,17 @@ func assertCatalogCaseRunStore(t *testing.T, storePath string, evidenceDir strin
 	if err != nil {
 		t.Fatalf("list evidence: %v", err)
 	}
-	if len(records) != 3 {
+	if len(records) != 5 {
 		t.Fatalf("evidence records = %#v", records)
+	}
+	kinds := make(map[string]bool, len(records))
+	for _, record := range records {
+		kinds[record.Kind] = true
+	}
+	for _, kind := range []string{"case", "request", "response", "assertions", "summary"} {
+		if !kinds[kind] {
+			t.Fatalf("evidence kind %q missing from %#v", kind, records)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(evidenceDir, "catalog-run-001", "request.json")); err != nil {
 		t.Fatalf("request evidence missing: %v", err)

@@ -261,6 +261,17 @@ func requirePostProcessTaskContract(t *testing.T, ctx context.Context, s store.S
 func requireAgentTaskContract(t *testing.T, ctx context.Context, s store.Store) {
 	t.Helper()
 
+	firstClaimAt := time.Date(2026, 6, 1, 10, 0, 0, 123456000, time.UTC)
+	task, listedRevision := requireRegisteredAgentTask(t, ctx, s, firstClaimAt.Add(-15*time.Minute))
+	firstClaim := requireInitialAgentTaskClaim(t, ctx, s, task, listedRevision, firstClaimAt)
+	releasedTask := requireAgentTaskReleaseRevision(t, ctx, s, task, listedRevision, firstClaim, firstClaimAt)
+	secondClaim, pausedTask, secondClaimAt := requireRecoveredAgentTask(t, ctx, s, task, releasedTask, firstClaim)
+	requireExplicitAgentTaskReschedule(t, ctx, s, task, pausedTask, firstClaim, secondClaim, secondClaimAt)
+	requireAgentTaskRunHistory(t, ctx, s, task)
+}
+
+func requireRegisteredAgentTask(t *testing.T, ctx context.Context, s store.Store, scheduledAt time.Time) (store.AgentTask, time.Time) {
+	t.Helper()
 	task, err := s.UpsertAgentTask(ctx, store.AgentTask{
 		ID:          "agent-task-001",
 		Name:        "catalog-smoke",
@@ -270,6 +281,8 @@ func requireAgentTaskContract(t *testing.T, ctx context.Context, s store.Store) 
 		Status:      "scheduled",
 		NotifyJSON:  `{"file":"notify.jsonl"}`,
 		SummaryJSON: `{"owner":"qa"}`,
+		CreatedAt:   scheduledAt,
+		UpdatedAt:   scheduledAt,
 	})
 	if err != nil {
 		t.Fatalf("upsert agent task: %v", err)
@@ -284,6 +297,117 @@ func requireAgentTaskContract(t *testing.T, ctx context.Context, s store.Store) 
 	if loaded.ID != "agent-task-001" || loaded.Command != "commands --filter case --json" || loaded.Schedule != "interval:15m" {
 		t.Fatalf("loaded agent task = %#v", loaded)
 	}
+	return task, loaded.UpdatedAt
+}
+
+func requireInitialAgentTaskClaim(t *testing.T, ctx context.Context, s store.Store, task store.AgentTask, listedRevision time.Time, firstClaimAt time.Time) store.AgentTaskClaim {
+	t.Helper()
+	firstClaim, claimed, err := s.ClaimScheduledAgentTask(ctx, task.ID, listedRevision, firstClaimAt)
+	if err != nil || !claimed || firstClaim.Token == "" {
+		t.Fatalf("claim scheduled agent task: claim=%#v claimed=%t err=%v", firstClaim, claimed, err)
+	}
+	_, claimedAgain, err := s.ClaimScheduledAgentTask(ctx, task.ID, listedRevision, firstClaimAt.Add(time.Second))
+	if err != nil || claimedAgain {
+		t.Fatalf("claim scheduled agent task twice: claimed=%t err=%v", claimedAgain, err)
+	}
+	claimedTask, err := s.GetAgentTask(ctx, task.ID)
+	if err != nil || claimedTask.Status != store.StatusRunning {
+		t.Fatalf("claimed agent task = %#v err=%v", claimedTask, err)
+	}
+	for _, status := range []string{"paused", "scheduled"} {
+		maintenance := claimedTask
+		maintenance.Status = status
+		maintenance.Command = "commands --filter changed --json"
+		maintenance.UpdatedAt = firstClaimAt.Add(2 * time.Second)
+		if _, maintenanceErr := s.UpsertAgentTask(ctx, maintenance); !errors.Is(maintenanceErr, store.ErrAgentTaskClaimed) {
+			t.Fatalf("upsert running task as %s error = %v, want ErrAgentTaskClaimed", status, maintenanceErr)
+		}
+	}
+	stillClaimed, err := s.GetAgentTask(ctx, task.ID)
+	if err != nil || stillClaimed.Status != store.StatusRunning || stillClaimed.Command != task.Command {
+		t.Fatalf("running claim changed during maintenance: task=%#v err=%v", stillClaimed, err)
+	}
+	return firstClaim
+}
+
+func requireAgentTaskReleaseRevision(t *testing.T, ctx context.Context, s store.Store, task store.AgentTask, listedRevision time.Time, firstClaim store.AgentTaskClaim, releasedAt time.Time) store.AgentTask {
+	t.Helper()
+	// Even if claim and release timestamps collide at Store precision, the
+	// durable revision must advance so an old scheduled snapshot stays stale.
+	released, err := s.ReleaseScheduledAgentTask(ctx, firstClaim, releasedAt)
+	if err != nil || !released {
+		t.Fatalf("release scheduled agent task: released=%t err=%v", released, err)
+	}
+	releasedAgain, err := s.ReleaseScheduledAgentTask(ctx, firstClaim, releasedAt.Add(4*time.Second))
+	if err != nil || releasedAgain {
+		t.Fatalf("release scheduled agent task twice: released=%t err=%v", releasedAgain, err)
+	}
+	_, staleClaimed, err := s.ClaimScheduledAgentTask(ctx, task.ID, listedRevision, releasedAt.Add(time.Second))
+	if err != nil || staleClaimed {
+		t.Fatalf("stale poll reclaimed completed interval: claimed=%t err=%v", staleClaimed, err)
+	}
+	releasedTask, err := s.GetAgentTask(ctx, task.ID)
+	if err != nil || releasedTask.Status != "scheduled" || !releasedTask.UpdatedAt.After(firstClaim.Revision) {
+		t.Fatalf("released agent task revision = %#v err=%v", releasedTask, err)
+	}
+	return releasedTask
+}
+
+func requireRecoveredAgentTask(t *testing.T, ctx context.Context, s store.Store, task store.AgentTask, releasedTask store.AgentTask, firstClaim store.AgentTaskClaim) (store.AgentTaskClaim, store.AgentTask, time.Time) {
+	t.Helper()
+	secondClaimAt := releasedTask.UpdatedAt.Add(15 * time.Minute)
+	secondClaim, claimed, err := s.ClaimScheduledAgentTask(ctx, task.ID, releasedTask.UpdatedAt, secondClaimAt)
+	if err != nil || !claimed || secondClaim.Token == "" || secondClaim.Token == firstClaim.Token {
+		t.Fatalf("claim scheduled agent task after release: claim=%#v claimed=%t err=%v", secondClaim, claimed, err)
+	}
+	staleRelease, err := s.ReleaseScheduledAgentTask(ctx, firstClaim, secondClaimAt.Add(time.Second))
+	if err != nil || staleRelease {
+		t.Fatalf("stale owner released new claim: released=%t err=%v", staleRelease, err)
+	}
+	newOwnerTask, err := s.GetAgentTask(ctx, task.ID)
+	if err != nil || newOwnerTask.Status != store.StatusRunning {
+		t.Fatalf("new owner claim after stale release = %#v err=%v", newOwnerTask, err)
+	}
+	recovered, err := s.RecoverScheduledAgentTask(ctx, task.ID, secondClaimAt.Add(2*time.Second))
+	if err != nil || !recovered {
+		t.Fatalf("recover new owner claim: recovered=%t err=%v", recovered, err)
+	}
+	pausedTask, err := s.GetAgentTask(ctx, task.ID)
+	if err != nil || pausedTask.Status != "paused" {
+		t.Fatalf("recovered task should be paused without replay: %#v err=%v", pausedTask, err)
+	}
+	secondReleased, err := s.ReleaseScheduledAgentTask(ctx, secondClaim, secondClaimAt.Add(3*time.Second))
+	if err != nil || secondReleased {
+		t.Fatalf("recovered owner released paused task: released=%t err=%v", secondReleased, err)
+	}
+	_, claimedWhilePaused, err := s.ClaimScheduledAgentTask(ctx, task.ID, pausedTask.UpdatedAt, secondClaimAt.Add(3*time.Second))
+	if err != nil || claimedWhilePaused {
+		t.Fatalf("recovered paused task replayed automatically: claimed=%t err=%v", claimedWhilePaused, err)
+	}
+	return secondClaim, pausedTask, secondClaimAt
+}
+
+func requireExplicitAgentTaskReschedule(t *testing.T, ctx context.Context, s store.Store, task store.AgentTask, pausedTask store.AgentTask, firstClaim store.AgentTaskClaim, secondClaim store.AgentTaskClaim, secondClaimAt time.Time) {
+	t.Helper()
+	pausedTask.Status = "scheduled"
+	pausedTask.UpdatedAt = secondClaimAt.Add(4 * time.Second)
+	rescheduledTask, err := s.UpsertAgentTask(ctx, pausedTask)
+	if err != nil {
+		t.Fatalf("explicitly reschedule recovered task: %v", err)
+	}
+	thirdClaimAt := rescheduledTask.UpdatedAt.Add(15 * time.Minute)
+	thirdClaim, claimed, err := s.ClaimScheduledAgentTask(ctx, task.ID, rescheduledTask.UpdatedAt, thirdClaimAt)
+	if err != nil || !claimed || thirdClaim.Token == firstClaim.Token || thirdClaim.Token == secondClaim.Token {
+		t.Fatalf("claim explicitly rescheduled task: claim=%#v claimed=%t err=%v", thirdClaim, claimed, err)
+	}
+	thirdReleased, err := s.ReleaseScheduledAgentTask(ctx, thirdClaim, thirdClaimAt.Add(time.Second))
+	if err != nil || !thirdReleased {
+		t.Fatalf("release explicitly rescheduled task: released=%t err=%v", thirdReleased, err)
+	}
+}
+
+func requireAgentTaskRunHistory(t *testing.T, ctx context.Context, s store.Store, task store.AgentTask) {
+	t.Helper()
 	run, err := s.RecordAgentTaskRun(ctx, store.AgentTaskRun{
 		ID:          "agent-task-run-001",
 		TaskID:      task.ID,

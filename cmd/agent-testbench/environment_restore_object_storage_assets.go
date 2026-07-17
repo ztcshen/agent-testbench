@@ -238,7 +238,7 @@ func environmentRestoreObjectStorageKindIsProviderConfig(kind string) bool {
 	objectCount := 0
 	for _, token := range environmentRestoreObjectStorageKindTokens(kind) {
 		switch token {
-		case "config", "credential", "credentials", "env", "secret", "secrets", "setting", "settings", "policy":
+		case "config", "credential", "credentials", "env", environmentSensitiveTokenSecret, "secrets", "setting", "settings", "policy":
 			hasConfig = true
 		case "s3", "bucket", "fixture", environmentRestoreAssetTokenSeed:
 			hasObjectFixture = true

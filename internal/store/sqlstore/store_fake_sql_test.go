@@ -44,6 +44,7 @@ type fakeSQLState struct {
 	queries   []fakeSQLCall
 	rows      []fakeRows
 	execErrs  []error
+	execRows  []int64
 	commits   int
 	rollbacks int
 }
@@ -58,6 +59,12 @@ func (s *fakeSQLState) queueExecError(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.execErrs = append(s.execErrs, err)
+}
+
+func (s *fakeSQLState) queueExecRowsAffected(rows int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.execRows = append(s.execRows, rows)
 }
 
 func (s *fakeSQLState) lastExec(t *testing.T) fakeSQLCall {
@@ -170,6 +177,11 @@ func (c fakeSQLConn) ExecContext(_ context.Context, query string, args []driver.
 		if err != nil {
 			return nil, err
 		}
+	}
+	if len(c.state.execRows) > 0 {
+		rows := c.state.execRows[0]
+		c.state.execRows = c.state.execRows[1:]
+		return driver.RowsAffected(rows), nil
 	}
 	return driver.RowsAffected(1), nil
 }

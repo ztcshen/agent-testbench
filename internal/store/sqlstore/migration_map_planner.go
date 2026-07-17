@@ -5,7 +5,9 @@ import "fmt"
 func coreMapPlannerSchemaSQL(d Dialect, types coreSchemaTypes) []string {
 	idType := types.runIDText
 	taskIDType := types.keyText
-	return []string{
+	leaseStatements := testMapPlanLeaseSchemaSQL(d, types)
+	statements := make([]string, 0, 8+len(leaseStatements))
+	statements = append(statements,
 		fmt.Sprintf(`
 create table if not exists test_map_plan_instances (
   plan_id %s primary key,
@@ -76,5 +78,21 @@ create table if not exists test_map_plan_task_edges (
   foreign key (plan_id) references test_map_plan_instances(plan_id) on delete cascade
 );`, idType, taskIDType, taskIDType, types.keyText, types.boolType, types.jsonType, types.jsonType, types.intType),
 		d.CreateIndexSQL("idx_test_map_plan_task_edges_to", "test_map_plan_task_edges", []string{"plan_id", "to_task_id", "edge_kind"}),
+	)
+	return append(statements, leaseStatements...)
+}
+
+func testMapPlanLeaseSchemaSQL(d Dialect, types coreSchemaTypes) []string {
+	return []string{
+		fmt.Sprintf(`
+create table if not exists test_map_plan_leases (
+  plan_id %s primary key,
+  owner_id %s not null,
+  lease_token %s not null,
+  lease_expires_at %s not null,
+  updated_at %s not null,
+  foreign key (plan_id) references test_map_plan_instances(plan_id) on delete cascade
+);`, types.runIDText, types.keyText, types.keyText, types.timeType, types.timeType),
+		d.CreateIndexSQL("idx_test_map_plan_leases_expiry", "test_map_plan_leases", []string{"lease_expires_at", "plan_id"}),
 	}
 }

@@ -31,19 +31,18 @@ func TestServerExecutesTestKitRunFromRuntimeConfig(t *testing.T) {
 	defer target.Close()
 
 	s := openTestKitSQLiteStore(t, ctx, "sandbox.sqlite")
-	seedRuntimeConfigCatalog(t, ctx, s)
-	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample", DisplayName: "Sample Profile"}, s))
+	seedRuntimeConfigCatalog(t, ctx, s, target.URL)
+	bundle := profile.Bundle{ID: "sample", DisplayName: "Sample Profile"}
+	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
 	defer server.Close()
 
-	var result map[string]any
-	postJSONInto(t, server.URL+"/api/test-kit/run", fmt.Sprintf(`{
-		"caseId":"case.alpha",
-		"workflowId":"workflow.alpha",
-			"stepId":"step.alpha",
-			"baseUrl":%q,
-		"overrides":{"id":"runtime-id","mode":"live","header":"selected"},
-		"timeoutSeconds":5
-	}`, target.URL), http.StatusOK, &result)
+	result, err := controlplane.RunTrustedTestKitCase(ctx, bundle, s, controlplane.TrustedTestKitRunRequest{
+		CaseID: "case.alpha", WorkflowID: "workflow.alpha", StepID: "step.alpha", TimeoutSeconds: 5,
+		Overrides: map[string]any{"id": "runtime-id", "mode": "live", "header": "selected"},
+	})
+	if err != nil {
+		t.Fatalf("run trusted runtime config case: %v", err)
+	}
 	if result["ok"] != true || result["status"] != store.StatusPassed {
 		t.Fatalf("test kit run result = %#v", result)
 	}
@@ -66,7 +65,7 @@ func TestServerTestKitRunHonorsExpectedResponseContains(t *testing.T) {
 		ProfileID: "sample",
 		IndexedAt: time.Now().UTC(),
 		APICases: []store.CatalogAPICase{
-			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha", Status: "active"},
+			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha", Status: "active", BaseURL: target.URL},
 		},
 		TemplateConfigs: []store.CatalogTemplateConfig{
 			{
@@ -92,16 +91,12 @@ func TestServerTestKitRunHonorsExpectedResponseContains(t *testing.T) {
 		t.Fatalf("replace profile catalog: %v", err)
 	}
 
-	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "sample", DisplayName: "Sample Profile"}, s))
-	defer server.Close()
-
-	var result map[string]any
-	postJSONInto(t, server.URL+"/api/test-kit/run", fmt.Sprintf(`{
-		"caseId":"case.alpha",
-		"workflowId":"workflow.alpha",
-		"stepId":"step.alpha",
-		"baseUrl":%q
-	}`, target.URL), http.StatusOK, &result)
+	result, err := controlplane.RunTrustedTestKitCase(ctx, profile.Bundle{ID: "sample", DisplayName: "Sample Profile"}, s, controlplane.TrustedTestKitRunRequest{
+		CaseID: "case.alpha", WorkflowID: "workflow.alpha", StepID: "step.alpha",
+	})
+	if err != nil {
+		t.Fatalf("run trusted expected-response case: %v", err)
+	}
 	if result["ok"] != false || !strings.Contains(fmt.Sprint(result["error"]), "response body missing") {
 		t.Fatalf("test kit result = %#v", result)
 	}
@@ -121,7 +116,7 @@ func TestServerTestKitRunFailsFastForBodylessWriteRequest(t *testing.T) {
 		ProfileID: "sample",
 		IndexedAt: time.Now().UTC(),
 		APICases: []store.CatalogAPICase{
-			{ID: "case.bodyless", DisplayName: "Bodyless Case", NodeID: "node.alpha", Status: "active"},
+			{ID: "case.bodyless", DisplayName: "Bodyless Case", NodeID: "node.alpha", Status: "active", BaseURL: target.URL},
 		},
 		TemplateConfigs: []store.CatalogTemplateConfig{
 			{
@@ -148,10 +143,9 @@ func TestServerTestKitRunFailsFastForBodylessWriteRequest(t *testing.T) {
 	defer server.Close()
 
 	var result map[string]any
-	postJSONInto(t, server.URL+"/api/test-kit/run", fmt.Sprintf(`{
-		"caseId":"case.bodyless",
-		"baseUrl":%q
-	}`, target.URL), http.StatusOK, &result)
+	postJSONInto(t, server.URL+"/api/test-kit/run", `{
+		"caseId":"case.bodyless"
+	}`, http.StatusOK, &result)
 	if targetCalled {
 		t.Fatal("bodyless write request should fail before sending HTTP")
 	}
@@ -175,7 +169,7 @@ func TestServerTestKitRunFailsAdmissionWhenRequiredInputMissing(t *testing.T) {
 		ProfileID: "sample",
 		IndexedAt: time.Now().UTC(),
 		APICases: []store.CatalogAPICase{
-			{ID: "case.requires-input", DisplayName: "Requires Input", NodeID: "node.alpha", Status: "active"},
+			{ID: "case.requires-input", DisplayName: "Requires Input", NodeID: "node.alpha", Status: "active", BaseURL: target.URL},
 		},
 		TemplateConfigs: []store.CatalogTemplateConfig{
 			{
@@ -204,10 +198,9 @@ func TestServerTestKitRunFailsAdmissionWhenRequiredInputMissing(t *testing.T) {
 	defer server.Close()
 
 	var result map[string]any
-	postJSONInto(t, server.URL+"/api/test-kit/run", fmt.Sprintf(`{
-		"caseId":"case.requires-input",
-		"baseUrl":%q
-	}`, target.URL), http.StatusOK, &result)
+	postJSONInto(t, server.URL+"/api/test-kit/run", `{
+		"caseId":"case.requires-input"
+	}`, http.StatusOK, &result)
 	if targetCalled {
 		t.Fatal("required-input case should fail before sending HTTP")
 	}
@@ -232,16 +225,12 @@ func TestServerExecutesTestKitRunFromStoreRegisteredServicePort(t *testing.T) {
 	s := openTestKitSQLiteStore(t, ctx, "sandbox.sqlite")
 	seedGatewayTestKitCatalog(t, ctx, s, targetPort, false)
 
-	server := httptest.NewServer(controlplane.NewWithStore(profile.Bundle{ID: "current"}, s))
-	defer server.Close()
-
-	var result map[string]any
-	postJSONInto(t, server.URL+"/api/test-kit/run", `{
-		"caseId":"case.gateway",
-		"workflowId":"workflow.gateway",
-		"stepId":"step.gateway",
-		"timeoutSeconds":5
-	}`, http.StatusOK, &result)
+	result, err := controlplane.RunTrustedTestKitCase(ctx, profile.Bundle{ID: "current"}, s, controlplane.TrustedTestKitRunRequest{
+		CaseID: "case.gateway", WorkflowID: "workflow.gateway", StepID: "step.gateway", TimeoutSeconds: 5,
+	})
+	if err != nil {
+		t.Fatalf("run trusted Store port case: %v", err)
+	}
 	if result["ok"] != true {
 		t.Fatalf("test kit run result=%#v", result)
 	}
@@ -275,16 +264,12 @@ func TestServerPrefersStoreRegisteredServicePortOverBundleServicePort(t *testing
 			{ID: "service.gateway", DisplayName: "Stale Gateway", Kind: "http", ServicePort: stalePort, Status: "active"},
 		},
 	}
-	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
-	defer server.Close()
-
-	var result map[string]any
-	postJSONInto(t, server.URL+"/api/test-kit/run", `{
-		"caseId":"case.gateway",
-		"workflowId":"workflow.gateway",
-		"stepId":"step.gateway",
-		"timeoutSeconds":5
-	}`, http.StatusOK, &result)
+	result, err := controlplane.RunTrustedTestKitCase(ctx, bundle, s, controlplane.TrustedTestKitRunRequest{
+		CaseID: "case.gateway", WorkflowID: "workflow.gateway", StepID: "step.gateway", TimeoutSeconds: 5,
+	})
+	if err != nil {
+		t.Fatalf("run trusted Store-first port case: %v", err)
+	}
 	if result["ok"] != true {
 		t.Fatalf("test kit run result=%#v", result)
 	}
@@ -413,7 +398,7 @@ func newRuntimeConfigTarget(t *testing.T) (*httptest.Server, *runtimeConfigTarge
 	return target, received
 }
 
-func seedRuntimeConfigCatalog(t *testing.T, ctx context.Context, s *sqlite.Store) {
+func seedRuntimeConfigCatalog(t *testing.T, ctx context.Context, s *sqlite.Store, baseURL string) {
 	t.Helper()
 
 	if err := s.ReplaceProfileCatalog(ctx, store.ProfileCatalog{
@@ -423,7 +408,7 @@ func seedRuntimeConfigCatalog(t *testing.T, ctx context.Context, s *sqlite.Store
 			{ID: "service.alpha", DisplayName: "Service Alpha", Kind: "app"},
 		},
 		APICases: []store.CatalogAPICase{
-			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha", Status: "active"},
+			{ID: "case.alpha", DisplayName: "Case Alpha", NodeID: "node.alpha", Status: "active", BaseURL: baseURL},
 		},
 		TemplateConfigs: []store.CatalogTemplateConfig{
 			{

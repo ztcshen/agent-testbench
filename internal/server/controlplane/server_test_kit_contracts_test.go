@@ -12,7 +12,7 @@ import (
 	"agent-testbench/internal/store"
 )
 
-func TestServerExposesTestKitRunContracts(t *testing.T) {
+func TestServerKeepsTestKitWorkflowMetadataOnTrustedBoundary(t *testing.T) {
 	ctx := context.Background()
 	s := openTestKitSQLiteStore(t, ctx, "sandbox.sqlite")
 
@@ -26,20 +26,34 @@ func TestServerExposesTestKitRunContracts(t *testing.T) {
 	server := httptest.NewServer(controlplane.NewWithStore(bundle, s))
 	defer server.Close()
 
-	var result map[string]any
+	var rejected map[string]any
 	postJSONInto(t, server.URL+"/api/test-kit/run", `{
 		"caseId":"case.alpha",
 		"workflowId":"workflow.alpha",
 			"stepId":"step.alpha"
-		}`, http.StatusOK, &result)
-	if result["ok"] != false || result["caseId"] != "case.alpha" || result["stepId"] != "step.alpha" {
-		t.Fatalf("test kit run result = %#v", result)
+		}`, http.StatusBadRequest, &rejected)
+	if rejected["ok"] != false || rejected["code"] != "trusted_execution_context_rejected" {
+		t.Fatalf("public test kit rejection = %#v", rejected)
 	}
 
 	runs := decodeJSONResponse(t, server.URL+"/api/runs", http.StatusOK)
 	workflowRuns := runs["workflowRuns"].([]any)
+	if len(workflowRuns) != 0 {
+		t.Fatalf("public metadata rejection must not create runs: %#v", runs)
+	}
+
+	result, err := controlplane.RunTrustedTestKitCase(ctx, bundle, s, controlplane.TrustedTestKitRunRequest{
+		CaseID:     "case.alpha",
+		WorkflowID: "workflow.alpha",
+		StepID:     "step.alpha",
+	})
+	if err != nil || result["ok"] != false || result["stepId"] != "step.alpha" {
+		t.Fatalf("trusted test kit run = %#v, %v", result, err)
+	}
+	runs = decodeJSONResponse(t, server.URL+"/api/runs", http.StatusOK)
+	workflowRuns = runs["workflowRuns"].([]any)
 	if len(workflowRuns) != 1 || workflowRuns[0].(map[string]any)["workflowId"] != "workflow.alpha" {
-		t.Fatalf("test kit run should be indexed in store: %#v", runs)
+		t.Fatalf("trusted test kit run should be indexed in store: %#v", runs)
 	}
 }
 

@@ -6,11 +6,13 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"agent-testbench/internal/store/sqlstore"
+	_ "modernc.org/sqlite"
 )
 
 type migrationDB struct {
@@ -54,11 +56,21 @@ func (m *migrationDB) queueExistingSchemaVersion(version int) {
 
 func (m *migrationDB) queueBootstrapFromEmptySchema() {
 	m.queueMissingSchemaVersionTable()
+	m.state.queueRows(fakeRows{
+		columns: []string{"column_exists"},
+		values:  [][]driver.Value{{int64(1)}},
+	})
 	m.queueExistingSchemaVersion(sqlstore.CurrentSchemaVersion)
 }
 
 func (m *migrationDB) queueUpgradeFromSchemaVersion(version int) {
 	m.queueExistingSchemaVersion(version)
+	if version < 22 {
+		m.state.queueRows(fakeRows{
+			columns: []string{"column_exists"},
+			values:  [][]driver.Value{{int64(0)}},
+		})
+	}
 	m.queueExistingSchemaVersion(sqlstore.CurrentSchemaVersion)
 }
 
@@ -516,6 +528,108 @@ func TestUpgradeSchemaWidensMySQLRuntimeIdentifiersFromVersionFour(t *testing.T)
 	)
 }
 
+func TestUpgradeSchemaAddsAgentTaskClaimTokenFromVersionTwentyOne(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		dialect sqlstore.Dialect
+		want    string
+		probe   string
+	}{
+		{name: "sqlite", dialect: sqlstore.SQLiteDialect{}, want: `alter table "agent_tasks" add column "claim_token" text not null default ''`, probe: "pragma_table_info('agent_tasks')"},
+		{name: "postgres", dialect: sqlstore.PostgresDialect{}, want: `alter table "agent_tasks" add column "claim_token" text not null default ''`, probe: "information_schema.columns"},
+		{name: "mysql", dialect: sqlstore.MySQLDialect{}, want: "alter table `agent_tasks` add column `claim_token` varchar(128) not null default ''", probe: "information_schema.columns"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			migration := newMigrationDB(t)
+			migration.queueUpgradeFromSchemaVersion(21)
+			status := migration.upgradeSchema(t, tt.dialect, "upgrade agent task claim token")
+			assertAppliedCoreSchema(t, status, "upgraded agent task claim token schema status")
+			assertSQLContains(t, migration.execSQL(), tt.name+" claim token migration", tt.want)
+			assertSQLContains(t, joinedSQLExecs(migration.state.queriesSnapshot()), tt.name+" claim token probe", tt.probe, "claim_token")
+		})
+	}
+}
+
+func TestUpgradeSchemaFromVersionEighteenHandlesAgentTasksPresence(t *testing.T) {
+	for _, withAgentTasks := range []bool{false, true} {
+		name := "without-agent-tasks"
+		if withAgentTasks {
+			name = "with-agent-tasks"
+		}
+		t.Run(name, func(t *testing.T) {
+			db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "store.sqlite"))
+			if err != nil {
+				t.Fatalf("open SQLite: %v", err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+			if _, err := db.Exec(`
+create table schema_versions (
+  version integer primary key,
+  name text not null,
+  applied_at text not null
+);
+insert into schema_versions (version, name, applied_at) values (18, 'legacy-v18', '2026-01-01T00:00:00Z');`); err != nil {
+				t.Fatalf("seed schema version 18: %v", err)
+			}
+			if withAgentTasks {
+				if _, err := db.Exec(`
+create table agent_tasks (
+  id text primary key,
+  name text not null unique,
+  kind text not null,
+  command text not null,
+  schedule text not null,
+  status text not null,
+  notify_json text not null,
+  summary_json text not null,
+  created_at text not null,
+  updated_at text not null
+);`); err != nil {
+					t.Fatalf("seed legacy agent_tasks: %v", err)
+				}
+			}
+
+			status, err := sqlstore.UpgradeSchema(context.Background(), db, sqlstore.SQLiteDialect{})
+			if err != nil {
+				t.Fatalf("upgrade SQLite v18 schema: %v", err)
+			}
+			assertAppliedCoreSchema(t, status, "SQLite v18 upgrade")
+			var claimTokenColumns int
+			if err := db.QueryRow(`select count(*) from pragma_table_info('agent_tasks') where name = 'claim_token'`).Scan(&claimTokenColumns); err != nil {
+				t.Fatalf("inspect claim_token: %v", err)
+			}
+			if claimTokenColumns != 1 {
+				t.Fatalf("claim_token column count = %d, want 1", claimTokenColumns)
+			}
+		})
+	}
+}
+
+func TestUpgradeSchemaReplaysAfterAgentTaskClaimTokenAlter(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		dialect sqlstore.Dialect
+	}{
+		{name: "sqlite", dialect: sqlstore.SQLiteDialect{}},
+		{name: "postgres", dialect: sqlstore.PostgresDialect{}},
+		{name: "mysql", dialect: sqlstore.MySQLDialect{}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			migration := newMigrationDB(t)
+			migration.queueExistingSchemaVersion(21)
+			migration.state.queueRows(fakeRows{
+				columns: []string{"column_exists"},
+				values:  [][]driver.Value{{int64(1)}},
+			})
+			migration.queueExistingSchemaVersion(sqlstore.CurrentSchemaVersion)
+			status := migration.upgradeSchema(t, tt.dialect, "replay agent task claim token migration")
+			assertAppliedCoreSchema(t, status, "replayed agent task claim token schema status")
+			alter := fmt.Sprintf("alter table %s add column %s", tt.dialect.QuoteIdent("agent_tasks"), tt.dialect.QuoteIdent("claim_token"))
+			assertSQLOmits(t, migration.execSQL(), tt.name+" claim token crash replay", alter)
+		})
+	}
+}
+
 func TestUpgradeSchemaAddsRunEnvironmentAndDropsLegacyServiceGraphTables(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -588,6 +702,10 @@ func TestUpgradeSchemaTreatsDuplicateMySQLIndexAsIdempotent(t *testing.T) {
 	migration := newMigrationDB(t)
 	dialect := sqlstore.MySQLDialect{}
 	migration.queueExistingSchemaVersion(4)
+	migration.state.queueRows(fakeRows{
+		columns: []string{"column_exists"},
+		values:  [][]driver.Value{{int64(0)}},
+	})
 
 	for i := 0; i < 3; i++ {
 		migration.state.queueExecError(nil)
@@ -603,6 +721,10 @@ func TestUpgradeSchemaIgnoresExistingMySQLIndexesDuringReplay(t *testing.T) {
 	migration := newMigrationDB(t)
 	dialect := sqlstore.MySQLDialect{}
 	migration.queueExistingSchemaVersion(4)
+	migration.state.queueRows(fakeRows{
+		columns: []string{"column_exists"},
+		values:  [][]driver.Value{{int64(0)}},
+	})
 
 	migration.state.queueExecError(nil)
 	migration.state.queueExecError(nil)
@@ -618,8 +740,12 @@ func TestUpgradeSchemaIgnoresExistingMySQLIndexesDuringIncrementalReplay(t *test
 	migration := newMigrationDB(t)
 	dialect := sqlstore.MySQLDialect{}
 	migration.queueExistingSchemaVersion(12)
+	migration.state.queueRows(fakeRows{
+		columns: []string{"column_exists"},
+		values:  [][]driver.Value{{int64(0)}},
+	})
 
-	for i := 0; i < len(sqlstore.CoreSchemaSQL(dialect))+1; i++ {
+	for i := 0; i < len(sqlstore.CoreSchemaSQL(dialect))+2; i++ {
 		migration.state.queueExecError(nil)
 	}
 	migration.state.queueExecError(errors.New("Error 1061 (42000): Duplicate key name 'idx_environment_files_kind_order'"))

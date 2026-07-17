@@ -363,6 +363,7 @@ func TestReadJSONPayloadPreservesLargeNumericOverrides(t *testing.T) {
 			"payout_id": 9161030727085880
 		}
 	}`))
+	request.Header.Set("Content-Type", "application/json")
 
 	payload, err := readJSONPayload(request)
 	if err != nil {
@@ -373,5 +374,17 @@ func TestReadJSONPayloadPreservesLargeNumericOverrides(t *testing.T) {
 
 	if rendered != "9161030727085880" {
 		t.Fatalf("rendered payout_id = %q", rendered)
+	}
+}
+
+func TestReadJSONPayloadRejectsBrowserSimpleRequestMediaTypes(t *testing.T) {
+	for _, contentType := range []string{"", "text/plain", "application/x-www-form-urlencoded", "multipart/form-data; boundary=test"} {
+		request := httptest.NewRequest(http.MethodPost, "/api/test-kit/run", strings.NewReader(`{"caseId":"case.alpha"}`))
+		if contentType != "" {
+			request.Header.Set("Content-Type", contentType)
+		}
+		if _, err := readJSONPayload(request); err == nil {
+			t.Fatalf("Content-Type %q was accepted", contentType)
+		}
 	}
 }

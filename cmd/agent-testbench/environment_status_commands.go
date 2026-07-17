@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 type environmentStatusReport struct {
@@ -18,13 +19,16 @@ type environmentStatusReport struct {
 	Error                string                           `json:"error,omitempty"`
 }
 
+const environmentLifecycleActionInspectStatusCommand = "inspect-status-command"
+
 type environmentStatusDockerReport struct {
-	OK          bool                             `json:"ok"`
-	Action      string                           `json:"action"`
-	ComposeFile string                           `json:"composeFile,omitempty"`
-	Summary     environmentStatusHealthSummary   `json:"summary"`
-	Services    []environmentStatusServiceReport `json:"services,omitempty"`
-	Error       string                           `json:"error,omitempty"`
+	OK           bool                                  `json:"ok"`
+	Action       string                                `json:"action"`
+	ComposeFile  string                                `json:"composeFile,omitempty"`
+	Summary      environmentStatusHealthSummary        `json:"summary"`
+	Services     []environmentStatusServiceReport      `json:"services,omitempty"`
+	HealthChecks []environmentRestoreHealthCheckReport `json:"healthChecks,omitempty"`
+	Error        string                                `json:"error,omitempty"`
 }
 
 type environmentStatusHealthSummary struct {
@@ -63,17 +67,18 @@ func runEnvironmentStatus(ctx context.Context, args []string) error {
 		VerificationWorkflow: plan.WorkflowID,
 		ComponentGraph:       environmentRestoreComponentGraphReport(env.ID, graph),
 	}
-	report.Docker = environmentStatusDocker(ctx, plan.Compose, plan.Workspace, plan.HealthChecks)
+	report.Docker = environmentStatusDocker(ctx, plan.Compose, plan.Workspace, plan.HealthChecks, options.HealthTimeout)
 	if !report.Docker.OK {
 		report.OK = false
 		report.Error = report.Docker.Error
 	}
+	outputReport := environmentStatusReportForOutput(report, plan.Compose)
 	if options.JSONOutput {
-		if err := writeIndentedJSON(report); err != nil {
+		if err := writeIndentedJSON(outputReport); err != nil {
 			return err
 		}
 	} else {
-		printEnvironmentStatusReport(report)
+		printEnvironmentStatusReport(outputReport)
 	}
 	if !report.OK {
 		return errors.New("environment status did not pass")
@@ -81,17 +86,20 @@ func runEnvironmentStatus(ctx context.Context, args []string) error {
 	return nil
 }
 
-func environmentStatusDocker(ctx context.Context, compose map[string]any, workspace string, healthChecks []any) environmentStatusDockerReport {
+func environmentStatusDocker(ctx context.Context, compose map[string]any, workspace string, healthChecks []any, healthTimeout time.Duration) environmentStatusDockerReport {
 	composeFiles := environmentRestoreComposeFiles(compose)
 	report := environmentStatusDockerReport{OK: true, Action: "inspect-compose-services", ComposeFile: strings.Join(environmentRestoreResolvedComposeFiles(workspace, composeFiles), ",")}
 	if len(composeFiles) == 0 {
+		if strings.TrimSpace(valueString(compose["startCommand"])) != "" {
+			return environmentStatusStartCommand(ctx, compose, workspace, healthChecks, healthTimeout)
+		}
 		report.Action = "no-compose-plan"
-		report.Error = "environment status requires a recorded composeFile"
+		report.Error = "environment status requires a recorded composeFile or startCommand"
 		report.OK = false
 		return report
 	}
 	composeBaseArgs := environmentRestoreComposeBaseArgs(compose, workspace, environmentRestoreResolvedComposeFiles(workspace, composeFiles))
-	if !prepareEnvironmentLifecycleComposeFiles(&report, compose, workspace) {
+	if !validateEnvironmentLifecycleComposeFiles(&report, compose, workspace) {
 		return report
 	}
 	services := environmentLifecycleComposeServices(compose, workspace)
@@ -110,6 +118,100 @@ func environmentStatusDocker(ctx context.Context, compose map[string]any, worksp
 	}
 	report.Summary = environmentStatusSummarizeServices(report.Services)
 	return report
+}
+
+func environmentStatusStartCommand(ctx context.Context, compose map[string]any, workspace string, healthChecks []any, healthTimeout time.Duration) environmentStatusDockerReport {
+	statusCommand := strings.TrimSpace(valueString(compose["statusCommand"]))
+	if statusCommand != "" {
+		return environmentStatusRunCommand(ctx, workspace, statusCommand)
+	}
+	if len(healthChecks) == 0 {
+		return environmentStatusDockerReport{
+			OK:     false,
+			Action: "inspect-health-probes",
+			Error:  "startCommand environment status requires a recorded statusCommand or health probe",
+		}
+	}
+	if healthTimeout <= 0 {
+		healthTimeout = 5 * time.Second
+	}
+	report := environmentStatusDockerReport{OK: true, Action: "inspect-health-probes"}
+	report.HealthChecks = waitEnvironmentRestoreHealthChecks(ctx, healthChecks, healthTimeout, workspace, nil)
+	for index := range report.HealthChecks {
+		check := environmentStatusSanitizeHealthCheck(report.HealthChecks[index])
+		report.HealthChecks[index] = check
+		if check.OK {
+			continue
+		}
+		report.OK = false
+		if report.Error == "" {
+			report.Error = environmentRestoreHealthFailureError(check)
+		}
+	}
+	if len(report.HealthChecks) == 0 {
+		report.OK = false
+		report.Error = "startCommand environment status has no supported health probe"
+	}
+	report.Summary = environmentStatusSummarizeHealthChecks(report.HealthChecks)
+	return report
+}
+
+func environmentStatusRunCommand(ctx context.Context, workspace string, statusCommand string) environmentStatusDockerReport {
+	result := runAgentObservedCommand(ctx, agentObservedCommandOptions{
+		Workdir:             workspace,
+		Command:             []string{posixShellPath, "-c", statusCommand},
+		SuppressEventOutput: true,
+	})
+	check := environmentRestoreHealthCheckReport{
+		ID:          "environment-status-command",
+		Kind:        "command",
+		OK:          result.Err == nil,
+		ExitCode:    result.ExitCode,
+		HasExitCode: true,
+	}
+	if result.Err != nil {
+		check.Error = fmt.Sprintf("statusCommand exited with code %d", result.ExitCode)
+	}
+	report := environmentStatusDockerReport{
+		OK:           check.OK,
+		Action:       environmentLifecycleActionInspectStatusCommand,
+		HealthChecks: []environmentRestoreHealthCheckReport{check},
+	}
+	if !check.OK {
+		report.Error = check.Error
+	}
+	report.Summary = environmentStatusSummarizeHealthChecks(report.HealthChecks)
+	return report
+}
+
+func environmentStatusSanitizeHealthCheck(check environmentRestoreHealthCheckReport) environmentRestoreHealthCheckReport {
+	check.Output = ""
+	if check.Kind != "command" {
+		return check
+	}
+	check.Command = ""
+	if !check.OK {
+		check.Error = "command health probe did not pass"
+	}
+	return check
+}
+
+func environmentStatusSummarizeHealthChecks(checks []environmentRestoreHealthCheckReport) environmentStatusHealthSummary {
+	summary := environmentStatusHealthSummary{Total: len(checks)}
+	for _, check := range checks {
+		if strings.EqualFold(strings.TrimSpace(check.State), "running") {
+			summary.Running++
+		}
+		if strings.EqualFold(strings.TrimSpace(check.Health), "healthy") {
+			summary.Healthy++
+		}
+		if check.OK {
+			summary.Ready++
+		} else {
+			summary.Failed++
+		}
+	}
+	return summary
 }
 
 func inspectEnvironmentComposeServices(ctx context.Context, services []string, workspace string, composeBaseArgs []string, healthChecks []any) []environmentRestoreHealthCheckReport {

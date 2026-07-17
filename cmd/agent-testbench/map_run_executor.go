@@ -4,10 +4,11 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"net/http/httptest"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"agent-testbench/internal/domain/mapplanner"
@@ -28,6 +29,13 @@ type mapRunExecutor struct {
 	matByID       map[string]store.TestPlanMaterialization
 	statusByTask  map[string]string
 	exportsByTask map[string]map[string]any
+	checkpoint    *mapRunCheckpointState
+	lease         *mapRunLeaseState
+	mu            *sync.Mutex
+}
+
+type mapRunCheckpointState struct {
+	err error
 }
 
 type mapRunStepResult struct {
@@ -53,6 +61,8 @@ func newMapRunExecutor(ctx context.Context, runtime store.Store, graph store.Tes
 		matByID:       map[string]store.TestPlanMaterialization{},
 		statusByTask:  map[string]string{},
 		exportsByTask: map[string]map[string]any{},
+		checkpoint:    &mapRunCheckpointState{},
+		mu:            &sync.Mutex{},
 	}
 	for _, path := range graph.Paths {
 		executor.pathByID[path.ID] = path
@@ -76,49 +86,200 @@ func newMapRunExecutor(ctx context.Context, runtime store.Store, graph store.Tes
 
 func (e mapRunExecutor) execute(record store.TestMapPlanRecord) store.TestMapPlanRecord {
 	now := time.Now().UTC()
-	for _, i := range mapRunTaskExecutionOrder(record.Tasks, record.TaskEdges) {
-		task := &record.Tasks[i]
-		if task.Status == mapplanner.TaskStatusSkipped || task.Kind == mapplanner.TaskSkip {
-			e.restoreTaskExports(*task)
-			e.statusByTask[task.ID] = mapplanner.TaskStatusSkipped
+	concurrency := e.options.concurrency
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+	for _, wave := range mapRunTaskExecutionWaves(record.Tasks, record.TaskEdges) {
+		if e.executionStopped() {
+			break
+		}
+		if concurrency == 1 || len(wave) == 1 {
+			for _, index := range wave {
+				if e.executionStopped() {
+					break
+				}
+				e.executeTask(record.Instance, record.TaskEdges, &record.Tasks[index], now)
+			}
 			continue
 		}
-		if !mapRunTaskSelectedForExecution(*task, e.options) || !mapRunTaskRunnable(*task, e.options) {
-			e.restoreTaskExports(*task)
-			e.statusByTask[task.ID] = task.Status
-			continue
+		limit := make(chan struct{}, concurrency)
+		var group sync.WaitGroup
+		for _, index := range wave {
+			index := index
+			group.Add(1)
+			go func() {
+				defer group.Done()
+				if e.executionStopped() {
+					return
+				}
+				limit <- struct{}{}
+				defer func() { <-limit }()
+				if e.executionStopped() {
+					return
+				}
+				e.executeTask(record.Instance, record.TaskEdges, &record.Tasks[index], now)
+			}()
 		}
-		if blockedReason := e.blockedByDependency(record.TaskEdges, task.ID); blockedReason != "" {
-			e.finishTask(task, mapplanner.TaskStatusBlocked, map[string]any{"error": blockedReason}, now)
-			e.statusByTask[task.ID] = task.Status
-			continue
-		}
-		task.StartedAt = time.Now().UTC()
-		task.Status = mapplanner.TaskStatusRunning
-		switch task.Kind {
-		case mapplanner.TaskRunPath:
-			e.executePathTask(record.Instance, task, "")
-		case mapplanner.TaskRunPathPrefix:
-			e.executePathTask(record.Instance, task, taskUntilNodeID(*task))
-		case mapplanner.TaskRunCase:
-			e.executeCaseTask(record.Instance, task, record.TaskEdges)
-		case mapplanner.TaskReuseMaterialized:
-			e.executeMaterializedTask(task)
-		default:
-			e.finishTask(task, store.StatusFailed, map[string]any{"error": "unsupported map task kind: " + task.Kind}, task.StartedAt)
-		}
-		e.statusByTask[task.ID] = task.Status
+		group.Wait()
 	}
 	record.Instance.FinishedAt = time.Now().UTC()
 	record.Instance.Status = mapRunStatus(record.Tasks)
 	record.Instance.SummaryJSON = mustCompactJSON(mapRunSummaryFromTasks(record.Tasks))
+	if e.lease != nil {
+		e.recordLeaseError(e.finishClaimedInstance(record.Instance))
+	} else {
+		e.checkpointInstance(record.Instance)
+	}
 	return record
 }
 
-func mapRunTaskExecutionOrder(tasks []store.TestMapPlanTask, edges []store.TestMapPlanTaskEdge) []int {
+func (e mapRunExecutor) executeTask(instance store.TestMapPlanInstance, edges []store.TestMapPlanTaskEdge, task *store.TestMapPlanTask, now time.Time) {
+	if e.executionStopped() {
+		return
+	}
+	if task.Status == mapplanner.TaskStatusSkipped || task.Kind == mapplanner.TaskSkip {
+		e.restoreTaskExports(*task)
+		e.setTaskStatus(task.ID, mapplanner.TaskStatusSkipped)
+		return
+	}
+	if !mapRunTaskSelectedForExecution(*task, e.options) || !mapRunTaskRunnable(*task, e.options) {
+		e.restoreTaskExports(*task)
+		e.setTaskStatus(task.ID, task.Status)
+		return
+	}
+	if blockedReason := e.blockedByDependency(edges, task.ID); blockedReason != "" {
+		e.finishTask(task, mapplanner.TaskStatusBlocked, map[string]any{"error": blockedReason}, now)
+		e.checkpointTask(*task)
+		e.setTaskStatus(task.ID, task.Status)
+		return
+	}
+	task.StartedAt = time.Now().UTC()
+	task.Status = mapplanner.TaskStatusRunning
+	e.checkpointTask(*task)
+	if err := e.executionError(); err != nil {
+		e.finishTask(task, store.StatusFailed, map[string]any{
+			"error":           "persist running task checkpoint: " + err.Error(),
+			"failureCategory": "checkpoint-persistence-error",
+		}, time.Now().UTC())
+		e.setTaskStatus(task.ID, task.Status)
+		return
+	}
+	switch task.Kind {
+	case mapplanner.TaskRunPath:
+		e.executePathTask(instance, task, "")
+	case mapplanner.TaskRunPathPrefix:
+		e.executePathTask(instance, task, taskUntilNodeID(*task))
+	case mapplanner.TaskRunCase:
+		e.executeCaseTask(instance, task, edges)
+	case mapplanner.TaskReuseMaterialized:
+		e.executeMaterializedTask(task)
+	default:
+		e.finishTask(task, store.StatusFailed, map[string]any{"error": "unsupported map task kind: " + task.Kind}, task.StartedAt)
+	}
+	e.setTaskStatus(task.ID, task.Status)
+	e.checkpointTask(*task)
+}
+
+func (e mapRunExecutor) checkpointTask(task store.TestMapPlanTask) {
+	if e.runtime == nil || e.checkpoint == nil {
+		return
+	}
+	e.mu.Lock()
+	failed := e.checkpoint.err != nil
+	e.mu.Unlock()
+	if failed {
+		return
+	}
+	if e.lease != nil {
+		e.recordLeaseError(e.checkpointClaimedTask(task))
+		return
+	}
+	checkpointStore, ok := e.runtime.(store.MapPlannerCheckpointStore)
+	if !ok {
+		e.recordCheckpointError(errors.New("store does not support test map task checkpoints"))
+		return
+	}
+	e.recordCheckpointError(checkpointStore.UpdateTestMapPlanTask(e.ctx, task))
+}
+
+func (e mapRunExecutor) checkpointInstance(instance store.TestMapPlanInstance) {
+	if e.runtime == nil || e.checkpoint == nil {
+		return
+	}
+	e.mu.Lock()
+	failed := e.checkpoint.err != nil
+	e.mu.Unlock()
+	if failed {
+		return
+	}
+	checkpointStore, ok := e.runtime.(store.MapPlannerCheckpointStore)
+	if !ok {
+		e.recordCheckpointError(errors.New("store does not support test map plan checkpoints"))
+		return
+	}
+	e.recordCheckpointError(checkpointStore.UpdateTestMapPlanInstance(e.ctx, instance))
+}
+
+func (e mapRunExecutor) checkpointError() error {
+	if e.checkpoint == nil {
+		return nil
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.checkpoint.err
+}
+
+func (e mapRunExecutor) executionError() error {
+	if err := e.checkpointError(); err != nil {
+		return err
+	}
+	return context.Cause(e.ctx)
+}
+
+func (e mapRunExecutor) executionStopped() bool {
+	return e.executionError() != nil
+}
+
+func (e mapRunExecutor) recordCheckpointError(err error) {
+	if err == nil {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.checkpoint.err == nil {
+		e.checkpoint.err = err
+	}
+}
+
+func (e mapRunExecutor) setTaskStatus(taskID string, status string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.statusByTask[taskID] = status
+}
+
+func (e mapRunExecutor) taskStatus(taskID string) string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.statusByTask[taskID]
+}
+
+func (e mapRunExecutor) setTaskExports(taskID string, exports map[string]any) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.exportsByTask[taskID] = mapRunCopyStringAnyMap(exports)
+}
+
+func (e mapRunExecutor) taskExports(taskID string) map[string]any {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return mapRunCopyStringAnyMap(e.exportsByTask[taskID])
+}
+
+func mapRunTaskExecutionWaves(tasks []store.TestMapPlanTask, edges []store.TestMapPlanTaskEdge) [][]int {
 	taskIndex := map[string]int{}
-	for i, task := range tasks {
-		taskIndex[task.ID] = i
+	for index, task := range tasks {
+		taskIndex[task.ID] = index
 	}
 	indegree := make([]int, len(tasks))
 	dependents := map[int][]int{}
@@ -134,36 +295,36 @@ func mapRunTaskExecutionOrder(tasks []store.TestMapPlanTask, edges []store.TestM
 		indegree[to]++
 		dependents[from] = append(dependents[from], to)
 	}
-	ready := make([]int, 0, len(tasks))
-	for i := range tasks {
-		if indegree[i] == 0 {
-			ready = append(ready, i)
+	ready := []int{}
+	for index := range tasks {
+		if indegree[index] == 0 {
+			ready = append(ready, index)
 		}
 	}
-	order := make([]int, 0, len(tasks))
+	waves := [][]int{}
 	queued := map[int]bool{}
 	for len(ready) > 0 {
 		sort.Ints(ready)
-		current := ready[0]
-		ready = ready[1:]
-		if queued[current] {
-			continue
-		}
-		queued[current] = true
-		order = append(order, current)
-		for _, dependent := range dependents[current] {
-			indegree[dependent]--
-			if indegree[dependent] == 0 {
-				ready = append(ready, dependent)
+		wave := append([]int(nil), ready...)
+		waves = append(waves, wave)
+		next := []int{}
+		for _, current := range wave {
+			queued[current] = true
+			for _, dependent := range dependents[current] {
+				indegree[dependent]--
+				if indegree[dependent] == 0 {
+					next = append(next, dependent)
+				}
 			}
 		}
+		ready = next
 	}
-	for i := range tasks {
-		if !queued[i] {
-			order = append(order, i)
+	for index := range tasks {
+		if !queued[index] {
+			waves = append(waves, []int{index})
 		}
 	}
-	return order
+	return waves
 }
 
 func mapRunTaskRunnable(task store.TestMapPlanTask, options mapRunOptions) bool {
@@ -178,7 +339,7 @@ func (e mapRunExecutor) blockedByDependency(edges []store.TestMapPlanTaskEdge, t
 		if edge.ToTaskID != taskID || !edge.Required {
 			continue
 		}
-		status := e.statusByTask[edge.FromTaskID]
+		status := e.taskStatus(edge.FromTaskID)
 		if status == store.StatusPassed || status == mapplanner.TaskStatusSkipped {
 			continue
 		}
@@ -195,8 +356,20 @@ func (e mapRunExecutor) executePathTask(instance store.TestMapPlanInstance, task
 	exports := map[string]any{}
 	status := store.StatusPassed
 	for _, step := range steps {
+		if err := e.executionError(); err != nil {
+			status = store.StatusFailed
+			break
+		}
 		result := e.executeStepCase(instance, *task, step, runID, overrides)
 		results = append(results, result)
+		task.SummaryJSON = mustCompactJSON(map[string]any{"steps": results, "checkpoint": true})
+		e.checkpointTask(*task)
+		if err := e.executionError(); err != nil {
+			results[len(results)-1].Status = store.StatusFailed
+			results[len(results)-1].Error = "persist step checkpoint: " + err.Error()
+			status = store.StatusFailed
+			break
+		}
 		if result.Status != store.StatusPassed {
 			status = store.StatusFailed
 			break
@@ -207,7 +380,7 @@ func (e mapRunExecutor) executePathTask(instance store.TestMapPlanInstance, task
 	}
 	if status == store.StatusPassed && len(overrides) > 0 {
 		exports = mapRunCopyStringAnyMap(overrides)
-		e.exportsByTask[task.ID] = exports
+		e.setTaskExports(task.ID, exports)
 	}
 	finishedAt := time.Now().UTC()
 	if len(steps) == 0 {
@@ -219,6 +392,11 @@ func (e mapRunExecutor) executePathTask(instance store.TestMapPlanInstance, task
 	if len(exports) > 0 {
 		runSummary["exports"] = exports
 		taskSummary["exports"] = exports
+	}
+	if err := e.fenceMapRunOwnership(); err != nil {
+		taskSummary["error"] = "map plan ownership changed before aggregate run persistence: " + err.Error()
+		e.finishTask(task, store.StatusFailed, taskSummary, finishedAt)
+		return
 	}
 	_, err := e.runtime.CreateRun(e.ctx, store.Run{
 		ID:                 runID,
@@ -277,7 +455,7 @@ func (e mapRunExecutor) dependencyOverrides(edges []store.TestMapPlanTaskEdge, t
 		if edge.ToTaskID != taskID || !edge.Required {
 			continue
 		}
-		for key, value := range e.exportsByTask[edge.FromTaskID] {
+		for key, value := range e.taskExports(edge.FromTaskID) {
 			out[key] = value
 		}
 	}
@@ -292,7 +470,7 @@ func (e mapRunExecutor) restoreTaskExports(task store.TestMapPlanTask) {
 	if len(exports) == 0 {
 		return
 	}
-	e.exportsByTask[task.ID] = mapRunCopyStringAnyMap(exports)
+	e.setTaskExports(task.ID, exports)
 }
 
 func (e mapRunExecutor) executeStepCase(instance store.TestMapPlanInstance, task store.TestMapPlanTask, step store.TestPlanPathStep, workflowRunID string, overrides map[string]any) mapRunStepResult {
@@ -336,7 +514,14 @@ func (e mapRunExecutor) runCatalogCase(instance store.TestMapPlanInstance, task 
 		RunID:     runID,
 		Overrides: overrides,
 	}
-	return runner.Run(e.ctx, request)
+	if err := e.fenceMapRunOwnership(); err != nil {
+		return map[string]any{"status": store.StatusFailed, "error": err.Error()}, err
+	}
+	result, err := runner.Run(e.ctx, request)
+	if leaseErr := e.executionError(); leaseErr != nil {
+		return result, fmt.Errorf("map plan ownership changed during case execution: %w", leaseErr)
+	}
+	return result, err
 }
 
 func (e mapRunExecutor) catalogCasePayload(request mapCaseRunRequest) map[string]any {
@@ -468,10 +653,23 @@ func (e mapRunExecutor) stepExecutionConfig(task store.TestMapPlanTask, step sto
 }
 
 func runCatalogCaseOnRuntime(ctx context.Context, runtime store.Store, profileID string, payload map[string]any) (map[string]any, error) {
-	handler := controlplane.NewWithStore(profile.Bundle{ID: strings.TrimSpace(profileID)}, runtime)
-	server := httptest.NewServer(handler)
-	defer server.Close()
-	result, err := postReportMapWithContext(ctx, server.URL+"/api/test-kit/run", payload)
+	result, err := controlplane.RunTrustedTestKitCase(ctx, profile.Bundle{ID: strings.TrimSpace(profileID)}, runtime, controlplane.TrustedTestKitRunRequest{
+		CaseID:             valueString(payload["caseId"]),
+		WorkflowID:         valueString(payload["workflowId"]),
+		StepID:             valueString(payload["stepId"]),
+		Overrides:          mapFromReportAny(payload["overrides"]),
+		TimeoutSeconds:     intFromReportAny(payload["timeoutSeconds"]),
+		BaseURL:            valueString(payload["baseUrl"]),
+		EvidenceDir:        valueString(payload["evidenceDir"]),
+		RunID:              valueString(payload["runId"]),
+		EnvironmentID:      valueString(payload["environmentId"]),
+		TestPlanMapID:      valueString(payload["testPlanMapId"]),
+		TestPlanPathID:     valueString(payload["testPlanPathId"]),
+		TestPlanNodeID:     valueString(payload["testPlanNodeId"]),
+		TestPlanOperation:  valueString(payload["testPlanOperation"]),
+		PlannerSummary:     mapFromReportAny(payload["plannerSummary"]),
+		InlineTraceCollect: boolFromReportAny(payload["inlineTraceCollect"]),
+	})
 	if err != nil {
 		return nil, err
 	}

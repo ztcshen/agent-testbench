@@ -7,8 +7,36 @@ import (
 	"time"
 
 	"agent-testbench/internal/domain/profile"
+	"agent-testbench/internal/domain/profilecatalog"
 	"agent-testbench/internal/store"
 )
+
+func TestServerUsesStoreCatalogForCaseSuiteMaintenance(t *testing.T) {
+	ctx, s := openCaseSuiteRouteStore(t)
+	bootstrap := caseSuiteAlphaBundle([]profile.APICase{
+		{ID: "case.bootstrap", DisplayName: "Bootstrap Case", NodeID: "node.alpha", Tags: []string{"bootstrap"}, Status: "active"},
+	})
+	current := caseSuiteAlphaBundle([]profile.APICase{
+		{ID: "case.store", DisplayName: "Store Case", NodeID: "node.alpha", Tags: []string{"store"}, Status: "active"},
+	})
+	if err := s.ReplaceProfileCatalog(ctx, profilecatalog.FromBundle(current, time.Now().UTC())); err != nil {
+		t.Fatalf("replace Store catalog: %v", err)
+	}
+	server := serveCaseSuiteRouteBundle(t, bootstrap, s)
+
+	payload := decodeJSONResponse(t, server.URL+"/api/case/suite-coverage?tag=store&status=active", http.StatusOK)
+	counts := payload["counts"].(map[string]any)
+	if counts["total"] != float64(1) {
+		t.Fatalf("suite coverage should use Store catalog: %#v", payload)
+	}
+	items := caseSuiteItemsByCase(t, payload)
+	if _, ok := items["case.store"]; !ok {
+		t.Fatalf("suite coverage missing Store-only case: %#v", items)
+	}
+	if _, ok := items["case.bootstrap"]; ok {
+		t.Fatalf("suite coverage retained stale bootstrap case: %#v", items)
+	}
+}
 
 func TestServerExposesCaseSuiteCoverageByMaintenanceFilters(t *testing.T) {
 	ctx, s := openCaseSuiteRouteStore(t)

@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"agent-testbench/internal/domain/environmentsource"
 	"agent-testbench/internal/store"
 )
 
@@ -83,10 +84,11 @@ func environmentBootstrapRepoPlan(env store.Environment, workspace string) []map
 		specByID[id] = spec
 	}
 	ids := make([]string, 0, len(specByID))
-	for id := range specByID {
-		if strings.TrimSpace(id) != "" {
-			ids = append(ids, id)
+	for id, spec := range specByID {
+		if strings.TrimSpace(id) == "" || !environmentBootstrapRepoHasSource(spec) {
+			continue
 		}
+		ids = append(ids, id)
 	}
 	sort.Strings(ids)
 	out := make([]map[string]any, 0, len(ids))
@@ -122,6 +124,17 @@ func environmentBootstrapRepoPlan(env store.Environment, workspace string) []map
 		})
 	}
 	return out
+}
+
+func environmentBootstrapRepoHasSource(spec map[string]string) bool {
+	checkout := strings.TrimSpace(spec["checkout"])
+	return (environmentsource.RepoSpec{
+		URL:              strings.TrimSpace(spec["url"]),
+		Branch:           strings.TrimSpace(spec["branch"]),
+		Ref:              strings.TrimSpace(spec["ref"]),
+		Checkout:         checkout,
+		CheckoutExplicit: checkout != "",
+	}).HasSource()
 }
 
 func environmentBootstrapDockerPlan(compose map[string]any, workspace string) map[string]any {

@@ -19,6 +19,28 @@ permissions:
   contents: read
 
 jobs:
+  docker-integration:
+    name: Docker Compose integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify Docker daemon and Compose
+        run: |
+          docker info
+          docker compose version
+
+      - name: Run real Docker lifecycle integration
+        run: make test-docker-integration
+
   secret-scan:
     name: Secret scan
     runs-on: ubuntu-latest

@@ -173,5 +173,5 @@ func environmentPayload(env store.Environment) map[string]any {
 	if !env.LastVerifiedAt.IsZero() {
 		payload["lastVerifiedAt"] = env.LastVerifiedAt
 	}
-	return payload
+	return environmentPayloadForOutput(payload)
 }

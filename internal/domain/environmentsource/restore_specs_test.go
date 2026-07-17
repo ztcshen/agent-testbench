@@ -39,6 +39,24 @@ func TestRepoSpecsMergesServicesOverRepoMapAndResolvesCheckouts(t *testing.T) {
 	}
 }
 
+func TestRepoSpecsSkipsInventoryOnlyServicesWithoutSource(t *testing.T) {
+	workspace := t.TempDir()
+
+	got := RepoSpecs(
+		`{}`,
+		`[{"id":"compose-only"},{"id":"remote","repo":"https://example.com/team/remote.git"}]`,
+		workspace,
+	)
+	want := []RepoSpec{{
+		ServiceID: "remote",
+		URL:       "https://example.com/team/remote.git",
+		Checkout:  filepath.Join(workspace, "remote"),
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("source-bearing repo specs mismatch\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
 func TestPackageSpecFromComposeDefaultsCheckoutToWorkspace(t *testing.T) {
 	workspace := t.TempDir()
 

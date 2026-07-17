@@ -285,7 +285,7 @@ func persistWorkflowStepRuntimeLogs(ctx context.Context, runtime store.Store, ru
 	}
 	dir := run.EvidenceRoot
 	if strings.TrimSpace(dir) == "" {
-		dir = filepath.Join(".runtime", "evidence", run.ID)
+		dir = filepath.Join(".runtime", apiFieldEvidence, run.ID)
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return

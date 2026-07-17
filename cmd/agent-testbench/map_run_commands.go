@@ -14,6 +14,8 @@ import (
 	"agent-testbench/internal/store"
 )
 
+const mapRunFailureInterruptedUnknownOutcome = "interrupted-unknown-outcome"
+
 type mapRunOptions struct {
 	storeRef         string
 	storeURL         string
@@ -30,6 +32,7 @@ type mapRunOptions struct {
 	baseURL          string
 	evidenceDir      string
 	timeoutSeconds   int
+	concurrency      int
 	resumeRun        bool
 	retryFailed      bool
 	skipPassed       bool
@@ -54,12 +57,17 @@ func runMapRun(ctx context.Context, args []string) error {
 	if err := validateMapRunCatalogPreflight(ctx, runtime, graph, record); err != nil {
 		return err
 	}
-	if err := runtime.SaveTestMapPlan(ctx, record); err != nil {
+	executionCtx, cancelExecution := context.WithCancelCause(ctx)
+	defer cancelExecution(nil)
+	leaseStore, lease, record, err := claimMapRunPlan(executionCtx, runtime, record, options)
+	if err != nil {
 		return err
 	}
-	executor := newMapRunExecutor(ctx, runtime, graph, options)
+	executor := newMapRunExecutor(executionCtx, runtime, graph, options)
+	executor.attachLease(leaseStore, lease, cancelExecution)
+	executor.startLeaseHeartbeat()
 	record = executor.execute(record)
-	if err := runtime.SaveTestMapPlan(ctx, record); err != nil {
+	if err := executor.checkpointError(); err != nil {
 		return err
 	}
 	report := mapRunReportFromRecord(record)
@@ -95,6 +103,7 @@ func parseMapRunOptions(args []string) (mapRunOptions, error) {
 	baseURL := flags.String("base-url", "", "Base URL override for API case execution")
 	evidenceDir := flags.String("evidence-dir", filepath.Join(".runtime", "map-runs"), "Evidence output directory")
 	timeoutSeconds := flags.Int("timeout-seconds", 0, "Request timeout in seconds for Store catalog case execution")
+	concurrency := flags.Int("concurrency", 1, "Maximum independent map tasks to execute concurrently")
 	resumeRun := flags.Bool("resume", false, "Resume an existing plan by keeping passed/skipped tasks and running incomplete tasks")
 	retryFailed := flags.Bool("retry-failed", false, "Retry failed or blocked tasks in an existing plan")
 	skipPassed := flags.Bool("skip-passed", false, "Keep passed/skipped tasks when executing an existing plan")
@@ -122,11 +131,15 @@ func parseMapRunOptions(args []string) (mapRunOptions, error) {
 	options.baseURL = strings.TrimSpace(*baseURL)
 	options.evidenceDir = strings.TrimSpace(*evidenceDir)
 	options.timeoutSeconds = *timeoutSeconds
+	options.concurrency = *concurrency
 	options.resumeRun = *resumeRun
 	options.retryFailed = *retryFailed
 	options.skipPassed = *skipPassed
 	options.rerunTaskIDs = rerunTasks.Values()
 	options.jsonOutput = *jsonOutput
+	if options.concurrency <= 0 {
+		return mapRunOptions{}, errors.New("--concurrency must be greater than zero")
+	}
 	if mapRunHasResumeControls(options) && options.planID == "" {
 		return mapRunOptions{}, errors.New("--resume, --retry-failed, --skip-passed, and --rerun-task require --plan")
 	}
@@ -198,7 +211,7 @@ func mapRunPlanRecord(ctx context.Context, runtime store.Store, graph store.Test
 		if err := validateMapRunRerunTasks(record, options); err != nil {
 			return store.TestMapPlanRecord{}, err
 		}
-		return prepareExistingMapRunRecord(record, options), nil
+		return record, nil
 	}
 	plan, err := mapplanner.Explain(graph, mapplanner.Query{
 		MapID:            options.mapID,
@@ -218,14 +231,14 @@ func mapRunPlanRecord(ctx context.Context, runtime store.Store, graph store.Test
 	now := time.Now().UTC()
 	plan.ID = "runplan." + safeReportID(plan.MapID) + "." + now.Format("20060102T150405.000000000Z")
 	plan.Mode = mapplanner.ModeRun
-	plan.Status = mapplanner.TaskStatusRunning
+	plan.Status = mapplanner.TaskStatusPlanned
 	plan.CreatedAt = now
 	record, err := mapplanner.RecordFromPlan(plan, now)
 	if err != nil {
 		return store.TestMapPlanRecord{}, err
 	}
-	record.Instance.Status = mapplanner.TaskStatusRunning
-	record.Instance.StartedAt = now
+	record.Instance.Status = mapplanner.TaskStatusPlanned
+	record.Instance.StartedAt = time.Time{}
 	record.Instance.FinishedAt = time.Time{}
 	for i := range record.Tasks {
 		if record.Tasks[i].Status == mapplanner.TaskStatusSkipped {
@@ -237,7 +250,11 @@ func mapRunPlanRecord(ctx context.Context, runtime store.Store, graph store.Test
 }
 
 func prepareExistingMapRunRecord(record store.TestMapPlanRecord, options mapRunOptions) store.TestMapPlanRecord {
-	now := time.Now().UTC()
+	return prepareExistingMapRunRecordAt(record, options, time.Now().UTC())
+}
+
+func prepareExistingMapRunRecordAt(record store.TestMapPlanRecord, options mapRunOptions, now time.Time) store.TestMapPlanRecord {
+	selectedTasks := mapRunSelectedTaskIDs(options.rerunTaskIDs)
 	record.Instance.Mode = mapplanner.ModeRun
 	record.Instance.Status = mapplanner.TaskStatusRunning
 	if strings.TrimSpace(options.environmentID) != "" {
@@ -247,6 +264,21 @@ func prepareExistingMapRunRecord(record store.TestMapPlanRecord, options mapRunO
 	record.Instance.FinishedAt = time.Time{}
 	for i := range record.Tasks {
 		task := &record.Tasks[i]
+		if task.Status == mapplanner.TaskStatusRunning {
+			task.Status = store.StatusFailed
+			task.Reason = mapRunFailureInterruptedUnknownOutcome
+			task.SummaryJSON = mustCompactJSON(map[string]any{
+				"failureCategory": mapRunFailureInterruptedUnknownOutcome,
+				"resumable":       false,
+			})
+			task.FinishedAt = now
+		}
+		// An interrupted task may already have reached the tested service. A
+		// broad --retry-failed must not turn that unknown outcome into an
+		// automatic replay; only an explicitly selected task may be reset.
+		if mapRunTaskInterruptedUnknownOutcome(*task) && !selectedTasks[task.ID] {
+			continue
+		}
 		if task.Status == mapplanner.TaskStatusSkipped || task.Kind == mapplanner.TaskSkip {
 			task.Status = mapplanner.TaskStatusSkipped
 			continue
@@ -285,6 +317,9 @@ func mapRunTaskSelectedForExecution(task store.TestMapPlanTask, options mapRunOp
 		return false
 	}
 	selectedTasks := mapRunSelectedTaskIDs(options.rerunTaskIDs)
+	if mapRunTaskInterruptedUnknownOutcome(task) {
+		return selectedTasks[task.ID]
+	}
 	if len(selectedTasks) > 0 && selectedTasks[task.ID] {
 		return true
 	}
@@ -298,6 +333,11 @@ func mapRunTaskSelectedForExecution(task store.TestMapPlanTask, options mapRunOp
 		return false
 	}
 	return true
+}
+
+func mapRunTaskInterruptedUnknownOutcome(task store.TestMapPlanTask) bool {
+	return strings.TrimSpace(task.Reason) == mapRunFailureInterruptedUnknownOutcome ||
+		valueString(jsonObjectString(task.SummaryJSON)["failureCategory"]) == mapRunFailureInterruptedUnknownOutcome
 }
 
 func mapRunSelectedTaskIDs(ids []string) map[string]bool {

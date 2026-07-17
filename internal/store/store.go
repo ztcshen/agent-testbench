@@ -43,6 +43,12 @@ type RunStore interface {
 	ListRuns(context.Context) ([]Run, error)
 }
 
+// RunUpdater is an optional Store capability used by long-running executions
+// to checkpoint a Run without replacing its immutable creation record.
+type RunUpdater interface {
+	UpdateRun(context.Context, Run) (Run, error)
+}
+
 type APICaseRunStore interface {
 	RecordAPICaseRun(context.Context, APICaseRun) (APICaseRun, error)
 	ListAPICaseRuns(context.Context, string) ([]APICaseRun, error)
@@ -91,6 +97,11 @@ type MapPlannerStore interface {
 	ListTestMapPlans(context.Context, string, int) ([]TestMapPlanInstance, error)
 }
 
+type MapPlannerCheckpointStore interface {
+	UpdateTestMapPlanInstance(context.Context, TestMapPlanInstance) error
+	UpdateTestMapPlanTask(context.Context, TestMapPlanTask) error
+}
+
 type EnvironmentStore interface {
 	UpsertEnvironment(context.Context, Environment) (Environment, error)
 	GetEnvironment(context.Context, string) (Environment, error)
@@ -109,6 +120,9 @@ type AgentTaskStore interface {
 	UpsertAgentTask(context.Context, AgentTask) (AgentTask, error)
 	GetAgentTask(context.Context, string) (AgentTask, error)
 	ListAgentTasks(context.Context) ([]AgentTask, error)
+	ClaimScheduledAgentTask(context.Context, string, time.Time, time.Time) (AgentTaskClaim, bool, error)
+	ReleaseScheduledAgentTask(context.Context, AgentTaskClaim, time.Time) (bool, error)
+	RecoverScheduledAgentTask(context.Context, string, time.Time) (bool, error)
 	RecordAgentTaskRun(context.Context, AgentTaskRun) (AgentTaskRun, error)
 	ListAgentTaskRuns(context.Context, string, int) ([]AgentTaskRun, error)
 }

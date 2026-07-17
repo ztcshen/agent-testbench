@@ -63,6 +63,9 @@ func TestMapRunExecutorRestoresPassedDependencyExports(t *testing.T) {
 			SortOrder:  1,
 		}},
 	}
+	if err := runtime.SaveTestMapPlan(ctx, record); err != nil {
+		t.Fatalf("save resumable map plan: %v", err)
+	}
 
 	executed := newMapRunExecutor(ctx, runtime, store.TestPlanGraph{}, mapRunOptions{}).execute(record)
 

@@ -13,13 +13,19 @@ import (
 )
 
 const (
-	builtInTaskMapMaintain    = "map-maintain"
-	builtInTaskMapExecute     = "map-execute"
-	builtInTaskJSONCount      = "count"
-	builtInTaskFlagMap        = "--map"
-	builtInTaskFlagWorkspace  = "--workspace"
-	builtInTaskInputWorkspace = "workspace"
-	builtInTaskStepEvidence   = "evidence"
+	builtInTaskMapMaintain        = "map-maintain"
+	builtInTaskMapExecute         = "map-execute"
+	builtInTaskCaseMaintain       = "case-maintain"
+	builtInTaskJSONCount          = "count"
+	builtInTaskFlagMap            = "--map"
+	builtInTaskFlagWorkspace      = "--workspace"
+	builtInTaskInputWorkspace     = "workspace"
+	builtInTaskStepEvidence       = "evidence"
+	builtInTaskTagMaintainCase    = "maintain case"
+	builtInTaskTagCaseMaintenance = "case maintenance"
+	builtInTaskTagAPICase         = "API case"
+	builtInTaskTagCatalog         = "catalog"
+	builtInTaskTagQuality         = "quality"
 )
 
 type builtInTaskDescriptor struct {
@@ -168,9 +174,9 @@ func runBuiltInTask(ctx context.Context, id string, inputs builtInTaskInputs, dr
 		printBuiltInTaskPlan(report)
 		return nil
 	}
-	if report.Task.ID != builtInTaskMapMaintain {
+	if report.Task.ID != builtInTaskMapMaintain && report.Task.ID != builtInTaskCaseMaintain {
 		report.OK = false
-		report.Error = "built-in task execution is only enabled for read-only map-maintain; use --dry-run to inspect this task"
+		report.Error = "built-in task execution is only enabled for read-only maintenance tasks; use --dry-run to inspect this task"
 		if jsonOutput {
 			if writeErr := writeIndentedJSON(report); writeErr != nil {
 				return writeErr
@@ -220,6 +226,19 @@ func registerBuiltInTaskFlags(flags *flag.FlagSet) (*builtInTaskInputs, *bool) {
 
 func builtInTaskDescriptors() []builtInTaskDescriptor {
 	return []builtInTaskDescriptor{
+		{
+			ID:      builtInTaskCaseMaintain,
+			Name:    "Maintain API case catalog",
+			Goal:    "Inspect and maintain API cases and their Store-backed execution readiness.",
+			Summary: "Reviews immutable catalog history, maintained cases, quality gaps, and the repair plan before editing.",
+			Tags:    []string{builtInTaskTagMaintainCase, builtInTaskTagCaseMaintenance, builtInTaskTagAPICase, builtInTaskTagCatalog, builtInTaskTagQuality},
+			Steps: []builtInTaskStepPattern{
+				{ID: "history", Title: "Review catalog revisions", Command: "case catalog history", ReadOnly: true},
+				{ID: "discover", Title: "Discover maintained cases", Command: "case discover", ReadOnly: true},
+				{ID: "quality", Title: "Inspect case quality gaps", Command: "case suite report --view quality", ReadOnly: true},
+				{ID: "plan", Title: "Plan case repairs", Command: "case suite report --view quality-plan", ReadOnly: true},
+			},
+		},
 		{
 			ID:      builtInTaskMapMaintain,
 			Name:    "Maintain test scenario map",

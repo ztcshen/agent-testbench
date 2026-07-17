@@ -33,8 +33,8 @@ func runEnvironmentAcceptanceStart(ctx context.Context, args []string) error {
 	flags.SetOutput(os.Stderr)
 	serverURL := flags.String("server-url", "", "Running control plane base URL")
 	requestID := flags.String("request-id", "", "Acceptance request id")
-	baseURL := flags.String("base-url", "", "Base URL for live request execution")
-	evidenceDir := flags.String("evidence-dir", "", "Evidence output directory")
+	baseURL := flags.String("base-url", "", "Deprecated: configure the target in the Store catalog")
+	evidenceDir := flags.String("evidence-dir", "", "Deprecated: configure the Evidence directory in the Store catalog")
 	timeoutSeconds := flags.Int("timeout-seconds", 0, "Per-step timeout in seconds")
 	jsonOutput := flags.Bool("json", false, "Emit machine-readable JSON")
 	if err := parseInterspersedFlags(flags, args); err != nil {
@@ -44,13 +44,10 @@ func runEnvironmentAcceptanceStart(ctx context.Context, args []string) error {
 	if envID == "" || strings.TrimSpace(*serverURL) == "" || strings.TrimSpace(*requestID) == "" {
 		return errors.New("environment id, --server-url, and --request-id are required")
 	}
+	if strings.TrimSpace(*baseURL) != "" || strings.TrimSpace(*evidenceDir) != "" {
+		return errors.New("--base-url and --evidence-dir cannot cross the public acceptance API; configure target and Evidence paths in the Store catalog")
+	}
 	payload := map[string]any{"requestId": strings.TrimSpace(*requestID)}
-	if strings.TrimSpace(*baseURL) != "" {
-		payload["baseUrl"] = strings.TrimSpace(*baseURL)
-	}
-	if strings.TrimSpace(*evidenceDir) != "" {
-		payload["evidenceDir"] = strings.TrimSpace(*evidenceDir)
-	}
 	if *timeoutSeconds > 0 {
 		payload["timeoutSeconds"] = *timeoutSeconds
 	}

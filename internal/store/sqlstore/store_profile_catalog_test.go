@@ -3,6 +3,9 @@ package sqlstore_test
 import (
 	"context"
 	"database/sql/driver"
+	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +33,49 @@ func TestStoreReplacesProfileCatalogSnapshotUsesMySQLDialect(t *testing.T) {
 	})
 }
 
+func TestReplaceProfileCatalogFailsClosedWhenRevisionChangesAfterRead(t *testing.T) {
+	ctx := context.Background()
+	db, state := openFakeSQLDB(t)
+	defer db.Close()
+	runtime := sqlstore.New(db, sqlstore.PostgresDialect{})
+	stale := sampleProfileCatalog(time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC))
+	payload, err := json.Marshal(stale)
+	if err != nil {
+		t.Fatalf("encode stale profile catalog: %v", err)
+	}
+
+	// ReplaceProfileCatalog observes revision 1, then another maintenance writer
+	// advances the head to revision 2 before the full-replace claim executes.
+	state.queueRows(fakeRows{
+		columns: []string{"catalog_json", "revision", "catalog_sha256", "updated_at"},
+		values:  [][]driver.Value{{string(payload), int64(1), "revision-one", stale.IndexedAt.Format(time.RFC3339Nano)}},
+	})
+	state.queueRows(fakeRows{
+		columns: []string{"revision"},
+		values:  [][]driver.Value{{int64(2)}},
+	})
+	state.queueExecRowsAffected(0)
+
+	err = runtime.ReplaceProfileCatalog(ctx, stale)
+	if !errors.Is(err, store.ErrProfileCatalogRevisionConflict) {
+		t.Fatalf("stale full replacement error = %v, want revision conflict", err)
+	}
+	var conflict *store.ProfileCatalogRevisionConflictError
+	if !errors.As(err, &conflict) || conflict.ExpectedRevision != 1 || conflict.ActualRevision != 2 {
+		t.Fatalf("stale full replacement conflict = %#v", conflict)
+	}
+
+	execs := state.execsSnapshot()
+	if len(execs) != 1 || !strings.Contains(execs[0].query, "update profile_catalog_heads") {
+		t.Fatalf("stale full replacement writes = %#v", execs)
+	}
+	for _, call := range execs {
+		if strings.Contains(call.query, "insert into profile_catalogs") || strings.Contains(call.query, "insert into profile_catalog_versions") {
+			t.Fatalf("stale full replacement overwrote revision 2 or created revision 3: %#v", call)
+		}
+	}
+}
+
 type profileCatalogDialectExpectation struct {
 	dialect                sqlstore.Dialect
 	reject                 string
@@ -50,7 +96,7 @@ func exerciseStoreReplacesAndReadsProfileCatalogSnapshot(t *testing.T, tt profil
 	if err := s.ReplaceProfileCatalog(ctx, catalog); err != nil {
 		t.Fatalf("replace profile catalog: %v", err)
 	}
-	exec := state.lastExec(t)
+	exec := findProfileCatalogExec(t, state.execsSnapshot())
 	assertSQLContains(t, exec.query, "profile catalog query", "insert into profile_catalogs", sqlValuesClause(tt.dialect, 13))
 	assertSQLContains(t, exec.query, "profile catalog query", tt.upsertFragments...)
 	assertSQLOmits(t, exec.query, "profile catalog query", tt.reject)
@@ -91,6 +137,17 @@ func exerciseStoreReplacesAndReadsProfileCatalogSnapshot(t *testing.T, tt profil
 	}
 	query = state.lastQuery(t)
 	assertSQLContains(t, query.query, "profile catalog get query", "select catalog_json", "from profile_catalogs")
+}
+
+func findProfileCatalogExec(t *testing.T, calls []fakeSQLCall) fakeSQLCall {
+	t.Helper()
+	for _, call := range calls {
+		if strings.Contains(call.query, "insert into profile_catalogs") {
+			return call
+		}
+	}
+	t.Fatalf("profile catalog exec not found in %#v", calls)
+	return fakeSQLCall{}
 }
 
 func sampleProfileCatalog(indexedAt time.Time) store.ProfileCatalog {

@@ -103,7 +103,8 @@ This is the layer that keeps test assets maintainable as a product grows:
 - inspect workflow convergence, coverage, paths, and versions from the Store;
 - run `map explain` before execution to see the planned operations;
 - run all workflows, all cases, or a focused node/path/case with resume and
-  retry support;
+  retry support; independent DAG waves can run with bounded concurrency, while
+  a Store lease prevents two workers from executing the same saved plan;
 - attach large negative-case families to the interface node they validate
   without flooding the main path;
 - review the graph and execution plan through a self-contained Test Scenario
@@ -145,12 +146,12 @@ These are design influences, not vendored runtime dependencies.
 | Capability | What it means |
 | --- | --- |
 | SQL Store-first | Named SQLite, PostgreSQL, or MySQL Stores with schema upgrades, run indexes, case run records, Evidence indexes, timing, logs, topology, post-process task records, and Store-backed CLI task history. |
-| API-operated catalog | Services, workflows, interface nodes, cases, request templates, fixtures, dependencies, and bindings are exposed through AgentTestBench APIs and UI discovery. |
+| API-operated catalog | Services, workflows, interface nodes, cases, request templates, fixtures, dependencies, and bindings are exposed through AgentTestBench APIs and UI discovery. Case maintenance uses Store revisions, strong ETags, conflict detection, history, and rollback. |
 | Agent-friendly discovery | Agents call discovery APIs first, then run reports with exact returned ids instead of hidden prompt knowledge. |
-| API case execution | Run one HTTP case, a maintained case suite, or only the failed/not-run part of a suite; render requests, assert responses, write Evidence, and index results into Store. |
+| API case execution | Run one HTTP case, a maintained case suite, or only the failed/not-run part of a suite; render requests, assert responses, and index passed or failed request/materialization Evidence into Store. Async batches persist running state and per-case checkpoints. |
 | Workflow execution | Run ordered workflow steps and keep per-step Evidence, timing, status, logs, and topology. |
-| Test Scenario Maps | Converge many workflows into one Store-backed DAG, explain a deterministic map plan, execute focused or full map scopes, gate the result, and generate an interactive Test Scenario Atlas for review. |
-| Environment restore | Store-backed Environment Catalog entries can plan or execute remote repository preparation, compact startup-file generation, Docker Compose pull/build/up, health checks, and the bound verification workflow. |
+| Test Scenario Maps | Converge many workflows into one Store-backed DAG, explain a deterministic map plan, execute focused or full map scopes with bounded concurrency and Store-owned execution leases, gate the result, and generate an interactive Test Scenario Atlas for review. |
+| Environment restore | Store-backed Environment Catalog entries can plan or execute remote repository preparation, owner-only secret projection, Docker Compose pull/build/up, repeatable status/stop checks, health gates, and the bound verification workflow. |
 | Evidence detail APIs | Query request, response, assertions, precondition context, stored topology, persisted logs, artifact manifests, failure summaries, status, and elapsed time by run or case run id. |
 | Real topology gate | Synthetic SkyWalking smoke is useful for wiring, but verified-environment publication and optional real-environment sign-off require a live SkyWalking endpoint and trace ids for every configured workflow step. |
 | Control plane workbench | A React workbench reads the same Store/read-models as CLI and API users. |
@@ -202,9 +203,10 @@ state, `doctor` for diagnostics, `update --channel release` or `update
 AREA --filter TEXT` to find daily Store, case, workflow, map, and Evidence
 commands without scrolling the full help text. Use `commands --all` when you
 need advanced, compatibility, developer, or operator entries. `task run`,
-`task schedule`, `task watch`, and `notify test` turn repeatable CLI operations into
+`task schedule`, `task worker`, `task watch`, and `notify test` turn repeatable CLI operations into
 Store-backed task definitions, run history, logs, and file/webhook completion
-notifications. `config show`, `config path`, `logs`, and `completion bash|zsh`
+notifications. `task worker` is an explicit foreground process; `--once` is the
+CI and operator-friendly single-poll mode. `config show`, `config path`, `logs`, and `completion bash|zsh`
 cover the common operator checks around local configuration, runtime logs, and
 shell integration. If a wrapper on `PATH` points at an older binary, `doctor`
 reports `runtime.shell-entrypoint` with the exact `.runtime/bin` directory or
@@ -307,17 +309,20 @@ Current working areas:
 - Store lifecycle: named SQLite/PostgreSQL/MySQL config, active Store switching,
   backend-specific DDL, schema status/upgrade, and contract tests.
 - Catalog maintenance: API case metadata, searchable case catalog, request
-  templates, fixtures, dependencies, workflow bindings, and suite coverage.
+  templates, fixtures, dependencies, workflow bindings, suite coverage, and
+  revisioned ETag/CAS history with rollback.
 - Test Scenario Maps: workflow import, map inspection, coverage, versions,
   validation families, SQL-style explain plans, map execution, gate checks, and
   interactive Atlas review.
-- Execution: single API case, maintained case suites, async batch surfaces,
-  interface-node reports, map execution, and persisted workflow run lookup.
+- Execution: single API case, maintained case suites, Store-checkpointed async
+  batches, interface-node reports, leased/concurrent map execution, and
+  persisted workflow run lookup.
 - Evidence: request, response, assertions, summaries, logs, topology, timing,
   artifact manifests, failure summaries, and redaction for sensitive fields.
 - Environment Catalog: Store-backed environment register/discover/inspect,
   bootstrap plan, restore diagnostics, component graph readiness, remote component
-  repository preparation, Docker Compose/start orchestration, health gates,
+  repository preparation, Docker Compose/start orchestration, read-only status
+  validation, explicit stop lifecycle, secret-safe output, health gates,
   acceptance workflow recording, and verified publishing gates.
 - Workbench: local React pages backed by Control plane APIs for catalog,
   workflow, environment, run, Evidence, and topology review.

@@ -191,6 +191,9 @@ func handleProfileImport(w http.ResponseWriter, r *http.Request, runtime store.S
 	}
 	bundle, report, err := importProfileBundle(r.Context(), runtime, req)
 	if err != nil {
+		if writeProfileCatalogConflict(w, err) {
+			return
+		}
 		status := http.StatusInternalServerError
 		if strings.HasPrefix(err.Error(), "load profile") || strings.HasPrefix(err.Error(), "digest profile") || strings.HasPrefix(err.Error(), "audit profile") || strings.HasPrefix(err.Error(), "profile audit failed") {
 			status = http.StatusBadRequest
@@ -214,6 +217,9 @@ func handleProfileVerify(w http.ResponseWriter, r *http.Request, runtime store.S
 		RequireWorkflowRuns: req.RequireWorkflowRuns,
 	})
 	if err != nil {
+		if writeProfileCatalogConflict(w, err) {
+			return
+		}
 		if report.ProfileID != "" {
 			if report.Error == "" {
 				report.Error = err.Error()
@@ -232,6 +238,21 @@ func handleProfileVerify(w http.ResponseWriter, r *http.Request, runtime store.S
 		activate(bundle)
 	}
 	writeJSON(w, report)
+}
+
+func writeProfileCatalogConflict(w http.ResponseWriter, err error) bool {
+	var conflict *store.ProfileCatalogRevisionConflictError
+	if !errors.As(err, &conflict) {
+		return false
+	}
+	writeJSONStatus(w, http.StatusConflict, map[string]any{
+		"ok":               false,
+		"error":            "profile catalog revision conflict",
+		apiFieldCode:       "profile_catalog_revision_conflict",
+		"expectedRevision": conflict.ExpectedRevision,
+		"actualRevision":   conflict.ActualRevision,
+	})
+	return true
 }
 
 func handleProfileAuditPlan(w http.ResponseWriter, r *http.Request, runtime store.Store, profileHome string) {

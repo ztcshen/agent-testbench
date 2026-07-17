@@ -22,6 +22,7 @@ func TestEnvironmentRestoreExecutesDockerComposeWithoutRepository(t *testing.T) 
 	runCLI(t, "environment", "register",
 		"--store", fixture.StoreDSN,
 		"--id", "env.docker.only",
+		"--service", "compose-only",
 		"--compose-file", "compose.yml",
 		"--health-url", newHealthyTestURL(t),
 		"--verification-workflow", "workflow.core-10",
@@ -297,7 +298,7 @@ func TestEnvironmentRestoreFailsWhenHealthProbeFails(t *testing.T) {
 	)
 
 	out := runCLIFailsWithEnv(t, fixture.DockerEnv, "environment", "restore", "--store", fixture.StoreDSN, "--workspace", fixture.Workspace, "--execute", "--health-timeout-seconds", "1", "--json", "env.health.fail")
-	if !strings.Contains(out, `"kind": "command"`) || !strings.Contains(out, "exit status 7") {
+	if !strings.Contains(out, `"kind": "command"`) || !strings.Contains(out, "environment health check did not pass") || strings.Contains(out, "echo nope") || strings.Contains(out, "exit status 7") {
 		t.Fatalf("health failure output = %q", out)
 	}
 	inspectOut := runCLI(t, "environment", "inspect", "--store", fixture.StoreDSN, "--json", "env.health.fail")

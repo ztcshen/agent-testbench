@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -13,6 +14,18 @@ import (
 
 type sqlExecer interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func execStoreRowMutation(ctx context.Context, execer sqlExecer, operation string, query string, args ...any) (int64, error) {
+	result, err := execer.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", operation, err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("%s rows affected: %w", operation, err)
+	}
+	return changed, nil
 }
 
 func utcNow() time.Time {
@@ -117,6 +130,13 @@ func rollbackTxOnError(tx *sql.Tx, errp *error) {
 	if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
 		*errp = errors.Join(*errp, rollbackErr)
 	}
+}
+
+func rollbackTxBeforeConflict(tx *sql.Tx, operation string) error {
+	if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+		return fmt.Errorf("rollback %s: %w", operation, err)
+	}
+	return nil
 }
 
 func (s *Store) runEnvironmentReplaceTx(ctx context.Context, replace func(sqlExecer) error) (err error) {

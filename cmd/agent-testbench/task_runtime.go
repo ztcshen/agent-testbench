@@ -116,13 +116,17 @@ func taskScheduleValue(interval string, cron string) (string, error) {
 		return "", errors.New("--interval and --cron cannot be combined")
 	}
 	if interval != "" {
-		if _, err := time.ParseDuration(interval); err != nil {
+		duration, err := time.ParseDuration(interval)
+		if err != nil {
 			return "", fmt.Errorf("invalid --interval: %w", err)
+		}
+		if duration <= 0 {
+			return "", errors.New("--interval must be greater than zero")
 		}
 		return "interval:" + interval, nil
 	}
 	if cron != "" {
-		return "cron:" + cron, nil
+		return "", errors.New("--cron is unsupported by task worker; use --interval")
 	}
 	return "", errors.New("schedule requires --interval or --cron")
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -16,6 +17,7 @@ import (
 type agentEventStreamContextKey struct{}
 
 const (
+	posixShellPath            = "/bin/sh"
 	cliOutputFormatText       = "text"
 	cliOutputFormatJSON       = "json"
 	cliOutputFormatStreamJSON = "stream-json"
@@ -91,6 +93,7 @@ func agentEmitEvent(ctx context.Context, event agentStreamEvent) {
 	if stream == nil {
 		return
 	}
+	event = environmentStreamEventForOutput(ctx, event)
 	stream.mu.Lock()
 	defer stream.mu.Unlock()
 	stream.seq++
@@ -247,11 +250,12 @@ func agentEmitCommand(ctx context.Context, status string, workdir string, comman
 }
 
 type agentObservedCommandOptions struct {
-	Workdir   string
-	Command   []string
-	Input     string
-	HasInput  bool
-	Configure func(*exec.Cmd)
+	Workdir             string
+	Command             []string
+	Input               string
+	HasInput            bool
+	SuppressEventOutput bool
+	Configure           func(*exec.Cmd)
 }
 
 type agentObservedCommandResult struct {
@@ -274,12 +278,23 @@ func runAgentObservedCommand(ctx context.Context, options agentObservedCommandOp
 	if options.HasInput {
 		cmd.Stdin = bytes.NewBufferString(options.Input)
 	}
+	var combined bytes.Buffer
+	cmd.Stdout = &combined
+	cmd.Stderr = &combined
 	started := time.Now()
 	agentEmitCommand(ctx, agentCommandStatusStarted, options.Workdir, options.Command, started, "", "")
+	if err := cmd.Start(); err != nil {
+		result := agentObservedCommandResult{Err: err, Error: err.Error(), ExitCode: 1}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			result = agentObservedCommandCanceledResult(ctxErr, "")
+		}
+		emitAgentObservedCommandResult(ctx, options, started, result)
+		return result
+	}
 	resultCh := make(chan agentObservedCommandResult, 1)
 	go func() {
-		out, err := cmd.CombinedOutput()
-		output := strings.TrimSpace(string(out))
+		err := cmd.Wait()
+		output := strings.TrimSpace(combined.String())
 		result := agentObservedCommandResult{Output: output, Err: err}
 		if err != nil {
 			result.ExitCode = 1
@@ -312,20 +327,33 @@ func runAgentObservedCommand(ctx context.Context, options agentObservedCommandOp
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				result = agentObservedCommandCanceledResult(ctxErr, result.Output)
 			}
-			status := agentCommandStatusCompleted
-			if result.Error != "" {
-				status = agentCommandStatusFailed
-			}
-			agentEmitCommand(ctx, status, options.Workdir, options.Command, started, result.Output, result.Error)
+			emitAgentObservedCommandResult(ctx, options, started, result)
 			return result
 		case <-ctx.Done():
 			result := waitForAgentObservedCommandCancel(ctx, cmd, resultCh)
-			agentEmitCommand(ctx, agentCommandStatusFailed, options.Workdir, options.Command, started, result.Output, result.Error)
+			emitAgentObservedCommandResult(ctx, options, started, result)
 			return result
 		case <-ticker.C:
 			agentEmitCommand(ctx, agentCommandStatusRunning, options.Workdir, options.Command, started, "command still running", "")
 		}
 	}
+}
+
+func emitAgentObservedCommandResult(ctx context.Context, options agentObservedCommandOptions, started time.Time, result agentObservedCommandResult) {
+	status := agentCommandStatusCompleted
+	message := result.Output
+	errText := result.Error
+	if result.Error != "" {
+		status = agentCommandStatusFailed
+	}
+	if options.SuppressEventOutput {
+		message = ""
+		errText = ""
+		if result.Error != "" {
+			errText = fmt.Sprintf("command exited with code %d", result.ExitCode)
+		}
+	}
+	agentEmitCommand(ctx, status, options.Workdir, options.Command, started, message, errText)
 }
 
 func waitForAgentObservedCommandCancel(ctx context.Context, cmd *exec.Cmd, resultCh <-chan agentObservedCommandResult) agentObservedCommandResult {

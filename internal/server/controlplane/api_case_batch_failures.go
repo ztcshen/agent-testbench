@@ -17,10 +17,13 @@ func apiCaseBatchFailureMessage(result apicase.RunResult) string {
 	if result.Status != store.StatusFailed {
 		return ""
 	}
+	if message := strings.TrimSpace(result.Error); message != "" {
+		return message
+	}
 	if strings.TrimSpace(result.EvidencePath) == "" {
 		return "case run failed"
 	}
-	raw, err := os.ReadFile(filepath.Join(result.EvidencePath, "assertions.json"))
+	raw, err := os.ReadFile(filepath.Join(result.EvidencePath, apiCaseEvidenceFileAssertions))
 	if err != nil {
 		return "case run failed"
 	}
@@ -38,10 +41,13 @@ func apiCaseBatchFailureCategory(result apicase.RunResult) string {
 	if result.Status != store.StatusFailed {
 		return ""
 	}
+	if category := strings.TrimSpace(result.FailureCategory); category != "" {
+		return category
+	}
 	if strings.TrimSpace(result.EvidencePath) == "" {
 		return "case-failure"
 	}
-	raw, err := os.ReadFile(filepath.Join(result.EvidencePath, "assertions.json"))
+	raw, err := os.ReadFile(filepath.Join(result.EvidencePath, apiCaseEvidenceFileAssertions))
 	if err != nil {
 		return "case-failure"
 	}

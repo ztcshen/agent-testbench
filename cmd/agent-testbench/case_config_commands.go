@@ -11,8 +11,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
+	"agent-testbench/internal/domain/casemaintenance"
 	"agent-testbench/internal/store"
 )
 
@@ -21,6 +21,8 @@ const caseConfigScopeTypeStep = "step"
 type caseConfigUpsertReport struct {
 	OK               bool                      `json:"ok"`
 	CaseID           string                    `json:"caseId"`
+	BeforeRevision   int64                     `json:"beforeRevision"`
+	Revision         int64                     `json:"revision"`
 	Created          bool                      `json:"created"`
 	Updated          bool                      `json:"updated"`
 	Config           caseConfigUpsertConfigRef `json:"config"`
@@ -63,6 +65,7 @@ func runCaseConfigUpsert(ctx context.Context, args []string) error {
 	nodeID := flags.String("node-id", "", "Override interface node id")
 	configID := flags.String("config-id", "", "Template config id to update")
 	status := flags.String("status", "", "Template config status; new configs default to active")
+	expectedRevision := flags.Int64("expected-revision", -1, "Required current catalog revision for optimistic concurrency")
 	authJSON := flags.String("auth-json", "", "Request auth JSON")
 	headersJSON := flags.String("headers-json", "", "Request headers JSON object")
 	defaultOverridesJSON := flags.String("default-overrides-json", "", "Default request overrides JSON object persisted on the catalog case")
@@ -92,6 +95,10 @@ func runCaseConfigUpsert(ctx context.Context, args []string) error {
 	}
 	if (strings.TrimSpace(*workflowID) == "") != (strings.TrimSpace(*stepID) == "") {
 		return errors.New("--workflow and --step must be provided together")
+	}
+	passedFlags := parsedFlagNames(flags)
+	if passedFlags["expected-revision"] && *expectedRevision < 0 {
+		return errors.New("--expected-revision must be non-negative")
 	}
 	storeDSN, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
 	if err != nil {
@@ -127,6 +134,7 @@ func runCaseConfigUpsert(ctx context.Context, args []string) error {
 			ExpectedStatuses:     expectedStatuses.Values(),
 			ResponseContains:     responseContains.Values(),
 			ResponseNotContains:  responseNotContains.Values(),
+			ExpectedRevision:     optionalExpectedProfileCatalogRevision(passedFlags["expected-revision"], *expectedRevision),
 		})
 		return upsertErr
 	})
@@ -162,11 +170,16 @@ type caseConfigUpsertOptions struct {
 	ExpectedStatuses     []string
 	ResponseContains     []string
 	ResponseNotContains  []string
+	ExpectedRevision     *int64
 }
 
 func upsertCaseExecutionConfig(ctx context.Context, runtime store.Store, options caseConfigUpsertOptions) (caseConfigUpsertReport, error) {
-	catalog, err := loadMutableProfileCatalog(ctx, runtime, "")
+	snapshot, err := loadMutableProfileCatalogSnapshot(ctx, runtime, "")
 	if err != nil {
+		return caseConfigUpsertReport{}, err
+	}
+	catalog := snapshot.Catalog
+	if err := requireExpectedProfileCatalogRevision(catalog.ProfileID, snapshot.Revision, options.ExpectedRevision); err != nil {
 		return caseConfigUpsertReport{}, err
 	}
 	caseID := strings.TrimSpace(options.CaseID)
@@ -189,14 +202,29 @@ func upsertCaseExecutionConfig(ctx context.Context, runtime store.Store, options
 	config.ConfigJSON = configJSON
 	catalog.TemplateConfigs = upsertCatalogTemplateConfig(catalog.TemplateConfigs, config)
 	catalog, parsed.DefaultOverrides = applyCaseConfigDefaultOverrides(catalog, apiCase, parsed)
+	apiCase, _ = findCatalogAPICase(catalog.APICases, caseID)
+	apiCase.Status, err = casemaintenance.NormalizeCaseStatus(apiCase.Status, false)
+	if err != nil {
+		return caseConfigUpsertReport{}, err
+	}
+	catalog.APICases = upsertCatalogAPICase(catalog.APICases, apiCase)
+	if err := casemaintenance.ValidateCase(catalog, apiCase); err != nil {
+		return caseConfigUpsertReport{}, err
+	}
 	selectedID := selectedCaseExecutionTemplateConfigID(catalog, caseID, options.WorkflowID, options.StepID)
-	catalog.IndexedAt = time.Now().UTC()
-	if err := runtime.ReplaceProfileCatalog(ctx, catalog); err != nil {
+	written, err := saveProfileCatalogMutation(ctx, runtime, snapshot.Revision, catalog, "case-config-upsert", map[string]any{
+		"caseId":                           caseID,
+		"configId":                         configID,
+		profileCatalogMutationFieldCreated: !exists,
+	})
+	if err != nil {
 		return caseConfigUpsertReport{}, err
 	}
 	return caseConfigUpsertReport{
 		OK:               true,
 		CaseID:           caseID,
+		BeforeRevision:   snapshot.Revision,
+		Revision:         written.Revision,
 		Created:          !exists,
 		Updated:          exists,
 		Config:           caseConfigUpsertConfigRefFromStore(configID, config),

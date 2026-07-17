@@ -18,7 +18,7 @@ func ReplayEvidencePayload(traceID string) (map[string]any, error) {
 			"httpStatus":  "",
 			"summaryJson": "{}",
 		},
-		"evidence": map[string]any{
+		apiFieldEvidence: map[string]any{
 			"traceId": traceID,
 			"request": map[string]any{
 				"method":      "",

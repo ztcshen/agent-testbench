@@ -142,13 +142,11 @@ func TestParentCommandsDefaultToCatalogNavigation(t *testing.T) {
 		{
 			args:       []string{"case"},
 			title:      "Commands: case",
-			wantUsages: []string{"agent-testbench case discover", "agent-testbench case inspect", "agent-testbench case run", "agent-testbench case gate"},
+			wantUsages: []string{"agent-testbench case discover", "agent-testbench case catalog upsert", "agent-testbench case catalog history", "agent-testbench case catalog rollback", "agent-testbench case config upsert", "agent-testbench case inspect", "agent-testbench case run", "agent-testbench case gate"},
 			hiddenUsages: []string{
 				"agent-testbench case runs",
 				"agent-testbench case evidence",
 				"agent-testbench case timing",
-				"agent-testbench case catalog upsert",
-				"agent-testbench case config upsert",
 				"agent-testbench case incomplete-batches",
 				"agent-testbench case diagnose",
 			},
@@ -845,8 +843,8 @@ func TestCommandsDefaultCatalogHidesSpecializedCommands(t *testing.T) {
 			}
 		}
 	}
-	if report.Count > 30 {
-		t.Fatalf("default command catalog should stay at or below the first target of 30 commands, got %d", report.Count)
+	if report.Count > 35 {
+		t.Fatalf("default command catalog should stay at or below the current target of 35 commands, got %d", report.Count)
 	}
 	for _, want := range []string{"demo", "status", "doctor", "store current", "environment restore", "task suggest", "task plan", "map explain", "map run", "case inspect", "case run", commandCatalogCaseSuiteReport} {
 		if _, ok := commands[want]; !ok {

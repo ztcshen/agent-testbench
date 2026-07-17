@@ -37,7 +37,7 @@ func handleCaseIncompleteBatches(w http.ResponseWriter, r *http.Request, bundle 
 		}
 		items = append(items, map[string]any{
 			"id":               item.ID,
-			"title":            firstNonEmpty(item.DisplayName, item.ID),
+			apiFieldTitle:      firstNonEmpty(item.DisplayName, item.ID),
 			"reason":           reason,
 			"source":           "profile:" + bundle.ID,
 			"message":          "no passed Store run found for this API Case",

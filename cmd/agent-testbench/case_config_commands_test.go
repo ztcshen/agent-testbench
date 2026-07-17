@@ -55,7 +55,7 @@ func TestCaseConfigUpsertMaintainsStoreBackedExecutionConfig(t *testing.T) {
 	}))
 	defer target.Close()
 
-	runOut := runCLI(t, "case", "run",
+	runOut := runCLIFails(t, "case", "run",
 		"--store", "sqlite://"+storePath,
 		"--case-id", "case.generic.submit",
 		"--base-url", target.URL,

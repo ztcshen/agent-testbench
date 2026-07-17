@@ -30,7 +30,7 @@ func (e mapRunExecutor) executeMaterializedTask(task *store.TestMapPlanTask) {
 		e.finishTask(task, store.StatusFailed, map[string]any{"error": err.Error()}, time.Now().UTC())
 		return
 	}
-	e.exportsByTask[task.ID] = overrides
+	e.setTaskExports(task.ID, overrides)
 	e.finishTask(task, store.StatusPassed, map[string]any{
 		"materializationId": materialization.ID,
 		"fixtureId":         fixture.ID,

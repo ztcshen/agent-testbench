@@ -164,7 +164,7 @@ func environmentRestorePlanStartCommand(workspace string, startCommand string, c
 		OK:       true,
 		Workdir:  workspace,
 		Action:   "plan-start-command",
-		Commands: [][]string{{"/bin/sh", "-c", startCommand}},
+		Commands: [][]string{{posixShellPath, "-c", startCommand}},
 	}
 	if cleanupOptions.Requested {
 		report.OK = false
@@ -261,16 +261,14 @@ func environmentRestoreRunCleanup(ctx context.Context, report *environmentRestor
 	report.Cleanup.Action = "run-cleanup"
 	for _, command := range append(report.Cleanup.BackupCommands, report.Cleanup.Commands...) {
 		output, errText := runEnvironmentRestoreDockerCommandWithPhaseProgress(ctx, workspace, command, "docker.cleanup", "Docker cleanup command")
-		if strings.TrimSpace(output) != "" {
-			report.Cleanup.Output = append(report.Cleanup.Output, output)
-		}
+		_ = output
 		if errText != "" {
 			if environmentRestoreCleanupIgnoreMissingContainer(command, errText) {
 				continue
 			}
 			report.OK = false
-			report.Cleanup.Error = errText
-			report.Error = errText
+			report.Cleanup.Error = environmentLifecycleCommandFailureMessage("Docker cleanup")
+			report.Error = report.Cleanup.Error
 			return false
 		}
 	}
@@ -306,12 +304,10 @@ func environmentRestoreMarkDockerExecuting(report *environmentRestoreDockerRepor
 func environmentRestoreRunCommands(ctx context.Context, report *environmentRestoreDockerReport, workspace string) bool {
 	for _, command := range report.Commands {
 		output, errText := runEnvironmentRestoreDockerCommandWithProgress(ctx, workspace, command)
-		if strings.TrimSpace(output) != "" {
-			report.Output = append(report.Output, output)
-		}
+		_ = output
 		if errText != "" {
 			report.OK = false
-			report.Error = errText
+			report.Error = environmentLifecycleCommandFailureMessage(report.Action)
 			return false
 		}
 	}

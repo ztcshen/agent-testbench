@@ -30,10 +30,13 @@ type schemaCommentMySQLTypes struct {
 }
 
 func schemaCommentSQL(d Dialect) []string {
+	return schemaCommentSQLForSpecs(d, schemaCommentSpecs())
+}
+
+func schemaCommentSQLForSpecs(d Dialect, specs []schemaTableComment) []string {
 	if d.Name() == "sqlite" {
 		return nil
 	}
-	specs := schemaCommentSpecs()
 	statements := []string{}
 	for _, table := range specs {
 		switch d.Name() {
@@ -64,11 +67,11 @@ func schemaCommentSpecs() []schemaTableComment {
 	types := schemaCommentMySQLTypes{
 		v128:     "varchar(128)",
 		v255:     mysqlVarchar255Type,
-		intType:  "integer",
+		intType:  sqlIntegerType,
 		text:     "mediumtext",
 		jsonType: "json",
 		timeType: "datetime(6)",
-		boolType: "boolean",
+		boolType: sqlBooleanType,
 	}
 	specs := coreRunCommentSpecs(types)
 	specs = append(specs, observabilityCommentSpecs(types)...)
@@ -218,6 +221,44 @@ func profileConfigCommentSpecs(types schemaCommentMySQLTypes) []schemaTableComme
 		configVersionsCommentSpec(types),
 		configReadModelCommentSpec(types),
 		profileCatalogsCommentSpec(types),
+		profileCatalogHeadsCommentSpec(types),
+		profileCatalogVersionsCommentSpec(types),
+	}
+}
+
+func profileCatalogVersionCommentSpecs(types schemaCommentMySQLTypes) []schemaTableComment {
+	return []schemaTableComment{
+		profileCatalogHeadsCommentSpec(types),
+		profileCatalogVersionsCommentSpec(types),
+	}
+}
+
+func profileCatalogHeadsCommentSpec(types schemaCommentMySQLTypes) schemaTableComment {
+	return schemaTableComment{
+		Table:   "profile_catalog_heads",
+		Comment: "Current optimistic-concurrency revision for each profile catalog.",
+		Columns: []schemaColumnComment{
+			{Name: "profile_id", MySQLType: types.v255, Comment: "Profile identifier for the current catalog head."},
+			{Name: "revision", MySQLType: "bigint", Comment: "Monotonic catalog revision used for compare-and-swap writes."},
+			{Name: "catalog_sha256", MySQLType: types.text, Comment: "Semantic SHA-256 digest of the current catalog."},
+			{Name: "updated_at", MySQLType: types.timeType, Comment: "UTC time when the catalog head last changed."},
+		},
+	}
+}
+
+func profileCatalogVersionsCommentSpec(types schemaCommentMySQLTypes) schemaTableComment {
+	return schemaTableComment{
+		Table:   "profile_catalog_versions",
+		Comment: "Immutable profile catalog revision history.",
+		Columns: []schemaColumnComment{
+			{Name: "profile_id", MySQLType: types.v255, Comment: "Profile identifier that owns this revision."},
+			{Name: "revision", MySQLType: "bigint", Comment: "Monotonic catalog revision."},
+			{Name: "catalog_sha256", MySQLType: types.text, Comment: "Semantic SHA-256 digest of this catalog revision."},
+			{Name: "catalog_json", MySQLType: types.jsonType, Comment: "Full immutable catalog payload for this revision."},
+			{Name: "operation", MySQLType: types.v128, Comment: "Mutation operation that created this revision."},
+			{Name: "summary_json", MySQLType: types.jsonType, Comment: "Safe structured mutation summary without catalog secrets."},
+			{Name: "created_at", MySQLType: types.timeType, Comment: "UTC time when this revision was recorded."},
+		},
 	}
 }
 

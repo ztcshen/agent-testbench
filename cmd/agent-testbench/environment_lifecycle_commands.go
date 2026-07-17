@@ -6,8 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"agent-testbench/internal/store"
 )
@@ -17,6 +19,7 @@ type environmentLifecycleOptions struct {
 	StoreRef      string
 	StoreURL      string
 	Workspace     string
+	HealthTimeout time.Duration
 	JSONOutput    bool
 }
 
@@ -26,6 +29,7 @@ func parseEnvironmentLifecycleOptions(name string, args []string) (environmentLi
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	storeURL := flags.String("store-url", "", legacyStoreURLFlagHelp)
 	workspace := flags.String("workspace", "", "Local workspace for generated compose artifacts")
+	healthTimeoutSeconds := flags.Int("health-timeout-seconds", 5, "Maximum seconds to wait for a non-Compose status health probe")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable JSON report")
 	if err := parseInterspersedFlags(flags, args); err != nil {
 		return environmentLifecycleOptions{}, err
@@ -37,6 +41,9 @@ func parseEnvironmentLifecycleOptions(name string, args []string) (environmentLi
 	if strings.TrimSpace(*workspace) == "" {
 		return environmentLifecycleOptions{}, errors.New("--workspace is required")
 	}
+	if *healthTimeoutSeconds <= 0 {
+		return environmentLifecycleOptions{}, errors.New("--health-timeout-seconds must be greater than zero")
+	}
 	resolvedStoreURL, err := resolveRequiredDailyStoreReference(*storeRef, *storeURL)
 	if err != nil {
 		return environmentLifecycleOptions{}, err
@@ -46,6 +53,7 @@ func parseEnvironmentLifecycleOptions(name string, args []string) (environmentLi
 		StoreRef:      *storeRef,
 		StoreURL:      resolvedStoreURL,
 		Workspace:     *workspace,
+		HealthTimeout: time.Duration(*healthTimeoutSeconds) * time.Second,
 		JSONOutput:    *jsonOutput,
 	}, nil
 }
@@ -110,6 +118,63 @@ func prepareEnvironmentLifecycleComposeFiles(report *environmentStatusDockerRepo
 		return false
 	}
 	return true
+}
+
+func validateEnvironmentLifecycleComposeFiles(report *environmentStatusDockerReport, compose map[string]any, workspace string) bool {
+	generatedFiles := generatedFileContentMapFromAny(compose["generatedFiles"])
+	generatedModes := environmentRestoreGeneratedFileModes(compose)
+	for _, relativePath := range environmentRestoreGeneratedFilePaths(compose, generatedFiles) {
+		if ok, errText := environmentRestoreGeneratedFileTargetOK(relativePath, workspace); !ok {
+			return failEnvironmentLifecycleProjectionValidation(report, relativePath, errText)
+		}
+		mode := generatedModes[filepath.Clean(relativePath)]
+		if mode == 0 {
+			mode = 0o644
+		}
+		content, err := readEnvironmentLifecycleProjectionFile(workspace, relativePath, mode)
+		if err != nil {
+			return failEnvironmentLifecycleProjectionValidation(report, restoreWorkspacePath(workspace, relativePath), err.Error())
+		}
+		if content != generatedFiles[relativePath] {
+			return failEnvironmentLifecycleProjectionValidation(report, restoreWorkspacePath(workspace, relativePath), "content differs from the active Store projection")
+		}
+	}
+	for _, path := range append(environmentRestoreComposeFiles(compose), stringSliceFromAny(compose["envFiles"])...) {
+		if _, err := readEnvironmentLifecycleProjectionFile(workspace, path, 0); err != nil {
+			return failEnvironmentLifecycleProjectionValidation(report, restoreWorkspacePath(workspace, path), err.Error())
+		}
+	}
+	envRelativePath := filepath.Join(".agent-testbench", "restore.env")
+	envPath := restoreWorkspacePath(workspace, envRelativePath)
+	envContent, err := readEnvironmentLifecycleProjectionFile(workspace, envRelativePath, 0o600)
+	if err != nil {
+		return failEnvironmentLifecycleProjectionValidation(report, envPath, err.Error())
+	}
+	if envContent != environmentRestoreGeneratedEnvFileContent(workspace, compose) {
+		return failEnvironmentLifecycleProjectionValidation(report, envPath, "content differs from the active Store projection")
+	}
+	return true
+}
+
+func readEnvironmentLifecycleProjectionFile(workspace string, relativePath string, expectedMode os.FileMode) (string, error) {
+	raw, info, err := readEnvironmentRestoreWorkspaceFileWithInfo(workspace, relativePath)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("projection must be a regular file")
+	}
+	if expectedMode != 0 && info.Mode().Perm() != expectedMode {
+		return "", fmt.Errorf("projection mode is %04o; expected %04o", info.Mode().Perm(), expectedMode)
+	}
+	return string(raw), nil
+}
+
+func failEnvironmentLifecycleProjectionValidation(report *environmentStatusDockerReport, path string, reason string) bool {
+	report.OK = false
+	report.Action = "validate-lifecycle-projection"
+	report.Error = fmt.Sprintf("environment lifecycle inspection is read-only; projection %s is not ready: %s; run environment restore --execute --prepare-repos-only to materialize the active Store projection", path, reason)
+	return false
 }
 
 func environmentLifecycleComposeServices(compose map[string]any, workspace string) []string {

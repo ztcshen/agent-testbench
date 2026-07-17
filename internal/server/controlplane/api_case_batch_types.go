@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"html/template"
 	"sync"
+	"time"
 
 	"agent-testbench/internal/domain/profile"
 )
@@ -70,6 +71,7 @@ type apiCaseBatchCaseReport struct {
 	EvidencePath    string `json:"evidencePath,omitempty"`
 	ElapsedMs       int64  `json:"elapsedMs"`
 	Error           string `json:"error,omitempty"`
+	FailurePhase    string `json:"failurePhase,omitempty"`
 	FailureCategory string `json:"failureCategory,omitempty"`
 	StartedAt       string `json:"startedAt,omitempty"`
 	FinishedAt      string `json:"finishedAt,omitempty"`
@@ -106,6 +108,7 @@ type apiCaseBatchRunReport struct {
 	Cases                []apiCaseBatchCaseReport   `json:"cases"`
 	Acceptance           workflowAcceptanceReport   `json:"acceptance,omitempty"`
 	Error                string                     `json:"error,omitempty"`
+	FailureCategory      string                     `json:"failureCategory,omitempty"`
 	HTMLReportPath       string                     `json:"htmlReportPath,omitempty"`
 	HTMLReportURL        string                     `json:"htmlReportUrl,omitempty"`
 	JUnitReportPath      string                     `json:"junitReportPath,omitempty"`
@@ -114,6 +117,7 @@ type apiCaseBatchRunReport struct {
 	ArtifactManifestURL  string                     `json:"artifactManifestUrl,omitempty"`
 	FailureSummaryPath   string                     `json:"failureSummaryPath,omitempty"`
 	FailureSummaryURL    string                     `json:"failureSummaryUrl,omitempty"`
+	lease                apiCaseBatchLease
 }
 
 type apiCaseBatchArtifactManifest struct {
@@ -152,10 +156,19 @@ var apiCaseBatchReportTemplateSource string
 var apiCaseBatchReportTemplate = template.Must(template.New("api-case-batch-report").Parse(apiCaseBatchReportTemplateSource))
 
 type apiCaseBatchRunner struct {
-	mu   sync.RWMutex
-	runs map[string]apiCaseBatchRunReport
+	mu            sync.RWMutex
+	checkpointMu  sync.Mutex
+	runs          map[string]apiCaseBatchRunReport
+	ownerID       string
+	leaseDuration time.Duration
+	reportWriters []func(apiCaseBatchRunReport) error
 }
 
-func newAPICaseBatchRunner() *apiCaseBatchRunner {
-	return &apiCaseBatchRunner{runs: map[string]apiCaseBatchRunReport{}}
+func newAPICaseBatchRunner(leaseDuration time.Duration) *apiCaseBatchRunner {
+	return &apiCaseBatchRunner{
+		runs:          map[string]apiCaseBatchRunReport{},
+		ownerID:       newAPICaseBatchOwnerID(),
+		leaseDuration: normalizeAPICaseBatchLeaseDuration(leaseDuration),
+		reportWriters: defaultAPICaseBatchReportWriters(),
+	}
 }

@@ -105,15 +105,6 @@ func compactUniqueStringListPreserveOrder(values []string) []string {
 	return out
 }
 
-func firstPositive(values ...int) int {
-	for _, value := range values {
-		if value > 0 {
-			return value
-		}
-	}
-	return 0
-}
-
 func mergeStringAnyMaps(base map[string]any, overlay map[string]any) map[string]any {
 	out := map[string]any{}
 	for key, value := range base {

@@ -1,6 +1,7 @@
 package sqlstore_test
 
 import (
+	"database/sql/driver"
 	"errors"
 	"strings"
 	"testing"
@@ -83,8 +84,12 @@ func TestUpgradeSchemaIgnoresDuplicateMySQLColumnsDuringIncrementalReplay(t *tes
 	migration := newMigrationDB(t)
 	dialect := sqlstore.MySQLDialect{}
 	migration.queueExistingSchemaVersion(15)
+	migration.state.queueRows(fakeRows{
+		columns: []string{"column_exists"},
+		values:  [][]driver.Value{{int64(0)}},
+	})
 
-	for i := 0; i < len(sqlstore.CoreSchemaSQL(dialect)); i++ {
+	for i := 0; i < len(sqlstore.CoreSchemaSQL(dialect))+1; i++ {
 		migration.state.queueExecError(nil)
 	}
 	migration.state.queueExecError(errors.New("Error 1060 (42S21): Duplicate column name 'test_plan_map_id'"))

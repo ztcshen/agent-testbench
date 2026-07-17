@@ -23,6 +23,21 @@ go test ./...
 npm run build:frontend
 ```
 
+The normal Go suite skips real Docker daemon tests. To exercise the product
+CLI against Docker Compose V2, including image build, environment restore,
+health/status, project networking, named volumes, secret-safe lifecycle output,
+and down cleanup, run:
+
+```sh
+make test-docker-integration
+```
+
+This opt-in target requires a running Docker daemon and pulls `alpine:3.20` by
+default. Set `AGENT_TESTBENCH_DOCKER_INTEGRATION_IMAGE` to use another locally
+approved image. The test uses a unique Compose project and always registers a
+`down --volumes --remove-orphans` cleanup handler; CI runs it as the separate
+`Docker Compose integration` job.
+
 Run the scoped release gate before opening a pull request:
 
 ```sh

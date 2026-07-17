@@ -113,14 +113,15 @@ func runEnvironmentRestore(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	outputReport := environmentRestoreReportForOutput(report)
 	if options.OutputFormat == cliOutputFormatStreamJSON {
-		environmentRestoreEmitRunCompleted(ctx, report)
+		environmentRestoreEmitRunCompleted(ctx, outputReport)
 	} else if options.JSONOutput {
-		if encodeErr := writeIndentedJSON(report); encodeErr != nil {
+		if encodeErr := writeIndentedJSON(outputReport); encodeErr != nil {
 			return encodeErr
 		}
 	} else {
-		printEnvironmentRestoreReport(report)
+		printEnvironmentRestoreReport(outputReport)
 	}
 	if !report.OK {
 		return errors.New("environment restore did not complete")
@@ -154,6 +155,7 @@ func buildEnvironmentRestoreReportWithStructuredState(ctx context.Context, env s
 	}
 	plan := result.Plan
 	report := result.Report
+	ctx = contextWithEnvironmentOutputRedactor(ctx, plan.Compose, plan.HealthChecks, plan.PackageSpec)
 	environmentRestoreEmitStep(ctx, "step_completed", "environment.restore.plan", "passed", report.EnvironmentID, "environment restore plan prepared", "")
 	environmentRestoreAddSourceReports(ctx, &report, plan, execute, pull)
 	environmentRestoreApplyPreDockerReadinessGates(&report, cleanupOptions)
@@ -574,7 +576,8 @@ func environmentRestoreMaybePersist(ctx context.Context, env *store.Environment,
 			report.Error = err.Error()
 			report.Readiness = environmentRestoreReadinessReport(*report, plan.PackageSpec, plan.Specs, cleanupOptions)
 		}
-		persisted, err := environmentRestorePersistEnvironment(ctx, workflowOptions.StoreURL, *env, *report, plan.AttemptedAt)
+		persistReport := environmentRestoreReportForOutput(*report)
+		persisted, err := environmentRestorePersistEnvironment(ctx, workflowOptions.StoreURL, *env, persistReport, plan.AttemptedAt)
 		if err != nil {
 			report.OK = false
 			report.Error = err.Error()

@@ -11,68 +11,86 @@ import (
 	"time"
 
 	"agent-testbench/internal/domain/profile"
-	"agent-testbench/internal/domain/profilecatalog"
 	"agent-testbench/internal/store"
 )
 
 func handleAPICaseBatchRunStart(w http.ResponseWriter, r *http.Request, bundle profile.Bundle, runtime store.Store, runner *apiCaseBatchRunner, collector traceCollector) {
-	payload, err := readJSONPayload(r)
-	if err != nil {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid json"})
+	payload, ok := readPublicAPICaseBatchRunPayload(w, r)
+	if !ok {
 		return
 	}
 	request := apiCaseBatchRunRequest{
-		RequestID:     strings.TrimSpace(valueString(payload["requestId"])),
-		EnvironmentID: strings.TrimSpace(valueString(payload["environmentId"])),
-		CaseIDs:       stringListValue(payload["caseIds"]),
-		NodeIDs:       stringListValue(payload["nodeIds"]),
-		WorkflowID:    strings.TrimSpace(valueString(payload["workflowId"])),
-		Suite:         apiCaseBatchSuiteSelectorValue(payload["suite"]),
+		RequestID:  strings.TrimSpace(valueString(payload["requestId"])),
+		CaseIDs:    stringListValue(payload["caseIds"]),
+		NodeIDs:    stringListValue(payload["nodeIds"]),
+		WorkflowID: strings.TrimSpace(valueString(payload["workflowId"])),
+		Suite:      apiCaseBatchSuiteSelectorValue(payload["suite"]),
 	}
 	applyAPICaseBatchRunOptionsFromPayload(&request, payload)
 	report, status, err := startAPICaseBatchRun(r.Context(), bundle, runtime, runner, request, collector)
-	if err != nil {
-		writeJSONStatus(w, status, map[string]any{"ok": false, "error": err.Error()})
+	if writeAPICaseBatchStartError(w, status, err, nil) {
 		return
 	}
 	writeJSONStatus(w, http.StatusAccepted, report)
 }
 
 func applyAPICaseBatchRunOptionsFromPayload(request *apiCaseBatchRunRequest, payload map[string]any) {
-	request.BaseURL = strings.TrimSpace(valueString(payload["baseUrl"]))
-	request.EvidenceDir = strings.TrimSpace(valueString(payload["evidenceDir"]))
-	request.TimeoutSeconds = intValue(payload["timeoutSeconds"])
+	request.TimeoutSeconds = intValue(payload[apiFieldTimeoutSeconds])
 	request.Overrides = mapValue(payload["overrides"])
 }
 
 func startAPICaseBatchRun(ctx context.Context, bundle profile.Bundle, runtime store.Store, runner *apiCaseBatchRunner, request apiCaseBatchRunRequest, collector traceCollector) (apiCaseBatchRunReport, int, error) {
+	request, plans, status, err := prepareAPICaseBatchRun(ctx, bundle, runtime, request)
+	if err != nil {
+		return apiCaseBatchRunReport{}, status, err
+	}
+	now := time.Now().UTC()
+	report := newAPICaseBatchRunReport(bundle, runner, request, plans, now)
+	if err := persistInitialAPICaseBatchRun(ctx, runtime, report); err != nil {
+		return apiCaseBatchRunReport{}, http.StatusInternalServerError, err
+	}
+	runner.save(report)
+	launchAPICaseBatchRun(runner, runtime, bundle, request, plans, report.BatchRunID, collector)
+	return report, http.StatusAccepted, nil
+}
+
+func prepareAPICaseBatchRun(ctx context.Context, bundle profile.Bundle, runtime store.Store, request apiCaseBatchRunRequest) (apiCaseBatchRunRequest, []apiCaseBatchCasePlan, int, error) {
 	if request.RequestID == "" {
-		return apiCaseBatchRunReport{}, http.StatusBadRequest, errors.New("requestId is required")
+		return request, nil, http.StatusBadRequest, errors.New("requestId is required")
 	}
 	request.CaseIDs = compactUniqueStringListPreserveOrder(request.CaseIDs)
 	request.NodeIDs = compactUniqueStringList(request.NodeIDs)
 	request.Suite = normalizeAPICaseBatchSuiteSelector(request.Suite)
-	if len(request.CaseIDs) == 0 && len(request.NodeIDs) == 0 && request.WorkflowID == "" && !request.Suite.configured() {
-		return apiCaseBatchRunReport{}, http.StatusBadRequest, errors.New("caseIds, nodeIds, workflowId, or suite is required")
+	if apiCaseBatchSelectorFamilyCount(request) != 1 {
+		return request, nil, http.StatusBadRequest, publicAPICaseBatchPayloadError{
+			code:    "invalid_batch_selector",
+			message: "exactly one of caseIds, nodeIds, workflowId, or suite is required",
+		}
 	}
 	if status, err := validateAPICaseBatchEnvironmentWorkflowGate(ctx, runtime, request); err != nil {
-		return apiCaseBatchRunReport{}, status, err
+		return request, nil, status, err
 	}
-	bundle = apiCaseBatchPlanningBundle(ctx, runtime, bundle)
 	plans, err := apiCaseBatchPlans(ctx, bundle, runtime, request)
 	if err != nil {
 		var planErr apiCaseBatchPlanError
 		if errors.As(err, &planErr) {
-			return apiCaseBatchRunReport{}, planErr.Status, planErr
+			return request, nil, planErr.Status, planErr
 		}
-		return apiCaseBatchRunReport{}, http.StatusInternalServerError, err
+		return request, nil, http.StatusInternalServerError, err
 	}
 	if len(plans) == 0 {
-		return apiCaseBatchRunReport{}, http.StatusBadRequest, errors.New("no api cases matched selector")
+		return request, nil, http.StatusBadRequest, errors.New("no api cases matched selector")
 	}
+	if err := normalizeAPICaseBatchPlanTimeouts(plans); err != nil {
+		return request, nil, http.StatusBadRequest, err
+	}
+	return request, plans, 0, nil
+}
 
+func newAPICaseBatchRunReport(bundle profile.Bundle, runner *apiCaseBatchRunner, request apiCaseBatchRunRequest, plans []apiCaseBatchCasePlan, now time.Time) apiCaseBatchRunReport {
 	batchRunID := newAPICaseBatchRunID(request.RequestID)
-	now := time.Now().UTC()
+	reportDir := filepath.Join(apiCaseBatchReportDir(request, plans), batchRunID)
+	reportURL := "/api/cases/batch-runs/" + url.PathEscape(batchRunID)
 	report := apiCaseBatchRunReport{
 		OK:                   true,
 		BatchRunID:           batchRunID,
@@ -84,25 +102,31 @@ func startAPICaseBatchRun(ctx context.Context, bundle profile.Bundle, runtime st
 		WorkflowID:           request.WorkflowID,
 		Status:               store.StatusRunning,
 		Total:                len(plans),
-		ReportURL:            "/api/cases/batch-runs/" + url.PathEscape(batchRunID),
+		ReportURL:            reportURL,
 		StartedAt:            now.Format(time.RFC3339Nano),
 		Nodes:                apiCaseBatchNodesFromPlans(plans),
-		Cases:                make([]apiCaseBatchCaseReport, 0, len(plans)),
-		HTMLReportPath:       filepath.Join(apiCaseBatchReportDir(request, plans), batchRunID, "report.html"),
-		HTMLReportURL:        "/api/cases/batch-runs/" + url.PathEscape(batchRunID) + "/report.html",
-		JUnitReportPath:      filepath.Join(apiCaseBatchReportDir(request, plans), batchRunID, "report.junit.xml"),
-		JUnitReportURL:       "/api/cases/batch-runs/" + url.PathEscape(batchRunID) + "/report.junit.xml",
-		ArtifactManifestPath: filepath.Join(apiCaseBatchReportDir(request, plans), batchRunID, "artifacts.json"),
-		ArtifactManifestURL:  "/api/cases/batch-runs/" + url.PathEscape(batchRunID) + "/artifacts.json",
-		FailureSummaryPath:   filepath.Join(apiCaseBatchReportDir(request, plans), batchRunID, "failures.json"),
-		FailureSummaryURL:    "/api/cases/batch-runs/" + url.PathEscape(batchRunID) + "/failures.json",
+		Cases:                apiCaseBatchCaseReportsFromPlans(plans),
+		HTMLReportPath:       filepath.Join(reportDir, "report.html"),
+		HTMLReportURL:        reportURL + "/report.html",
+		JUnitReportPath:      filepath.Join(reportDir, "report.junit.xml"),
+		JUnitReportURL:       reportURL + "/report.junit.xml",
+		ArtifactManifestPath: filepath.Join(reportDir, "artifacts.json"),
+		ArtifactManifestURL:  reportURL + "/artifacts.json",
+		FailureSummaryPath:   filepath.Join(reportDir, "failures.json"),
+		FailureSummaryURL:    reportURL + "/failures.json",
 	}
+	report.lease = runner.newLease(now)
 	if request.Suite.configured() {
 		suite := request.Suite
 		report.Suite = &suite
 	}
+	return report
+}
+
+func apiCaseBatchCaseReportsFromPlans(plans []apiCaseBatchCasePlan) []apiCaseBatchCaseReport {
+	cases := make([]apiCaseBatchCaseReport, 0, len(plans))
 	for _, plan := range plans {
-		report.Cases = append(report.Cases, apiCaseBatchCaseReport{
+		cases = append(cases, apiCaseBatchCaseReport{
 			CaseID:          plan.ID,
 			DisplayName:     plan.DisplayName,
 			Scenario:        plan.Scenario,
@@ -115,37 +139,49 @@ func startAPICaseBatchRun(ctx context.Context, bundle profile.Bundle, runtime st
 			Status:          store.StatusRunning,
 		})
 	}
-	if err := writeAPICaseBatchHTMLReport(report); err != nil {
-		return apiCaseBatchRunReport{}, http.StatusInternalServerError, err
-	}
-	if err := writeAPICaseBatchJUnitReport(report); err != nil {
-		return apiCaseBatchRunReport{}, http.StatusInternalServerError, err
-	}
-	if err := writeAPICaseBatchArtifactManifest(report); err != nil {
-		return apiCaseBatchRunReport{}, http.StatusInternalServerError, err
-	}
-	if err := writeAPICaseBatchFailureSummary(report); err != nil {
-		return apiCaseBatchRunReport{}, http.StatusInternalServerError, err
-	}
-	runner.save(report)
-
-	go runner.run(context.Background(), batchRunID, bundle, request.EnvironmentID, request.WorkflowID, plans, runtime, bundle.FailureCategories, collector)
-	return report, http.StatusAccepted, nil
+	return cases
 }
 
-func apiCaseBatchPlanningBundle(ctx context.Context, runtime store.Store, bootstrap profile.Bundle) profile.Bundle {
-	if runtime == nil {
-		return bootstrap
+func persistInitialAPICaseBatchRun(ctx context.Context, runtime store.Store, report apiCaseBatchRunReport) error {
+	if err := writeAPICaseBatchHTMLReport(report); err != nil {
+		return err
 	}
-	catalog, err := runtime.GetProfileCatalog(ctx)
-	if err != nil || strings.TrimSpace(catalog.ProfileID) == "" {
-		return bootstrap
+	if err := writeAPICaseBatchJUnitReport(report); err != nil {
+		return err
 	}
-	refreshed := profilecatalog.ToBundle(catalog)
-	if len(refreshed.FailureCategories) == 0 && len(bootstrap.FailureCategories) > 0 && strings.TrimSpace(refreshed.ID) == strings.TrimSpace(bootstrap.ID) {
-		refreshed.FailureCategories = append([]profile.FailureCategoryRule(nil), bootstrap.FailureCategories...)
+	if err := writeAPICaseBatchArtifactManifest(report); err != nil {
+		return err
 	}
-	return refreshed
+	if err := writeAPICaseBatchFailureSummary(report); err != nil {
+		return err
+	}
+	return createAPICaseBatchRunParent(ctx, runtime, report)
+}
+
+func launchAPICaseBatchRun(runner *apiCaseBatchRunner, runtime store.Store, bundle profile.Bundle, request apiCaseBatchRunRequest, plans []apiCaseBatchCasePlan, batchRunID string, collector traceCollector) {
+	runCtx, cancel := context.WithCancel(context.Background())
+	runner.startHeartbeat(runCtx, cancel, runtime, batchRunID)
+	go func() {
+		defer cancel()
+		runner.run(runCtx, batchRunID, bundle, request.EnvironmentID, request.WorkflowID, plans, runtime, bundle.FailureCategories, collector)
+	}()
+}
+
+func apiCaseBatchSelectorFamilyCount(request apiCaseBatchRunRequest) int {
+	count := 0
+	if len(request.CaseIDs) > 0 {
+		count++
+	}
+	if len(request.NodeIDs) > 0 {
+		count++
+	}
+	if strings.TrimSpace(request.WorkflowID) != "" {
+		count++
+	}
+	if request.Suite.configured() {
+		count++
+	}
+	return count
 }
 
 func validateAPICaseBatchEnvironmentWorkflowGate(ctx context.Context, runtime store.Store, request apiCaseBatchRunRequest) (int, error) {
@@ -175,7 +211,7 @@ func validateAPICaseBatchEnvironmentWorkflowGate(ctx context.Context, runtime st
 	return http.StatusConflict, fmt.Errorf("workflow %s is bound to environment %s; run it through environment acceptance after restore instead of the generic batch API: POST /api/environments/%s/acceptance-runs or agent-testbench environment restore %s --store STORE_NAME_OR_DSN --workspace WORKSPACE --execute --run-workflow --server-url URL", workflowID, strings.Join(ids, ", "), url.PathEscape(ids[0]), ids[0])
 }
 
-func handleAPICaseBatchRunReport(w http.ResponseWriter, r *http.Request, runner *apiCaseBatchRunner) {
+func handleAPICaseBatchRunReport(w http.ResponseWriter, r *http.Request, runtime store.Store, runner *apiCaseBatchRunner) {
 	idValue := strings.TrimPrefix(r.URL.Path, "/api/cases/batch-runs/")
 	wantsHTML := strings.HasSuffix(idValue, "/report.html")
 	wantsJUnit := strings.HasSuffix(idValue, "/report.junit.xml")
@@ -200,8 +236,16 @@ func handleAPICaseBatchRunReport(w http.ResponseWriter, r *http.Request, runner 
 	}
 	report, ok := runner.get(id)
 	if !ok {
-		writeJSONStatus(w, http.StatusNotFound, map[string]any{"ok": false, "error": "batch run not found"})
-		return
+		var loadErr error
+		report, ok, loadErr = storedAPICaseBatchRunReport(r.Context(), runtime, id)
+		if loadErr != nil {
+			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": loadErr.Error()})
+			return
+		}
+		if !ok {
+			writeJSONStatus(w, http.StatusNotFound, map[string]any{"ok": false, "error": "batch run not found"})
+			return
+		}
 	}
 	if wantsHTML {
 		http.ServeFile(w, r, report.HTMLReportPath)

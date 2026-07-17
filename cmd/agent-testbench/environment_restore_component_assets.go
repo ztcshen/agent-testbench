@@ -205,8 +205,7 @@ func environmentRestoreRemoteComponentAssets(ctx context.Context, envID string, 
 			continue
 		}
 		report.Action = "materialize"
-		sourceFile := filepath.Join(checkout, filepath.Clean(sourcePath))
-		raw, err := os.ReadFile(sourceFile)
+		raw, err := readEnvironmentRestoreWorkspaceFile(checkout, sourcePath)
 		if err != nil {
 			report.OK = false
 			report.Error = err.Error()
@@ -214,17 +213,8 @@ func environmentRestoreRemoteComponentAssets(ctx context.Context, envID string, 
 			continue
 		}
 		report.Bytes = int64(len(raw))
-		if err := os.MkdirAll(filepath.Dir(report.TargetPath), 0o755); err != nil {
-			report.OK = false
-			report.Error = err.Error()
-			out = append(out, report)
-			continue
-		}
 		mode := environmentRestoreComponentAssetFileMode(asset)
-		if err := os.WriteFile(report.TargetPath, raw, mode); err != nil {
-			report.OK = false
-			report.Error = err.Error()
-		} else if err := os.Chmod(report.TargetPath, mode); err != nil {
+		if err := writeEnvironmentRestoreWorkspaceFile(workspace, asset.TargetPath, raw, mode); err != nil {
 			report.OK = false
 			report.Error = err.Error()
 		}

@@ -37,6 +37,20 @@ func startEnvironmentRouteServer(t *testing.T, s *sqlite.Store) string {
 	return server.URL
 }
 
+func TestEnvironmentBootstrapPlanSkipsInventoryOnlyServicesWithoutSource(t *testing.T) {
+	plan := controlplane.EnvironmentBootstrapPlan(store.Environment{
+		ServicesJSON:           `[{"id":"compose-only"},{"id":"remote","repo":"https://example.com/team/remote.git"}]`,
+		ReposJSON:              `{}`,
+		ComposeJSON:            `{"composeFile":"compose.yml","services":["compose-only"]}`,
+		VerificationWorkflowID: "workflow.bootstrap",
+	})
+	restore := plan["restore"].(map[string]any)
+	repos := restore["repos"].([]map[string]any)
+	if len(repos) != 1 || repos[0]["serviceId"] != "remote" || repos[0]["action"] != "clone-if-missing" {
+		t.Fatalf("bootstrap repository plan should only contain source-bearing services: %#v", repos)
+	}
+}
+
 func TestServerRegistersServiceIntoSandboxStoreWithoutProfileImport(t *testing.T) {
 	ctx := context.Background()
 	s := openEnvironmentRouteStore(t, ctx)

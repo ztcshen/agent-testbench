@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,6 +18,10 @@ func readJSONPayload(r *http.Request) (payload map[string]any, err error) {
 			err = errors.Join(err, closeErr)
 		}
 	}()
+	mediaType, _, mediaTypeErr := mime.ParseMediaType(strings.TrimSpace(r.Header.Get("Content-Type")))
+	if mediaTypeErr != nil || (mediaType != "application/json" && !strings.HasSuffix(mediaType, "+json")) {
+		return nil, errors.New("Content-Type must be application/json")
+	}
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
 		return nil, err

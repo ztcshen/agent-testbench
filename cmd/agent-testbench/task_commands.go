@@ -12,6 +12,11 @@ import (
 	"agent-testbench/internal/store"
 )
 
+const (
+	taskCommandWorker   = "worker"
+	taskStatusScheduled = "scheduled"
+)
+
 func runTask(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("missing task command")
@@ -27,6 +32,8 @@ func runTask(ctx context.Context, args []string) error {
 		return runTaskRun(ctx, args[1:])
 	case "schedule":
 		return runTaskSchedule(ctx, args[1:])
+	case taskCommandWorker:
+		return runTaskWorker(ctx, args[1:])
 	case "watch":
 		return runTaskWatch(ctx, args[1:])
 	case cliCommandList:
@@ -118,7 +125,8 @@ func runTaskSchedule(ctx context.Context, args []string) error {
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
 	command := flags.String("command", "", "AgentTestBench command to execute")
 	interval := flags.String("interval", "", "Schedule interval, such as 15m")
-	cron := flags.String("cron", "", "Cron expression metadata")
+	cron := flags.String("cron", "", "Unsupported; task worker currently accepts interval schedules only")
+	shellMode := flags.Bool("shell", false, "Execute --command through /bin/sh -c; required for shell syntax")
 	notifyFile := flags.String("notify-file", "", "Append completion notifications to a JSONL file")
 	notifyWebhook := flags.String("notify-webhook", "", "POST completion notifications to a webhook")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable task schedule report")
@@ -140,7 +148,11 @@ func runTaskSchedule(ctx context.Context, args []string) error {
 		return err
 	}
 	defer cleanup()
-	task, err := upsertCLITask(ctx, runtime, flags.Arg(0), *command, schedule, "scheduled", taskNotificationOptions{File: *notifyFile, Webhook: *notifyWebhook})
+	kind := "cli"
+	if *shellMode {
+		kind = "shell"
+	}
+	task, err := upsertTask(ctx, runtime, flags.Arg(0), *command, schedule, taskStatusScheduled, kind, taskNotificationOptions{File: *notifyFile, Webhook: *notifyWebhook})
 	if err != nil {
 		return err
 	}
@@ -357,6 +369,8 @@ func runTaskStop(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("task stop", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	storeRef := flags.String("store", "", "Named Store config or Store DSN")
+	recoverRunningClaim := flags.Bool("recover-running-claim", false, "Recover an abandoned running worker claim into paused status without replay")
+	confirmSideEffectsReviewed := flags.Bool("confirm-side-effects-reviewed", false, "Confirm the claimed command's side effects were reviewed before recovery")
 	jsonOutput := flags.Bool("json", false, "Emit a machine-readable task stop report")
 	if err := parseInterspersedFlags(flags, args); err != nil {
 		return err
@@ -364,11 +378,36 @@ func runTaskStop(ctx context.Context, args []string) error {
 	if flags.NArg() != 1 {
 		return errors.New("task name is required")
 	}
+	if *confirmSideEffectsReviewed && !*recoverRunningClaim {
+		return errors.New("--confirm-side-effects-reviewed requires --recover-running-claim")
+	}
+	if *recoverRunningClaim && !*confirmSideEffectsReviewed {
+		return errors.New("--recover-running-claim requires --confirm-side-effects-reviewed")
+	}
 	runtime, cleanup, task, err := openTaskByArg(ctx, *storeRef, flags.Arg(0))
 	if err != nil {
 		return err
 	}
 	defer cleanup()
+	if *recoverRunningClaim {
+		recovered, recoverErr := runtime.RecoverScheduledAgentTask(ctx, task.ID, time.Now().UTC())
+		if recoverErr != nil {
+			return recoverErr
+		}
+		if !recovered {
+			return errors.New("task has no active running claim to recover")
+		}
+		task, err = runtime.GetAgentTask(ctx, task.ID)
+		if err != nil {
+			return err
+		}
+		report := taskCommandReport{OK: true, Task: taskViewFromStore(task)}
+		if *jsonOutput {
+			return writeIndentedJSON(report)
+		}
+		fmt.Printf("Recovered and paused task: %s\n", task.Name)
+		return nil
+	}
 	task.Status = "paused"
 	task.UpdatedAt = time.Now().UTC()
 	task, err = runtime.UpsertAgentTask(ctx, task)

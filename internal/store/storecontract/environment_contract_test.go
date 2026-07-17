@@ -62,7 +62,7 @@ func contractEnvironmentFixture() store.Environment {
 		Status:                 "draft",
 		ServicesJSON:           `[{"id":"service.alpha","repo":"../service-alpha"}]`,
 		ReposJSON:              `{"service.alpha":{"url":"../service-alpha","branch":"main"}}`,
-		ComposeJSON:            `{"composeFile":"docker-compose.yml","startCommand":"docker compose up -d"}`,
+		ComposeJSON:            `{"composeFile":"docker-compose.yml","startCommand":"docker compose up -d","statusCommand":"docker compose ps --status running","stopCommand":"docker compose stop"}`,
 		HealthChecksJSON:       `[{"id":"alpha-health","url":"http://127.0.0.1:18080/health"}]`,
 		VerificationWorkflowID: "workflow.smoke",
 		SummaryJSON:            `{"owner":"team"}`,
@@ -87,7 +87,7 @@ func requireEnvironmentFilesContract(t *testing.T, ctx context.Context, s store.
 	if err != nil {
 		t.Fatalf("get environment after files: %v", err)
 	}
-	if !jsonEqual(loadedEnv.ComposeJSON, `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"envFiles":["compose/runtime.env","compose/empty.env"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  service-alpha:\n    image: alpine:3.20\n","compose/runtime.env":"APP_MODE=test\n","compose/empty.env":""},"startCommand":"docker compose up -d"}`) {
+	if !jsonEqual(loadedEnv.ComposeJSON, `{"composeFile":"compose/docker-compose.yml","composeFiles":["compose/docker-compose.yml"],"envFiles":["compose/runtime.env","compose/empty.env"],"generatedFiles":{"compose/docker-compose.yml":"services:\n  service-alpha:\n    image: alpine:3.20\n","compose/runtime.env":"APP_MODE=test\n","compose/empty.env":""},"startCommand":"docker compose up -d","statusCommand":"docker compose ps --status running","stopCommand":"docker compose stop"}`) {
 		t.Fatalf("structured files were not merged into compose json: %s", loadedEnv.ComposeJSON)
 	}
 }

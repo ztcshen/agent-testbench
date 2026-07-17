@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"agent-testbench/internal/domain/casemaintenance"
 	"agent-testbench/internal/domain/profile"
 	"agent-testbench/internal/store"
 )
@@ -24,7 +25,10 @@ func findAPICase(items []profile.APICase, id string) (profile.APICase, bool) {
 func findRunnableAPICase(ctx context.Context, bundle profile.Bundle, runtime store.Store, id string, payload map[string]any) (runnableAPICase, bool) {
 	if item, ok := findAPICase(bundle.APICases, id); ok {
 		item.CasePath = resolveBundleAPICasePath(ctx, runtime, bundle, item.CasePath)
-		template := findCaseExecutionTemplateConfig(ctx, runtime, id, payload)
+		template := findCaseExecutionTemplateConfigFromBundle(bundle, id, payload)
+		if template == nil {
+			template = findCaseExecutionTemplateConfig(ctx, runtime, id, payload)
+		}
 		var execution *caseExecutionConfig
 		var inputs []map[string]any
 		if template != nil {
@@ -239,6 +243,10 @@ func deriveCaseExecutionConfigFromCatalog(catalog store.ProfileCatalog, item sto
 }
 
 func deriveCaseExecutionConfigFromSiblingConfig(catalog store.ProfileCatalog, item store.CatalogAPICase) *caseExecutionConfig {
+	itemNodeID := strings.TrimSpace(item.NodeID)
+	if itemNodeID == "" {
+		return nil
+	}
 	caseNodeByID := map[string]string{}
 	for _, apiCase := range catalog.APICases {
 		caseNodeByID[apiCase.ID] = apiCase.NodeID
@@ -251,14 +259,14 @@ func deriveCaseExecutionConfigFromSiblingConfig(catalog store.ProfileCatalog, it
 		if json.Unmarshal([]byte(config.ConfigJSON), &parsed) != nil {
 			continue
 		}
-		if strings.TrimSpace(config.NodeID) != "" && config.NodeID != item.NodeID && caseNodeByID[parsed.CaseID] != item.NodeID {
+		if strings.TrimSpace(config.NodeID) != "" && config.NodeID != itemNodeID && caseNodeByID[parsed.CaseID] != itemNodeID {
 			continue
 		}
 		next := parsed.CaseExecution
 		if next.Method == "" && next.Path == "" && next.NodeID == "" {
 			continue
 		}
-		if strings.TrimSpace(config.NodeID) == "" && caseNodeByID[parsed.CaseID] != item.NodeID {
+		if strings.TrimSpace(config.NodeID) == "" && caseNodeByID[parsed.CaseID] != itemNodeID {
 			continue
 		}
 		cloned := cloneCaseExecutionConfig(next)
@@ -370,15 +378,54 @@ func findCaseExecutionConfigFromCatalog(catalog store.ProfileCatalog, caseID str
 }
 
 func findCaseExecutionTemplateConfigFromCatalog(catalog store.ProfileCatalog, caseID string, payload map[string]any) *caseExecutionTemplateConfig {
+	entries := make([]caseExecutionConfigEntry, 0, len(catalog.TemplateConfigs))
+	for _, config := range catalog.TemplateConfigs {
+		entries = append(entries, caseExecutionConfigEntry{
+			Status:     config.Status,
+			ConfigJSON: config.ConfigJSON,
+			WorkflowID: config.WorkflowID,
+			ScopeType:  config.ScopeType,
+			ScopeID:    config.ScopeID,
+		})
+	}
+	return findCaseExecutionTemplateConfigFromEntries(entries, caseID, payload)
+}
+
+func findCaseExecutionTemplateConfigFromBundle(bundle profile.Bundle, caseID string, payload map[string]any) *caseExecutionTemplateConfig {
+	entries := make([]caseExecutionConfigEntry, 0, len(bundle.TemplateConfigs))
+	for _, config := range bundle.TemplateConfigs {
+		entries = append(entries, caseExecutionConfigEntry{
+			Status:     config.Status,
+			ConfigJSON: config.ConfigJSON,
+			WorkflowID: config.WorkflowID,
+			ScopeType:  config.ScopeType,
+			ScopeID:    config.ScopeID,
+		})
+	}
+	return findCaseExecutionTemplateConfigFromEntries(entries, caseID, payload)
+}
+
+type caseExecutionConfigEntry struct {
+	Status     string
+	ConfigJSON string
+	WorkflowID string
+	ScopeType  string
+	ScopeID    string
+}
+
+func findCaseExecutionTemplateConfigFromEntries(entries []caseExecutionConfigEntry, caseID string, payload map[string]any) *caseExecutionTemplateConfig {
 	workflowID := valueString(payload["workflowId"])
 	stepID := valueString(payload["stepId"])
 	var defaultValue *caseExecutionTemplateConfig
-	for _, config := range catalog.TemplateConfigs {
+	for _, config := range entries {
 		if config.Status != "" && config.Status != "active" {
 			continue
 		}
 		var parsed caseExecutionTemplateConfig
 		if err := json.Unmarshal([]byte(config.ConfigJSON), &parsed); err != nil {
+			continue
+		}
+		if !casemaintenance.ExecutionConfigTargetsCase(config.ScopeType, config.ScopeID, config.ConfigJSON, caseID) {
 			continue
 		}
 		next := parsed.CaseExecution
@@ -387,9 +434,6 @@ func findCaseExecutionTemplateConfigFromCatalog(catalog store.ProfileCatalog, ca
 		}
 		if workflowID != "" && stepID != "" && config.WorkflowID == workflowID && config.ScopeID == stepID {
 			return &parsed
-		}
-		if parsed.CaseID != caseID {
-			continue
 		}
 		if defaultValue == nil {
 			defaultValue = &parsed

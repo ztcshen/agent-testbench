@@ -60,7 +60,44 @@ func exerciseStoreRecordsAndReadsRuns(t *testing.T, tt runDialectExpectation) {
 		t.Fatalf("create run args = %#v", exec.args)
 	}
 
-	queueRunRow(state, created, started, `{"stepCount": 1}`)
+	updated := created
+	updated.Status = store.StatusPassed
+	updated.SummaryJSON = `{"stepCount":2}`
+	updated.FinishedAt = started.Add(time.Second)
+	updated.UpdatedAt = updated.FinishedAt
+	updated, err = s.UpdateRun(ctx, updated)
+	if err != nil {
+		t.Fatalf("update run: %v", err)
+	}
+	if updated.Status != store.StatusPassed || updated.SummaryJSON != `{"stepCount":2}` {
+		t.Fatalf("updated run = %#v", updated)
+	}
+	exec = state.lastExec(t)
+	assertSQLContains(t, exec.query, "update run query", "update runs", "where id = "+tt.dialect.BindVar(13))
+	assertSQLOmits(t, exec.query, "update run query", tt.reject)
+	if exec.args[3] != store.StatusPassed || exec.args[5] != `{"stepCount":2}` || exec.args[12] != "run-001" {
+		t.Fatalf("update run args = %#v", exec.args)
+	}
+
+	swapped := updated
+	swapped.Status = store.StatusFailed
+	swapped.SummaryJSON = `{"stepCount":3}`
+	swapped.UpdatedAt = updated.UpdatedAt.Add(time.Second)
+	if _, err := s.CompareAndSwapRun(ctx, updated.UpdatedAt, store.StatusPassed, swapped); err != nil {
+		t.Fatalf("compare and swap run: %v", err)
+	}
+	exec = state.lastExec(t)
+	assertSQLContains(t, exec.query, "compare and swap run query",
+		"where id = "+tt.dialect.BindVar(13),
+		"updated_at = "+tt.dialect.BindVar(14),
+		"status = "+tt.dialect.BindVar(15),
+	)
+	assertSQLOmits(t, exec.query, "compare and swap run query", tt.reject)
+	if exec.args[3] != store.StatusFailed || exec.args[12] != "run-001" || exec.args[14] != store.StatusPassed {
+		t.Fatalf("compare and swap run args = %#v", exec.args)
+	}
+
+	queueRunRow(state, updated, started, `{"stepCount": 1}`)
 	loaded, err := s.GetRun(ctx, "run-001")
 	if err != nil {
 		t.Fatalf("get run: %v", err)

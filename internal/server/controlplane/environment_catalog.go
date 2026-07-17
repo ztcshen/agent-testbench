@@ -174,6 +174,9 @@ func handleEnvironmentAcceptanceRunStart(w http.ResponseWriter, r *http.Request,
 		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
+	if writePublicAPICaseBatchPayloadError(w, validatePublicEnvironmentAcceptanceRunPayload(payload)) {
+		return
+	}
 	requestID := strings.TrimSpace(valueString(payload["requestId"]))
 	if requestID == "" {
 		requestID = "env-acceptance-" + time.Now().UTC().Format("20060102T150405.000000000Z")
@@ -186,8 +189,7 @@ func handleEnvironmentAcceptanceRunStart(w http.ResponseWriter, r *http.Request,
 	}
 	applyAPICaseBatchRunOptionsFromPayload(&request, payload)
 	report, status, err := startAPICaseBatchRun(r.Context(), bundle, runtime, runner, request, collector)
-	if err != nil {
-		writeJSONStatus(w, status, map[string]any{"ok": false, "error": err.Error()})
+	if writeAPICaseBatchStartError(w, status, err, nil) {
 		return
 	}
 	report.ReportURL = "/api/environments/" + url.PathEscape(env.ID) + "/acceptance-runs/" + url.PathEscape(report.BatchRunID)
@@ -199,7 +201,11 @@ func handleEnvironmentAcceptanceRunReport(w http.ResponseWriter, r *http.Request
 		writeJSON(w, environmentAcceptanceRunPayload(environmentID, report))
 		return
 	}
-	report, ok := storedEnvironmentAcceptanceRunReport(r.Context(), runtime, environmentID, batchRunID)
+	report, ok, err := storedEnvironmentAcceptanceRunReport(r.Context(), runtime, environmentID, batchRunID)
+	if err != nil {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
 	if !ok {
 		writeJSONStatus(w, http.StatusNotFound, map[string]any{"ok": false, "error": "environment acceptance run not found"})
 		return
@@ -207,28 +213,18 @@ func handleEnvironmentAcceptanceRunReport(w http.ResponseWriter, r *http.Request
 	writeJSON(w, environmentAcceptanceRunPayload(environmentID, report))
 }
 
-func storedEnvironmentAcceptanceRunReport(ctx context.Context, runtime store.Store, environmentID string, batchRunID string) (apiCaseBatchRunReport, bool) {
+func storedEnvironmentAcceptanceRunReport(ctx context.Context, runtime store.Store, environmentID string, batchRunID string) (apiCaseBatchRunReport, bool, error) {
 	if runtime == nil || strings.TrimSpace(environmentID) == "" || strings.TrimSpace(batchRunID) == "" {
-		return apiCaseBatchRunReport{}, false
+		return apiCaseBatchRunReport{}, false, nil
 	}
-	run, err := runtime.GetRun(ctx, batchRunID)
+	report, ok, err := storedAPICaseBatchRunReport(ctx, runtime, batchRunID)
 	if err != nil {
-		return apiCaseBatchRunReport{}, false
+		return apiCaseBatchRunReport{}, false, err
 	}
-	var report apiCaseBatchRunReport
-	if err := json.Unmarshal([]byte(strings.TrimSpace(run.SummaryJSON)), &report); err != nil {
-		return apiCaseBatchRunReport{}, false
+	if !ok || report.EnvironmentID != environmentID {
+		return apiCaseBatchRunReport{}, false, nil
 	}
-	if report.BatchRunID == "" {
-		report.BatchRunID = run.ID
-	}
-	if report.WorkflowID == "" {
-		report.WorkflowID = run.WorkflowID
-	}
-	if report.EnvironmentID != environmentID {
-		return apiCaseBatchRunReport{}, false
-	}
-	return report, true
+	return report, true, nil
 }
 
 func environmentAcceptanceRunPayload(environmentID string, report apiCaseBatchRunReport) map[string]any {
@@ -239,16 +235,16 @@ func environmentAcceptanceRunPayload(environmentID string, report apiCaseBatchRu
 	return raw
 }
 
-func finalizeEnvironmentAcceptanceRun(ctx context.Context, runtime store.Store, report apiCaseBatchRunReport) {
+func finalizeEnvironmentAcceptanceRun(ctx context.Context, runtime store.Store, report apiCaseBatchRunReport) error {
 	if runtime == nil || strings.TrimSpace(report.EnvironmentID) == "" || strings.TrimSpace(report.BatchRunID) == "" || strings.TrimSpace(report.WorkflowID) == "" {
-		return
+		return nil
 	}
 	env, err := runtime.GetEnvironment(ctx, report.EnvironmentID)
 	if err != nil {
-		return
+		return err
 	}
 	if env.VerificationWorkflowID != report.WorkflowID {
-		return
+		return nil
 	}
 	env.LastVerificationRunID = report.BatchRunID
 	if report.Acceptance.OK {
@@ -265,7 +261,8 @@ func finalizeEnvironmentAcceptanceRun(ctx context.Context, runtime store.Store, 
 	}
 	env.Verified = false
 	env.UpdatedAt = time.Now().UTC()
-	_, _ = runtime.UpsertEnvironment(ctx, env)
+	_, err = runtime.UpsertEnvironment(ctx, env)
+	return err
 }
 
 func handleEnvironmentVerifyAPI(w http.ResponseWriter, r *http.Request, runtime store.Store, id string) {
@@ -366,7 +363,7 @@ func environmentRegistrationFromAPIPayload(payload map[string]any) (environmentA
 		env: store.Environment{
 			ID:                     id,
 			DisplayName:            strings.TrimSpace(valueString(payload["displayName"])),
-			Description:            strings.TrimSpace(valueString(payload["description"])),
+			Description:            strings.TrimSpace(valueString(payload[apiFieldDescription])),
 			Status:                 firstNonEmpty(strings.TrimSpace(valueString(payload["status"])), "draft"),
 			ServicesJSON:           "[]",
 			ReposJSON:              "{}",
@@ -422,7 +419,7 @@ func environmentAPIPayload(env store.Environment) map[string]any {
 	payload := map[string]any{
 		"id":                     env.ID,
 		"displayName":            env.DisplayName,
-		"description":            env.Description,
+		apiFieldDescription:      env.Description,
 		"status":                 env.Status,
 		"verified":               env.Verified,
 		"services":               jsonArray(env.ServicesJSON),

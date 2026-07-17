@@ -267,6 +267,8 @@ func commandCatalogTaskTags(command string) []string {
 		return []string{"maintain map", "map maintenance"}
 	case commandCatalogMapPlans, commandCatalogMapExplain, commandCatalogMapGate, commandCatalogMapRun, commandCatalogMapPlanInspect:
 		return []string{"execute map", "map execution"}
+	case commandCatalogCaseCatalogUpsert, commandCatalogCaseCatalogHistory, commandCatalogCaseCatalogRollback, commandCatalogCaseConfigUpsert:
+		return []string{"maintain case", "case maintenance"}
 	case "environment restore", "environment status", "environment stop", "environment service restart", "environment discover", "environment inspect":
 		return []string{"restore environment", "environment operations"}
 	case commandCatalogCaseInspect, "case diagnose", "case evidence", "case gate", "workflow gate", commandCatalogEvidenceInspect, commandCatalogEvidenceList, commandCatalogEvidenceTasks, cliCommandDoctor:

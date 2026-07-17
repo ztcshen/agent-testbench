@@ -73,10 +73,10 @@ func workflowDiscoveryItems(workflows []workflowDiscoverySource, stepCounts map[
 			continue
 		}
 		items = append(items, map[string]any{
-			"id":          workflow.ID,
-			"displayName": workflow.DisplayName,
-			"description": workflow.Description,
-			"stepCount":   stepCounts[workflow.ID],
+			"id":                workflow.ID,
+			"displayName":       workflow.DisplayName,
+			apiFieldDescription: workflow.Description,
+			"stepCount":         stepCounts[workflow.ID],
 		})
 	}
 	return items

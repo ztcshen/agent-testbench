@@ -268,6 +268,9 @@ func TestTaskCatalogExposesBuiltInTasks(t *testing.T) {
 	if _, ok := tasks["map-execute"]; !ok {
 		t.Fatalf("task catalog missing map-execute: %#v", tasks)
 	}
+	if task, ok := tasks[builtInTaskCaseMaintain]; !ok || !stringSliceContains(task.Tags, "maintain case") || len(task.Steps) < 4 {
+		t.Fatalf("task catalog missing case-maintain workflow: %#v", tasks)
+	}
 }
 
 func TestTaskSuggestBuiltInTasks(t *testing.T) {
@@ -288,6 +291,10 @@ func TestTaskSuggestBuiltInTasks(t *testing.T) {
 	executeSuggest := runCLI(t, "task", "suggest", "--goal", "execute map", "--json")
 	if !strings.Contains(executeSuggest, `"id": "map-execute"`) {
 		t.Fatalf("execute map suggestion should include map-execute:\n%s", executeSuggest)
+	}
+	caseSuggest := runCLI(t, "task", "suggest", "--goal", "maintain API case", "--json")
+	if !strings.Contains(caseSuggest, `"id": "case-maintain"`) {
+		t.Fatalf("case maintenance suggestion should include case-maintain:\n%s", caseSuggest)
 	}
 }
 
@@ -434,7 +441,7 @@ func taskIDFromJSONReport(t *testing.T, raw string) string {
 
 func TestCommandCatalogIncludesOnboardTaskWatchAndNotify(t *testing.T) {
 	out := runCLI(t, "commands", "--all", "--filter", "task", "--json")
-	for _, want := range []string{`"command": "task run"`, `"command": "task schedule"`, `"command": "task list"`} {
+	for _, want := range []string{`"command": "task run"`, `"command": "task schedule"`, `"command": "task worker"`, `"command": "task list"`} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("command catalog missing %s:\n%s", want, out)
 		}
@@ -443,6 +450,7 @@ func TestCommandCatalogIncludesOnboardTaskWatchAndNotify(t *testing.T) {
 	for _, want := range []string{
 		"agent-testbench onboard",
 		"agent-testbench task run NAME --command",
+		"agent-testbench task worker [--store NAME_OR_DSN] [--once]",
 		"agent-testbench task watch catalog-smoke --command",
 		"agent-testbench notify test",
 	} {

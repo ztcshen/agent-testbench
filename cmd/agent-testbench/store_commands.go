@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"net/http/httptest"
 	"os"
 	"strings"
 
@@ -437,10 +436,14 @@ func runStoreCatalogCaseWithPayload(ctx context.Context, storeURL string, profil
 		return nil, err
 	}
 	defer closeCLIStore(runtime)
-	handler := controlplane.NewWithStore(profile.Bundle{ID: strings.TrimSpace(profileID)}, runtime)
-	server := httptest.NewServer(handler)
-	defer server.Close()
-	result, err := postReportMap(server.URL+"/api/test-kit/run", payload)
+	result, err := controlplane.RunTrustedTestKitCase(ctx, profile.Bundle{ID: strings.TrimSpace(profileID)}, runtime, controlplane.TrustedTestKitRunRequest{
+		CaseID:         valueString(payload["caseId"]),
+		BaseURL:        valueString(payload["baseUrl"]),
+		EvidenceDir:    valueString(payload["evidenceDir"]),
+		RunID:          valueString(payload["runId"]),
+		TimeoutSeconds: intFromReportAny(payload["timeoutSeconds"]),
+		Overrides:      mapFromReportAny(payload["overrides"]),
+	})
 	if err != nil {
 		return nil, err
 	}

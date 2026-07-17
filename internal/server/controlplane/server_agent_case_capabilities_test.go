@@ -95,7 +95,11 @@ func TestServerExposesAPICaseCapabilitiesFromStoreCatalog(t *testing.T) {
 			{
 				ID:                   "case.alpha",
 				DisplayName:          "Case Alpha",
+				Description:          "Maintained in the Store catalog.",
 				NodeID:               "node.alpha",
+				Tags:                 []string{"smoke", "regression"},
+				Priority:             "p0",
+				Owner:                "quality-team",
 				CasePath:             "cases/case.alpha.json",
 				SourceKind:           "karate",
 				SourcePath:           "tests/api.feature",
@@ -122,6 +126,16 @@ func TestServerExposesAPICaseCapabilitiesFromStoreCatalog(t *testing.T) {
 	item := cases[0].(map[string]any)
 	if item["id"] != "case.alpha" || item["casePath"] != "cases/case.alpha.json" || item["sourceKind"] != "karate" || item["sourcePath"] != "tests/api.feature" || item["executorId"] != "executor.karate" || item["baseUrl"] != "http://127.0.0.1:18080" || item["evidenceDir"] != ".runtime/cases" || item["timeoutSeconds"] != float64(30) {
 		t.Fatalf("api case store run config = %#v", item)
+	}
+	if item["description"] != "Maintained in the Store catalog." || item["status"] != "active" || item["owner"] != "quality-team" || item["priority"] != "p0" {
+		t.Fatalf("api case store maintenance metadata = %#v", item)
+	}
+	if item["executionReady"] != true {
+		t.Fatalf("file-backed Store case should be execution-ready = %#v", item)
+	}
+	tags := item["tags"].([]any)
+	if len(tags) != 2 || tags[0] != "smoke" || tags[1] != "regression" {
+		t.Fatalf("api case store tags = %#v", tags)
 	}
 	overrides := item["defaultOverrides"].(map[string]any)
 	if overrides["itemId"] != "item-001" {
