@@ -27,6 +27,7 @@ func TestParseConfigFromURLAcceptsMySQLURL(t *testing.T) {
 	}
 	for _, want := range []string{
 		"user:secret@tcp(example.com:3306)/agent_testbench",
+		"clientFoundRows=true",
 		"parseTime=true",
 		"loc=UTC",
 		"tls=false",
@@ -34,6 +35,23 @@ func TestParseConfigFromURLAcceptsMySQLURL(t *testing.T) {
 		if !strings.Contains(cfg.DSN, want) {
 			t.Fatalf("mysql driver dsn missing %q: %q", want, cfg.DSN)
 		}
+	}
+}
+
+func TestParseConfigFromURLKeepsMatchedRowCountingAuthoritative(t *testing.T) {
+	cfg, err := mysql.ParseConfigFromURL("mysql://user:secret@example.com:3306/agent_testbench?clientFoundRows=false&tls=false")
+	if err != nil {
+		t.Fatalf("parse mysql url: %v", err)
+	}
+	driverCfg, err := mysqlDriver.ParseDSN(cfg.DSN)
+	if err != nil {
+		t.Fatalf("parse mysql driver dsn: %v", err)
+	}
+	if !driverCfg.ClientFoundRows {
+		t.Fatalf("mysql store must count matched rows: %q", cfg.DSN)
+	}
+	if strings.Contains(cfg.DSN, "clientFoundRows=false") {
+		t.Fatalf("mysql store should not allow changed-row semantics: %q", cfg.DSN)
 	}
 }
 
