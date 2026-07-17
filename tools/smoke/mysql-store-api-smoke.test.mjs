@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { assertCaseEvidencePayload, assertEnvironmentAcceptancePayload, assertEnvironmentCatalogPayload, assertEnvironmentPublishedPayload, assertRegisteredInterfaceCatalog, assertWorkflowBatchReport, requiredMySQLDSN } from "./mysql-store-api-smoke.mjs";
+import { assertCaseEvidencePayload, assertEnvironmentAcceptancePayload, assertEnvironmentCatalogPayload, assertEnvironmentPublishedPayload, assertRegisteredInterfaceCatalog, assertWorkflowBatchReport, requiredMySQLDSN, storeNativeEnvironmentAcceptanceRequest, storeNativeWorkflowBatchRequest } from "./mysql-store-api-smoke.mjs";
 
 test("MySQL API smoke accepts the shared SQL smoke Store env", () => {
   assert.equal(
@@ -48,6 +48,18 @@ test("MySQL API smoke refuses likely business databases", () => {
     }),
     /refuses database 'business_prod'/,
   );
+});
+
+test("MySQL API smoke keeps public execution requests Store-native", () => {
+  assert.deepEqual(storeNativeWorkflowBatchRequest(), {
+    requestId: "mysql-api-smoke-workflow",
+    workflowId: "workflow.alpha",
+    timeoutSeconds: 10,
+  });
+  assert.deepEqual(storeNativeEnvironmentAcceptanceRequest(), {
+    requestId: "mysql-api-smoke-acceptance",
+    timeoutSeconds: 10,
+  });
 });
 
 test("MySQL API smoke validates the async configured workflow batch report", () => {
