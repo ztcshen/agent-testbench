@@ -1,9 +1,14 @@
 package sqlstore_test
 
 import (
+	"context"
+	"database/sql/driver"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
+	"agent-testbench/internal/store"
 	"agent-testbench/internal/store/sqlstore"
 )
 
@@ -118,5 +123,64 @@ func TestMapPlanLeaseSchemaSupportsFreshAndVersionNineteenUpgrade(t *testing.T) 
 			assertAppliedCoreSchema(t, status, "upgraded v19 map plan lease schema")
 			assertSQLContains(t, migration.execSQL(), tt.name+" v19 lease upgrade", want...)
 		})
+	}
+}
+
+func TestRenewTestMapPlanLeaseAcceptsMySQLNoopUpdateForActiveOwner(t *testing.T) {
+	ctx := context.Background()
+	db, state := openFakeSQLDB(t)
+	defer db.Close()
+	runtime := sqlstore.New(db, sqlstore.MySQLDialect{})
+	now := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
+	lease := store.TestMapPlanLease{
+		PlanID: "plan.noop", OwnerID: "owner.one", Token: "token-one", ExpiresAt: now.Add(time.Minute),
+	}
+
+	state.queueExecRowsAffected(0)
+	state.queueRows(fakeRows{
+		columns: []string{"count"},
+		values:  [][]driver.Value{{int64(1)}},
+	})
+	renewed, err := runtime.RenewTestMapPlanLease(ctx, lease, now, lease.ExpiresAt)
+	if err != nil {
+		t.Fatalf("renew active no-op MySQL lease: %v", err)
+	}
+	if !renewed.ExpiresAt.Equal(lease.ExpiresAt) || !renewed.UpdatedAt.Equal(now) {
+		t.Fatalf("renewed lease = %#v", renewed)
+	}
+	query := state.lastQuery(t)
+	for _, fragment := range []string{"test_map_plan_leases", "owner_id", "lease_token", "lease_expires_at >"} {
+		if !strings.Contains(query.query, fragment) {
+			t.Fatalf("active lease verification query missing %q: %s", fragment, query.query)
+		}
+	}
+	commits, rollbacks := state.txCounts()
+	if commits != 1 || rollbacks != 0 {
+		t.Fatalf("active no-op lease tx counts commits=%d rollbacks=%d", commits, rollbacks)
+	}
+}
+
+func TestRenewTestMapPlanLeaseRejectsZeroRowUpdateWhenOwnerIsInactive(t *testing.T) {
+	ctx := context.Background()
+	db, state := openFakeSQLDB(t)
+	defer db.Close()
+	runtime := sqlstore.New(db, sqlstore.MySQLDialect{})
+	now := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
+	lease := store.TestMapPlanLease{
+		PlanID: "plan.lost", OwnerID: "owner.one", Token: "token-one", ExpiresAt: now.Add(time.Minute),
+	}
+
+	state.queueExecRowsAffected(0)
+	state.queueRows(fakeRows{
+		columns: []string{"count"},
+		values:  [][]driver.Value{{int64(0)}},
+	})
+	_, err := runtime.RenewTestMapPlanLease(ctx, lease, now, lease.ExpiresAt)
+	if !errors.Is(err, store.ErrTestMapPlanLeaseLost) {
+		t.Fatalf("inactive lease renewal error = %v, want lease lost", err)
+	}
+	commits, rollbacks := state.txCounts()
+	if commits != 0 || rollbacks != 1 {
+		t.Fatalf("inactive lease tx counts commits=%d rollbacks=%d", commits, rollbacks)
 	}
 }

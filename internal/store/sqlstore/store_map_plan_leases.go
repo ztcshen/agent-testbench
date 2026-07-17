@@ -230,7 +230,13 @@ where plan_id = %s and owner_id = %s and lease_token = %s and lease_expires_at >
 	if err != nil {
 		return store.TestMapPlanLease{}, fmt.Errorf("inspect test map plan %q lease renewal: %w", lease.PlanID, err)
 	}
-	if updated != 1 {
+	if updated == 0 {
+		// MySQL reports changed rows by default. An idempotent renewal can
+		// therefore report zero even though the ownership predicate matched.
+		if err := s.requireActiveTestMapPlanLease(ctx, tx, lease, now); err != nil {
+			return store.TestMapPlanLease{}, err
+		}
+	} else if updated != 1 {
 		return store.TestMapPlanLease{}, fmt.Errorf("%w: plan %q is no longer owned by this executor", store.ErrTestMapPlanLeaseLost, lease.PlanID)
 	}
 	lease.ExpiresAt = expiresAt.UTC()
