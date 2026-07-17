@@ -62,7 +62,7 @@ export function workflowBatchRunnerState(report, { startedAt, elapsedMs = 0 } = 
   return state;
 }
 
-export function workflowBatchPollTimeoutMs(report, fallbackMs = 0) {
+export function workflowBatchPollTimeoutMs(report, catalogBudgetMs = 0) {
   const cases = Array.isArray(report?.cases) ? report.cases : [];
   const total = Number.isInteger(Number(report?.total)) && Number(report?.total) > 0
     ? Number(report.total)
@@ -74,7 +74,7 @@ export function workflowBatchPollTimeoutMs(report, fallbackMs = 0) {
     }, 0)
     : total * 90000;
   const postProcessMs = total * 15000;
-  const catalogMs = Number.isFinite(Number(fallbackMs)) && Number(fallbackMs) > 0 ? Number(fallbackMs) : 0;
+  const catalogMs = Number.isFinite(Number(catalogBudgetMs)) && Number(catalogBudgetMs) > 0 ? Number(catalogBudgetMs) : 0;
   return Math.max(75000, plannedMs + postProcessMs + 60000, catalogMs + postProcessMs + 60000);
 }
 
