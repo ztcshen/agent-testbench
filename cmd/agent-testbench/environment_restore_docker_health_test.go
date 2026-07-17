@@ -22,6 +22,7 @@ func TestEnvironmentRestoreExecutesDockerComposeWithoutRepository(t *testing.T) 
 	runCLI(t, "environment", "register",
 		"--store", fixture.StoreDSN,
 		"--id", "env.docker.only",
+		"--service", "compose-only",
 		"--compose-file", "compose.yml",
 		"--health-url", newHealthyTestURL(t),
 		"--verification-workflow", "workflow.core-10",

@@ -72,7 +72,10 @@ func RepoSpecs(reposJSON string, servicesJSON string, workspace string) []RepoSp
 		specByID[id] = spec
 	}
 	ids := make([]string, 0, len(specByID))
-	for id := range specByID {
+	for id, spec := range specByID {
+		if !spec.HasSource() {
+			continue
+		}
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
@@ -87,6 +90,14 @@ func RepoSpecs(reposJSON string, servicesJSON string, workspace string) []RepoSp
 		out = append(out, spec)
 	}
 	return out
+}
+
+// HasSource reports whether the service records repository preparation intent.
+func (spec RepoSpec) HasSource() bool {
+	return strings.TrimSpace(spec.URL) != "" ||
+		strings.TrimSpace(spec.Branch) != "" ||
+		strings.TrimSpace(spec.Ref) != "" ||
+		spec.CheckoutExplicit
 }
 
 func PackageSpecFromCompose(compose map[string]any, workspace string) PackageSpec {
