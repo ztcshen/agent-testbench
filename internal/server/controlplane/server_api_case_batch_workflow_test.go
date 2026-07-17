@@ -246,6 +246,20 @@ func requireAPICaseBatchWorkflowStoreRecords(t *testing.T, ctx context.Context, 
 		t.Fatalf("stored workflow batch run = %#v", batchRun)
 	}
 	requireAPICaseBatchWorkflowSummary(t, batchRun)
+	caseRuns, err := s.ListAPICaseRuns(ctx, report.BatchRunID)
+	if err != nil {
+		t.Fatalf("list parent workflow case runs: %v", err)
+	}
+	if len(caseRuns) != 10 {
+		t.Fatalf("parent workflow case runs = %#v", caseRuns)
+	}
+	evidence, ok, err := controlplane.CaseEvidencePayloadForRunID(ctx, s, report.BatchRunID, report.Cases[0].CaseID, report.Cases[0].StepID)
+	if err != nil {
+		t.Fatalf("load parent workflow case Evidence: %v", err)
+	}
+	if !ok || evidence["ok"] != true {
+		t.Fatalf("parent workflow case Evidence = %#v", evidence)
+	}
 }
 
 func requireAPICaseBatchWorkflowSummary(t *testing.T, batchRun store.Run) {

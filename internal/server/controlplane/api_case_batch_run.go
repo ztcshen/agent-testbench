@@ -136,6 +136,7 @@ func apiCaseBatchCaseReportsFromPlans(plans []apiCaseBatchCasePlan) []apiCaseBat
 			Method:          plan.Method,
 			Path:            plan.Path,
 			StepID:          plan.StepID,
+			TimeoutSeconds:  plan.TimeoutSeconds,
 			Status:          store.StatusRunning,
 		})
 	}

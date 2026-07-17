@@ -73,6 +73,7 @@ type apiCaseBatchCaseReport struct {
 	Error           string `json:"error,omitempty"`
 	FailurePhase    string `json:"failurePhase,omitempty"`
 	FailureCategory string `json:"failureCategory,omitempty"`
+	TimeoutSeconds  int    `json:"timeoutSeconds,omitempty"`
 	StartedAt       string `json:"startedAt,omitempty"`
 	FinishedAt      string `json:"finishedAt,omitempty"`
 }
