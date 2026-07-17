@@ -12,6 +12,7 @@ import { requireSafeMySQLStoreDSN } from "./mysql-store-dsn-guard.mjs";
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 export const smokeWorkflowStepCount = 3;
 export const smokeStepIDs = Array.from({ length: smokeWorkflowStepCount }, (_, index) => `step-${String(index + 1).padStart(2, "0")}`);
+export const browserSmokeWorkflowID = "workflow.browser-smoke";
 const minimumSmokeCatalogTemplateCount = smokeWorkflowStepCount * 2;
 const minimumSmokeCatalogTemplateConfigCount = smokeWorkflowStepCount + 1;
 
@@ -252,7 +253,7 @@ async function closeHTTPServer(server) {
   await new Promise((resolve) => server.close(resolve));
 }
 
-export async function writeSmokeProfile(baseDir, targetPort) {
+export async function writeSmokeProfile(baseDir, targetPort, { workflowID = "workflow.alpha" } = {}) {
   const profileDir = path.join(baseDir, "profile");
   await mkdir(profileDir, { recursive: true });
   const profile = {
@@ -266,7 +267,7 @@ export async function writeSmokeProfile(baseDir, targetPort) {
       servicePort: targetPort,
       sortOrder: index + 1,
     })),
-    workflows: [{ id: "workflow.alpha", displayName: "Workflow Alpha", description: "Checks a generic item flow." }],
+    workflows: [{ id: workflowID, displayName: "Workflow Alpha", description: "Checks a generic item flow." }],
     interfaceNodes: coreSmokeSteps.map((step, index) => ({
       id: step.nodeID,
       displayName: `Node ${index + 1}`,
@@ -294,7 +295,7 @@ export async function writeSmokeProfile(baseDir, targetPort) {
       mappingsJson: "[]",
     })),
     workflowBindings: coreSmokeSteps.map((step, index) => ({
-      workflowId: "workflow.alpha",
+      workflowId: workflowID,
       stepId: step.id,
       nodeId: step.nodeID,
       caseId: step.caseID,
@@ -469,7 +470,21 @@ async function checkPage(browser, baseURL, pageSpec) {
   }
 }
 
-async function checkWorkflowDetailRunButton(browser, baseURL) {
+async function waitForWorkflowBatchReport(baseURL, reportURL, timeoutMs = 90000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastReport;
+  while (Date.now() < deadline) {
+    lastReport = await waitForJSON(`${baseURL}${reportURL}`, 5000);
+    if (lastReport?.status === "passed" || lastReport?.status === "failed") return lastReport;
+    if (lastReport?.status !== "running") {
+      throw new Error(`workflow batch returned unexpected status: ${JSON.stringify(lastReport)}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`timed out waiting for workflow batch report: ${JSON.stringify(lastReport)}`);
+}
+
+async function checkWorkflowDetailRunButton(browser, baseURL, workflowID) {
   const page = await browser.newPage();
   const errors = [];
   page.on("console", (message) => {
@@ -478,15 +493,40 @@ async function checkWorkflowDetailRunButton(browser, baseURL) {
   page.on("pageerror", (error) => errors.push(error.message));
 
   try {
-    const response = await page.goto(`${baseURL}/workflow-detail.html?id=workflow.alpha`, { waitUntil: "networkidle" });
+    const response = await page.goto(`${baseURL}/workflow-detail.html?id=${encodeURIComponent(workflowID)}`, { waitUntil: "networkidle" });
     if (!response?.ok()) {
       throw new Error(`/workflow-detail.html returned ${response?.status()}`);
     }
     await page.waitForSelector("#react-workflow-detail-root");
+    const persistedRunLink = page.locator('a[href^="/workflow-run.html?id="]').first();
+    const previousHref = await persistedRunLink.count() ? await persistedRunLink.getAttribute("href") : "";
+    const batchResponsePromise = page.waitForResponse((candidate) => candidate.request().method() === "POST" && new URL(candidate.url()).pathname === "/api/cases/batch-runs");
     await page.getByRole("button", { name: "运行 Workflow" }).click();
+    const batchResponse = await batchResponsePromise;
+    const requestBody = batchResponse.request().postDataJSON();
+    if (batchResponse.status() !== 202) {
+      throw new Error(`/api/cases/batch-runs returned ${batchResponse.status()}: ${await batchResponse.text()}`);
+    }
+    if (requestBody.workflowId !== workflowID || !requestBody.requestId || JSON.stringify(Object.keys(requestBody).sort()) !== JSON.stringify(["requestId", "workflowId"])) {
+      throw new Error(`/api/cases/batch-runs received an unsafe workflow request: ${JSON.stringify(requestBody)}`);
+    }
+    const created = await batchResponse.json();
+    if (!created.batchRunId || !created.reportUrl || created.workflowId !== workflowID || created.status !== "running") {
+      throw new Error(`/api/cases/batch-runs returned an invalid start report: ${JSON.stringify(created)}`);
+    }
+    if (!Array.isArray(created.cases) || created.cases.length !== coreSmokeSteps.length || created.cases.some((item) => !(item.timeoutSeconds > 0))) {
+      throw new Error(`/api/cases/batch-runs did not expose the Store execution timeout budget: ${JSON.stringify(created)}`);
+    }
+    if (!await page.locator(".workflow-detail-selector select").isDisabled()) {
+      throw new Error("/workflow-detail.html allowed switching workflows while a batch was running");
+    }
+    const report = await waitForWorkflowBatchReport(baseURL, created.reportUrl);
+    if (report.status !== "passed" || report.batchRunId !== created.batchRunId || report.completed !== coreSmokeSteps.length || report.passed !== coreSmokeSteps.length) {
+      throw new Error(`workflow batch did not pass: ${JSON.stringify(report)}`);
+    }
     try {
-      await page.waitForFunction((expected) => document.querySelectorAll(".workflow-progress-step.passed").length === expected, coreSmokeSteps.length, { timeout: 30000 });
-      await page.locator(".workflow-run-template .status-pill.passed", { hasText: "passed" }).waitFor({ timeout: 30000 });
+      await page.waitForFunction((expected) => document.querySelectorAll(".workflow-progress-step.passed").length === expected, coreSmokeSteps.length, { timeout: 90000 });
+      await page.locator(".workflow-run-template .status-pill.passed", { hasText: "passed" }).waitFor({ timeout: 90000 });
     } catch (error) {
       const text = await page.locator(".workflow-run-template").innerText().catch(() => "");
       throw new Error(`/workflow-detail.html did not complete after clicking run button:\n${text}\n${error.message}`);
@@ -495,7 +535,6 @@ async function checkWorkflowDetailRunButton(browser, baseURL) {
     if (passedSteps !== coreSmokeSteps.length) {
       throw new Error(`/workflow-detail.html expected ${coreSmokeSteps.length} passed workflow steps, got ${passedSteps}`);
     }
-    const persistedRunLink = page.locator('a[href^="/workflow-run.html?id="]').first();
     try {
       await persistedRunLink.waitFor({ timeout: 10000 });
     } catch (error) {
@@ -503,10 +542,14 @@ async function checkWorkflowDetailRunButton(browser, baseURL) {
       throw new Error(`/workflow-detail.html did not expose the persisted workflow run link:\n${text}\n${error.message}`);
     }
     const href = await persistedRunLink.getAttribute("href");
+    const runID = new URL(href, baseURL).searchParams.get("id");
+    const previousRunID = previousHref ? new URL(previousHref, baseURL).searchParams.get("id") : "";
+    if (runID !== created.batchRunId || (previousRunID && runID === previousRunID)) {
+      throw new Error(`/workflow-detail.html did not expose the new batch run: ${JSON.stringify({ previousRunID, runID, created: created.batchRunId })}`);
+    }
     if (errors.length > 0) {
       throw new Error(`/workflow-detail.html run button browser errors:\n${errors.join("\n")}`);
     }
-    const runID = new URL(href, baseURL).searchParams.get("id");
     const detail = runID ? await waitForJSON(`${baseURL}/api/workflow-runs/${encodeURIComponent(runID)}`) : {};
     const topologies = Array.isArray(detail.traceTopologies) ? detail.traceTopologies : [];
     for (const step of coreSmokeSteps) {
@@ -523,7 +566,7 @@ async function checkWorkflowDetailRunButton(browser, baseURL) {
   }
 }
 
-async function checkWorkflowStepSkyWalkingTopology(browser, baseURL, runID) {
+async function checkWorkflowStepSkyWalkingTopology(browser, baseURL, runID, workflowID) {
   if (!runID) {
     throw new Error("workflow run button did not return a run id for topology verification");
   }
@@ -536,7 +579,7 @@ async function checkWorkflowStepSkyWalkingTopology(browser, baseURL, runID) {
 
   try {
     const step = coreSmokeSteps[0];
-    const stepURL = `${baseURL}/workflow-step.html?workflow=workflow.alpha&step=${step.id}&runId=${encodeURIComponent(runID)}`;
+    const stepURL = `${baseURL}/workflow-step.html?workflow=${encodeURIComponent(workflowID)}&step=${step.id}&runId=${encodeURIComponent(runID)}`;
     const response = await page.goto(stepURL, { waitUntil: "networkidle" });
     if (!response?.ok()) {
       throw new Error(`/workflow-step.html returned ${response?.status()}`);
@@ -576,6 +619,10 @@ async function checkWorkflowRunCaseEvidence(baseURL, runID) {
   for (const step of coreSmokeSteps) {
     const payload = await waitForJSON(`${baseURL}/api/case/evidence?runId=${encodeURIComponent(runID)}&caseId=${encodeURIComponent(step.caseID)}&stepId=${encodeURIComponent(step.id)}`);
     assertWorkflowCaseEvidence(payload, { runID, caseID: step.caseID, stepID: step.id, path: step.path, traceID: step.traceID });
+    const tasks = await waitForJSON(`${baseURL}/api/post-process-tasks?runId=${encodeURIComponent(runID)}&stepId=${encodeURIComponent(step.id)}&kind=trace_topology_collect`);
+    if (tasks.counts?.passed !== 1 || tasks.counts?.failed !== 0 || tasks.counts?.skipped !== 0 || tasks.tasks?.[0]?.status !== "passed") {
+      throw new Error(`unexpected parent workflow post-process task status for ${step.id}: ${JSON.stringify(tasks)}`);
+    }
   }
 }
 
@@ -758,7 +805,7 @@ async function main() {
   const targetPort = await freePort();
   const targetServer = await startSmokeTargetServer(targetPort);
   const traceProvider = await prepareSmokeTraceProvider();
-  const profileDir = await writeSmokeProfile(tempDir, targetPort);
+  const profileDir = await writeSmokeProfile(tempDir, targetPort, { workflowID: browserSmokeWorkflowID });
   const profileHome = path.join(tempDir, "profile-home");
   const runSmokeCLI = (command, args, options = {}) => {
     if (command === "go" && args[0] === "run" && args[1] === "./cmd/agent-testbench") {
@@ -819,17 +866,17 @@ async function main() {
       const pages = [
         { path: "/index.html", root: "#react-sandbox-workbench-root", presentText: ["Configured workflow target", "MATCHING WORKFLOW", "Workflow Alpha", "安装到本地", "要求用例已通过", "要求工作流已通过", "验收并发布"], absentText: ["Agent Test Kit"], absentHrefs: ["agent-test.html"] },
         { path: "/dashboard.html", root: "#react-dashboard-root" },
-        { path: "/workflows.html", root: "#react-workflows-root", presentText: ["Configured workflow target", "WORKFLOW MAP", "STEP", "INTERFACE", "CASE", "ACTIONS", "Runs", "ready"], presentHrefs: ["/api-cases.html?workflow=workflow.alpha&case=case.step-01"] },
-        { path: "/workflow-detail.html?id=workflow.alpha", root: "#react-workflow-detail-root" },
-        { path: "/workflow-blueprint-demo.html?workflow=workflow.alpha", root: "#react-workflow-blueprint-demo-root" },
+        { path: "/workflows.html", root: "#react-workflows-root", presentText: ["Configured workflow target", "WORKFLOW MAP", "STEP", "INTERFACE", "CASE", "ACTIONS", "Runs", "ready"], presentHrefs: [`/api-cases.html?workflow=${browserSmokeWorkflowID}&case=case.step-01`] },
+        { path: `/workflow-detail.html?id=${browserSmokeWorkflowID}`, root: "#react-workflow-detail-root" },
+        { path: `/workflow-blueprint-demo.html?workflow=${browserSmokeWorkflowID}`, root: "#react-workflow-blueprint-demo-root" },
         { path: "/workflow-blueprint-new.html", root: "#react-workflow-blueprint-demo-root" },
         { path: "/api-cases.html", root: "#react-api-cases-root", presentText: ["API Case 工作台", "Coverage matrix", "Case Management Search", "Readiness groups"] },
-        { path: "/api-cases.html?workflow=workflow.alpha", root: "#react-api-cases-root", presentText: ["WORKFLOW CASE SET", "Workflow Alpha", `${smokeWorkflowStepCount} steps`, `${smokeWorkflowStepCount} interfaces`, `${smokeWorkflowStepCount} cases`, "Workflow case sequence", "Case 1", "service.step-01", "Runs"], presentHrefs: ["/interface-nodes.html?serviceId=service.step-01&workflow=workflow.alpha&case=case.step-01", "/case-runs.html?case=case.step-01&workflow=workflow.alpha"] },
-        { path: "/interface-nodes.html?serviceId=service.step-01&workflow=workflow.alpha&case=case.step-01", root: "#react-interface-nodes-root", presentText: ["Workflow case set", "Node 1", "service.step-01"], presentHrefs: ["/interface-node.html?id=node.step-01&workflow=workflow.alpha&case=case.step-01", "/api-cases.html?workflow=workflow.alpha&case=case.step-01"] },
-        { path: "/interface-node.html?id=node.step-01&workflow=workflow.alpha&case=case.step-01", root: "#react-interface-node-root", presentText: ["Workflow case set"], presentHrefs: ["/api-cases.html?workflow=workflow.alpha&case=case.step-01"] },
+        { path: `/api-cases.html?workflow=${browserSmokeWorkflowID}`, root: "#react-api-cases-root", presentText: ["WORKFLOW CASE SET", "Workflow Alpha", `${smokeWorkflowStepCount} steps`, `${smokeWorkflowStepCount} interfaces`, `${smokeWorkflowStepCount} cases`, "Workflow case sequence", "Case 1", "service.step-01", "Runs"], presentHrefs: [`/interface-nodes.html?serviceId=service.step-01&workflow=${browserSmokeWorkflowID}&case=case.step-01`, `/case-runs.html?case=case.step-01&workflow=${browserSmokeWorkflowID}`] },
+        { path: `/interface-nodes.html?serviceId=service.step-01&workflow=${browserSmokeWorkflowID}&case=case.step-01`, root: "#react-interface-nodes-root", presentText: ["Workflow case set", "Node 1", "service.step-01"], presentHrefs: [`/interface-node.html?id=node.step-01&workflow=${browserSmokeWorkflowID}&case=case.step-01`, `/api-cases.html?workflow=${browserSmokeWorkflowID}&case=case.step-01`] },
+        { path: `/interface-node.html?id=node.step-01&workflow=${browserSmokeWorkflowID}&case=case.step-01`, root: "#react-interface-node-root", presentText: ["Workflow case set"], presentHrefs: [`/api-cases.html?workflow=${browserSmokeWorkflowID}&case=case.step-01`] },
         { path: "/case-runs.html", root: "#react-case-runs-root", presentText: ["Run Analysis Center", "Case run report workbench", "Failure triage", "Report Grid"] },
         { path: "/case-runs.html?case=case.step-01", root: "#react-case-runs-root", presentText: ["Run Analysis Center", "case: case.step-01", "CASE EXECUTION SUMMARY", "Report Grid"] },
-        { path: "/case-runs.html?workflow=workflow.alpha&case=case.step-01", root: "#react-case-runs-root", presentText: ["Run Analysis Center", "WORKFLOW CONTEXT", "workflow.alpha", "Workflow case set", "case: case.step-01", "CASE EXECUTION SUMMARY"], presentHrefs: ["/api-cases.html?workflow=workflow.alpha&case=case.step-01"] },
+        { path: `/case-runs.html?workflow=${browserSmokeWorkflowID}&case=case.step-01`, root: "#react-case-runs-root", presentText: ["Run Analysis Center", "WORKFLOW CONTEXT", browserSmokeWorkflowID, "Workflow case set", "case: case.step-01", "CASE EXECUTION SUMMARY"], presentHrefs: [`/api-cases.html?workflow=${browserSmokeWorkflowID}&case=case.step-01`] },
         { path: "/interface-nodes.html", root: "#react-interface-nodes-root" },
       ];
       for (const page of pages) {
@@ -838,9 +885,9 @@ async function main() {
       await checkEvidenceViewerTimeline(browser, baseURL);
       await checkWorkbenchVerify(browser, baseURL, profileDir);
       await checkWorkbenchInvalidInstalledProfile(browser, baseURL, profileHome);
-      const runID = await checkWorkflowDetailRunButton(browser, baseURL);
+      const runID = await checkWorkflowDetailRunButton(browser, baseURL, browserSmokeWorkflowID);
       await checkWorkflowRunCaseEvidence(baseURL, runID);
-      await checkWorkflowStepSkyWalkingTopology(browser, baseURL, runID);
+      await checkWorkflowStepSkyWalkingTopology(browser, baseURL, runID, browserSmokeWorkflowID);
       const removedPage = await fetch(`${baseURL}/agent-test.html`);
       if (removedPage.status !== 404) {
         throw new Error(`/agent-test.html returned ${removedPage.status}, want 404`);

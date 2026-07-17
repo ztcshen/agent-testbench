@@ -98,6 +98,10 @@ func (r *apiCaseBatchRunner) finish(ctx context.Context, batchRunID string, runt
 		return
 	}
 	if strings.TrimSpace(report.WorkflowID) != "" {
+		if err := materializeAPICaseBatchWorkflowParent(ctx, reportRuntime, report); err != nil {
+			r.failFinalPersistence(ctx, runtime, report, err)
+			return
+		}
 		if err := r.requireOwnerFence(ctx, runtime, batchRunID); err != nil {
 			return
 		}

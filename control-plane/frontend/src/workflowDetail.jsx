@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Chip, fetchJSON, selectedWorkflow, serviceName, workflowIdFromURL } from "./workflowPagesCommon.jsx";
-import { exportedValues } from "./workflowDetailModel.mjs";
+import {
+  assertTerminalWorkflowBatchReport,
+  workflowBatchPollTimeoutMs,
+  storeNativeWorkflowBatchRequest,
+  workflowBatchRunnerState,
+  workflowStepResultOK,
+} from "./workflowDetailModel.mjs";
 
 function serviceIds(workflow) {
   return [...new Set((workflow?.steps || []).map((step) => step.serviceId).filter(Boolean))];
@@ -26,45 +32,11 @@ function runStatusTone(status) {
 }
 
 function resultOK(result) {
-  return Boolean(result?.ok) && result?.bodyHealth?.ok !== false;
+  return workflowStepResultOK(result);
 }
 
 function runStepId(step) {
   return step?.stepId || step?.id || "";
-}
-
-function resultBodyHealth(result) {
-  if (result?.bodyHealth) return result.bodyHealth;
-  const reason = result?.error || result?.summary?.failureReason || "";
-  return { ok: Boolean(result?.ok), level: result?.ok ? "ok" : "failed", message: result?.ok ? "" : reason || "case failed" };
-}
-
-function unsupportedStepResult(step) {
-  return {
-    ok: false,
-    stepOk: false,
-    status: "failed",
-    caseId: step.caseId || "",
-    stepId: step.id,
-    title: step.displayName || step.id,
-    elapsedMs: 0,
-    summary: { failureReason: "caseId is required" },
-    bodyHealth: { ok: false, level: "failed", message: "caseId is required" },
-  };
-}
-
-function workflowRunSnapshot(workflow, steps, startedAt, done) {
-  const passed = steps.filter(resultOK).length;
-  const ok = done && steps.length === (workflow?.steps || []).length && passed === steps.length;
-  const elapsedMs = Date.now() - startedAt;
-  return {
-    workflowId: workflow?.id || "",
-    status: done ? (ok ? "passed" : "failed") : "running",
-    ok,
-    elapsedMs,
-    summary: { expectedStepCount: workflow?.steps?.length || 0, stepCount: steps.length, passed, elapsedMs, timeoutMs: workflowTimeoutMs(workflow) },
-    steps,
-  };
 }
 
 function cachedRunState(latestRun) {
@@ -85,6 +57,33 @@ function workflowTimeoutMs(workflow) {
   const base = workflow?.baseStepTimeoutMs > 0 ? workflow.baseStepTimeoutMs : 3000;
   const offset = workflow?.timeoutOffsetMs > 0 ? workflow.timeoutOffsetMs : 0;
   return offset + (workflow?.steps || []).reduce((total, step) => total + (step.timeoutMs > 0 ? step.timeoutMs : base), 0);
+}
+
+function workflowBatchRequestID(workflowID) {
+  const random = globalThis.crypto?.randomUUID?.() || Math.random().toString(16).slice(2);
+  return `workflow-ui-${workflowID}-${Date.now()}-${random}`;
+}
+
+async function pollWorkflowBatch(reportURL, timeoutMs, startedAt, onReport) {
+  const deadline = Date.now() + timeoutMs;
+  let lastReport = null;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
+    try {
+      lastReport = await fetchJSON(reportURL);
+    } catch (error) {
+      lastError = error;
+      continue;
+    }
+    onReport(lastReport);
+    if (lastReport?.status === "passed" || lastReport?.status === "failed") return assertTerminalWorkflowBatchReport(lastReport);
+    if (lastReport?.status !== "running") {
+      throw new Error(`workflow batch returned unexpected status: ${lastReport?.status || "missing"}`);
+    }
+    lastError = null;
+  }
+  throw lastError || new Error(`workflow batch did not complete within ${formatMs(Date.now() - startedAt)}`);
 }
 
 function formatMs(value) {
@@ -250,7 +249,7 @@ function WorkflowDetailApp() {
   const warnings = catalog?.warnings || [];
   const latestRun = workflow?.latestRun || null;
   const latestStatus = latestRun?.status || (workflow?.runCount ? "unknown" : "no run");
-  const visibleStatus = runner.runId ? runner.status : latestStatus;
+  const visibleStatus = runner.status && runner.status !== "idle" ? runner.status : latestStatus;
 
   useEffect(() => {
     if (!workflow?.id || !latestRun?.id) {
@@ -266,15 +265,22 @@ function WorkflowDetailApp() {
       .then((payload) => {
         if (cancelled) return;
         const summary = payload.summary || {};
-        setRunner({
-          status: payload.run?.status || summary.status || latestRun.status || "idle",
-          steps: Array.isArray(summary.steps) ? summary.steps : [],
-          runId: latestRun.id,
-          message: "cached run",
+        setRunner((current) => {
+          if (current.status === "running" || (current.runId && current.runId !== latestRun.id)) return current;
+          return {
+            status: payload.run?.status || summary.status || latestRun.status || "idle",
+            steps: Array.isArray(summary.steps) ? summary.steps : [],
+            runId: latestRun.id,
+            message: "cached run",
+          };
         });
       })
       .catch((error) => {
-        if (!cancelled) setRunner({ status: "idle", steps: [], runId: latestRun.id, message: error.message });
+        if (!cancelled) {
+          setRunner((current) => current.status === "running" || (current.runId && current.runId !== latestRun.id)
+            ? current
+            : { status: "idle", steps: [], runId: latestRun.id, message: error.message });
+        }
       });
     return () => {
       cancelled = true;
@@ -302,35 +308,34 @@ function WorkflowDetailApp() {
   async function runWorkflow() {
     if (!workflow?.id || runner.status === "running") return;
     const startedAt = Date.now();
-    const results = [];
-    let context = {};
-    setRunner({ status: "running", steps: [], message: "starting", startedAt, elapsedMs: 0 });
+    let latestState = { status: "running", steps: [], message: "starting", startedAt, elapsedMs: 0 };
+    setRunner(latestState);
     try {
-      for (const step of workflow.steps || []) {
-        const remainingMs = workflowTimeoutMs(workflow) - (Date.now() - startedAt);
-        if (remainingMs <= 0) throw new Error(`workflow exceeded ${formatMs(workflowTimeoutMs(workflow))} timeout`);
-        setRunner({ status: "running", steps: [...results], message: `running ${step.displayName || step.id}`, startedAt, elapsedMs: Date.now() - startedAt });
-        const result = step.caseId
-          ? await postJSON("/api/test-kit/run", { caseId: step.caseId, workflowId: workflow.id, stepId: step.id, overrides: context, timeoutSeconds: Math.max(1, Math.ceil(Math.min(remainingMs, step.timeoutMs || workflow?.baseStepTimeoutMs || 3000) / 1000)) })
-          : unsupportedStepResult(step);
-        const withStep = {
-          ...result,
-          stepId: step.id,
-          title: step.displayName || step.id,
-          bodyHealth: resultBodyHealth(result),
-          stepOk: resultOK({ ...result, bodyHealth: resultBodyHealth(result) }),
-        };
-        context = { ...context, ...exportedValues(step, withStep) };
-        results.push(withStep);
-        setRunner({ status: "running", steps: [...results], message: `completed ${results.length}/${workflow.steps?.length || 0}`, startedAt, elapsedMs: Date.now() - startedAt });
-        if (!resultOK(withStep)) break;
+      const created = await postJSON("/api/cases/batch-runs", storeNativeWorkflowBatchRequest(
+        workflow.id,
+        workflowBatchRequestID(workflow.id),
+      ));
+      if (!created?.batchRunId || !created?.reportUrl || created?.status !== "running") {
+        throw new Error("workflow batch start did not return a running report");
       }
-      const snapshot = workflowRunSnapshot(workflow, results, startedAt, true);
-      const saved = results.length ? await postJSON("/api/workflow-runs", snapshot) : {};
-      setRunner({ status: snapshot.status, steps: results, runId: saved.workflowRunId || "", message: snapshot.ok ? "workflow completed" : "workflow failed", elapsedMs: snapshot.elapsedMs });
+      latestState = workflowBatchRunnerState(created, { startedAt, elapsedMs: Date.now() - startedAt });
+      setRunner(latestState);
+      const report = await pollWorkflowBatch(
+        created.reportUrl,
+        workflowBatchPollTimeoutMs(created, workflowTimeoutMs(workflow)),
+        startedAt,
+        (nextReport) => {
+          latestState = workflowBatchRunnerState(nextReport, { startedAt, elapsedMs: Date.now() - startedAt });
+          setRunner(latestState);
+        },
+      );
+      latestState = workflowBatchRunnerState(report, { startedAt, elapsedMs: Date.now() - startedAt });
+      setRunner(latestState);
       refresh();
     } catch (error) {
-      setRunner({ status: "failed", steps: results, message: error.message, elapsedMs: Date.now() - startedAt });
+      const failedState = { ...latestState, status: "failed", message: error.message, elapsedMs: Date.now() - startedAt };
+      delete failedState.startedAt;
+      setRunner(failedState);
     }
   }
 
@@ -371,7 +376,7 @@ function WorkflowDetailApp() {
           <h2>Workflow</h2>
           <label className="workflow-detail-selector">
             <span>切换 Workflow</span>
-            <select value={workflow?.id || ""} onChange={(event) => setWorkflowID(event.target.value)}>
+            <select disabled={runner.status === "running"} value={workflow?.id || ""} onChange={(event) => setWorkflowID(event.target.value)}>
               {workflows.map((item) => <option value={item.id} key={item.id}>{item.displayName || item.id}</option>)}
             </select>
           </label>

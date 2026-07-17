@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -60,7 +61,7 @@ func copyWorkflowStepEvidenceFromSources(ctx context.Context, runtime store.Stor
 	for _, source := range workflowStepCopySources(runID, step) {
 		rows, err := runtime.ListEvidence(ctx, source.runID)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("list Evidence for source run %s: %w", source.runID, err)
 		}
 		for _, row := range rows {
 			if source.stepID != "" && row.StepID != "" && row.StepID != source.stepID {
@@ -121,7 +122,7 @@ func copyWorkflowStepTraceTopologiesFromSources(ctx context.Context, runtime sto
 	for _, source := range workflowStepCopySources(runID, step) {
 		rows, err := runtime.ListTraceTopologies(ctx, source.runID)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("list trace topologies for source run %s: %w", source.runID, err)
 		}
 		for _, row := range rows {
 			if !isSkyWalkingTraceTopology(row) {
@@ -198,7 +199,7 @@ func copyWorkflowStepPostProcessTasksFromSources(ctx context.Context, runtime st
 	for _, source := range workflowStepCopySources(runID, step) {
 		rows, err := runtime.ListPostProcessTasks(ctx, source.runID)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("list post-process tasks for source run %s: %w", source.runID, err)
 		}
 		for _, row := range rows {
 			if source.stepID != "" && row.StepID != "" && row.StepID != source.stepID {

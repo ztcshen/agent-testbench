@@ -18,3 +18,17 @@ func TestNormalizeAPICaseBatchOverrideKey(t *testing.T) {
 		}
 	}
 }
+
+func TestAPICaseBatchCaseReportsExposeExecutionTimeoutBudget(t *testing.T) {
+	plans := []apiCaseBatchCasePlan{
+		{ID: "case.default", TimeoutSeconds: defaultAPICaseBatchTimeoutSeconds},
+		{ID: "case.configured", TimeoutSeconds: 7},
+	}
+	reports := apiCaseBatchCaseReportsFromPlans(plans)
+	if len(reports) != 2 || reports[0].TimeoutSeconds != 90 || reports[1].TimeoutSeconds != 7 {
+		t.Fatalf("case timeout reports = %#v", reports)
+	}
+	if terminal := newAPICaseBatchCaseReport(plans[0]); terminal.TimeoutSeconds != 90 {
+		t.Fatalf("terminal case timeout report = %#v", terminal)
+	}
+}

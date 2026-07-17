@@ -348,6 +348,8 @@ else
   go_scope_packages=()
   run_frontend_tests=0
   run_frontend_build=0
+  run_cli_active_store_smoke=0
+  run_control_plane_browser_smoke=0
   run_mysql_store_api_smoke=0
   ran_scoped_runtime_tests=0
 
@@ -440,6 +442,15 @@ else
         node_scope_tests+=("tools/smoke/mysql-store-api-smoke.test.mjs")
         run_mysql_store_api_smoke=1
         ;;
+      tools/smoke/control-plane-smoke.mjs)
+        node_scope_tests+=(
+          "tools/smoke/control-plane-smoke.test.mjs"
+          "tools/smoke/cli-active-store-smoke.test.mjs"
+          "tools/smoke/mysql-store-api-smoke.test.mjs"
+        )
+        run_cli_active_store_smoke=1
+        run_mysql_store_api_smoke=1
+        ;;
       tools/examples/*.test.mjs|tools/smoke/*.test.mjs)
         node_scope_tests+=("$path")
         ;;
@@ -451,6 +462,12 @@ else
         ;;
       tools/release-check.sh|tools/guardrails/*)
         node_scope_tests+=("tools/smoke/release-check.test.mjs")
+        ;;
+    esac
+
+    case "$path" in
+      control-plane/frontend/src/workflowDetail.jsx|control-plane/frontend/src/workflowDetailModel.mjs|internal/server/controlplane/test_kit*.go|internal/server/controlplane/api_case_batch*.go|internal/server/controlplane/workflow_run*.go|tools/smoke/control-plane-smoke.mjs)
+        run_control_plane_browser_smoke=1
         ;;
     esac
   done
@@ -546,6 +563,26 @@ else
     step "running scoped Node tests"
     printf '  %s\n' "${node_scope_tests[@]}"
     node --test "${node_scope_tests[@]}"
+    ran_scoped_runtime_tests=1
+  fi
+
+  if [[ "$run_cli_active_store_smoke" -eq 1 ]]; then
+    step "running scoped active SQL Store CLI smoke tests"
+    if is_sqlite_store_dsn "$smoke_store_dsn"; then
+      node tools/smoke/cli-active-store-smoke.mjs
+    else
+      npm run smoke:cli:sql-active
+    fi
+    ran_scoped_runtime_tests=1
+  fi
+
+  if [[ "$run_control_plane_browser_smoke" -eq 1 ]]; then
+    step "running scoped active SQL Store browser smoke tests"
+    if is_sqlite_store_dsn "$smoke_store_dsn"; then
+      node tools/smoke/control-plane-smoke.mjs
+    else
+      npm run smoke:frontend:sql-active
+    fi
     ran_scoped_runtime_tests=1
   fi
 
