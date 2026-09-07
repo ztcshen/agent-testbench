@@ -1,185 +1,118 @@
-# Testing workbench direction and lightweight direct execution
+# 测试工作台演进方向与轻量直连执行模式
 
-Date: 2026-09-07
+日期：2026-09-07
 
-This document consolidates the current review and the first implementation
-slice. It records proposed changes separately from implemented behavior. Private
-test projects, environment addresses, credentials, and runtime evidence remain
-outside public source.
+本文汇总本轮评审结论与首个实现切片，分别记录拟议改动和已实现的行为。私有测试项目、环境地址、凭据和运行证据均保留在公开源码之外。
 
-## Product decision
+## 产品决策
 
-**Lightweight direct mode is an explicit operating mode.** It runs an existing
-local test executor against an already-running application. Selecting it never
-depends on the availability of Docker. TestBench owns registration, execution
-identity, outcome recording, and evidence; it does not own the target's startup
-or shutdown in this mode.
+**轻量直连模式是一种需要显式选择的运行模式。** 它调用已有的本地测试执行器，测试已经运行的应用。是否选择该模式与 Docker 是否可用无关。在此模式下，TestBench 负责注册、执行标识、结果记录和证据管理，不负责目标应用的启动与关闭。
 
-Three independent concerns must stay separate:
+以下三个独立职责必须分开：
 
-| Concern | Direct mode | Managed environment mode |
+| 职责 | 直连模式 | 托管环境模式 |
 | --- | --- | --- |
-| Control-plane persistence | Selected SQLite, PostgreSQL, or MySQL Store | Same Store contract |
-| Test executor | Local process in its existing language runtime | Local or container executor as configured |
-| Target application | Existing endpoint with explicit target configuration | Environment lifecycle may prepare repositories, start services, and restore Docker Compose |
+| 控制平面持久化 | 使用选定的 SQLite、PostgreSQL 或 MySQL Store | 使用相同的 Store 契约 |
+| 测试执行器 | 在已有语言运行时中启动本地进程 | 按配置使用本地或容器执行器 |
+| 目标应用 | 使用已有服务端点，并显式配置目标 | 环境生命周期可负责准备代码仓库、启动服务和恢复 Docker Compose 环境 |
 
-Container-based restoration remains a supported capability. The direct path has
-its own discovery, planning, execution, and result contract; it does not require
-environment restoration, a component graph, or a topology publication gate.
-An ordinary test pass never implies that an entire environment is verified.
+基于容器的环境恢复能力继续保留。直连模式拥有独立的发现、计划、执行和结果契约，无需环境恢复、组件图或拓扑发布门禁。普通测试通过不代表整个环境已经通过验证。
 
-## Consolidated change inventory
+## 汇总改动清单
 
-| ID | Change | Rationale | Delivery |
+| 编号 | 改动 | 原因 | 交付安排 |
 | --- | --- | --- | --- |
-| D01 | Add explicit lightweight direct execution of existing local test projects | External executor descriptors currently plan but do not execute native tests | First slice |
-| D02 | Register attached target configuration independently of target startup | Existing services should be usable without inventing a Compose or start-command lifecycle | First slice, binding-level target |
-| D03 | Normalize native results and index run evidence | Process exit, assertion failure, interrupted execution, and a dry-run are different outcomes | First slice |
-| D04 | Isolate execution state directories | Cache, session, timing, and output state must not leak between independent runs | First slice |
-| D05 | Preserve source identity and detect changed test inputs | A case ID alone does not identify the code and data actually executed | First slice |
-| D06 | Keep external case ownership in its original project | Avoid duplicating signing, request builders, assertions, and workflow logic inside the core | First slice, references in Store |
-| D07 | Extract reusable execution responsibilities from CLI and HTTP packages | The current CLI and control-plane packages hold too much orchestration | Start with the new slice; broader extraction remains open |
-| D08 | Expose Map discovery, explain, execution, and gates consistently through APIs | Existing Map functionality is concentrated in the CLI | Follow-up |
-| D09 | Provide Store-case dry-runs and temporary drafts | Discovery and exploration should not require complete production-style catalog preparation | Follow-up; direct plans included first |
-| D10 | Add shared artifact retrieval and durable artifact ownership | Shared SQL indexes currently refer to execution-host-local files | Follow-up |
-| D11 | Separate topology requirements from provider implementations | Real evidence remains required where appropriate; provider choice should not be a universal workflow constraint | Follow-up; existing verified publication policy unchanged |
-| D12 | Audit capability-specific diagnostics | A local test executor should require its own dependencies; development and managed-environment prerequisites should be separate | Follow-up |
-| D13 | Make fixture setup, sharing, and cleanup explicit | Repeatability depends on equivalent preconditions and controlled side effects | Direct state directories first; general fixture model follow-up |
-| D14 | Distinguish submit retry, test retry, new execution, and replay | Request idempotency does not make every tested operation idempotent | First slice reserves run identity; general recovery policy follow-up |
-| D15 | Track changes to expected behavior and test strength | Automatic repair must not silently erase failures, skip coverage, or weaken assertions | Follow-up |
-| D16 | Reduce procedural instructions as model capability improves | Agents can own test design, code generation, and investigation; the runtime owns facts and boundaries | Ongoing, measured with historical defects |
+| D01 | 增加显式的轻量直连模式，执行已有本地测试项目 | 现有外部执行器描述只能生成计划，尚不能执行原生测试 | 首个切片 |
+| D02 | 将已有目标的配置注册与目标启动分开 | 使用已经运行的服务时，不应被迫构造 Compose 或启动命令生命周期 | 首个切片，在绑定记录中保存目标配置 |
+| D03 | 统一原生测试结果格式，建立运行证据索引 | 进程退出、断言失败、执行中断和预演（dry-run）是不同的结果 | 首个切片 |
+| D04 | 隔离执行状态目录 | 缓存、会话、耗时记录和输出状态不能在独立运行之间串用 | 首个切片 |
+| D05 | 保留来源标识，检测测试输入变化 | 仅凭用例 ID 无法确定实际执行的代码和数据 | 首个切片 |
+| D06 | 外部用例继续由原项目维护 | 避免在核心项目中重复实现签名、请求构造、断言和工作流逻辑 | 首个切片，在 Store 中保存引用 |
+| D07 | 从 CLI 和 HTTP 包中提取可复用的执行职责 | 当前 CLI 和控制平面包承担了过多编排职责 | 从新切片开始，更大范围的提取尚待完成 |
+| D08 | 通过 API 一致地提供 Map 发现、解释、执行和门禁能力 | 现有 Map 功能主要集中在 CLI 中 | 后续改动 |
+| D09 | 为 Store 中的用例提供预演和临时草稿能力 | 发现和探索阶段不应要求先按正式运行标准准备完整的用例目录 | 后续改动；首个切片先提供直连执行计划 |
+| D10 | 增加共享产物读取能力，明确产物的持久化归属 | 共享 SQL 索引目前指向执行主机的本地文件 | 后续改动 |
+| D11 | 将拓扑要求与具体提供方实现解耦 | 需要真实证据的场景仍应保留要求，但不应将某个提供方变成所有工作流的统一约束 | 后续改动；现有验证通过后的发布策略保持不变 |
+| D12 | 检查并拆分各项能力的诊断要求 | 本地测试执行器应只要求自身所需依赖；开发和托管环境的前置要求应分开 | 后续改动 |
+| D13 | 显式定义测试夹具（fixture）的准备、共享和清理 | 可重复执行依赖等价的前置条件和受控的副作用 | 先提供直连运行状态目录，通用夹具模型后续实现 |
+| D14 | 区分提交重试、测试重试、新执行和回放 | 请求幂等不代表每个被测操作都具有幂等性 | 首个切片先确立运行标识，通用恢复策略后续实现 |
+| D15 | 跟踪预期行为与测试强度的变化 | 自动修复不能悄悄抹去失败、跳过应覆盖的场景或弱化断言 | 后续改动 |
+| D16 | 随模型能力提升，减少对具体操作步骤的规定 | Agent 可负责测试设计、代码生成和问题调查；运行时负责事实记录与边界约束 | 持续推进，使用历史缺陷衡量效果 |
 
-The 2026-09-07 working-tree review ran Go and frontend tests. It observed 1,237
-passing Go test items and 87 skipped external-database/real-Docker items, 56
-passing frontend tests, and a report-only quality result of 3 blocking and 33
-warning findings. The Go duplicate detector found no clones at its configured
-thresholds. These are baseline observations, not validation of this new slice.
+2026-09-07 的工作区评审运行了 Go 和前端测试。基线结果为：1,237 个 Go 测试项通过，87 个依赖外部数据库或真实 Docker 的测试项跳过，56 个前端测试通过。仅生成报告、不阻断流程的质量检查记录了 3 个阻断级问题和 33 个警告。Go 重复代码检测器在配置阈值下未发现重复代码块。以上是基线观察结果，不代表对本次新切片的验证。
 
-## Maintenance and execution boundaries
+## 用例维护与执行边界
 
-During maintenance an agent may discover cases, propose scenarios, change
-scripts, refine fixtures, and investigate failures. Stable regression runs bind
-their test definition and target before execution. Changes create a new
-definition or source snapshot rather than changing the meaning of an existing
-run.
+维护阶段，Agent 可以发现用例、提出测试场景、修改脚本、完善测试夹具和调查失败。稳定回归运行需要在执行前绑定测试定义和目标。修改应生成新的测试定义或来源快照，不得改变已有运行记录的含义。
 
-- Submission idempotency: repeating the same request identity must not launch
-  a second process. Reusing it with different inputs is a conflict.
-- Repeatable execution: a new execution gets its own state directory; sharing
-  within an existing external workflow remains that workflow's responsibility.
-- Failure reproduction: preserve source digests, resolved inputs, target,
-  executor identity, and original outcomes. This does not claim that external
-  services or all dependencies are hermetically reproducible.
-- Assertion quality: distinguish expected behavior from observed output.
-  Updating a baseline, changing an assertion, and repairing a locator are
-  identifiable maintenance actions.
-- Result integrity: preserve failed attempts, skipped outcomes, malformed
-  reports, cancellations, and unknown outcomes. A process exit code of zero
-  alone does not prove a test passed.
+- 提交幂等：使用同一请求标识重复提交时，不得启动第二个进程。使用同一标识提交不同输入时，应报告冲突。
+- 可重复执行：每次新执行使用独立的状态目录；已有外部工作流内部的状态共享仍由该工作流负责。
+- 失败复现：保留源文件摘要、解析后的输入、目标、执行器标识和原始结果。这不代表外部服务或全部依赖都能在完全隔离的环境中复现。
+- 断言质量：区分预期行为与实际输出。更新基线、修改断言和修复定位器应作为不同的维护操作加以识别。
+- 结果完整性：保留失败尝试、跳过结果、格式错误的报告、取消和未知结果。仅凭进程退出码为零，不能认定测试通过。
 
-## Reference evidence and adaptation
+## 参考依据与借鉴方式
 
-| Reference | Observed approach | Adaptation |
+| 参考项目或资料 | 观察到的做法 | 借鉴方式 |
 | --- | --- | --- |
-| [Playwright Test Agents](https://playwright.dev/docs/test-agents) | Agents generate and maintain executable test files | Let agents maintain test assets while a runner executes selected definitions |
-| [Playwright fixtures](https://playwright.dev/docs/test-fixtures) | Scoped setup/teardown and fixture dependencies | Give each execution explicit state, preserving intentional workflow sharing |
-| [Playwright web server](https://playwright.dev/docs/test-webserver) | Start a local command or reuse an existing server | Treat attached targets and managed startup as separate lifecycle choices |
-| [TestSprite CLI v0.10.0](https://github.com/TestSprite/testsprite-cli/tree/v0.10.0) | Versioned code updates, run IDs, structured failure bundles; hosted execution | Reuse result and identity concepts, without introducing a hosted dependency |
-| [Testkube workflows](https://docs.testkube.io/articles/test-workflows) | Invoke existing tools with explicit code sources and execution configuration | Preserve external runner ownership; keep container orchestration optional |
-| [Keploy test recording](https://keploy.io/docs/running-keploy/cli-commands/) | Recorded requests and dependencies, explicit re-recording and normalization | Treat a recorded baseline as a versioned test input |
-| [Schemathesis replay](https://schemathesis.readthedocs.io/en/stable/guides/crash-reproduction/) | Preserve failing requests and stateful call chains | Keep generation separate from replay; preserve dependency context |
-| [Allure report integration](https://allurereport.org/docs/v2/generate-report/) | Original test frameworks emit results consumed by a common report layer | Normalize external reports without translating every test into the native HTTP format |
-| [Test-strength research, August 2026 revision](https://arxiv.org/abs/2604.01518v2) | Validate generated tests against behavioral variants | Evaluate defect detection and false passes, not pass rate alone |
+| [Playwright 测试 Agent](https://playwright.dev/docs/test-agents) | Agent 生成并维护可执行测试文件 | 由 Agent 维护测试资产，由执行器运行选定的测试定义 |
+| [Playwright 测试夹具](https://playwright.dev/docs/test-fixtures) | 按作用域准备和清理夹具，管理夹具依赖 | 为每次执行提供明确的状态，同时保留工作流内有意设计的共享 |
+| [Playwright Web 服务](https://playwright.dev/docs/test-webserver) | 启动本地命令，或复用已有服务 | 将直连已有目标与托管启动作为不同的生命周期选择 |
+| [TestSprite CLI v0.10.0](https://github.com/TestSprite/testsprite-cli/tree/v0.10.0) | 版本化代码更新、运行 ID、结构化失败信息包；采用托管执行 | 借鉴结果与标识设计，不引入托管服务依赖 |
+| [Testkube 工作流](https://docs.testkube.io/articles/test-workflows) | 通过明确的代码来源和执行配置调用现有工具 | 保留外部执行器的职责归属，将容器编排保持为可选能力 |
+| [Keploy 测试录制](https://keploy.io/docs/running-keploy/cli-commands/) | 录制请求及依赖，显式重新录制并进行规范化处理 | 将录制基线视为具有版本的测试输入 |
+| [Schemathesis 回放](https://schemathesis.readthedocs.io/en/stable/guides/crash-reproduction/) | 保留失败请求和有状态调用链 | 将生成与回放分开，保留依赖上下文 |
+| [Allure 报告集成](https://allurereport.org/docs/v2/generate-report/) | 原有测试框架产出结果，由统一报告层读取 | 统一外部报告格式，无需将所有测试改写为原生 HTTP 用例格式 |
+| [测试强度研究，2026 年 8 月修订版](https://arxiv.org/abs/2604.01518v2) | 使用行为变体验证生成的测试 | 评估缺陷检出能力和错误通过的情况，而不只看通过率 |
 
-TestSprite's public CLI is not its hosted execution engine. Testkube's open
-agent and commercial control plane have different scopes. Tracetest remains a
-useful conceptual reference, but its last observed repository push was in
-June 2025. None of these observations establish comparative runtime quality.
+TestSprite 公开的 CLI 不包含其托管执行引擎。Testkube 的开源 Agent 与商业控制平面覆盖范围不同。Tracetest 仍可作为概念参考，但本轮观察到的最近一次仓库推送时间为 2025 年 6 月。这些观察均不足以证明各项目实际运行质量的高低。
 
-## First slice contract
+## 首个切片的约定
 
-The implementation will provide an explicitly named `direct` CLI/API surface.
-A one-time registration records an existing local executor, attached target,
-case references, source identity, and evidence location in the active Store.
-Daily discovery and runs use that Store registration.
+首个切片将提供明确命名为 `direct` 的 CLI/API 入口。通过一次性注册，将已有本地执行器、直连目标、用例引用、来源标识和证据位置记录到当前 Store。日常发现和执行使用该 Store 中的注册信息。
 
-The generic executor adapter uses JSON for discovery and execution. Its test
-implementation remains outside the core. Public examples use only synthetic
-HTTP targets and test data. An existing external workflow initially remains a
-single execution unit; its own runner controls its internal dependency order.
+通用执行器适配器使用 JSON 完成发现与执行交互，测试实现继续保留在核心项目之外。公开示例仅使用模拟 HTTP 目标和测试数据。已有外部工作流在首个切片中作为一个执行单元，其内部依赖顺序由原执行器控制。
 
-The native process boundary must support explicit executable/argv/working
-directory, bounded output, timeout and cancellation of owned child processes,
-and per-run state. The result contract must distinguish real pass/fail/skip
-from planning and protocol failure. Source drift must be visible and require
-an explicit registration refresh.
+原生进程边界必须支持显式配置可执行文件、argv 参数和工作目录，限制输出大小，处理超时和所启动子进程的取消，并提供独立的运行状态。结果契约必须区分实际通过、失败、跳过、执行计划和协议错误。来源变化必须可见，并要求显式刷新注册信息。
 
-The direct HTTP surface is an explicitly selected local execution mode. It
-accepts registered identities and execution inputs, not a shell command hidden
-in a run request. The first slice does not expose a remote general-purpose
-command service.
+直连 HTTP 接口属于需要显式选择的本地执行模式。运行请求接收已注册的标识和执行输入，不允许在其中夹带 shell 命令。首个切片不提供远程通用命令服务。
 
-## Acceptance and validation
+## 验收与验证
 
-1. Register and discover an external synthetic test project in a fresh local
-   SQLite Store using direct mode.
-2. Execute a real native process against an already-running local HTTP target.
-   Docker availability is irrelevant: direct mode invokes no Docker command.
-3. Verify pass, assertion failure, malformed output, process startup failure,
-   timeout, and duplicate request handling.
-4. Verify that a reported dry-run cannot become a passed test.
-5. Preserve source identity, per-run directories, original output, and indexed
-   evidence across repeated runs; prevent source drift from silently changing
-   a registered case.
-6. Exercise CLI and API through the same application service.
-7. Demonstrate the private existing project's adapter without calling shared
-   business environments. Any live target validation needs its own authorized
-   target and case selection.
-8. Run focused tests, `go test ./...`, `make quality`, and relevant repository
-   guards. Report baseline debt separately from newly introduced findings.
+1. 使用直连模式，在新建的本地 SQLite Store 中注册并发现一个外部模拟测试项目。
+2. 启动真实的原生进程，测试已经运行的本地 HTTP 目标。Docker 是否可用不影响结果：直连模式不调用任何 Docker 命令。
+3. 验证通过、断言失败、输出格式错误、进程启动失败、超时和重复请求处理。
+4. 验证标记为预演的报告不能被认定为测试通过。
+5. 在多次运行中保留来源标识、独立运行目录、原始输出和证据索引，防止来源变化悄悄改变已注册用例的含义。
+6. 让 CLI 和 API 通过同一个应用服务执行。
+7. 演示已有私有项目的适配器，不调用共享业务环境。任何真实目标验证均需限定在明确授权的目标和用例范围内。
+8. 运行针对性测试、`go test ./...`、`make quality` 和相关仓库检查。分别报告既有问题与新增问题。
 
-## Status
+## 当前状态
 
-Public surface impact of the first slice:
+首个切片对外部接口的影响：
 
-- Adds five `direct` CLI commands and expands default discovery from 35 to at
-  most 40 commands; existing workbench commands retain their meanings.
-- Adds `serve --mode direct` and an explicitly separate local API route set.
-  The default remains the existing workbench server.
-- Adds runner packages for native process lifecycle and direct registration/run
-  orchestration. They reuse versioned catalog storage and Run/CaseRun/Evidence
-  interfaces; SQL schemas, migrations, and existing HTTP-case contracts do not
-  change.
-- Direct bindings are catalog template-config records. They have their own
-  discovery surface and are not yet native HTTP Case Catalog or Map entries.
-- A stable `caseKey` qualifies the external case identity by its binding, so
-  equally named cases in unrelated projects do not share history accidentally.
+- 新增五个 `direct` CLI 命令，将默认发现的命令数从 35 个扩展到最多 40 个；现有工作台命令的语义不变。
+- 新增 `serve --mode direct` 和独立的本地 API 路由集合。默认仍使用现有工作台服务。
+- 新增执行器包，分别负责原生进程生命周期，以及直连注册与运行编排。它们复用版本化目录存储和 Run/CaseRun/Evidence 接口；SQL Schema、数据库迁移和现有 HTTP 用例契约均不变。
+- 直连绑定保存为目录中的模板配置记录，拥有独立的发现入口，尚未纳入原生 HTTP Case Catalog 或 Map。
+- 使用稳定的 `caseKey`，结合绑定标识限定外部用例身份，防止不同项目的同名用例意外共用历史记录。
 
-- [x] Consolidated session decisions and research evidence.
-- [x] Implement first direct-mode slice.
-- [x] Verify local native execution and API/CLI behavior.
-- [x] Add private existing-project adapter and validate it locally.
-- [x] Record checks for the local review checkpoint.
+- [x] 汇总本次会话的决策与研究依据。
+- [x] 实现首个直连模式切片。
+- [x] 验证本地原生执行以及 API/CLI 行为。
+- [x] 添加已有私有项目的适配器，并完成本地验证。
+- [x] 记录本地评审提交所需的检查结果。
 
-First-slice verification on 2026-09-07:
+2026-09-07 首个切片的验证结果：
 
-- `go test ./...`: 1,268 test items passed; 87 external database and real-Docker
-  checks skipped. No shared service was used for this validation.
-- Native process and direct runner race tests passed.
-- Go lint for the CLI, control plane, direct service, and native process packages
-  reported zero issues.
-- `make quality`: 3 existing package-size blocking findings and 34 warnings;
-  the added warning identifies the new public surface documented above. No
-  duplicate clone blocks were found at the repository's configured thresholds.
-- Store-first, secret, whitespace, and required keyword guards passed.
-- An actual native adapter called a synthetic HTTP target, recorded pass and
-  assertion failure, and reused an identical request identity across CLI/API
-  without another target call. An available Docker stub was never invoked.
-  The local direct server shut down cleanly.
-- The existing private adapter's discovery and plan were registered and checked
-  in a local SQLite Store. Its four adapter tests passed. Actual business cases
-  were not executed.
-- Existing unrelated working-tree changes were preserved.
+- `go test ./...`：1,268 个测试项通过；87 个依赖外部数据库和真实 Docker 的检查跳过。本次验证未使用共享服务。
+- 原生进程和直连执行器的竞态检测测试通过。
+- CLI、控制平面、直连服务和原生进程包的 Go lint 检查未发现问题。
+- `make quality`：记录 3 个已有的包体量阻断级问题和 34 个警告；新增警告对应上文记录的对外接口扩展。在仓库配置阈值下未发现重复代码块。
+- Store-first、敏感信息、空白格式和指定关键词检查通过。
+- 使用真实运行的原生适配器调用模拟 HTTP 目标，记录通过和断言失败结果；在 CLI/API 之间复用同一请求标识时，没有再次调用目标。可用的 Docker 桩程序从未被调用。本地直连服务正常关闭。
+- 已有私有适配器的发现结果和执行计划已在本地 SQLite Store 中注册并检查。该适配器的四个测试通过，未执行真实业务用例。
+- 保留了工作区内已有的其他无关改动。
 
-Broader Map APIs, remote artifact storage, provider-general topology acceptance,
-and automatic test-strength gates remain follow-up work.
+更完整的 Map API、远程产物存储、不绑定具体提供方的拓扑验收，以及自动化测试强度门禁，仍属于后续工作。
