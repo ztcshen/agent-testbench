@@ -50,6 +50,7 @@ var rootCommands = map[string]rootCommand{
 	"trace":              func(args []string) error { return runTrace(context.Background(), args) },
 	"replay":             runReplay,
 	"executor":           func(args []string) error { return runExecutor(context.Background(), args) },
+	cliCommandDirect:     func(args []string) error { return runDirect(context.Background(), args) },
 	"workflow":           runWorkflow,
 	"map":                func(args []string) error { return runMap(context.Background(), args) },
 	"gate":               func(args []string) error { return runGate(context.Background(), args) },

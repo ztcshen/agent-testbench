@@ -119,6 +119,11 @@ template-package catalog restore	agent-testbench template-package catalog restor
 template-package verify	agent-testbench template-package verify --template-package PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--require-case-runs] [--require-workflow-runs] [--json] [--force]
 template-package import	agent-testbench template-package import --from PATH_OR_ID [--profile-home PATH] [--store NAME_OR_DSN] [--json] [--audit] [--require-audit-ok] [--force]
 executor plan	agent-testbench executor plan [--profile PATH_OR_ID] [--profile-home PATH] [--store NAME_OR_DSN] [--json]	replacement=agent-testbench map explain
+direct register	agent-testbench direct register --id ID --project PATH --executable PATH --target-url URL [--arg ARG]... [--env NAME]... [--target-env NAME]... [--evidence-dir PATH] [--timeout-seconds N] [--expected-revision N] [--display-name NAME] [--store NAME_OR_DSN] [--json]	surface=default	reason=lightweight direct: register an existing local executor and attached target in Store
+direct discover	agent-testbench direct discover [--store NAME_OR_DSN] [--json]	surface=default	reason=lightweight direct: discover registered external cases and workflows
+direct plan	agent-testbench direct plan --binding ID --case ID [--override KEY=VALUE]... [--store NAME_OR_DSN] [--json]	surface=default	reason=lightweight direct: inspect source and target without running tests
+direct run	agent-testbench direct run --binding ID --case ID [--run-id ID] [--override KEY=VALUE]... [--dry-run] [--store NAME_OR_DSN] [--json]	surface=default	reason=lightweight direct: execute a native test against an attached target
+direct inspect	agent-testbench direct inspect --run ID [--store NAME_OR_DSN] [--json]	surface=default	reason=lightweight direct: inspect persisted run results and Evidence
 evidence import	agent-testbench evidence import --from PATH --profile ID [--store NAME_OR_DSN]
 evidence inspect	agent-testbench evidence inspect --view list [--store NAME_OR_DSN] [--run ID] [--json] | agent-testbench evidence inspect --view tasks --run ID [--store NAME_OR_DSN] [--step ID] [--case ID] [--kind KIND] [--status STATUS] [--json]
 evidence list	agent-testbench evidence list [--store NAME_OR_DSN] [--run ID] [--json]	replacement=agent-testbench evidence inspect --view list
@@ -178,6 +183,6 @@ case run	agent-testbench case run --case-id ID [--base-url URL] [--override KEY=
 case incomplete-batches	agent-testbench case incomplete-batches [--profile PATH_OR_ID] [--store NAME_OR_DSN] [--json]
 case diagnose	agent-testbench case diagnose [--store NAME_OR_DSN] [--case-run ID | --run ID [--case-id ID] [--step-id ID]] [--json]	replacement=agent-testbench case inspect --view diagnose
 case gate	agent-testbench case gate [--store NAME_OR_DSN] [--run ID] [--require-no-failures] [--require-evidence] [--min-passed N] [--json]	surface=default	reason=case lifecycle: discover, run, inspect evidence, and gate API or MQ cases
-serve	agent-testbench serve [--profile PATH_OR_ID] [--profile-home PATH] [--host HOST] [--port PORT] [--store NAME_OR_DSN]
+serve	agent-testbench serve [--mode workbench|direct] [--profile PATH_OR_ID] [--profile-home PATH] [--host HOST] [--port PORT] [--store NAME_OR_DSN]
 help	agent-testbench help
 `

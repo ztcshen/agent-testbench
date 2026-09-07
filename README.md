@@ -169,6 +169,12 @@ These are design influences, not vendored runtime dependencies.
 
 ## Quick Start
 
+For an existing local test project, use the explicit
+[lightweight direct mode](docs/lightweight-direct.md). It runs a native adapter
+against an already-running target and records results in the selected SQL Store.
+Start with `agent-testbench direct register`, then `direct discover`, `direct
+plan`, and `direct run`. The local API is available through `serve --mode direct`.
+
 Install dependencies and verify the checkout:
 
 ```sh

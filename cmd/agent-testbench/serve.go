@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -32,12 +33,16 @@ func runServe(args []string) error {
 		}
 	}()
 
-	addr := cfg.host + ":" + strconv.Itoa(cfg.port)
+	addr := net.JoinHostPort(cfg.host, strconv.Itoa(cfg.port))
 	fmt.Printf("AgentTestBench listening on http://%s\n", addr)
+	if cfg.mode == cliCommandDirect {
+		return runDirectServer(addr, handler)
+	}
 	return http.ListenAndServe(addr, handler)
 }
 
 type serveConfig struct {
+	mode            string
 	profilePath     string
 	profileHome     string
 	host            string
@@ -58,6 +63,7 @@ func serveHandlerFromArgs(args []string) (http.Handler, func() error, error) {
 func serveConfigFromArgs(args []string) (serveConfig, error) {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
+	mode := flags.String("mode", "workbench", "Execution surface: workbench or lightweight direct")
 	profilePath := flags.String("profile", "", "Template package path or installed template package id")
 	profileHome := flags.String("profile-home", "", "Installed template package home")
 	host := flags.String("host", "127.0.0.1", "HTTP host")
@@ -68,7 +74,19 @@ func serveConfigFromArgs(args []string) (serveConfig, error) {
 	if err := flags.Parse(args); err != nil {
 		return serveConfig{}, err
 	}
-	return serveConfig{profilePath: *profilePath, profileHome: *profileHome, host: *host, port: *port, storeRef: *storeRef, storeURL: *storeURL, traceGraphQLURL: *traceGraphQLURL}, nil
+	if *mode != "workbench" && *mode != cliCommandDirect {
+		return serveConfig{}, errors.New("--mode must be workbench or direct")
+	}
+	if *mode == cliCommandDirect {
+		ip := net.ParseIP(*host)
+		if *host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			return serveConfig{}, errors.New("direct mode requires a loopback --host")
+		}
+		if *profilePath != "" {
+			return serveConfig{}, errors.New("direct mode uses registered Store bindings")
+		}
+	}
+	return serveConfig{mode: *mode, profilePath: *profilePath, profileHome: *profileHome, host: *host, port: *port, storeRef: *storeRef, storeURL: *storeURL, traceGraphQLURL: *traceGraphQLURL}, nil
 }
 
 func serveHandler(cfg serveConfig) (http.Handler, func() error, error) {
@@ -83,6 +101,9 @@ func serveHandler(cfg serveConfig) (http.Handler, func() error, error) {
 		return nil, nil, err
 	}
 	ctx := context.Background()
+	if cfg.mode == cliCommandDirect {
+		return controlplane.NewDirectHandler(runtime), runtime.Close, nil
+	}
 	if strings.TrimSpace(cfg.profilePath) != "" {
 		profilePath, err := resolveProfileReference(cfg.profilePath, cfg.profileHome)
 		if err != nil {

@@ -142,6 +142,11 @@ flowchart LR
 
 ## 快速开始
 
+已有本地测试项目可以使用[轻量直连模式](docs/lightweight-direct.md)：通过本机执行器
+连接已经运行的服务，并将来源版本、结果与 Evidence 记录到选定的 SQL Store。
+入口是 `direct register/discover/plan/run/inspect`，本地 API 使用 `serve --mode direct`。
+该模式由用户明确选择，Docker 的可用状态不参与模式选择。
+
 安装依赖并验证仓库：
 
 ```sh

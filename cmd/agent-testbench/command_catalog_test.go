@@ -843,8 +843,8 @@ func TestCommandsDefaultCatalogHidesSpecializedCommands(t *testing.T) {
 			}
 		}
 	}
-	if report.Count > 35 {
-		t.Fatalf("default command catalog should stay at or below the current target of 35 commands, got %d", report.Count)
+	if report.Count > 40 {
+		t.Fatalf("default catalog permits 35 workbench commands plus 5 direct commands, got %d", report.Count)
 	}
 	for _, want := range []string{"demo", "status", "doctor", "store current", "environment restore", "task suggest", "task plan", "map explain", "map run", "case inspect", "case run", commandCatalogCaseSuiteReport} {
 		if _, ok := commands[want]; !ok {
