@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mapIndex, filterMap, mapLayout, planNodeStatus } from "./mapModel.mjs";
+import { mapIndex, filterMap, mapLayout, planNodeStatus, mapPlanWithSteps } from "./mapModel.mjs";
 
 const document = {
   graph: {
@@ -68,4 +68,28 @@ test("a partial plan never becomes a passed node overlay", () => {
     planNodeStatus([{ status: "passed" }, { status: "failed" }]),
     "failed",
   );
+});
+
+test("recorded workflow steps show their own status and Evidence without marking unexecuted nodes", () => {
+  const plan = { tasks: [{
+    id: "task.path", kind: "run_path", status: "failed", pathId: "path.one",
+    workflowRunId: "run.workflow",
+    summaryJson: JSON.stringify({ steps: [{
+      stepId: "create", nodeId: "create", caseId: "case.create", status: "failed",
+      runId: "run.workflow.create", apiCaseRunId: "run.workflow.create.case",
+      error: "unexpected http status 404",
+    }] }),
+  }] };
+  const original = JSON.stringify(plan);
+  const projected = mapPlanWithSteps(plan);
+  const layout = mapLayout(filterMap(mapIndex(document), { pathId: "path.one" }), { plan: projected });
+  const create = layout.nodes.find(item => item.id === "create");
+  const read = layout.nodes.find(item => item.id === "read");
+  assert.equal(planNodeStatus(create.data.tasks), "failed");
+  assert.equal(planNodeStatus(read.data.tasks), "");
+  assert.equal(create.data.tasks[0].apiCaseRunId, "run.workflow.create.case");
+  assert.equal(create.data.tasks[0].workflowRunId, "run.workflow.create");
+  assert.equal(create.data.tasks[0].reason, "unexpected http status 404");
+  assert.equal(JSON.stringify(plan), original);
+  assert.equal(projected.tasks[0], plan.tasks[0]);
 });

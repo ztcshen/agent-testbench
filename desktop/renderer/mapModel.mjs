@@ -12,6 +12,33 @@ export const validationNode = (node) =>
   ["validation", "negative"].includes(node.role) ||
   node.stateEffect === "unchanged";
 
+export function mapPlanWithSteps(plan) {
+  if (!plan) return plan;
+  const tasks = [...(plan.tasks || [])];
+  for (const task of plan.tasks || []) {
+    if (!["run_path", "run_path_prefix"].includes(task.kind)) continue;
+    const steps = parseMapJSON(task.summaryJson).steps;
+    if (!Array.isArray(steps)) continue;
+    for (const step of steps) {
+      if (!step?.nodeId || !step.caseId || !step.status) continue;
+      tasks.push({
+        ...task,
+        id: `${task.id}.step.${step.stepId || step.nodeId}`,
+        kind: "workflow_step",
+        sourceTaskId: task.id,
+        nodeId: step.nodeId,
+        caseId: step.caseId,
+        status: step.status,
+        reason: step.error || "",
+        workflowRunId: step.runId || "",
+        apiCaseRunId: step.apiCaseRunId || "",
+        summaryJson: JSON.stringify(step),
+      });
+    }
+  }
+  return { ...plan, tasks };
+}
+
 export function mapIndex(document) {
   const graph = document.graph || {
     map: {},

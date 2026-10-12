@@ -43,6 +43,7 @@ import {
   mapLayout,
   planNodeStatus,
   validationNode,
+  mapPlanWithSteps,
 } from "./mapModel.mjs";
 import { dateLabel } from "./model.mjs";
 import MapInspector from "./MapInspector.jsx";
@@ -280,7 +281,7 @@ export default function MapWorkspace({
     let current = true;
     api(`/api/map/plan?${new URLSearchParams({ id: planId, mapId })}`)
       .then((result) => {
-        if (current) setPlan(result.data.plan);
+        if (current) setPlan(mapPlanWithSteps(result.data.plan));
       })
       .catch((error) => {
         if (current) setError(error.message);
