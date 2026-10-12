@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"agent-testbench/internal/store/assistantstate"
 )
 
 const (
-	CurrentSchemaVersion = 22
+	CurrentSchemaVersion = 23
 	CoreSchemaName       = "create shared sql store schema"
 	mysqlVarchar255Type  = "varchar(255)"
 	sha256ColumnName     = "sha256"
@@ -156,6 +158,7 @@ func CoreSchemaSQL(d Dialect) []string {
 	statements = append(statements, coreProfileCatalogVersionSchemaSQL(d, types)...)
 	statements = append(statements, corePlanGraphSchemaSQL(d, types)...)
 	statements = append(statements, coreMapPlannerSchemaSQL(d, types)...)
+	statements = append(statements, assistantstate.SchemaSQL(assistantstate.ColumnTypes{Key: types.keyText, Profile: types.profileIDText, Text: types.text, JSON: types.jsonType, Time: types.timeType}, d.CreateIndexSQL("idx_assistant_sessions_owner_map_updated", "assistant_sessions", []string{"owner_id", "map_id", "updated_at"}))...)
 	return append(statements, coreEnvironmentCatalogSchemaSQL(d, types)...)
 }
 

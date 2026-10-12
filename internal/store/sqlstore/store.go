@@ -3,15 +3,21 @@ package sqlstore
 import (
 	"database/sql"
 	"strings"
+	"time"
+
+	"agent-testbench/internal/store/assistantstate"
 )
 
 type Store struct {
+	*assistantstate.Repository
 	db      *sql.DB
 	dialect Dialect
 }
 
 func New(db *sql.DB, dialect Dialect) *Store {
-	return &Store{db: db, dialect: dialect}
+	s := &Store{db: db, dialect: dialect}
+	s.Repository = assistantstate.New(db, dialect.BindVar, s.bindVars, func(value time.Time) any { return dbTimeArg(dialect, value) }, decodeDBTime)
+	return s
 }
 
 func (s *Store) Close() error {

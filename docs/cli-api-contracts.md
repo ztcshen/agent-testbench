@@ -239,6 +239,9 @@ acceptance.
 | `GET` | `/api/workflow-runs/latest-step` | Return latest matching workflow step; requires `workflowId` and `stepId`. |
 | `POST` | `/api/trace-topology/collect` | Query trace provider and persist topology for a run. |
 | `GET` | `/api/agent-test` | Return agent workbench payload. |
+| `GET` / `POST` | `/api/assistant/sessions` | List owner/map session summaries or create a Store-backed assistant conversation. |
+| `GET` / `PUT` | `/api/assistant/session?id=...` | Read or checkpoint assistant state with a required expected revision; stale updates return 409. |
+| `POST` | `/api/assistant/tool` | Invoke a registered read-only map/plan/Evidence tool bound to a conversation. No model credentials or execution actions are accepted. |
 | `GET` | `/api/executor/plan` | Return the active template package executor dry-run plan. |
 | `POST` | `/api/evidence/import` | Import a legacy runtime Evidence SQLite index into the active Store. |
 | `GET` | `/api/evidence/list` | List Store Evidence records and API case runs for all runs or `run`/`runId`; `evidenceRecords` use stable lowerCamel attachment fields including `runId`, `caseRunId`, `stepId`, `mediaType`, `sizeBytes`, `sha256`, `category`, `visibility`, and parsed `labels`. |

@@ -5,11 +5,14 @@ const {
   Menu,
   dialog,
   clipboard,
+  utilityProcess,
+  safeStorage,
 } = require("electron");
 const { join, resolve, basename } = require("node:path");
 const { readFileSync, writeFileSync, mkdirSync } = require("node:fs");
 const { Backend } = require("./backend.cjs");
 const { backendURL, trustedFrame } = require("./trust.cjs");
+const { AssistantController } = require("./assistant-controller.cjs");
 
 app.setName("AgentTestBench");
 const option = (name) =>
@@ -45,6 +48,19 @@ if (option("store"))
   settings = { ...settings, mode: "local", store: option("store") };
 let window;
 let quitting = false;
+const assistant = new AssistantController({
+  backend,
+  dataDir,
+  safeStorage,
+  workerPath: app.isPackaged
+    ? join(process.resourcesPath, "assistant-worker.mjs")
+    : join(__dirname, "..", "dist", "desktop", "assistant-worker.mjs"),
+  fork: (path, args, options) => utilityProcess.fork(path, args, options),
+  notify: (session) => {
+    if (window && !window.isDestroyed())
+      window.webContents.send("atb:assistant-event", session);
+  },
+});
 
 function handle(channel, action) {
   ipcMain.handle(channel, async (event, input) => {
@@ -57,6 +73,23 @@ function handle(channel, action) {
 handle("atb:connection", () => backend.status());
 handle("atb:api", (input) => backend.request(input));
 handle("atb:settings", () => ({ ...settings, version: app.getVersion() }));
+handle("atb:assistant-settings", () => assistant.settings.public());
+handle("atb:assistant-save-settings", (input) => {
+  if (assistant.running.size || assistant.startPromise)
+    throw new Error("请先取消正在进行的分析，再修改模型配置");
+  return assistant.settings.save(input);
+});
+handle("atb:assistant-probe", () => assistant.probe());
+handle("atb:assistant-sessions", (input) =>
+  assistant.sessions(String(input.mapId || "")),
+);
+handle("atb:assistant-session", (input) =>
+  assistant.session(String(input.id || "")),
+);
+handle("atb:assistant-start", (input) => assistant.start(input));
+handle("atb:assistant-cancel", (input) =>
+  assistant.cancel(String(input.id || "")),
+);
 handle("atb:connect", async (input) => {
   const next = {
     mode: input.mode === "external" ? "external" : "local",
@@ -65,6 +98,7 @@ handle("atb:connect", async (input) => {
     backendURL: input.mode === "external" ? backendURL(input.backendURL) : "",
   };
   try {
+    await assistant.stop();
     const result = await backend.start(next);
     settings = next;
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2), {
@@ -222,6 +256,9 @@ else {
     if (quitting) return;
     event.preventDefault();
     quitting = true;
-    backend.stop().finally(() => app.quit());
+    assistant
+      .stop()
+      .finally(() => backend.stop())
+      .finally(() => app.quit());
   });
 }

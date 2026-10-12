@@ -24,6 +24,7 @@ import {
   Plus,
   ArrowUpRight,
   CheckCircle2,
+  Sparkles,
 } from "lucide-react";
 import { api } from "./api.mjs";
 import {
@@ -45,6 +46,7 @@ import {
 } from "./mapModel.mjs";
 import { dateLabel } from "./model.mjs";
 import MapInspector from "./MapInspector.jsx";
+import AssistantPanel from "./AssistantPanel.jsx";
 
 const MapNode = memo(({ data, selected }) => {
   const status = planNodeStatus(data.tasks);
@@ -250,6 +252,7 @@ export default function MapWorkspace({
   const [tab, setTab] = useState("graph");
   const [planId, setPlanId] = useState("");
   const [plan, setPlan] = useState(null);
+  const [assistantOpen, setAssistantOpen] = useState(false);
   async function load() {
     setError("");
     try {
@@ -322,6 +325,16 @@ export default function MapWorkspace({
           </div>
         </div>
         <div className="heading-actions">
+          <button
+            className={`button ${assistantOpen ? "primary" : ""}`}
+            onClick={() => {
+              setAssistantOpen((value) => !value);
+              setTab("graph");
+            }}
+          >
+            <Sparkles size={14} />
+            AI 图谱助手
+          </button>
           <IconButton icon={RefreshCw} title="刷新图谱" onClick={load} />
           {currentPath?.workflowId && (
             <button
@@ -426,20 +439,37 @@ export default function MapWorkspace({
               plan={plan}
             />
           </ReactFlowProvider>
-          <MapInspector
-            node={node}
-            index={index}
-            plan={plan}
-            pathId={pathId}
-            selectPath={(id) => {
-              setPathId(id);
-              setTab("graph");
-            }}
-            openCase={openCase}
-            openWorkflow={openWorkflow}
-            openEvidence={openEvidence}
-            close={() => setSelected("")}
-          />
+          {assistantOpen ? (
+            <AssistantPanel
+              key={mapId}
+              mapId={mapId}
+              mapName={index.graph.map.displayName || mapId}
+              node={node}
+              pathId={pathId}
+              selectNode={setSelected}
+              selectPath={(id) => {
+                setPathId(id);
+                setSelected("");
+              }}
+              openEvidence={openEvidence}
+              close={() => setAssistantOpen(false)}
+            />
+          ) : (
+            <MapInspector
+              node={node}
+              index={index}
+              plan={plan}
+              pathId={pathId}
+              selectPath={(id) => {
+                setPathId(id);
+                setTab("graph");
+              }}
+              openCase={openCase}
+              openWorkflow={openWorkflow}
+              openEvidence={openEvidence}
+              close={() => setSelected("")}
+            />
+          )}
         </div>
       ) : tab === "paths" ? (
         <div className="map-path-table">

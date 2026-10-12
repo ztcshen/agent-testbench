@@ -9,6 +9,20 @@ const repo = resolve(desktop, "..");
 const out = join(repo, "dist", "desktop");
 await mkdir(join(out, "renderer"), { recursive: true });
 await build({
+  entryPoints: [join(desktop, "assistant", "worker.mjs")],
+  outfile: join(out, "assistant-worker.mjs"),
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node24",
+  banner: {
+    js: 'import { createRequire as createNodeRequire } from "node:module"; const require = createNodeRequire(import.meta.url);',
+  },
+  minify: true,
+  legalComments: "inline",
+  logLevel: "info",
+});
+await build({
   entryPoints: [join(desktop, "renderer", "entry.jsx")],
   outfile: join(out, "renderer", "app.js"),
   bundle: true,
@@ -55,7 +69,14 @@ if (process.argv.includes("--package")) {
   const staging = join(out, "app");
   await mkdir(staging, { recursive: true });
   await mkdir(join(staging, "renderer"), { recursive: true });
-  for (const name of ["main.cjs", "preload.cjs", "backend.cjs", "trust.cjs"])
+  for (const name of [
+    "main.cjs",
+    "preload.cjs",
+    "backend.cjs",
+    "trust.cjs",
+    "assistant-controller.cjs",
+    "assistant-settings.cjs",
+  ])
     await copyFile(join(desktop, name), join(staging, name));
   for (const name of ["index.html", "app.js", "app.css"])
     await copyFile(
@@ -107,6 +128,7 @@ if (process.argv.includes("--package")) {
     asar: true,
     overwrite: true,
     extraResource: [
+      join(out, "assistant-worker.mjs"),
       join(
         out,
         "bin",

@@ -77,6 +77,13 @@ and the canvas organization of
 It uses original components with React Flow and Dagre, rather than embedding
 commercial code or assets.
 
+The map header also opens a Store-backed LangChain assistant. It supports
+dependency analysis, existing Go Planner previews and persisted failure
+diagnosis, with clickable node/Evidence references and tool-call history.
+Configure an OpenAI-compatible model in the assistant's model settings. See
+[Agent assistant](agent-assistant.md) for credential handling, session storage,
+read-only scope and validation.
+
 The renderer has no Node.js integration. A sandboxed, isolated preload exposes
 specific IPC methods. The main process checks the invoking frame, confines API
 requests to the configured backend, rejects navigation/new windows, and uses a
