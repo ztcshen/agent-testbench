@@ -231,6 +231,8 @@ export function mapLayout(
     return {
       id: node.id,
       type: "mapNode",
+      width: 236,
+      height: 108,
       position: { x: point.x - 118, y: point.y - 54 },
       selected: node.id === selected,
       data: { ...node, tasks: tasksByNode.get(node.id) || [] },
