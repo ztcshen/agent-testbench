@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,21 @@ func materializeAPICaseBatchExecution(ctx context.Context, bundle profile.Bundle
 		"workflowId": workflowID,
 		"baseUrl":    plan.BaseURL,
 		"overrides":  plan.Overrides,
+	}
+	// Studio bindings are explicit dependencies, so a missing exported value
+	// must fail before sending an incorrectly rendered request.
+	if runtime != nil {
+		catalog, err := runtime.GetProfileCatalog(ctx)
+		if err != nil {
+			return "", "", err
+		}
+		doc, _ := workflowStudioScopedDocument(catalog, workflowID, plan.StepID, plan.ID)
+		meta := mapFromAny(doc["workflowStudio"])
+		for alias := range stringSetFromAny(meta["managedInputs"]) {
+			if value, exists := plan.Overrides[alias]; !exists || value == nil || strings.TrimSpace(valueString(value)) == "" {
+				return "", "", fmt.Errorf("step %s is missing the selected upstream value %s", plan.StepID, alias)
+			}
+		}
 	}
 	request, err := buildCaseHTTPRequest(ctx, bundle, runtime, *plan.Execution, plan.BaseURL, payload)
 	if err != nil {

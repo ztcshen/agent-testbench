@@ -2,6 +2,7 @@ import { copyFileSync, readFileSync, readdirSync, rmSync, statSync, writeFileSyn
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
+import { buildWorkflowStudio } from "./buildWorkflowStudio.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const outdir = resolve(root, "../static/assets/react");
@@ -73,4 +74,5 @@ function scrubBuiltAsset(path) {
   }
 }
 
+await buildWorkflowStudio();
 scrubBuiltAsset(outdir);

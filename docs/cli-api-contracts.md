@@ -230,6 +230,7 @@ acceptance.
 | `GET` | `/api/workflows` | List workflows with Store-first `filter` support, matching `workflow discover`. |
 | `GET` | `/api/workflow-audit` | Audit one workflow; requires `workflowId`. |
 | `GET` | `/api/workflow-plan` | Return workflow-bound steps; requires `workflowId`, accepts `workflow` alias. |
+| `GET` / `PUT` | `/api/workflow-studio` | Read the visual workflow catalog or atomically save one workflow, ordered bindings, positions, outputs, and step-specific parameter references. `PUT` requires the current strong catalog `If-Match`; missing/stale preconditions return 428/412. |
 | `GET` | `/api/runs` | List workflow/replay/probe run headers. |
 | `POST` | `/api/workflow-runs` | Persist a workflow run snapshot. |
 | `GET` | `/api/workflow-runs/{runId}` | Return one workflow run. |

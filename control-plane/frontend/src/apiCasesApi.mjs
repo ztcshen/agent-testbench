@@ -120,7 +120,7 @@ async function mutateCaseCatalog(path, method, payload, etag, fetchImpl) {
   return { payload: body, etag: response.headers.get("etag") || "" };
 }
 
-async function readJSONResponse(response) {
+export async function readJSONResponse(response) {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     const issue = Array.isArray(body.issues) && body.issues.length ? `: ${body.issues.map(issueMessage).join("; ")}` : "";

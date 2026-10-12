@@ -7,6 +7,7 @@ import (
 )
 
 var staticFileNames = []string{
+	"workflow-studio.html",
 	"index.html",
 	"agent-run.html",
 	"api-cases.html",

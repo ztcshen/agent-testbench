@@ -48,6 +48,9 @@ function WorkflowSection({ title, summary, workflows, services, statusById, onRu
               runtimeImpact={workflowRuntimeImpact(workflow, statusById)}
               onRuntimeImpactClick={onRuntimeImpactClick}
             />
+            <div className="react-card-actions">
+              <ButtonLink href={`/workflow-studio.html?workflow=${encodeURIComponent(workflow.id)}`} icon={Icons.GitBranch}>可视化编排</ButtonLink>
+            </div>
           </div>
         ))}
       </div>
@@ -182,6 +185,7 @@ function WorkflowCatalogStudio() {
           <>
             <span className="react-status">{message}</span>
             <ButtonLink href="/" icon={Icons.LayoutDashboard}>控制台</ButtonLink>
+            <ButtonLink href="/workflow-studio.html" icon={Icons.GitBranch}>场景工作台</ButtonLink>
             <ButtonLink href="/dashboard.html" icon={Icons.Gauge}>环境大盘</ButtonLink>
             <ButtonLink href="/service-inventory.html" icon={Icons.Boxes}>服务清单</ButtonLink>
           </>

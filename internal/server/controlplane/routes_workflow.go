@@ -10,6 +10,7 @@ func registerWorkflowRoutes(mux *http.ServeMux, deps routeDeps) {
 	runtime := deps.runtime
 	profiles := deps.profiles
 	collector := deps.collector
+	registerWorkflowStudioRoutes(mux, runtime)
 	mux.HandleFunc("/api/workflow-audit", func(w http.ResponseWriter, r *http.Request) {
 		if !requireMethod(w, r, http.MethodGet) {
 			return
