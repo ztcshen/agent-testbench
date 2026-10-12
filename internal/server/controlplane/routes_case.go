@@ -11,6 +11,7 @@ func registerCaseRoutes(mux *http.ServeMux, deps routeDeps) {
 	collector := deps.collector
 	caseBatchRunner := deps.caseBatchRunner
 	registerCaseCatalogMaintenanceRoutes(mux, runtime)
+	registerRequestEditorRoutes(mux, runtime)
 	handleCurrentProfileMethod(mux, "/api/case/runs", http.MethodGet, deps, func(w http.ResponseWriter, r *http.Request, bundle profile.Bundle) {
 		handleCaseRuns(w, r, bundle, runtime)
 	})

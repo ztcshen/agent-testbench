@@ -24,6 +24,20 @@ HTML/JSON 报告，同时保持开源核心通用、可复用。
 Evidence 写入临时 SQLite Store，索引运行记录，并打印 Evidence 目录。源码
 checkout 中安装依赖后，`npm run demo:one` 会包装同一个 CLI 命令。
 
+## Electron 桌面工作台
+
+前端现已统一为 Electron 桌面应用，采用接口目录、多标签编辑、请求/响应分栏和
+场景步骤编排。旧网页入口已停用；CLI、API、SQL Store 与执行引擎继续共用。
+
+```sh
+npm ci
+npm run desktop:start
+```
+
+打包可独立运行的应用：`npm run desktop:package`。桌面应用默认使用独立的本机
+SQLite Store，也可以在项目设置中选择已有 Store 或 API 服务。操作与运行说明见
+[桌面工作台](docs/desktop.md)。
+
 ## 产品方向
 
 当前产品方向是 agent-native 和 Store-first：
@@ -47,7 +61,7 @@ checkout 中安装依赖后，`npm run demo:one` 会包装同一个 CLI 命令�
 - 用例失败时，缺少请求、响应、断言、日志、耗时、拓扑等证据，排查很慢。
 
 AgentTestBench 把这些能力收束成一个本地控制平面。Store 是活动事实源；
-CLI、Control plane API、React 工作台、报告和验证工具读取同一份事实。
+CLI、Control plane API、Electron 工作台、报告和验证工具读取同一份事实。
 agent 得到的是“先发现、再执行”的稳定契约，而不是从提示词或私有文档里猜目标 ID。
 
 ## 测试场景图谱
@@ -213,7 +227,7 @@ AgentTestBench API 和 UI
   -> catalog read-model
   -> Environment Catalog 与组件图
   -> 远端服务仓库和目标 Docker runtime
-  -> CLI discovery、Control plane API、React 工作台
+  -> CLI discovery、Control plane API、Electron 工作台
   -> 用例与工作流执行
   -> Evidence 文件与 Store 索引
   -> JSON / HTML 报告
@@ -230,8 +244,8 @@ AgentTestBench API 和 UI
 - `internal/store/postgres/`：PostgreSQL 产品 Store 后端。
 - `internal/store/mysql/`：MySQL 产品 Store 后端。
 - `internal/store/sqlite/`：SQLite Store 后端，用于本地/个人 Store，并保留旧数据导入兼容能力。
-- `control-plane/frontend/`：React 工作台源码。
-- `control-plane/static/`：`agent-testbench serve` 提供的静态工作台资源。
+- `control-plane/frontend/`：Electron 工作台源码。
+- `control-plane/static/`：旧网页资源，已退出默认构建和服务入口。
 
 ## 文档
 

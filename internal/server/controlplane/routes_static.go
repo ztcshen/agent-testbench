@@ -2,33 +2,22 @@ package controlplane
 
 import (
 	"net/http"
-	"path/filepath"
 )
 
+// The control plane exposes APIs. The desktop application owns the frontend.
+// Old browser entrypoints return a clear retirement response rather than serving
+// a second UI whose configuration could diverge from the Electron workspace.
 func registerStaticRoutes(mux *http.ServeMux, deps routeDeps) {
-	staticDir := deps.staticDir
-	mux.HandleFunc("/dashboard.html", func(w http.ResponseWriter, r *http.Request) {
+	retired := func(w http.ResponseWriter, r *http.Request) {
 		if !requireMethod(w, r, http.MethodGet) {
 			return
 		}
-		serveStaticFile(w, r, staticDir, "dashboard.html")
-	})
-	mux.HandleFunc("/workflows.html", func(w http.ResponseWriter, r *http.Request) {
-		if !requireMethod(w, r, http.MethodGet) {
-			return
-		}
-		serveStaticFile(w, r, staticDir, "workflows.html")
-	})
-	for _, name := range staticFileNames {
-		name := name
-		mux.HandleFunc("/"+name, func(w http.ResponseWriter, r *http.Request) {
-			if !requireMethod(w, r, http.MethodGet) {
-				return
-			}
-			serveStaticFile(w, r, staticDir, name)
-		})
+		writeJSONStatus(w, http.StatusGone, map[string]any{"ok": false, "code": "desktop_frontend_required", "error": "The browser frontend has been retired. Open AgentTestBench Desktop.", "frontend": "electron"})
 	}
-	mux.Handle("/assets/react/", http.StripPrefix("/assets/react/", http.FileServer(http.Dir(filepath.Join(staticDir, "assets", "react")))))
+	for _, name := range append([]string{"dashboard.html", "workflows.html"}, staticFileNames...) {
+		mux.HandleFunc("/"+name, retired)
+	}
+	mux.HandleFunc("/assets/react/", retired)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if !requireMethod(w, r, http.MethodGet) {
 			return
@@ -37,6 +26,6 @@ func registerStaticRoutes(mux *http.ServeMux, deps routeDeps) {
 			http.NotFound(w, r)
 			return
 		}
-		serveStaticFile(w, r, staticDir, "index.html")
+		writeJSON(w, map[string]any{"ok": true, "product": "AgentTestBench", "frontend": "electron", "message": "Open AgentTestBench Desktop to manage this workspace."})
 	})
 }

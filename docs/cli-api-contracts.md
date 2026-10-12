@@ -12,8 +12,8 @@ Verification baseline: this page was checked against `cmd/agent-testbench/main.g
 - CLI is the primary operator surface for local testing workflows.
 - API means local control-plane routes exposed by `agent-testbench serve` for the
   workbench, automation, and agents; it is not a separate cloud product surface.
-- Static HTML pages under `control-plane/static/` are UI entrypoints, not API
-  contracts, so they are not counted as API parity targets here.
+- Electron is the active frontend. Retired browser UI pages and assets return
+  HTTP 410; the control-plane root identifies the desktop API workspace.
 - SQL Store is the active source of truth for new testing workflows.
   SQLite, PostgreSQL, and MySQL are supported Store engines; users should choose
   the engine that matches their operational boundary. Profile packages are
@@ -231,6 +231,7 @@ acceptance.
 | `GET` | `/api/workflow-audit` | Audit one workflow; requires `workflowId`. |
 | `GET` | `/api/workflow-plan` | Return workflow-bound steps; requires `workflowId`, accepts `workflow` alias. |
 | `GET` / `PUT` | `/api/workflow-studio` | Read the visual workflow catalog or atomically save one workflow, ordered bindings, positions, outputs, and step-specific parameter references. `PUT` requires the current strong catalog `If-Match`; missing/stale preconditions return 428/412. |
+| `GET` / `PUT` | `/api/request-editor` | Read safe native HTTP request drafts or atomically save one request (`{request: {id, nodeId, serviceId, displayName, description, baseUrl, timeoutSeconds, execution}}`). `execution` includes method, path, query, headers, JSON body, expected HTTP codes and response assertions. `PUT` requires strong catalog `If-Match`; missing/stale preconditions return 428/412. Saved masked credentials and unknown native fields are retained. External adapter configuration is protected. |
 | `GET` | `/api/runs` | List workflow/replay/probe run headers. |
 | `POST` | `/api/workflow-runs` | Persist a workflow run snapshot. |
 | `GET` | `/api/workflow-runs/{runId}` | Return one workflow run. |

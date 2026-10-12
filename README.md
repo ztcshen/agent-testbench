@@ -28,6 +28,22 @@ SQLite Store, indexes the run, and prints the Evidence bundle path. In a source
 checkout, `npm run demo:one` wraps the same CLI command after dependencies are
 installed.
 
+## Electron Desktop Workspace
+
+The frontend is now an Electron desktop application with an interface tree,
+multiple editor tabs, request/response panels, scenario steps and persisted run
+reports. The browser UI is retired. CLI, API, SQL Store and execution capabilities
+remain shared.
+
+```sh
+npm ci
+npm run desktop:start
+```
+
+Use `npm run desktop:package` to build a standalone native application. Its default
+SQLite Store is independent of team Stores; project settings can attach an
+existing Store or API service. See the [desktop guide](docs/desktop.md).
+
 ## Product Direction
 
 The current product direction is agent-native and Store-first:
@@ -57,7 +73,7 @@ Modern integration testing often has three painful gaps:
   topology Evidence to review quickly.
 
 AgentTestBench turns those pieces into one local control plane. The Store is
-the live source of truth; CLI, Control plane APIs, the React workbench, reports,
+the live source of truth; CLI, Control plane APIs, the Electron workspace, reports,
 and validation tools all read the same facts. Agents get a discover-then-run
 contract instead of guessing target ids from prompts or private notes.
 
@@ -269,8 +285,8 @@ Core packages stay generic:
 - `internal/store/postgres/`: PostgreSQL product Store backend.
 - `internal/store/mysql/`: MySQL product Store backend.
 - `internal/store/sqlite/`: SQLite product Store backend for local and personal Stores.
-- `control-plane/frontend/`: React workbench source.
-- `control-plane/static/`: built static workbench assets served by `agent-testbench serve`.
+- `control-plane/frontend/`: Retired browser source and shared scenario draft model.
+- `control-plane/static/`: retired browser assets; the desktop renderer is built under `dist/desktop/`.
 
 ## Documentation
 

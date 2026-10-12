@@ -2,10 +2,8 @@ package controlplane_test
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"agent-testbench/internal/domain/profile"
@@ -39,159 +37,37 @@ func TestServerExposesEmptyProfileAssetLists(t *testing.T) {
 	}
 }
 
-func TestServerRendersDashboardForEmptyProfile(t *testing.T) {
-	bundle := loadEmptyProfile(t)
-	server := httptest.NewServer(controlplane.New(bundle))
+func TestServerRequiresDesktopForRetiredBrowserPages(t *testing.T) {
+	server := httptest.NewServer(controlplane.New(loadEmptyProfile(t)))
 	defer server.Close()
-
-	resp, err := http.Get(server.URL + "/dashboard.html")
-	if err != nil {
-		t.Fatalf("get dashboard: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("dashboard status = %d", resp.StatusCode)
-	}
-
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read dashboard: %v", err)
-	}
-	body := string(raw)
-	for _, want := range []string{"AgentTestBench", "react-dashboard-root", "/assets/react/dashboard.js"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("dashboard missing %q: %s", want, body)
+	for _, path := range []string{"/index.html", "/dashboard.html", "/workflows.html", "/workflow-studio.html", "/api-cases.html", "/workflow-detail.html", "/environment-nodes.html", "/evidence-viewer.html", "/styles.css", "/assets/react/workflowStudio.js"} {
+		resp, err := http.Get(server.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload map[string]any
+		err = json.NewDecoder(resp.Body).Decode(&payload)
+		resp.Body.Close()
+		if err != nil || resp.StatusCode != http.StatusGone || payload["frontend"] != "electron" {
+			t.Fatalf("%s should require the desktop app: status=%d payload=%#v err=%v", path, resp.StatusCode, payload, err)
 		}
 	}
 }
 
-func TestServerRendersWorkbenchIndexAtRoot(t *testing.T) {
+func TestServerRootDescribesElectronAPIWorkspace(t *testing.T) {
 	server := httptest.NewServer(controlplane.New(loadEmptyProfile(t)))
 	defer server.Close()
-
 	resp, err := http.Get(server.URL + "/")
 	if err != nil {
-		t.Fatalf("get index: %v", err)
+		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("index status = %d", resp.StatusCode)
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
 	}
-
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read index: %v", err)
-	}
-	body := string(raw)
-	for _, want := range []string{"react-sandbox-workbench-root", "/assets/react/sandboxWorkbench.js"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("index missing %q: %s", want, body)
-		}
-	}
-}
-
-func TestServerRendersWorkflowCatalogPage(t *testing.T) {
-	server := httptest.NewServer(controlplane.New(loadEmptyProfile(t)))
-	defer server.Close()
-
-	resp, err := http.Get(server.URL + "/workflows.html")
-	if err != nil {
-		t.Fatalf("get workflows page: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("workflows status = %d", resp.StatusCode)
-	}
-
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read workflows page: %v", err)
-	}
-	body := string(raw)
-	for _, want := range []string{"Workflow Catalog", "react-workflows-root", "/assets/react/workflows.js"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("workflows page missing %q: %s", want, body)
-		}
-	}
-}
-
-func TestServerServesReferenceStaticPagesAndAssets(t *testing.T) {
-	server := httptest.NewServer(controlplane.New(loadEmptyProfile(t)))
-	defer server.Close()
-
-	for _, item := range []struct {
-		path string
-		want string
-	}{
-		{path: "/index.html", want: "react-sandbox-workbench-root"},
-		{path: "/agent-run.html", want: "react-agent-run-root"},
-		{path: "/api-cases.html", want: "react-api-cases-root"},
-		{path: "/case-runs.html", want: "react-case-runs-root"},
-		{path: "/evidence-viewer.html", want: "react-evidence-viewer-root"},
-		{path: "/trace-topology.html", want: "react-trace-topology-root"},
-		{path: "/replay-evidence.html", want: "react-replay-evidence-root"},
-		{path: "/trace-call.html", want: "react-control-plane-root"},
-		{path: "/trace-evidence.html", want: "react-control-plane-root"},
-		{path: "/workflow-blueprint-demo.html", want: "react-workflow-blueprint-demo-root"},
-		{path: "/workflow-blueprint-new.html", want: "react-workflow-blueprint-demo-root"},
-		{path: "/interface-nodes.html", want: "react-interface-nodes-root"},
-		{path: "/interface-node.html", want: "react-interface-node-root"},
-		{path: "/interface-node-history.html", want: "react-interface-node-root"},
-		{path: "/interface-node-fields.html", want: "react-interface-node-root"},
-		{path: "/environment-nodes.html", want: "react-environment-nodes-root"},
-		{path: "/environment-node.html", want: "react-environment-node-root"},
-		{path: "/service-inventory.html", want: "react-service-inventory-root"},
-		{path: "/workflow-run.html", want: "react-workflow-run-root"},
-		{path: "/workflow-detail.html", want: "react-workflow-detail-root"},
-		{path: "/workflow-step.html", want: "react-workflow-step-root"},
-		{path: "/styles.css", want: "body"},
-		{path: "/assets/react/controlPlane.css", want: "react-control-plane"},
-		{path: "/assets/react/controlPlane.js", want: "Trace Evidence"},
-		{path: "/assets/react/agentRun.js", want: "/api/agent-test"},
-		{path: "/assets/react/apiCases.js", want: "/api/cases/capabilities"},
-		{path: "/assets/react/caseRuns.js", want: "/api/case/incomplete-batches"},
-		{path: "/assets/react/environmentNode.js", want: "/api/interface-nodes"},
-		{path: "/assets/react/environmentNodes.js", want: "/api/dashboard"},
-		{path: "/assets/react/evidenceViewer.js", want: "/api/case/evidence"},
-		{path: "/assets/react/interfaceNode.js", want: "/api/interface-node"},
-		{path: "/assets/react/interfaceNodes.js", want: "/api/interface-nodes"},
-		{path: "/assets/react/replayEvidence.js", want: "/api/replay/evidence"},
-		{path: "/assets/react/sandboxWorkbench.js", want: "/api/template-packages/import"},
-		{path: "/assets/react/serviceInventory.js", want: "/api/catalog"},
-		{path: "/assets/react/traceTopology.js", want: "/api/workflow-runs/"},
-		{path: "/assets/react/workflowDetail.js", want: "/api/catalog"},
-		{path: "/assets/react/workflowRun.js", want: "/api/runs"},
-		{path: "/assets/react/workflowStep.js", want: "/api/dashboard"},
-		{path: "/assets/react/workflowBlueprintDemo.css", want: "blueprint-demo-shell"},
-		{path: "/assets/react/workflowBlueprintDemo.js", want: "workflow-blueprint-demo/v1"},
-	} {
-		resp, err := http.Get(server.URL + item.path)
-		if err != nil {
-			t.Fatalf("get %s: %v", item.path, err)
-		}
-		raw, readErr := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if readErr != nil {
-			t.Fatalf("read %s: %v", item.path, readErr)
-		}
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("%s status = %d", item.path, resp.StatusCode)
-		}
-		if strings.HasSuffix(item.path, ".css") && !strings.Contains(resp.Header.Get("Content-Type"), "text/css") {
-			t.Fatalf("%s content-type = %q", item.path, resp.Header.Get("Content-Type"))
-		}
-		if !strings.Contains(string(raw), item.want) {
-			t.Fatalf("%s missing %q", item.path, item.want)
-		}
-	}
-
-	resp, err := http.Get(server.URL + "/agent-test.html")
-	if err != nil {
-		t.Fatalf("get removed agent test page: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("removed agent test page status = %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK || payload["frontend"] != "electron" || payload["product"] != "AgentTestBench" {
+		t.Fatalf("unexpected root response: %#v", payload)
 	}
 }
 

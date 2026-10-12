@@ -6,7 +6,7 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "build:frontend": "node control-plane/frontend/build.mjs",
+    "build:frontend": "node desktop/build.mjs",
     "demo:api-case": "node tools/examples/api-case-demo.mjs",
     "demo:one": "./bin/agent-testbench.sh demo",
     "demo:services": "node tools/examples/demo-service-server.mjs",
@@ -30,18 +30,25 @@
     "store:restore:mysql": "bash tools/smoke/mysql-store-colleague-restore.sh",
     "smoke:api:mysql-store": "AGENT_TESTBENCH_DISABLE_SQLITE_STORE=1 node tools/smoke/mysql-store-api-smoke.mjs",
     "smoke:cli:sql-active": "AGENT_TESTBENCH_DISABLE_SQLITE_STORE=1 node tools/smoke/cli-active-store-smoke.mjs",
-    "smoke:frontend": "AGENT_TESTBENCH_DISABLE_SQLITE_STORE=1 node tools/smoke/control-plane-smoke.mjs",
+    "smoke:frontend": "npm run smoke:desktop",
     "smoke:frontend:sql-active": "npm run smoke:frontend",
     "smoke:release-archive-serve": "node --test tools/smoke/release-archive-serve.test.mjs",
-    "test:frontend": "node --test control-plane/frontend/src/*.test.mjs",
-    "test": "go test ./..."
+    "test:frontend": "node --test desktop/renderer/*.test.mjs desktop/*.test.cjs control-plane/frontend/src/workflowStudioModel.test.mjs",
+    "test": "go test ./...",
+    "desktop:build": "node desktop/build.mjs --engine",
+    "desktop:start": "npm run desktop:build && electron desktop/main.cjs",
+    "desktop:package": "node desktop/build.mjs --engine --package",
+    "smoke:desktop": "node desktop/smoke.mjs"
   },
   "devDependencies": {
+    "@electron/packager": "20.3.0",
     "@xyflow/react": "^12.10.2",
+    "electron": "44.3.0",
     "esbuild": "^0.28.0",
     "lucide-react": "^1.14.0",
     "playwright": "^1.60.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
-  }
+  },
+  "main": "desktop/main.cjs"
 }

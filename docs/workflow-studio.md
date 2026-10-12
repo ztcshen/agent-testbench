@@ -1,11 +1,12 @@
 # Visual Workflow Studio
 
-Open `/workflow-studio.html` on an AgentTestBench workbench server. The workflow
-catalog also links to the studio and to each workflow's editor.
+Open AgentTestBench Desktop and select **自动化测试**. Launch with
+`npm run desktop:start`; see the [desktop guide](desktop.md). The former browser
+page is retired. The Store contract and native binding compiler remain shared.
 
-The page provides a Store-backed scenario list, execution/data-flow canvas,
-reorderable step list, request preview, parameter-source selector, output
-configuration, and asynchronous run results with Evidence links. It follows the
+The desktop provides a Store-backed scenario list, visual ordered steps, request
+preview, parameter-source selector, output configuration, and asynchronous run
+results with Evidence. It follows the
 step editor and data-source interaction described in the
 [Apifox scenario guide](https://docs.apifox.com/new-test-scenario) and
 [step data guide](https://docs.apifox.com/pass-data-between-test-steps).
@@ -17,8 +18,8 @@ The editor discovers those parameters from existing requests and preserves their
 base configuration. Saving compiles the references into unique export names and
 step-scoped request overrides. Shared case definitions remain unchanged.
 
-The canvas distinguishes execution order from parameter references. Dragging
-nodes changes layout; reorder steps in the step list to change execution order.
+The step sequence displays execution order and parameter references. Drag steps
+or use the reorder controls to change execution order.
 Moving or deleting a producer leaves its invalid references visible and blocks
 saving until they are repaired. A missing selected field fails materialization
 before the consumer sends its HTTP request.
@@ -37,12 +38,13 @@ configuration source is introduced. Changes made to compiled request settings
 through another entrypoint require review before the studio replaces them.
 
 Run uses the existing Store-native `/api/cases/batch-runs` API. The studio checks
-that its catalog version is current before starting, then displays persisted
-step statuses and Evidence. Step success and environment acceptance are shown
+saved changes before starting, then displays persisted step statuses and
+Evidence. Store compare-and-swap protects saves; a run follows the catalog version
+chosen by the existing executor. Step success and environment acceptance are shown
 separately; missing real SkyWalking topology does not become successful
 environment verification. This does not pin concurrent changes throughout an
 entire run; that remains the execution API's existing contract.
 
-Build the full frontend with `npm run build:frontend`. For an isolated studio
-build during development, run `node control-plane/frontend/buildWorkflowStudio.mjs`.
-The standalone bundle avoids changing shared chunks for other workbench pages.
+Build the Electron frontend with `npm run build:frontend`, or the frontend and
+execution engine with `npm run desktop:build`. The new renderer imports only the
+existing pure scenario draft model and uses no retired browser components or CSS.
