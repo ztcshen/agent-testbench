@@ -238,6 +238,8 @@ export default function ScenarioEditor({
   run,
   report,
   busy,
+  verificationEnvironments = [],
+  inspectEnvironment,
 }) {
   const [selected, setSelected] = useState(draft.steps[0]?.id || "");
   const [tab, setTab] = useState("steps");
@@ -294,18 +296,29 @@ export default function ScenarioEditor({
             <Save size={14} />
             保存
           </button>
-          <button
-            className="button primary"
-            disabled={busy || !draft.steps.length || errors.length > 0}
-            onClick={run}
-          >
-            {busy ? (
-              <LoaderCircle size={14} className="spin" />
-            ) : (
-              <Play size={14} />
-            )}
-            运行场景
-          </button>
+          {verificationEnvironments.length > 0 ? (
+            <button
+              className="button primary"
+              disabled={busy || draft.dirty}
+              onClick={inspectEnvironment}
+            >
+              <ShieldCheck size={14} />
+              查看环境验收
+            </button>
+          ) : (
+            <button
+              className="button primary"
+              disabled={busy || !draft.steps.length || errors.length > 0}
+              onClick={run}
+            >
+              {busy ? (
+                <LoaderCircle size={14} className="spin" />
+              ) : (
+                <Play size={14} />
+              )}
+              运行场景
+            </button>
+          )}
         </div>
       </div>
       <Tabs
@@ -318,6 +331,16 @@ export default function ScenarioEditor({
         onChange={setTab}
       />
       {errors.length > 0 && <div className="notice error">{errors[0]}</div>}
+      {verificationEnvironments.length > 0 && (
+        <div className="notice">
+          <ShieldCheck size={14} />
+          该场景用于环境验收：
+          {verificationEnvironments
+            .map((item) => item.displayName || item.id)
+            .join("、")}
+          。请先保存修改，再到运行环境中执行验收。
+        </div>
+      )}
       {tab === "steps" ? (
         <div className="scenario-workspace">
           <div className="scenario-step-area">

@@ -260,6 +260,17 @@ try {
   const environment = (await call("/api/environments?all=true")).data.items[0];
   assert.equal(environment.verified, false);
   check("Environment registration remains unverified until actual acceptance");
+  await page.getByRole("button", { name: "自动化测试", exact: true }).click();
+  await page
+    .getByRole("button", { name: "查看环境验收", exact: true })
+    .waitFor();
+  assert.equal(
+    await page.getByRole("button", { name: "运行场景", exact: true }).count(),
+    0,
+  );
+  check(
+    "Environment verification scenes direct users to their acceptance entrypoint",
+  );
   assert.equal(
     (await fetch(connection.backendURL + "/workflow-studio.html")).status,
     410,

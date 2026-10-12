@@ -447,6 +447,12 @@ export default function App() {
           key={tab.id}
           draft={scenes[tab.id].draft}
           cases={workspace.studio.cases}
+          verificationEnvironments={workspace.environments.filter(
+            (item) => item.verificationWorkflowId === tab.id,
+          )}
+          inspectEnvironment={() =>
+            open({ kind: "environments", id: "all", name: "环境验收" })
+          }
           patch={(draft) => patchScene(tab.id, draft)}
           save={() => save(tab.id, true)}
           run={() => run(tab.id)}
