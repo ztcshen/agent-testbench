@@ -76,6 +76,7 @@ if (process.argv.includes("--package")) {
     "trust.cjs",
     "assistant-controller.cjs",
     "assistant-settings.cjs",
+    "codex-auth.cjs",
   ])
     await copyFile(join(desktop, name), join(staging, name));
   for (const name of ["index.html", "app.js", "app.css"])

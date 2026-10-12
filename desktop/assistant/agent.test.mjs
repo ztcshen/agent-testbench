@@ -104,3 +104,58 @@ test("cancellation aborts model requests without creating an analysis", async ()
     await service.close();
   }
 });
+
+test("only returned Evidence attachment IDs are normalized to clickable references", () => {
+  const receipts = [
+    {
+      ok: true,
+      action: "map.read",
+      data: { graph: { nodes: [{ id: "node.example" }], paths: [] } },
+    },
+    {
+      ok: true,
+      action: "evidence.read",
+      data: {
+        runs: [
+          {
+            caseRunId: "case-run.example",
+            evidenceRecords: [{ id: "artifact.request" }],
+          },
+        ],
+      },
+    },
+  ];
+  const result = {
+    summary: "Assertion failed",
+    findings: [
+      {
+        kind: "observation",
+        title: "HTTP mismatch",
+        detail: "Expected 200, observed 503",
+        nodeIds: ["node:node.example"],
+        evidenceRefs: ["artifact.request"],
+      },
+    ],
+    nextActions: [],
+  };
+  assert.deepEqual(
+    validateAnalysis(result, receipts).findings[0].evidenceRefs,
+    ["evidence:artifact.request"],
+  );
+  assert.deepEqual(validateAnalysis(result, receipts).findings[0].nodeIds, [
+    "node.example",
+  ]);
+  assert.throws(
+    () =>
+      validateAnalysis(
+        {
+          ...result,
+          findings: [
+            { ...result.findings[0], evidenceRefs: ["artifact.unknown"] },
+          ],
+        },
+        receipts,
+      ),
+    /未读取/,
+  );
+});

@@ -49,10 +49,44 @@ export default function AssistantModelSettings({ value, saved, close }) {
         </header>
         <div className="assistant-model-fields">
           <label>
+            调用方式
+            <select
+              aria-label="模型调用方式"
+              value={draft.provider || "compatible"}
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  provider: event.target.value,
+                  model:
+                    event.target.value === "codex"
+                      ? "gpt-5.6-sol"
+                      : current.model,
+                  baseURL:
+                    event.target.value === "codex"
+                      ? "https://chatgpt.com/backend-api"
+                      : "http://127.0.0.1:11434/v1",
+                  apiKey: "",
+                }))
+              }
+            >
+              <option value="compatible">OpenAI 兼容服务</option>
+              <option value="codex">Codex · 本机 ChatGPT 登录</option>
+            </select>
+          </label>
+          {draft.provider === "codex" && (
+            <p>
+              {value.codexAvailable
+                ? "检测到本机 Codex 登录，可直接使用订阅模型。"
+                : "请先在 Codex 中完成 ChatGPT 登录。"}
+              应用只在调用时读取登录态，不复制或修改凭证。
+            </p>
+          )}
+          <label>
             Base URL
             <input
               aria-label="模型 Base URL"
               value={draft.baseURL}
+              disabled={draft.provider === "codex"}
               placeholder="https://your-provider.example/v1"
               onChange={(event) => patch("baseURL", event.target.value)}
             />
@@ -66,21 +100,34 @@ export default function AssistantModelSettings({ value, saved, close }) {
               onChange={(event) => patch("model", event.target.value)}
             />
           </label>
-          <label>
-            API 密钥
-            <input
-              aria-label="模型 API 密钥"
-              type="password"
-              autoComplete="off"
-              value={draft.apiKey}
-              placeholder={
-                value.hasKey
-                  ? "已设置；留空保留现有密钥"
-                  : "无认证的本机服务可留空"
-              }
-              onChange={(event) => patch("apiKey", event.target.value)}
-            />
-          </label>
+          {draft.provider !== "codex" && (
+            <label>
+              API 密钥
+              <input
+                aria-label="模型 API 密钥"
+                type="password"
+                autoComplete="off"
+                value={draft.apiKey}
+                placeholder={
+                  value.hasKey
+                    ? "已设置；留空保留现有密钥"
+                    : "无认证的本机服务可留空"
+                }
+                onChange={(event) => patch("apiKey", event.target.value)}
+              />
+            </label>
+          )}
+          {draft.provider === "codex" && (
+            <label>
+              代理地址（可选）
+              <input
+                aria-label="模型代理地址"
+                value={draft.proxyURL || ""}
+                placeholder="留空使用系统 HTTPS 代理"
+                onChange={(event) => patch("proxyURL", event.target.value)}
+              />
+            </label>
+          )}
           <div className="assistant-model-limits">
             <label>
               请求超时（秒）

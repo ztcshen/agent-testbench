@@ -356,7 +356,8 @@
   font-size: 11px;
   color: #7c889b;
 }
-.assistant-model-fields input {
+.assistant-model-fields input,
+.assistant-model-fields select {
   width: 100%;
   padding: 10px;
   border: 1px solid #dfe5ef;

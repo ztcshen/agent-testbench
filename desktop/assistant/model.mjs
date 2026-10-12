@@ -1,6 +1,8 @@
 import { ChatOpenAI } from "@langchain/openai";
+import { CodexChatModel } from "./codex-model.mjs";
 
 export function assistantModel(config) {
+  if (config.provider === "codex") return new CodexChatModel(config);
   return new ChatOpenAI({
     model: config.model,
     apiKey: config.apiKey || "not-required",

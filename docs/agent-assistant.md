@@ -8,6 +8,21 @@ integration. LangChain, its OpenAI-compatible model client and the worker are
 bundled with the native application; no Python or separate Node installation is
 required.
 
+The model settings also support **Codex · 本机 ChatGPT 登录**. This mode reads the
+current file-backed Codex login at invocation time and sends requests only to the
+Codex backend. It neither copies nor updates the login cache and does not ask for
+a Platform API key. The transport adapts Codex Responses messages and tool calls
+to LangChain; private reasoning continuity remains internal to the current model
+turn. A system HTTPS proxy is used when available, with an optional explicit
+proxy setting. Invalid/expired login produces a visible error.
+
+The Codex transport uses the maintained Pi AI provider and its normalized
+transcript contract, preserving both system instructions and registered tools.
+Its tests assert these fields reach the provider, preserve tool-call identity
+and reject truncated tool responses. `AGENT_TESTBENCH_MODEL_PROVIDER=codex`
+selects this transport for development. Model ID remains explicit; no model is
+silently replaced.
+
 Open a map and click **AI 图谱助手**, then **模型设置**. Enter the service's Base
 URL, model ID and optional API key. The endpoint must support the Chat Completions
 tool-call protocol. The connection check sends only a generic greeting; it does

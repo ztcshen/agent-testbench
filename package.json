@@ -54,8 +54,10 @@
   },
   "main": "desktop/main.cjs",
   "dependencies": {
+    "@earendil-works/pi-ai": "1.1.0",
     "@langchain/openai": "1.6.2",
     "langchain": "1.5.16",
+    "undici": "8.11.2",
     "zod": "4.6.6"
   }
 }

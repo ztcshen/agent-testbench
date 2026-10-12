@@ -133,6 +133,20 @@ export default function AssistantPanel({
     }
   }
   function reference(ref) {
+    if (ref.startsWith("evidence:")) {
+      const id = ref.slice(9);
+      const run = (session?.state?.receipts || [])
+        .flatMap((item) => item.data?.runs || [])
+        .find((item) =>
+          item.evidenceRecords?.some((record) => record.id === id),
+        );
+      if (run)
+        openEvidence({
+          apiCaseRunId: run.caseRunId,
+          caseId: run.caseId,
+          status: run.status,
+        });
+    }
     if (ref.startsWith("node:")) selectNode(ref.slice(5));
     if (ref.startsWith("path:")) selectPath(ref.slice(5));
     if (ref.startsWith("run:"))
@@ -321,7 +335,11 @@ export default function AssistantPanel({
               Planner 计划预览 · {plan.physicalTasks?.length || 0}
               {plan.truncated ? ` / ${plan.totalTasks || "更多"}` : ""} 项任务
             </summary>
-            <p>{plan.truncated ? "当前上下文只显示部分计划，请缩小到路径或节点查看。" : "此处显示计划，执行结果另行验证。"}</p>
+            <p>
+              {plan.truncated
+                ? "当前上下文只显示部分计划，请缩小到路径或节点查看。"
+                : "此处显示计划，执行结果另行验证。"}
+            </p>
             <ol>
               {(plan.physicalTasks || []).slice(0, 16).map((item) => (
                 <li key={item.id}>

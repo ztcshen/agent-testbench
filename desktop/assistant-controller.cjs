@@ -146,7 +146,11 @@ class AssistantController {
         nodeId: String(input.nodeId || ""),
         pathId: String(input.pathId || ""),
       },
-      model: { id: config.model, baseURL: config.baseURL },
+      model: {
+        id: config.model,
+        provider: config.provider || "compatible",
+        baseURL: config.baseURL,
+      },
       events: [],
       result: null,
       receipts: [],
