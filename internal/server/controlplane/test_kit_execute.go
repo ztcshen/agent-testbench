@@ -46,7 +46,9 @@ func executeTestKitCase(ctx context.Context, bundle profile.Bundle, runtime stor
 		result.httpStatus = http.StatusBadRequest
 		return result
 	}
-	if strings.TrimSpace(item.Case.CasePath) != "" {
+	// Store case references identify catalog records with inline execution;
+	// they are not filesystem paths accepted by the file runner.
+	if path := strings.TrimSpace(item.Case.CasePath); path != "" && !strings.HasPrefix(path, "store://cases/") {
 		return executeTestKitFileCase(ctx, item, payload, overrides, timeout)
 	}
 	return executeInlineTestKitCase(ctx, bundle, runtime, item, payload, timeout)
