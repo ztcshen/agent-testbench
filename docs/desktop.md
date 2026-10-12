@@ -53,6 +53,30 @@ The new step editor shows execution results separately from environment
 acceptance; missing real SkyWalking topology remains an incomplete acceptance.
 The report viewer reads existing persisted run and Evidence APIs.
 
+The test-map workspace reads existing Store graphs through `GET /api/maps` and
+`GET /api/map?id=...`. It opens available maps before the larger request catalog
+finishes loading. Each map retains its own profile context, including when the
+active request catalog belongs to another profile. The library distinguishes
+active and deprecated maps. The canvas supports path selection, search, zoom,
+a minimap, expandable validation branches and a node inspector with linked cases
+and scenarios. Large maps start at a readable zoom; the fit-to-canvas control
+shows the complete overview.
+
+Persisted edges remain separate from display connections derived from ordered
+path steps and validation anchors. Derived connections use dashed lines. The
+view does not write layouts or graph metadata back to the Store. Saved plan and
+run statuses can be overlaid through `GET /api/map/plan`; unfinished tasks are
+never shown as passed. Node explanations use `GET /api/map/explanation`. These
+endpoints are read-only and redact sensitive metadata before it reaches the
+renderer. Opening a map does not execute its cases.
+
+The map interaction borrows from the large-process navigation of
+[Boomi](https://help.boomi.com/docs/Atomsphere/Integration/Process%20building/c-atm-Process_building_b422a00a-b17b-4ea8-ae01-d04adaf97e16)
+and the canvas organization of
+[Postman Flows](https://learning.postman.com/latest-v-12/docs/postman-flows/build-flows/organize/organize-flows).
+It uses original components with React Flow and Dagre, rather than embedding
+commercial code or assets.
+
 The renderer has no Node.js integration. A sandboxed, isolated preload exposes
 specific IPC methods. The main process checks the invoking frame, confines API
 requests to the configured backend, rejects navigation/new windows, and uses a

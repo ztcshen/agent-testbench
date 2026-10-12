@@ -20,8 +20,10 @@ export async function loadWorkspace() {
     api("/api/case/runs"),
     api("/api/environments?all=true"),
     api("/api/store/current"),
+    api("/api/maps"),
   ]);
-  const [requests, studio, catalog, runs, environments, store] = responses;
+  const [requests, studio, catalog, runs, environments, store, maps] =
+    responses;
   const required = [requests, studio, catalog].find(
     (item) => item.status === "rejected",
   );
@@ -38,6 +40,7 @@ export async function loadWorkspace() {
         ? environments.value.data.items || []
         : [],
     store: store.status === "fulfilled" ? store.value.data : {},
+    maps: maps.status === "fulfilled" ? maps.value.data.maps || [] : [],
     issues: responses
       .filter((item) => item.status === "rejected")
       .map((item) => item.reason.message),

@@ -23,6 +23,7 @@ import {
   LoaderCircle,
   House,
   ArrowDownToLine,
+  Network,
 } from "lucide-react";
 import {
   emptyStudioDraft,
@@ -53,6 +54,8 @@ import {
 import { Sidebar } from "./Navigation.jsx";
 import RequestEditor from "./RequestEditor.jsx";
 import ScenarioEditor from "./ScenarioEditor.jsx";
+import MapWorkspace from "./MapWorkspace.jsx";
+import MapLibrary from "./MapLibrary.jsx";
 import {
   Overview,
   Reports,
@@ -62,6 +65,7 @@ import {
 } from "./WorkspacePanels.jsx";
 
 const emptyWorkspace = {
+  maps: [],
   requests: [],
   studio: { workflows: [], cases: [] },
   catalog: { services: [] },
@@ -71,6 +75,7 @@ const emptyWorkspace = {
   issues: [],
 };
 const navigation = [
+  { id: "maps", label: "测试图谱", Icon: Network },
   { id: "apis", label: "接口管理", Icon: Braces },
   { id: "scenarios", label: "自动化测试", Icon: GitBranch },
   { id: "reports", label: "测试报告", Icon: FileText },
@@ -145,9 +150,11 @@ export default function App() {
         ? "apis"
         : tab.kind === "scenario"
           ? "scenarios"
-          : tab.kind === "evidence"
-            ? "reports"
-            : tab.kind,
+          : tab.kind === "map"
+            ? "maps"
+            : tab.kind === "evidence"
+              ? "reports"
+              : tab.kind,
     );
   }
   async function refresh() {
@@ -176,8 +183,36 @@ export default function App() {
         setConnection(current);
         if (!current.connected)
           throw new Error(current.error || "尚未连接执行引擎");
+        const discovered = await api("/api/maps");
+        const initialMap = discovered.data.maps?.find(
+          (item) => item.status !== "deprecated",
+        );
+        if (initialMap) {
+          setWorkspace((previous) => ({
+            ...previous,
+            maps: discovered.data.maps,
+            store: current.store || {},
+          }));
+          open({
+            kind: "map",
+            id: initialMap.id,
+            name: initialMap.displayName || initialMap.id,
+          });
+          setLoading(false);
+          refresh().catch((error) =>
+            notify(`部分目录尚未就绪：${error.message}`, true),
+          );
+          return;
+        }
         const next = await refresh();
-        if (next.requests.length)
+        if (next.maps?.some((item) => item.status !== "deprecated"))
+          open({
+            kind: "map",
+            id: next.maps.find((item) => item.status !== "deprecated").id,
+            name: next.maps.find((item) => item.status !== "deprecated")
+              .displayName,
+          });
+        else if (next.requests.length)
           open({
             kind: "request",
             id: next.requests[0].id,
@@ -428,6 +463,57 @@ export default function App() {
   }
   function view() {
     if (!tab) return <Empty title="正在打开工作区" />;
+    if (tab.kind === "maps")
+      return (
+        <MapLibrary
+          maps={workspace.maps || []}
+          open={open}
+          refresh={() => job("refresh", refresh)}
+        />
+      );
+    if (tab.kind === "map")
+      return (
+        <MapWorkspace
+          key={tab.id}
+          mapId={tab.id}
+          openCase={(id) => {
+            const item = requests[id];
+            if (item)
+              open({ kind: "request", id, name: item.draft.displayName });
+            else
+              notify(
+                "当前活动目录没有该用例，可在节点详情中查看已登记的信息",
+                true,
+              );
+          }}
+          openWorkflow={(id) => {
+            const item = scenes[id];
+            if (item)
+              open({
+                kind: "scenario",
+                id,
+                name: item.draft.workflow.displayName,
+              });
+            else notify("当前活动目录没有该场景，可在图谱路径中查看步骤", true);
+          }}
+          openEvidence={(task) =>
+            open({
+              kind: "evidence",
+              id: task.apiCaseRunId,
+              name: task.caseId || task.id,
+              run: {
+                id: task.apiCaseRunId,
+                caseId: task.caseId,
+                runId: task.workflowRunId,
+                status: task.status,
+                operation: task.operation,
+                updatedAt: task.finishedAt,
+              },
+            })
+          }
+        />
+      );
+
     if (tab.kind === "request" && requests[tab.id])
       return (
         <RequestEditor
@@ -521,7 +607,9 @@ export default function App() {
   }
   function navigate(id) {
     setModule(id);
-    if (id === "apis") {
+    if (id === "maps") {
+      open({ kind: "maps", id: "all", name: "测试图谱" });
+    } else if (id === "apis") {
       const first = requestList[0];
       open(
         first
@@ -561,7 +649,7 @@ export default function App() {
           }
         >
           <Boxes size={15} />
-          <span>本机工作区</span>
+          <span>测试工作区</span>
           <ChevronDown size={12} />
         </button>
         <span className="window-title">AgentTestBench</span>

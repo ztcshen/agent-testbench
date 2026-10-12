@@ -12,6 +12,7 @@ import {
   Plus,
   RefreshCw,
   ArrowDownToLine,
+  Network,
 } from "lucide-react";
 import { IconButton, Method, SearchInput } from "./components.jsx";
 import { filterRequests } from "./model.mjs";
@@ -38,6 +39,7 @@ export function Sidebar({
     reports: "测试报告",
     environments: "运行环境",
     settings: "项目设置",
+    maps: "测试图谱",
   }[module];
   const apiItems = filterRequests(requests, query);
   const services = workspace.catalog.services || [];
@@ -53,7 +55,7 @@ export function Sidebar({
           <Boxes size={17} />
         </span>
         <div>
-          <strong>本机项目</strong>
+          <strong>{workspace.catalog.source?.id || "本机项目"}</strong>
           <span>AgentTestBench</span>
         </div>
         <ChevronDown size={14} />
@@ -63,7 +65,13 @@ export function Sidebar({
           <GitBranch size={13} />
           工作区目录
         </span>
-        <span className="local-badge">LOCAL</span>
+        <span className="local-badge">
+          {workspace.store.backend === "mysql"
+            ? "MYSQL"
+            : workspace.store.backend === "postgres"
+              ? "PG"
+              : "LOCAL"}
+        </span>
       </div>
       <div className="sidebar-search">
         <SearchInput
@@ -86,6 +94,48 @@ export function Sidebar({
         <IconButton icon={RefreshCw} title="刷新目录" onClick={refresh} />
       </div>
       <div className="tree-content">
+        {module === "maps" && (
+          <>
+            <button
+              className={`tree-overview ${active === "maps:all" ? "active" : ""}`}
+              onClick={() =>
+                open({ kind: "maps", id: "all", name: "测试图谱" })
+              }
+            >
+              <Network size={15} />
+              全部图谱<small>{workspace.maps?.length || 0}</small>
+            </button>
+            {(workspace.maps || [])
+              .filter((item) =>
+                `${item.displayName} ${item.id}`
+                  .toLowerCase()
+                  .includes(query.toLowerCase()),
+              )
+              .map((item) => (
+                <button
+                  className={`tree-item map-tree-item ${active === `map:${item.id}` ? "active" : ""} ${item.status === "deprecated" ? "deprecated" : ""}`}
+                  key={item.id}
+                  onClick={() =>
+                    open({
+                      kind: "map",
+                      id: item.id,
+                      name: item.displayName || item.id,
+                    })
+                  }
+                >
+                  <Network size={14} />
+                  <span>
+                    <strong>{item.displayName || item.id}</strong>
+                    <small>
+                      {item.nodeCount} 节点 · {item.pathCount} 路径
+                      {item.status === "deprecated" ? " · 已废弃" : ""}
+                    </small>
+                  </span>
+                </button>
+              ))}
+          </>
+        )}
+
         {module === "apis" && (
           <>
             <button

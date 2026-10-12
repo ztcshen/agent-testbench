@@ -32,6 +32,7 @@ func NewWithOptions(bundle profile.Bundle, options Options) http.Handler {
 	}
 	registerTemplatePackageRoutes(mux, deps)
 	registerWorkbenchRoutes(mux, deps)
+	registerMapReaderRoutes(mux, deps.runtime)
 	registerWorkflowRoutes(mux, deps)
 	registerCaseRoutes(mux, deps)
 	registerInterfaceNodeRoutes(mux, deps)

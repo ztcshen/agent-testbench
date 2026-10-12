@@ -41,6 +41,7 @@
     "smoke:desktop": "node desktop/smoke.mjs"
   },
   "devDependencies": {
+    "@dagrejs/dagre": "3.1.1",
     "@electron/packager": "20.3.0",
     "@xyflow/react": "^12.10.2",
     "electron": "44.3.0",
