@@ -6,6 +6,7 @@ import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import assert from "node:assert/strict";
+import { verifyStepLibrary } from "./step-library-smoke.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
@@ -241,6 +242,8 @@ try {
   );
   await screenshot("scenario");
   check("Three dependent steps pass, with acceptance kept separate");
+
+  await verifyStepLibrary({ page, call, screenshot, check, summary });
 
   await page.getByRole("button", { name: "测试报告", exact: true }).click();
   await page.locator(".report-table-row").first().click();

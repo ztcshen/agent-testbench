@@ -42,8 +42,41 @@ saved changes before starting, then displays persisted step statuses and
 Evidence. Store compare-and-swap protects saves; a run follows the catalog version
 chosen by the existing executor. Step success and environment acceptance are shown
 separately; missing real SkyWalking topology does not become successful
-environment verification. This does not pin concurrent changes throughout an
-entire run; that remains the execution API's existing contract.
+environment verification. Studio input checks use the request configuration
+snapshot selected by the executor rather than rereading a newer catalog between
+steps.
+
+Select **复用步骤库** to create a versioned step block, or select a continuous
+range in a scenario and use **保存为步骤组**. Internal bindings are retained;
+inputs from outside the selected range become block parameters. A block can be
+inserted repeatedly and into other scenarios. Each invocation has its own step
+IDs, fixed values or preceding-step bindings, and pinned definition revision.
+Blocks move and delete as a unit; their internal steps can be expanded for review.
+
+The parameter panel supports string, integer, number, boolean, object, array and
+explicitly nullable values. Fixed values are checked when saved. Values exported
+by preceding steps are converted and checked before sending the consumer request.
+Zero, false and literal template-like strings are preserved. Sensitive parameter
+values are masked in discovery and run snapshots, and masked round trips retain
+the stored value.
+
+`GET /api/step-library` returns active definitions and their workflow references.
+`PUT` accepts `{definition}` and `DELETE` accepts `{id}`; both require the current
+catalog ETag. Definitions use reserved `step-block` TemplateConfig records inside
+the existing transactional catalog. Older revisions remain available while
+referenced. Deleting a referenced block returns 409 with its affected workflows.
+Updating a definition shows outdated references; each scenario explicitly chooses
+whether to upgrade, so editing the library does not silently change a saved scene.
+
+The run detail expands from step to request, response, assertions and the persisted
+block revision and actual parameter values. These values come from the recorded
+case metadata rather than from the latest editable definition. Click **定位编排步骤**
+to return to the selected step, or **查看运行证据** to open its indexed Evidence.
+The first implementation supports one level of blocks; nested block definitions
+are rejected. The existing Apifox visual style is retained. The parameterized reuse
+and namespaced steps also follow established patterns in
+[Robot Framework user keywords](https://robotframework.org/robotframework/latest/RobotFrameworkUserGuide.html#creating-user-keywords)
+and [Airflow TaskGroups](https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/dags.html#taskgroups).
 
 Build the Electron frontend with `npm run build:frontend`, or the frontend and
 execution engine with `npm run desktop:build`. The new renderer imports only the

@@ -11,6 +11,7 @@ func registerWorkflowRoutes(mux *http.ServeMux, deps routeDeps) {
 	profiles := deps.profiles
 	collector := deps.collector
 	registerWorkflowStudioRoutes(mux, runtime)
+	registerStepLibraryRoutes(mux, runtime)
 	mux.HandleFunc("/api/workflow-audit", func(w http.ResponseWriter, r *http.Request) {
 		if !requireMethod(w, r, http.MethodGet) {
 			return

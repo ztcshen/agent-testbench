@@ -9,6 +9,7 @@ import (
 
 	"agent-testbench/internal/domain/casemaintenance"
 	"agent-testbench/internal/domain/redaction"
+	"agent-testbench/internal/domain/stepblock"
 	"agent-testbench/internal/store"
 )
 
@@ -18,35 +19,10 @@ type workflowStudioDefinition struct {
 	Description string `json:"description"`
 }
 
-type workflowStudioPosition struct {
-	X float64 `json:"x"`
-	Y float64 `json:"y"`
-}
-
-type workflowStudioBinding struct {
-	Parameter    string `json:"parameter"`
-	SourceStepID string `json:"sourceStepId"`
-	From         string `json:"from"`
-	Path         string `json:"path"`
-}
-
-type workflowStudioOutput struct {
-	Name string `json:"name"`
-	From string `json:"from"`
-	Path string `json:"path"`
-}
-
-type workflowStudioStep struct {
-	ID        string                  `json:"id"`
-	Title     string                  `json:"title"`
-	CaseID    string                  `json:"caseId"`
-	Required  bool                    `json:"required"`
-	Position  workflowStudioPosition  `json:"position"`
-	Bindings  []workflowStudioBinding `json:"bindings"`
-	Outputs   []workflowStudioOutput  `json:"outputs"`
-	Variables []string                `json:"variables,omitempty"`
-	Request   map[string]any          `json:"request,omitempty"`
-}
+type workflowStudioPosition = stepblock.Position
+type workflowStudioBinding = stepblock.Binding
+type workflowStudioOutput = stepblock.Output
+type workflowStudioStep = stepblock.Step
 
 type workflowStudioDraft struct {
 	Workflow workflowStudioDefinition `json:"workflow"`
@@ -157,8 +133,11 @@ func writeWorkflowStudioSnapshot(w http.ResponseWriter, snapshot store.ProfileCa
 						step.Position = saved.Position
 					}
 					step.Bindings = append(step.Bindings, saved.Bindings...)
+					step.Group, step.Values = saved.Group, saved.Values
 				}
 			}
+			step.Group = safeWorkflowStudioGroup(step.Group)
+			step.Values = safeStepParameterValues(step.Values)
 			managed := stringSetFromAny(meta["managedExports"])
 			for _, export := range listFromAny(doc["exports"]) {
 				value := mapFromAny(export)

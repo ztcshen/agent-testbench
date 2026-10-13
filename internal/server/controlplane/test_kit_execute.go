@@ -34,6 +34,7 @@ func executeTestKitCase(ctx context.Context, bundle profile.Bundle, runtime stor
 	// recorder. Always clear caller input before deciding how this case runs.
 	delete(payload, testKitAPICaseRunResultKey)
 	overrides := mergeStringAnyMaps(item.Case.DefaultOverrides, mapFromAny(payload["overrides"]))
+	overrides = mergeStringAnyMaps(overrides, item.Overrides)
 	if len(overrides) > 0 {
 		payload["overrides"] = overrides
 	}

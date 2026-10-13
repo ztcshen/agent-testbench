@@ -13,6 +13,7 @@ import {
   RefreshCw,
   ArrowDownToLine,
   Network,
+  Library,
 } from "lucide-react";
 import { IconButton, Method, SearchInput } from "./components.jsx";
 import { filterRequests } from "./model.mjs";
@@ -40,6 +41,7 @@ export function Sidebar({
     environments: "运行环境",
     settings: "项目设置",
     maps: "测试图谱",
+    library: "复用步骤库",
   }[module];
   const apiItems = filterRequests(requests, query);
   const services = workspace.catalog.services || [];
@@ -94,6 +96,42 @@ export function Sidebar({
         <IconButton icon={RefreshCw} title="刷新目录" onClick={refresh} />
       </div>
       <div className="tree-content">
+        {module === "library" && (
+          <>
+            <button
+              className="tree-overview"
+              onClick={() =>
+                open({ kind: "library", id: "all", name: "复用步骤库" })
+              }
+            >
+              <Library size={15} />
+              全部步骤组
+            </button>
+            {(workspace.library?.blocks || [])
+              .filter((item) =>
+                item.definition.displayName
+                  .toLowerCase()
+                  .includes(query.toLowerCase()),
+              )
+              .map((item) => (
+                <button
+                  className={`tree-item ${active === `library:${item.definition.id}` ? "active" : ""}`}
+                  key={item.definition.id}
+                  onClick={() =>
+                    open({
+                      kind: "library",
+                      id: item.definition.id,
+                      name: item.definition.displayName,
+                    })
+                  }
+                >
+                  <Library size={14} />
+                  <span>{item.definition.displayName}</span>
+                  <small>{item.definition.steps.length} 步</small>
+                </button>
+              ))}
+          </>
+        )}
         {module === "maps" && (
           <>
             <button

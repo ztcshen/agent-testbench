@@ -31,6 +31,11 @@ func workflowStudioVariables(execution map[string]any) []string {
 }
 
 func compileWorkflowStudio(original store.ProfileCatalog, draft workflowStudioDraft) (store.ProfileCatalog, error) {
+	var err error
+	draft, err = resolveWorkflowStepGroups(original, draft)
+	if err != nil {
+		return store.ProfileCatalog{}, err
+	}
 	if strings.TrimSpace(draft.Workflow.ID) == "" || strings.TrimSpace(draft.Workflow.DisplayName) == "" {
 		return store.ProfileCatalog{}, fmt.Errorf("workflow id and display name are required")
 	}
@@ -68,6 +73,7 @@ func compileWorkflowStudio(original store.ProfileCatalog, draft workflowStudioDr
 		remaining[step.ID] = true
 		catalog.WorkflowBindings = append(catalog.WorkflowBindings, store.CatalogWorkflowBinding{WorkflowID: workflow.ID, StepID: step.ID, CaseID: step.CaseID, NodeID: cases[step.CaseID].NodeID, Required: step.Required, SortOrder: index + 1})
 		meta := mapFromAny(docs[index]["workflowStudio"])
+		applyWorkflowStudioValues(docs[index], step.Values)
 		meta["compiledDigest"] = workflowStudioDigest(docs[index]["caseExecution"])
 		configRaw, _ := json.Marshal(docs[index])
 		_, oldIndex := workflowStudioScopedDocument(catalog, workflow.ID, step.ID, step.CaseID)
@@ -107,9 +113,16 @@ func prepareWorkflowStudioSteps(original store.ProfileCatalog, draft workflowStu
 		}
 		baseRaw, _ := json.Marshal(execution)
 		base := jsonObject(string(baseRaw))
+		variables := workflowStudioVariables(base)
+		for name := range step.Values {
+			if !slices.Contains(variables, name) || slices.ContainsFunc(step.Bindings, func(b workflowStudioBinding) bool { return b.Parameter == name }) {
+				return nil, nil, workflowStudioError(step.ID, "fixed values must select an unbound template parameter")
+			}
+		}
 		doc["caseId"] = step.CaseID
 		doc["title"] = firstNonEmpty(step.Title, item.DisplayName, step.ID)
 		doc["caseExecution"] = execution
+		clearStudioValueOverrides(doc)
 		baseInputs := listFromAny(doc["inputs"])
 		if saved, exists := meta["baseInputs"]; exists {
 			baseInputs = listFromAny(saved)
@@ -141,7 +154,7 @@ func prepareWorkflowStudioSteps(original store.ProfileCatalog, draft workflowStu
 			exports = append(exports, export)
 		}
 		doc["exports"] = exports
-		doc["workflowStudio"] = map[string]any{"position": step.Position, "bindings": step.Bindings, "baseExecution": base, "baseInputs": baseInputs, "managedExports": []any{}, "managedInputs": []any{}}
+		doc["workflowStudio"] = map[string]any{"position": step.Position, "bindings": step.Bindings, "baseExecution": base, "baseInputs": baseInputs, "managedExports": []any{}, "managedInputs": []any{}, "group": step.Group, "values": step.Values}
 		docs[index] = doc
 	}
 	return docs, indices, nil
@@ -168,7 +181,7 @@ func applyWorkflowStudioBindings(draft workflowStudioDraft, docs []map[string]an
 				return workflowStudioError(step.ID, err.Error())
 			}
 			seen[binding.Parameter] = true
-			alias := "studio_" + workflowStudioDigest([]string{draft.Workflow.ID, binding.SourceStepID, binding.From, binding.Path})[:20]
+			alias := studioParameterAlias(draft.Workflow.ID, binding)
 			sourceMeta := mapFromAny(docs[source]["workflowStudio"])
 			if !stringSetFromAny(sourceMeta["managedExports"])[alias] {
 				docs[source]["exports"] = append(listFromAny(docs[source]["exports"]), map[string]any{"name": alias, "from": binding.From, "path": binding.Path})
@@ -177,6 +190,11 @@ func applyWorkflowStudioBindings(draft workflowStudioDraft, docs []map[string]an
 			doc["inputs"] = append(listFromAny(doc["inputs"]), map[string]any{"name": alias, "source": "previous", "required": true})
 			meta := mapFromAny(doc["workflowStudio"])
 			meta["managedInputs"] = append(listFromAny(meta["managedInputs"]), alias)
+			if contract, exists := step.ValueContracts[binding.Parameter]; exists {
+				contracts := mapFromAny(meta["parameterContracts"])
+				contracts[alias] = contract
+				meta["parameterContracts"] = contracts
+			}
 			for _, key := range []string{"path", "query", "headers", "auth", "body", "traceEndpoint"} {
 				execution[key] = replaceWorkflowStudioParameter(execution[key], binding.Parameter, alias)
 			}

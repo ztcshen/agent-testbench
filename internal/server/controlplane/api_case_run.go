@@ -48,6 +48,7 @@ func recordAPICaseRunWithContext(ctx context.Context, runtime store.Store, runCo
 	if err != nil {
 		return err
 	}
+	requestSummary = stepGroupRequestSummary(requestSummary, result)
 	workflowID := strings.TrimSpace(runContext.WorkflowID)
 	stepID := strings.TrimSpace(runContext.StepID)
 	if stepID != "" {

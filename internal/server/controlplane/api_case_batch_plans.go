@@ -164,9 +164,11 @@ func apiCaseBatchPlanFromCase(ctx context.Context, bundle profile.Bundle, runtim
 	template := findCaseExecutionTemplateConfig(ctx, runtime, item.ID, payload)
 	var execution *caseExecutionConfig
 	var exports []map[string]any
+	overrides := mergeStringAnyMaps(item.DefaultOverrides, request.Overrides)
 	if template != nil {
 		execution = &template.CaseExecution
 		exports = template.Exports
+		overrides = mergeStringAnyMaps(overrides, template.Overrides)
 	}
 	if casePath == "" && execution == nil {
 		return apiCaseBatchCasePlan{}, false
@@ -185,7 +187,7 @@ func apiCaseBatchPlanFromCase(ctx context.Context, bundle profile.Bundle, runtim
 		BaseURL:         firstNonEmpty(request.BaseURL, item.BaseURL),
 		EvidenceDir:     firstNonEmpty(request.EvidenceDir, item.EvidenceDir, filepath.Join(".runtime", "case-batches")),
 		TimeoutSeconds:  selectedAPICaseBatchTimeoutSeconds(request.TimeoutSeconds, item.TimeoutSeconds),
-		Overrides:       mergeStringAnyMaps(item.DefaultOverrides, request.Overrides),
+		Overrides:       overrides,
 		Execution:       execution,
 		Exports:         exports,
 		Case:            item,

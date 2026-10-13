@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import {
   Play,
   Save,
@@ -15,6 +15,8 @@ import {
   LoaderCircle,
   CheckCircle2,
   ShieldCheck,
+  Library,
+  ChevronDown,
 } from "lucide-react";
 import {
   addStudioStep,
@@ -37,6 +39,13 @@ import {
   Breadcrumb,
 } from "./components.jsx";
 import { filterRequests, statusLabel } from "./model.mjs";
+import StepBlockInputs from "./StepBlockInputs.jsx";
+import ScenarioRunStep from "./ScenarioRunStep.jsx";
+import {
+  addStepBlock,
+  captureStepBlock,
+  validateStepGroups,
+} from "./stepBlockModel.mjs";
 
 function StepInspector({ draft, step, cases, patch, onClose }) {
   const caseDef = cases.find((item) => item.id === step.caseId) || {};
@@ -240,17 +249,31 @@ export default function ScenarioEditor({
   busy,
   verificationEnvironments = [],
   inspectEnvironment,
+  blocks = [],
+  saveBlock,
+  openLibrary,
+  libraryMode = false,
+  extraErrors = [],
+  openEvidence,
 }) {
   const [selected, setSelected] = useState(draft.steps[0]?.id || "");
   const [tab, setTab] = useState("steps");
   const [adding, setAdding] = useState(false);
   const [query, setQuery] = useState("");
   const [dragging, setDragging] = useState("");
+  const [collapsed, setCollapsed] = useState({});
+  const [capture, setCapture] = useState(null);
+  const [capturing, setCapturing] = useState(false);
+  const [captureError, setCaptureError] = useState("");
   useEffect(() => {
     setSelected(draft.steps[0]?.id || "");
   }, [draft.workflow.id]);
   const step = draft.steps.find((item) => item.id === selected);
-  const errors = validateStudioDraft(draft, cases);
+  const errors = [
+    ...validateStudioDraft(draft, cases),
+    ...validateStepGroups(draft),
+    ...extraErrors,
+  ];
   const results = report?.steps || report?.cases || [];
   const resultByID = new Map(results.map((item) => [item.stepId, item]));
   const available = cases.filter((item) =>
@@ -264,11 +287,38 @@ export default function ScenarioEditor({
     setSelected(next.steps.at(-1).id);
     setAdding(false);
   }
+  function addBlock(definition) {
+    const next = addStepBlock(draft, definition);
+    patch(next);
+    setSelected(next.steps.at(-1).id);
+    setAdding(false);
+  }
+  async function captureBlock() {
+    setCapturing(true);
+    setCaptureError("");
+    try {
+      const definition = captureStepBlock(
+        draft,
+        cases,
+        capture.start,
+        capture.end,
+      );
+      definition.displayName = capture.name;
+      await saveBlock(definition);
+      setCapture(null);
+    } catch (error) {
+      setCaptureError(error.message);
+    } finally {
+      setCapturing(false);
+    }
+  }
   return (
     <div className="scenario-editor">
       <div className="editor-heading">
         <div>
-          <Breadcrumb items={["自动化测试", "场景用例"]} />
+          <Breadcrumb
+            items={["自动化测试", libraryMode ? "步骤组定义" : "场景用例"]}
+          />
           <div className="editor-title">
             <GitBranch size={20} className="accent" />
             <input
@@ -296,7 +346,7 @@ export default function ScenarioEditor({
             <Save size={14} />
             保存
           </button>
-          {verificationEnvironments.length > 0 ? (
+          {libraryMode ? null : verificationEnvironments.length > 0 ? (
             <button
               className="button primary"
               disabled={busy || draft.dirty}
@@ -349,6 +399,23 @@ export default function ScenarioEditor({
                 <GitBranch size={14} />
                 按顺序执行 <b>{draft.steps.length}</b> 个步骤
               </span>
+              {!libraryMode && saveBlock && (
+                <button
+                  className="button"
+                  disabled={busy || !draft.steps.length}
+                  onClick={() => {
+                    setCaptureError("");
+                    setCapture({
+                      name: `${draft.workflow.displayName} · 公共步骤`,
+                      start: 0,
+                      end: draft.steps.length - 1,
+                    });
+                  }}
+                >
+                  <Library size={14} />
+                  保存为步骤组
+                </button>
+              )}
               <button
                 className="button"
                 disabled={busy}
@@ -367,91 +434,219 @@ export default function ScenarioEditor({
                 const caseDef =
                   cases.find((value) => value.id === item.caseId) || {};
                 const result = resultByID.get(item.id);
+                const group = item.group;
+                const first =
+                  group && draft.steps[index - 1]?.group?.id !== group.id;
+                const members = group
+                  ? draft.steps.filter((step) => step.group?.id === group.id)
+                  : [];
+                const folded = group && collapsed[group.id] !== false;
                 return (
-                  <div
-                    className={`sequence-row ${item.id === selected ? "selected" : ""}`}
-                    key={item.id}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      if (dragging)
-                        patch(moveStudioStep(draft, dragging, index));
-                      setDragging("");
-                    }}
-                  >
-                    <div className="sequence-index">{index + 1}</div>
-                    <div
-                      className="sequence-card"
-                      onClick={() => setSelected(item.id)}
-                    >
-                      <div className="step-card-heading">
-                        <span
-                          className="drag-handle"
-                          draggable={!busy}
-                          onDragStart={() => setDragging(item.id)}
-                          onDragEnd={() => setDragging("")}
-                          title="拖动调整步骤顺序"
+                  <Fragment key={item.id}>
+                    {first && (
+                      <div
+                        className={`sequence-row group-sequence ${step?.group?.id === group.id ? "selected" : ""}`}
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          if (dragging)
+                            patch(moveStudioStep(draft, dragging, index));
+                          setDragging("");
+                        }}
+                      >
+                        <div className="sequence-index">{index + 1}</div>
+                        <div
+                          className="sequence-card group-sequence-card"
+                          onClick={() => setSelected(item.id)}
                         >
-                          <GripVertical size={16} />
-                        </span>
-                        <Method value={caseDef.method} />
-                        <strong>{item.title}</strong>
-                        {result ? (
-                          <Status value={result.status} />
-                        ) : (
-                          <span className="soft-tag">
-                            {item.required ? "必选" : "可选"}
-                          </span>
-                        )}
-                        <div className="step-actions">
-                          <IconButton
-                            icon={ArrowUp}
-                            title={`上移步骤 ${index + 1}`}
-                            disabled={busy || index === 0}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              patch(moveStudioStep(draft, item.id, index - 1));
-                            }}
-                          />
-                          <IconButton
-                            icon={ArrowDown}
-                            title={`下移步骤 ${index + 1}`}
-                            disabled={busy || index === draft.steps.length - 1}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              patch(moveStudioStep(draft, item.id, index + 1));
-                            }}
-                          />
-                          <IconButton
-                            icon={Trash2}
-                            title={`删除步骤 ${index + 1}`}
-                            disabled={busy}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              patch(removeStudioStep(draft, item.id));
-                            }}
-                          />
+                          <div className="step-card-heading">
+                            <span
+                              className="drag-handle"
+                              draggable={!busy}
+                              onDragStart={() => setDragging(item.id)}
+                              onDragEnd={() => setDragging("")}
+                            >
+                              <GripVertical size={16} />
+                            </span>
+                            <Library size={16} className="accent" />
+                            <strong>{group.title}</strong>
+                            <span className="soft-tag">
+                              {members.length} 步
+                            </span>
+                            <code className="group-revision">
+                              {group.revision.slice(0, 8)}
+                            </code>
+                            <div className="step-actions">
+                              <IconButton
+                                icon={ArrowUp}
+                                title={`上移步骤组 ${group.title}`}
+                                disabled={busy || index === 0}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  patch(
+                                    moveStudioStep(draft, item.id, index - 1),
+                                  );
+                                }}
+                              />
+                              <IconButton
+                                icon={ArrowDown}
+                                title={`下移步骤组 ${group.title}`}
+                                disabled={
+                                  busy ||
+                                  index + members.length === draft.steps.length
+                                }
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  patch(
+                                    moveStudioStep(
+                                      draft,
+                                      item.id,
+                                      index + members.length,
+                                    ),
+                                  );
+                                }}
+                              />
+                              <IconButton
+                                icon={Trash2}
+                                title={`移除步骤组 ${group.title}`}
+                                disabled={busy}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  patch(removeStudioStep(draft, item.id));
+                                }}
+                              />
+                              <IconButton
+                                icon={folded ? ChevronRight : ChevronDown}
+                                title={`${folded ? "展开" : "折叠"}步骤组 ${group.title}`}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setCollapsed({
+                                    ...collapsed,
+                                    [group.id]: !folded,
+                                  });
+                                }}
+                              />
+                            </div>
+                          </div>
+                          <div className="group-parameter-chips">
+                            {(group.parameters || []).map((parameter) => (
+                              <span className="soft-tag" key={parameter.name}>
+                                <Braces size={11} />
+                                {parameter.name}
+                                <span>
+                                  {(group.bindings || []).some(
+                                    (b) => b.parameter === parameter.name,
+                                  )
+                                    ? "前序输出"
+                                    : Object.hasOwn(
+                                          group.values || {},
+                                          parameter.name,
+                                        )
+                                      ? "固定值"
+                                      : parameter.hasDefault
+                                        ? "默认值"
+                                        : "待填写"}
+                                </span>
+                              </span>
+                            ))}
+                          </div>
                         </div>
-                        <ChevronRight size={14} />
                       </div>
-                      <code className="step-path">
-                        {caseDef.path || item.caseId}
-                      </code>
-                      {(item.bindings || []).map((binding) => (
-                        <div className="step-binding" key={binding.parameter}>
-                          <Braces size={12} />
-                          <code>{binding.parameter}</code>
-                          <span>
-                            ←{" "}
-                            {draft.steps.find(
-                              (source) => source.id === binding.sourceStepId,
-                            )?.title || "来源已移除"}
+                    )}
+                    <div
+                      hidden={Boolean(folded)}
+                      className={`sequence-row ${group ? "group-member" : ""} ${item.id === selected ? "selected" : ""}`}
+                      key={item.id}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        if (dragging)
+                          patch(moveStudioStep(draft, dragging, index));
+                        setDragging("");
+                      }}
+                    >
+                      <div className="sequence-index">{index + 1}</div>
+                      <div
+                        className="sequence-card"
+                        onClick={() => setSelected(item.id)}
+                      >
+                        <div className="step-card-heading">
+                          <span
+                            className="drag-handle"
+                            draggable={!busy}
+                            onDragStart={() => setDragging(item.id)}
+                            onDragEnd={() => setDragging("")}
+                            title="拖动调整步骤顺序"
+                          >
+                            <GripVertical size={16} />
                           </span>
-                          <code>{binding.path}</code>
+                          <Method value={caseDef.method} />
+                          <strong>{item.title}</strong>
+                          {result ? (
+                            <Status value={result.status} />
+                          ) : (
+                            <span className="soft-tag">
+                              {item.required ? "必选" : "可选"}
+                            </span>
+                          )}
+                          <div className="step-actions">
+                            <IconButton
+                              icon={ArrowUp}
+                              title={`上移步骤 ${index + 1}`}
+                              disabled={busy || Boolean(group) || index === 0}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                patch(
+                                  moveStudioStep(draft, item.id, index - 1),
+                                );
+                              }}
+                            />
+                            <IconButton
+                              icon={ArrowDown}
+                              title={`下移步骤 ${index + 1}`}
+                              disabled={
+                                busy ||
+                                Boolean(group) ||
+                                index === draft.steps.length - 1
+                              }
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                patch(
+                                  moveStudioStep(draft, item.id, index + 1),
+                                );
+                              }}
+                            />
+                            <IconButton
+                              icon={Trash2}
+                              title={`删除步骤 ${index + 1}`}
+                              disabled={busy || Boolean(group)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                patch(removeStudioStep(draft, item.id));
+                              }}
+                            />
+                          </div>
+                          <ChevronRight size={14} />
                         </div>
-                      ))}
+                        <code className="step-path">
+                          {caseDef.path || item.caseId}
+                        </code>
+                        {(item.bindings || []).map((binding) => (
+                          <div className="step-binding" key={binding.parameter}>
+                            <Braces size={12} />
+                            <code>{binding.parameter}</code>
+                            <span>
+                              ←{" "}
+                              {draft.steps.find(
+                                (source) => source.id === binding.sourceStepId,
+                              )?.title || "来源已移除"}
+                            </span>
+                            <code>{binding.path}</code>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  </Fragment>
                 );
               })}
               <button
@@ -486,14 +681,26 @@ export default function ScenarioEditor({
               </div>
             )}
           </div>
-          {step && (
-            <StepInspector
+          {step?.group ? (
+            <StepBlockInputs
               draft={draft}
-              step={step}
-              cases={cases}
+              group={step.group}
+              blocks={blocks}
               patch={patch}
-              onClose={() => setSelected("")}
+              close={() => setSelected("")}
+              openLibrary={openLibrary}
+              busy={busy}
             />
+          ) : (
+            step && (
+              <StepInspector
+                draft={draft}
+                step={step}
+                cases={cases}
+                patch={patch}
+                onClose={() => setSelected("")}
+              />
+            )
           )}
         </div>
       ) : tab === "description" ? (
@@ -535,17 +742,27 @@ export default function ScenarioEditor({
           </div>
           <div className="report-steps">
             {results.map((item, index) => (
-              <details key={item.stepId || index}>
-                <summary>
-                  <span>{index + 1}</span>
-                  <strong>
-                    {draft.steps.find((step) => step.id === item.stepId)
-                      ?.title || item.caseId}
-                  </strong>
-                  <Status value={item.status} />
-                </summary>
-                <Code value={item} />
-              </details>
+              <ScenarioRunStep
+                key={item.caseRunId || item.stepId || index}
+                item={item}
+                index={index}
+                step={draft.steps.find((step) => step.id === item.stepId)}
+                openEvidence={openEvidence}
+                locate={() => {
+                  const found = draft.steps.find(
+                    (step) => step.id === item.stepId,
+                  );
+                  if (found) {
+                    setSelected(found.id);
+                    if (found.group)
+                      setCollapsed((current) => ({
+                        ...current,
+                        [found.group.id]: false,
+                      }));
+                    setTab("steps");
+                  }
+                }}
+              />
             ))}
           </div>
           <details>
@@ -562,6 +779,36 @@ export default function ScenarioEditor({
               onChange={setQuery}
               placeholder="搜索接口名称或路径"
             />
+            {!libraryMode && blocks.length > 0 && (
+              <div className="add-block-list">
+                <h4>引用步骤组</h4>
+                {blocks
+                  .filter((item) =>
+                    item.definition.displayName
+                      .toLowerCase()
+                      .includes(query.toLowerCase()),
+                  )
+                  .map((item) => (
+                    <button
+                      className="add-block-item"
+                      key={item.definition.id}
+                      onClick={() => addBlock(item.definition)}
+                    >
+                      <Library size={17} />
+                      <span>
+                        <strong>{item.definition.displayName}</strong>
+                        <small>
+                          {item.definition.steps.length} 步 ·{" "}
+                          {item.definition.parameters.length} 个参数 ·{" "}
+                          {item.definition.revision.slice(0, 8)}
+                        </small>
+                      </span>
+                      <Plus size={14} />
+                    </button>
+                  ))}
+                <h4>独立接口步骤</h4>
+              </div>
+            )}
             <div className="add-case-list">
               {available.map((item) => (
                 <button key={item.id} onClick={() => add(item)}>
@@ -579,6 +826,80 @@ export default function ScenarioEditor({
                 </Empty>
               )}
             </div>
+          </div>
+        </Modal>
+      )}
+      {capture && (
+        <Modal
+          title="保存连续步骤到步骤库"
+          onClose={() => {
+            if (!capturing) setCapture(null);
+          }}
+        >
+          <div className="modal-body">
+            <label className="field">
+              步骤组名称
+              <input
+                aria-label="新步骤组名称"
+                value={capture.name}
+                onChange={(event) =>
+                  setCapture({ ...capture, name: event.target.value })
+                }
+              />
+            </label>
+            <div className="capture-range">
+              <label className="field">
+                开始步骤
+                <select
+                  aria-label="步骤组开始步骤"
+                  value={capture.start}
+                  onChange={(event) =>
+                    setCapture({
+                      ...capture,
+                      start: Number(event.target.value),
+                      end: Math.max(Number(event.target.value), capture.end),
+                    })
+                  }
+                >
+                  {draft.steps.map((step, index) => (
+                    <option key={step.id} value={index}>
+                      {index + 1}. {step.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                结束步骤
+                <select
+                  aria-label="步骤组结束步骤"
+                  value={capture.end}
+                  onChange={(event) =>
+                    setCapture({ ...capture, end: Number(event.target.value) })
+                  }
+                >
+                  {draft.steps.map(
+                    (step, index) =>
+                      index >= capture.start && (
+                        <option key={step.id} value={index}>
+                          {index + 1}. {step.title}
+                        </option>
+                      ),
+                  )}
+                </select>
+              </label>
+            </div>
+            <p className="muted">
+              组内数据绑定会保留；外部来源会转换成步骤组输入参数。
+            </p>
+            {captureError && <div className="notice error">{captureError}</div>}
+            <button
+              className="button primary"
+              disabled={capturing || !capture.name.trim()}
+              onClick={captureBlock}
+            >
+              <Save size={14} />
+              {capturing ? "正在保存" : "保存到步骤库"}
+            </button>
           </div>
         </Modal>
       )}

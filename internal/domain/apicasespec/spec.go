@@ -4,10 +4,11 @@ package apicasespec
 import "encoding/json"
 
 type Case struct {
-	ID         string     `json:"id"`
-	Title      string     `json:"title"`
-	Request    Request    `json:"request"`
-	Assertions Assertions `json:"assertions"`
+	ID         string         `json:"id"`
+	Title      string         `json:"title"`
+	Request    Request        `json:"request"`
+	Assertions Assertions     `json:"assertions"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
 type Request struct {

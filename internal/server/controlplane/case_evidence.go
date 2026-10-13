@@ -244,6 +244,7 @@ func caseEvidencePayload(run store.Run, item store.APICaseRun, caseRuns []store.
 			"summary":                     summary,
 			"trace":                       trace,
 			"request":                     request,
+			"stepGroup":                   jsonObject(item.RequestSummaryJSON)["stepGroup"],
 			"response":                    response,
 			apiCaseEvidenceKindAssertions: assertions,
 			"services":                    []map[string]any{},

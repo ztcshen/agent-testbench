@@ -21,8 +21,9 @@ export async function loadWorkspace() {
     api("/api/environments?all=true"),
     api("/api/store/current"),
     api("/api/maps"),
+    api("/api/step-library"),
   ]);
-  const [requests, studio, catalog, runs, environments, store, maps] =
+  const [requests, studio, catalog, runs, environments, store, maps, library] =
     responses;
   const required = [requests, studio, catalog].find(
     (item) => item.status === "rejected",
@@ -41,6 +42,9 @@ export async function loadWorkspace() {
         : [],
     store: store.status === "fulfilled" ? store.value.data : {},
     maps: maps.status === "fulfilled" ? maps.value.data.maps || [] : [],
+    library:
+      library.status === "fulfilled" ? library.value.data : { blocks: [] },
+    libraryETag: library.status === "fulfilled" ? library.value.etag : "",
     issues: responses
       .filter((item) => item.status === "rejected")
       .map((item) => item.reason.message),

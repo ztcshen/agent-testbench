@@ -25,6 +25,11 @@ func renderCaseExecutionValue(value any, overrides map[string]any) any {
 		}
 		return out
 	case string:
+		if match := workflowStudioToken.FindStringSubmatch(typed); len(match) > 1 && match[0] == typed {
+			if resolved, exists := overrides[strings.TrimSpace(match[1])]; exists {
+				return resolved
+			}
+		}
 		return renderCaseString(typed, overrides)
 	default:
 		return value

@@ -18,6 +18,7 @@ type runnableAPICase struct {
 	Execution   *caseExecutionConfig
 	Inputs      []map[string]any
 	CaseBaseURL string
+	Overrides   map[string]any
 }
 
 type caseExecutionConfig struct {
@@ -42,6 +43,7 @@ type caseExecutionTemplateConfig struct {
 	CaseExecution caseExecutionConfig `json:"caseExecution"`
 	Exports       []map[string]any    `json:"exports"`
 	Inputs        []map[string]any    `json:"inputs"`
+	Overrides     map[string]any      `json:"overrides,omitempty"`
 }
 
 var caseSerialCounter uint64

@@ -48,7 +48,7 @@ func findRunnableAPICase(ctx context.Context, bundle profile.Bundle, runtime sto
 				}
 			}
 		}
-		return runnableAPICase{Case: item, Execution: execution, Inputs: inputs, CaseBaseURL: caseBaseURL}, true
+		return runnableAPICase{Case: item, Execution: execution, Inputs: inputs, CaseBaseURL: caseBaseURL, Overrides: stepTemplateOverrides(template)}, true
 	}
 	if runtime == nil {
 		return runnableAPICase{}, false
@@ -72,7 +72,7 @@ func findRunnableAPICase(ctx context.Context, bundle profile.Bundle, runtime sto
 			if execution == nil {
 				execution = deriveCaseExecutionConfigFromCatalog(catalog, item)
 			}
-			return runnableAPICase{Case: apiCase, Execution: execution, Inputs: inputs, CaseBaseURL: item.BaseURL}, true
+			return runnableAPICase{Case: apiCase, Execution: execution, Inputs: inputs, CaseBaseURL: item.BaseURL, Overrides: stepTemplateOverrides(template)}, true
 		}
 	}
 	return runnableAPICase{}, false

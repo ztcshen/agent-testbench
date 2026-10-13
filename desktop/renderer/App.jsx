@@ -24,6 +24,7 @@ import {
   House,
   ArrowDownToLine,
   Network,
+  Library,
 } from "lucide-react";
 import {
   emptyStudioDraft,
@@ -56,6 +57,8 @@ import RequestEditor from "./RequestEditor.jsx";
 import ScenarioEditor from "./ScenarioEditor.jsx";
 import MapWorkspace from "./MapWorkspace.jsx";
 import MapLibrary from "./MapLibrary.jsx";
+import StepLibrary from "./StepLibrary.jsx";
+import { validateStepGroups } from "./stepBlockModel.mjs";
 import {
   Overview,
   Reports,
@@ -66,6 +69,7 @@ import {
 
 const emptyWorkspace = {
   maps: [],
+  library: { blocks: [] },
   requests: [],
   studio: { workflows: [], cases: [] },
   catalog: { services: [] },
@@ -78,6 +82,7 @@ const navigation = [
   { id: "maps", label: "测试图谱", Icon: Network },
   { id: "apis", label: "接口管理", Icon: Braces },
   { id: "scenarios", label: "自动化测试", Icon: GitBranch },
+  { id: "library", label: "复用步骤库", Icon: Library },
   { id: "reports", label: "测试报告", Icon: FileText },
   { id: "environments", label: "运行环境", Icon: Server },
 ];
@@ -100,6 +105,7 @@ export default function App() {
   const [connection, setConnection] = useState({ connected: false });
   const [requests, setRequests] = useState({});
   const [scenes, setScenes] = useState({});
+  const [libraryDrafts, setLibraryDrafts] = useState({});
   const [tabs, setTabs] = useState([]);
   const [active, setActive] = useState("");
   const [module, setModule] = useState("apis");
@@ -118,7 +124,8 @@ export default function App() {
   const sceneList = Object.values(scenes).map((item) => item.draft);
   const anyDirty =
     requestList.some((item) => item.dirty) ||
-    sceneList.some((item) => item.dirty);
+    sceneList.some((item) => item.dirty) ||
+    Object.values(libraryDrafts).some((item) => item?.dirty);
   useEffect(() => {
     const guard = (event) => {
       if (anyDirty) {
@@ -301,7 +308,10 @@ export default function App() {
   }
   async function persistScene(id) {
     const current = scenes[id];
-    const errors = validateStudioDraft(current.draft, workspace.studio.cases);
+    const errors = [
+      ...validateStudioDraft(current.draft, workspace.studio.cases),
+      ...validateStepGroups(current.draft),
+    ];
     if (errors.length) throw new Error(errors[0]);
     const response = await api("/api/workflow-studio", {
       method: "PUT",
@@ -327,6 +337,15 @@ export default function App() {
       notify("已保存至 Store");
     });
   }
+  async function saveStepBlock(definition) {
+    await api("/api/step-library", {
+      method: "PUT",
+      etag: workspace.libraryETag,
+      body: { definition },
+    });
+    await refresh();
+    notify("步骤组已保存到 Store，可在其他场景中引用");
+  }
   function send(id, overrides) {
     return job(id, async () => {
       if (requests[id].draft.dirty) await persistRequest(id);
@@ -341,6 +360,10 @@ export default function App() {
     });
   }
   function run(id) {
+    setSceneResults((current) => ({
+      ...current,
+      [id]: { status: "queued", cases: [] },
+    }));
     return job(id, async () => {
       if (scenes[id].draft.dirty) await persistScene(id);
       await runScenario(
@@ -361,12 +384,16 @@ export default function App() {
         ? requests[tab.id]?.draft.dirty
         : tab.kind === "scenario"
           ? scenes[tab.id]?.draft.dirty
-          : false;
+          : tab.kind === "library"
+            ? libraryDrafts[tab.id]?.dirty
+            : false;
     if (dirty && !discard) {
       setConfirmation(tab);
       return;
     }
     if (discard) {
+      if (tab.kind === "library")
+        setLibraryDrafts((current) => ({ ...current, [tab.id]: null }));
       if (tab.kind === "request")
         setRequests((current) => {
           const next = { ...current };
@@ -463,6 +490,29 @@ export default function App() {
   }
   function view() {
     if (!tab) return <Empty title="正在打开工作区" />;
+    if (tab.kind === "library")
+      return (
+        <StepLibrary
+          key={tab.id}
+          workspace={workspace}
+          initialID={tab.id === "all" ? "" : tab.id}
+          onSaved={refresh}
+          notify={notify}
+          draftState={libraryDrafts[tab.id] || null}
+          onDraft={(draft) =>
+            setLibraryDrafts((current) => ({ ...current, [tab.id]: draft }))
+          }
+          openWorkflow={(id) => {
+            const item = scenes[id];
+            if (item)
+              open({
+                kind: "scenario",
+                id,
+                name: item.draft.workflow.displayName,
+              });
+          }}
+        />
+      );
     if (tab.kind === "maps")
       return (
         <MapLibrary
@@ -533,6 +583,24 @@ export default function App() {
           key={tab.id}
           draft={scenes[tab.id].draft}
           cases={workspace.studio.cases}
+          blocks={workspace.library.blocks || []}
+          saveBlock={saveStepBlock}
+          openLibrary={(id) =>
+            open({ kind: "library", id, name: "步骤组定义" })
+          }
+          openEvidence={(item) =>
+            open({
+              kind: "evidence",
+              id: item.caseRunId,
+              name: item.displayName || item.caseId,
+              run: {
+                id: item.caseRunId,
+                caseId: item.caseId,
+                runId: item.runId,
+                status: item.status,
+              },
+            })
+          }
           verificationEnvironments={workspace.environments.filter(
             (item) => item.verificationWorkflowId === tab.id,
           )}
@@ -715,7 +783,9 @@ export default function App() {
                   ? requests[item.id]?.draft.dirty
                   : item.kind === "scenario"
                     ? scenes[item.id]?.draft.dirty
-                    : false;
+                    : item.kind === "library"
+                      ? libraryDrafts[item.id]?.dirty
+                      : false;
               return (
                 <div
                   key={tabKey(item)}

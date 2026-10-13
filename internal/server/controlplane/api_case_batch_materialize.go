@@ -24,11 +24,10 @@ func materializeAPICaseBatchExecution(ctx context.Context, bundle profile.Bundle
 	// Studio bindings are explicit dependencies, so a missing exported value
 	// must fail before sending an incorrectly rendered request.
 	if runtime != nil {
-		catalog, err := runtime.GetProfileCatalog(ctx)
-		if err != nil {
+		doc := workflowStepDocumentFromBundle(bundle.TemplateConfigs, workflowID, plan.StepID, plan.ID)
+		if err := validateStepGroupRuntimeParameters(doc, plan.Overrides); err != nil {
 			return "", "", err
 		}
-		doc, _ := workflowStudioScopedDocument(catalog, workflowID, plan.StepID, plan.ID)
 		meta := mapFromAny(doc["workflowStudio"])
 		for alias := range stringSetFromAny(meta["managedInputs"]) {
 			if value, exists := plan.Overrides[alias]; !exists || value == nil || strings.TrimSpace(valueString(value)) == "" {
@@ -57,6 +56,7 @@ func materializeAPICaseBatchExecution(ctx context.Context, bundle profile.Bundle
 			ExpectedStatusCodes: request.expectedHTTPCodes,
 			ResponseContains:    request.expectedResponse,
 		},
+		Metadata: workflowStepGroupRunMetadata(bundle.TemplateConfigs, workflowID, plan),
 	}
 	dir := filepath.Join(".runtime", "case-batches", batchRunID, "materialized-cases")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
