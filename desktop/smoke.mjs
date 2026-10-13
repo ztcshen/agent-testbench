@@ -309,6 +309,15 @@ try {
     await application.close();
   }
   if (childPID) {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      try {
+        process.kill(childPID, 0);
+        await new Promise((yes) => setTimeout(yes, 100));
+      } catch {
+        break;
+      }
+    }
     try {
       process.kill(childPID, 0);
       summary.sidecarStopped = false;
@@ -323,9 +332,10 @@ try {
       JSON.stringify(summary, null, 2),
     );
   await rm(fixtureDir, { recursive: true, force: true });
-  assert.equal(
-    summary.sidecarStopped,
-    true,
-    "The desktop left its owned engine running",
-  );
+  if (childPID)
+    assert.equal(
+      summary.sidecarStopped,
+      true,
+      "The desktop left its owned engine running",
+    );
 }

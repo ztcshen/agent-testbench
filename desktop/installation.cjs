@@ -1,4 +1,8 @@
-const { readFileSync, existsSync } = require("node:fs");
+// Electron's patched fs treats app.asar as a directory. Build identity must
+// hash the archive bytes, using the same representation as the Node packager.
+const { readFileSync, existsSync } = process.versions.electron
+  ? require("original-fs")
+  : require("node:fs");
 const { createHash } = require("node:crypto");
 const { join, resolve } = require("node:path");
 
