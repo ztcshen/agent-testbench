@@ -11,12 +11,26 @@ From a source checkout with Node.js and Go installed:
 
 ```sh
 npm ci
+npm run desktop:install
 npm run desktop:start
 ```
 
 `npm run desktop:build` builds the renderer and the Go execution engine.
-`npm run desktop:package` produces the native application under
-`dist/desktop-release/`. A packaged application includes its execution engine and
+On macOS, `npm run desktop:package` produces a ZIP archive under `dist/desktop-release/`;
+unpacked packaging directories are temporary and removed after packaging.
+`npm run desktop:install` builds the current checkout and installs the canonical
+macOS application at `/Applications/AgentTestBench.app`. Save editing work and
+quit the application before installing. Old indexed copies of the same bundle
+identity are compressed, checked, and retired; unrelated applications and Store
+settings are preserved. Archives live in the application-data
+`application-archives.noindex` directory and cannot be launched directly.
+`desktop:start` opens only the canonical installation. Ordinary copied builds
+redirect there. Explicit development uses `npm run desktop:dev` with a separate
+development application name and data directory.
+Windows and Linux retain their native packaged directory and source-start flows;
+the managed single-location installer currently targets macOS.
+
+A packaged application includes its execution engine and
 does not need Go, Node.js or a separately running browser server. `npm run
 build:frontend` now builds only the Electron renderer. Older browser entrypoints
 return HTTP 410; the control-plane root identifies itself as an Electron API
@@ -29,6 +43,15 @@ service through the existing API. Closing the application stops only the child
 process it started. Project settings can select an existing named Store or DSN,
 or connect to an existing API service. Attached services are never stopped by the
 desktop application. Unsaved edits and active runs block a workspace switch.
+
+The package has one content-derived build identity covering the renderer/main
+ASAR, engine, and assistant worker. Startup checks component hashes and the
+installation receipt; mixed components or an unregistered build are rejected.
+The status bar, project settings, and native About panel show the build identity.
+The desktop keeps its owned engine's stdin pipe open. The engine exits on EOF
+with the internal `AGENT_TESTBENCH_PARENT_STDIN_CLOSE=1` setting, including when
+the parent dies before normal quit handlers can run. Standalone CLI servers are
+unaffected.
 
 Request edits use `GET` and `PUT /api/request-editor`. PUT requires the catalog's
 strong `If-Match` ETag and writes the interface, API case and native execution

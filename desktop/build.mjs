@@ -1,8 +1,21 @@
 import { build } from "esbuild";
-import { mkdir, writeFile, copyFile, chmod, access } from "node:fs/promises";
-import { spawn } from "node:child_process";
+import {
+  mkdir,
+  writeFile,
+  copyFile,
+  chmod,
+  access,
+  mkdtemp,
+  rm,
+} from "node:fs/promises";
+import { spawn, execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { installApplication } from "./install.mjs";
+const require = createRequire(import.meta.url);
+const { createBuildInfo } = require("./installation.cjs");
 
 const desktop = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(desktop, "..");
@@ -77,6 +90,7 @@ if (process.argv.includes("--package")) {
     "assistant-controller.cjs",
     "assistant-settings.cjs",
     "codex-auth.cjs",
+    "installation.cjs",
   ])
     await copyFile(join(desktop, name), join(staging, name));
   for (const name of ["index.html", "app.js", "app.css"])
@@ -115,29 +129,92 @@ if (process.argv.includes("--package")) {
       : process.platform === "linux"
         ? join(desktop, "assets", "icon.png")
         : undefined;
-  const packaged = await packager({
-    dir: staging,
-    out: join(repo, "dist", "desktop-release"),
-    name: "AgentTestBench",
-    platform: process.platform,
-    arch: process.arch,
-    electronVersion: pkg.devDependencies.electron,
-    download: { checksums },
-    appBundleId: "org.agenttestbench.desktop",
-    appCategoryType: "public.app-category.developer-tools",
-    icon,
-    asar: true,
-    overwrite: true,
-    extraResource: [
-      join(out, "assistant-worker.mjs"),
-      join(
-        out,
-        "bin",
-        process.platform === "win32"
-          ? "agent-testbench.exe"
-          : "agent-testbench",
+  const temporary = await mkdtemp(join(tmpdir(), "atb-package-"));
+  await writeFile(join(temporary, ".metadata_never_index"), "");
+  try {
+    const packaged = await packager({
+      dir: staging,
+      out:
+        process.platform === "darwin"
+          ? join(temporary, "packages.noindex")
+          : join(repo, "dist", "desktop-release"),
+      name: "AgentTestBench",
+      platform: process.platform,
+      arch: process.arch,
+      electronVersion: pkg.devDependencies.electron,
+      download: { checksums },
+      appBundleId: "org.agenttestbench.desktop",
+      appCategoryType: "public.app-category.developer-tools",
+      icon,
+      asar: true,
+      overwrite: true,
+      extraResource: [
+        join(out, "assistant-worker.mjs"),
+        join(
+          out,
+          "bin",
+          process.platform === "win32"
+            ? "agent-testbench.exe"
+            : "agent-testbench",
+        ),
+      ],
+    });
+    const application =
+      process.platform === "darwin"
+        ? join(packaged[0], "AgentTestBench.app")
+        : packaged[0];
+    const resources = join(
+      application,
+      process.platform === "darwin" ? "Contents/Resources" : "resources",
+    );
+    const info = createBuildInfo(resources, {
+      version: pkg.version,
+      builtAt: new Date().toISOString(),
+      platform: process.platform,
+      arch: process.arch,
+      sourceRevision: execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: repo,
+        encoding: "utf8",
+      }).trim(),
+      sourceDirty: Boolean(
+        execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], {
+          cwd: repo,
+          encoding: "utf8",
+        }).trim(),
       ),
-    ],
-  });
-  process.stdout.write(`Desktop application: ${packaged.join(", ")}\n`);
+    });
+    await writeFile(
+      join(resources, "build-info.json"),
+      JSON.stringify(info, null, 2),
+    );
+    if (process.platform === "darwin") {
+      const archiveDirectory = join(repo, "dist", "desktop-release");
+      await mkdir(archiveDirectory, { recursive: true });
+      const archive = join(
+        archiveDirectory,
+        `AgentTestBench-${process.platform}-${process.arch}.zip`,
+      );
+      execFileSync("ditto", [
+        "-c",
+        "-k",
+        "--sequesterRsrc",
+        "--keepParent",
+        application,
+        archive,
+      ]);
+      process.stdout.write(
+        `Desktop archive: ${archive}\nBuild: ${info.buildId}\n`,
+      );
+      if (process.argv.includes("--install"))
+        process.stdout.write(
+          JSON.stringify(installApplication(application), null, 2) + "\n",
+        );
+    } else {
+      process.stdout.write(
+        `Desktop application: ${application}\nBuild: ${info.buildId}\n`,
+      );
+    }
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
 }

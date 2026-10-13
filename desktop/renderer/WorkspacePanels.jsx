@@ -663,6 +663,12 @@ export function Settings({
           <strong>AgentTestBench</strong>
           <span>版本</span>
           <code>{draft.version}</code>
+          <span>构建标识</span>
+          <code>{draft.build?.buildId || "开发构建"}</code>
+          <span>构建时间</span>
+          <code>
+            {draft.build?.builtAt ? dateLabel(draft.build.builtAt) : "—"}
+          </code>
           <span>界面</span>
           <strong>Electron 桌面工作区</strong>
           <span>执行引擎</span>

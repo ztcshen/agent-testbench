@@ -7,18 +7,50 @@ const {
   clipboard,
   utilityProcess,
   safeStorage,
+  shell,
 } = require("electron");
 const { join, resolve, basename } = require("node:path");
 const { readFileSync, writeFileSync, mkdirSync } = require("node:fs");
 const { Backend } = require("./backend.cjs");
 const { backendURL, trustedFrame } = require("./trust.cjs");
 const { AssistantController } = require("./assistant-controller.cjs");
+const {
+  applicationPath,
+  launchDecision,
+  verifyBuild,
+  verifyReceipt,
+} = require("./installation.cjs");
 
 app.setName("AgentTestBench");
 const option = (name) =>
   process.argv
     .find((value) => value.startsWith(`--${name}=`))
     ?.slice(name.length + 3);
+const isolatedTest =
+  process.env.AGENT_TESTBENCH_DESKTOP_HEADLESS === "1" &&
+  Boolean(option("user-data"));
+const development =
+  !app.isPackaged && process.env.AGENT_TESTBENCH_DESKTOP_DEV === "1";
+if (development) app.setName("AgentTestBench Development");
+if (
+  launchDecision({
+    platform: process.platform,
+    executable: process.execPath,
+    isolatedTest,
+    development,
+  }) === "redirect"
+) {
+  app.whenReady().then(async () => {
+    const error = await shell.openPath(applicationPath);
+    if (error)
+      dialog.showErrorBox(
+        "请安装最新 AgentTestBench",
+        "运行 npm run desktop:install 后再打开正式应用。",
+      );
+    app.quit();
+  });
+  return;
+}
 if (option("user-data")) app.setPath("userData", resolve(option("user-data")));
 const dataDir = app.getPath("userData");
 mkdirSync(dataDir, { recursive: true });
@@ -48,6 +80,11 @@ if (option("store"))
   settings = { ...settings, mode: "local", store: option("store") };
 let window;
 let quitting = false;
+let buildInfo = {
+  version: app.getVersion(),
+  buildId: "development",
+  development: true,
+};
 const assistant = new AssistantController({
   backend,
   dataDir,
@@ -70,9 +107,13 @@ function handle(channel, action) {
   });
 }
 
-handle("atb:connection", () => backend.status());
+handle("atb:connection", () => ({ ...backend.status(), build: buildInfo }));
 handle("atb:api", (input) => backend.request(input));
-handle("atb:settings", () => ({ ...settings, version: app.getVersion() }));
+handle("atb:settings", () => ({
+  ...settings,
+  version: app.getVersion(),
+  build: buildInfo,
+}));
 handle("atb:assistant-settings", () => assistant.settings.public());
 handle("atb:assistant-save-settings", (input) => {
   if (assistant.running.size || assistant.startPromise)
@@ -190,6 +231,25 @@ else {
   app
     .whenReady()
     .then(async () => {
+      if (app.isPackaged) {
+        const observed = verifyBuild(process.resourcesPath);
+        if (process.platform === "darwin" && !isolatedTest)
+          verifyReceipt(dataDir, observed);
+        if (option("binary") && !isolatedTest)
+          throw new Error("正式应用只能使用同一构建的执行引擎");
+        buildInfo = {
+          version: observed.version,
+          buildId: observed.buildId,
+          builtAt: observed.builtAt,
+          sourceRevision: observed.sourceRevision,
+          sourceDirty: observed.sourceDirty,
+        };
+      }
+      app.setAboutPanelOptions({
+        applicationName: app.getName(),
+        applicationVersion: buildInfo.version,
+        version: buildInfo.buildId.slice(0, 12),
+      });
       if (process.env.AGENT_TESTBENCH_DESKTOP_HEADLESS === "1")
         app.dock?.hide();
       Menu.setApplicationMenu(

@@ -38,6 +38,9 @@ func runServe(args []string) error {
 	if cfg.mode == cliCommandDirect {
 		return runDirectServer(addr, handler)
 	}
+	if os.Getenv("AGENT_TESTBENCH_PARENT_STDIN_CLOSE") == "1" {
+		return runOwnedServe(addr, handler, os.Stdin)
+	}
 	return http.ListenAndServe(addr, handler)
 }
 

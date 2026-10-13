@@ -37,10 +37,13 @@ remain shared.
 
 ```sh
 npm ci
+npm run desktop:install
 npm run desktop:start
 ```
 
-Use `npm run desktop:package` to build a standalone native application. Its default
+On macOS, `desktop:install` maintains one application in `/Applications` and
+archives previous copies without retaining launchable backup bundles.
+Use `npm run desktop:package` to build a ZIP installer archive. Its default
 SQLite Store is independent of team Stores; project settings can attach an
 existing Store or API service. See the [desktop guide](docs/desktop.md).
 

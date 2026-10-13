@@ -804,7 +804,11 @@ export default function App() {
         )}
         <span>目录版本 {workspace.studio.revision ?? "—"}</span>
         <span className="statusbar-divider" />
-        <span>Electron 桌面端</span>
+        <span title={connection.build?.buildId || "开发构建"}>
+          AgentTestBench {connection.build?.version || "开发构建"}
+          {connection.build?.buildId &&
+            ` · ${connection.build.buildId.slice(0, 12)}`}
+        </span>
       </footer>
       {toast && (
         <div role="status" className={`toast ${toast.error ? "error" : ""}`}>

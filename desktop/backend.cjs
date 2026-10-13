@@ -56,10 +56,11 @@ class Backend {
         {
           cwd: this.dataDir,
           windowsHide: true,
-          stdio: ["ignore", "pipe", "pipe"],
+          stdio: ["pipe", "pipe", "pipe"],
           env: {
             ...process.env,
             AGENT_TESTBENCH_TRACE_GRAPHQL_URL: settings.traceURL || "",
+            AGENT_TESTBENCH_PARENT_STDIN_CLOSE: "1",
           },
         },
       );
@@ -160,14 +161,16 @@ class Backend {
     this.store = null;
     if (!child || child.exitCode !== null || child.signalCode) return;
     await new Promise((resolve) => {
+      const graceful = setTimeout(() => child.kill("SIGTERM"), 1500);
       const timer = setTimeout(() => {
         child.kill("SIGKILL");
       }, 3000);
       child.once("exit", () => {
+        clearTimeout(graceful);
         clearTimeout(timer);
         resolve();
       });
-      child.kill("SIGTERM");
+      child.stdin.end();
     });
   }
 }
