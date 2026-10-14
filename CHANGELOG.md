@@ -7,8 +7,17 @@ should be called out in this file and in the relevant docs.
 
 ## Unreleased
 
+## 0.5.0
+
+- Replace the browser workbench with an Electron desktop workspace for API requests, scenario editing, persisted run reports, and Store map navigation. Browser workbench routes are retired; CLI and control-plane API access remain available.
+- Add a Store-backed visual workflow studio and a versioned reusable step library with explicit parameters, dependencies, and revision conflict checks.
+- Add a desktop LangChain assistant with typed Store tools, model connection validation, protected credential storage, cancellation, and session records.
+- Add an explicit lightweight direct execution mode with local adapters and reproducible, redacted Evidence.
+- Execute workflow case references through Store-native batches and preserve parent workflow state and copied Evidence paths.
+- Maintain one managed desktop installation and validate packaged startup content and owned engine lifecycle.
+
 - Added local AgentTestBench feedback registration skill support so future
-  sessions can persist usability findings in-repo instead of temporary notes.
+  sessions can persist usability findings locally outside the public repository.
 - Improved case execution readiness diagnostics: bodyless write-method cases now
   fail fast, while suite and discovery readiness still honor case-scoped configs
   and bodies rendered from API case or request-template models.

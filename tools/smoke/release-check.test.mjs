@@ -290,6 +290,134 @@ test("release-check scope-file runs targeted example tests without full Go suite
   }
 });
 
+test("release-check runs the MySQL Store API smoke when its implementation changes", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agent-testbench-release-mysql-smoke-"));
+  const binDir = path.join(tempDir, "bin");
+  const npmLog = path.join(tempDir, "npm.log");
+  const fakeNPM = path.join(binDir, "npm");
+  try {
+    await mkdir(binDir, { recursive: true });
+    await writeFile(fakeNPM, [
+      "#!/usr/bin/env bash",
+      "printf 'args=%s\\n' \"$*\" >> \"$AGENT_TESTBENCH_TEST_NPM_LOG\"",
+      "printf 'dsn=%s\\n' \"${AGENT_TESTBENCH_MYSQL_API_SMOKE_DSN:-}\" >> \"$AGENT_TESTBENCH_TEST_NPM_LOG\"",
+      "",
+    ].join("\n"));
+    await chmod(fakeNPM, 0o755);
+
+    const dsn = "mysql://user@example.com:3306/agent_testbench_scope_smoke?tls=false";
+    const result = runReleaseCheck(releaseCheckEnv({
+      AGENT_TESTBENCH_SMOKE_STORE_DSN: dsn,
+      AGENT_TESTBENCH_SKIP_QUALITY_GATE: "1",
+      AGENT_TESTBENCH_TEST_NPM_LOG: npmLog,
+      PATH: `${binDir}:${process.env.PATH}`,
+    }), ["--scope", "tools/smoke/mysql-store-api-smoke.mjs"]);
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /running scoped Node tests/);
+    assert.match(result.stdout, /tools\/smoke\/mysql-store-api-smoke\.test\.mjs/);
+    assert.match(result.stdout, /running scoped MySQL Store API smoke tests/);
+    const calls = readFileSync(npmLog, "utf8");
+    assert.deepEqual(calls.trim().split("\n"), [
+      "args=run smoke:api:mysql-store",
+      `dsn=${dsn}`,
+    ]);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+async function stubControlPlaneSmoke(binDir) {
+  const node = path.join(binDir, "node");
+  await writeFile(node, [
+    "#!/usr/bin/env bash",
+    'if [[ "$1" == "tools/smoke/control-plane-smoke.mjs" ]]; then',
+    '  printf "control-plane-api-smoke\\n" >> "$AGENT_TESTBENCH_TEST_NPM_LOG"',
+    "  exit 0",
+    "fi",
+    `exec "${process.execPath}" "$@"`,
+    "",
+  ].join("\n"));
+  await chmod(node, 0o755);
+}
+
+test("release-check runs API and desktop smoke when workflow execution UI changes", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agent-testbench-release-browser-smoke-"));
+  const binDir = path.join(tempDir, "bin");
+  const npmLog = path.join(tempDir, "npm.log");
+  const fakeNPM = path.join(binDir, "npm");
+  try {
+    await mkdir(binDir, { recursive: true });
+    await writeFile(fakeNPM, [
+      "#!/usr/bin/env bash",
+      "printf '%s\\n' \"$*\" >> \"$AGENT_TESTBENCH_TEST_NPM_LOG\"",
+      "",
+    ].join("\n"));
+    await chmod(fakeNPM, 0o755);
+
+    await stubControlPlaneSmoke(binDir);
+
+    const result = runReleaseCheck(releaseCheckEnv({
+      AGENT_TESTBENCH_SMOKE_STORE_DSN: "mysql://user@example.com:3306/agent_testbench_scope_smoke?tls=false",
+      AGENT_TESTBENCH_SKIP_QUALITY_GATE: "1",
+      AGENT_TESTBENCH_TEST_NPM_LOG: npmLog,
+      PATH: `${binDir}:${process.env.PATH}`,
+    }), ["--scope", "control-plane/frontend/src/workflowDetail.jsx"]);
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /running scoped active SQL Store control-plane API smoke tests/);
+    assert.match(result.stdout, /running scoped isolated Electron desktop smoke tests/);
+    assert.deepEqual(readFileSync(npmLog, "utf8").trim().split("\n"), [
+      "run build:frontend",
+      "run test:frontend",
+      "control-plane-api-smoke",
+      "run desktop:build",
+      "run smoke:desktop",
+    ]);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("release-check runs every active Store smoke consumer when the shared control-plane harness changes", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agent-testbench-release-shared-smoke-"));
+  const binDir = path.join(tempDir, "bin");
+  const npmLog = path.join(tempDir, "npm.log");
+  const fakeNPM = path.join(binDir, "npm");
+  try {
+    await mkdir(binDir, { recursive: true });
+    await writeFile(fakeNPM, [
+      "#!/usr/bin/env bash",
+      "printf '%s\\n' \"$*\" >> \"$AGENT_TESTBENCH_TEST_NPM_LOG\"",
+      "",
+    ].join("\n"));
+    await chmod(fakeNPM, 0o755);
+
+    await stubControlPlaneSmoke(binDir);
+
+    const result = runReleaseCheck(releaseCheckEnv({
+      AGENT_TESTBENCH_SMOKE_STORE_DSN: "mysql://user@example.com:3306/agent_testbench_scope_smoke?tls=false",
+      AGENT_TESTBENCH_SKIP_QUALITY_GATE: "1",
+      AGENT_TESTBENCH_TEST_NPM_LOG: npmLog,
+      PATH: `${binDir}:${process.env.PATH}`,
+    }), ["--scope", "tools/smoke/control-plane-smoke.mjs"]);
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /tools\/smoke\/control-plane-smoke\.test\.mjs/);
+    assert.match(result.stdout, /tools\/smoke\/cli-active-store-smoke\.test\.mjs/);
+    assert.match(result.stdout, /tools\/smoke\/mysql-store-api-smoke\.test\.mjs/);
+    assert.deepEqual(readFileSync(npmLog, "utf8").trim().split("\n"), [
+      "run smoke:cli:sql-active",
+      "control-plane-api-smoke",
+      "run desktop:build",
+      "run smoke:desktop",
+      "run smoke:api:mysql-store",
+    ]);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("release-check scopes release workflow changes to workflow smoke", () => {
   const result = runReleaseCheck(releaseCheckEnv({
     AGENT_TESTBENCH_SKIP_QUALITY_GATE: "1",
@@ -306,6 +434,17 @@ test("release-check scopes release packaging script changes to archive smoke", (
   const script = readFileSync(path.join(rootDir, "tools", "release-check.sh"), "utf8");
 
   assert.match(script, /scripts\/build-release\.sh\)\n\s*node_scope_tests\+=\("tools\/smoke\/release-archive-serve\.test\.mjs"\)/);
+});
+
+test("release-check scopes browser smoke implementation changes to its unit tests", () => {
+  const script = readFileSync(path.join(rootDir, "tools", "release-check.sh"), "utf8");
+
+  assert.match(script, /tools\/smoke\/control-plane-smoke\.mjs\)\n\s*node_scope_tests\+=\(/);
+  assert.match(script, /tools\/smoke\/cli-active-store-smoke\.test\.mjs/);
+  assert.match(script, /tools\/smoke\/mysql-store-api-smoke\.test\.mjs/);
+  assert.match(script, /tools\/smoke\/control-plane-smoke\.mjs\)[\s\S]*run_cli_active_store_smoke=1/);
+  assert.match(script, /tools\/smoke\/control-plane-smoke\.mjs\)[\s\S]*run_mysql_store_api_smoke=1/);
+  assert.match(script, /tools\/smoke\/control-plane-smoke\.mjs\)\n\s*run_control_plane_browser_smoke=1/);
 });
 
 test("release-check scoped Go selection runs only touched package directories", async () => {

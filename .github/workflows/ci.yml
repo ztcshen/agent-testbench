@@ -88,7 +88,7 @@ jobs:
           cache: npm
 
       - name: Install release gate tools
-        run: sudo apt-get update && sudo apt-get install -y ripgrep sqlite3
+        run: sudo apt-get update && sudo apt-get install -y ripgrep sqlite3 xvfb
 
       - name: Install Go lint
         run: |
@@ -117,7 +117,7 @@ jobs:
           fi
 
       - name: Install browser
-        run: npx playwright install chromium
+        run: npx playwright install --with-deps chromium
 
       - name: Run release gate
         run: |

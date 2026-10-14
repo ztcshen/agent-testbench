@@ -12,7 +12,7 @@ const interfaceNodeCommand = "interface-node"
 const cliCommandTask = "task"
 const cliCommandDemo = "demo"
 
-var version = "0.4.0-dev"
+var version = "0.5.0-dev"
 var buildRevision = ""
 
 type versionCommandReport struct {

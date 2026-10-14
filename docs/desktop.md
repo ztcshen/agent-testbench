@@ -36,9 +36,10 @@ build:frontend` now builds only the Electron renderer. Older browser entrypoints
 return HTTP 410; the control-plane root identifies itself as an Electron API
 workspace. Old source files are outside the active frontend build.
 
-The application normally owns one loopback Go child process. Its default SQLite
-Store and Evidence live in its OS application-data directory, independently of
-any configured team Store. On an empty Store it registers one generic HTTP
+The application normally owns one loopback Go child process. For first-run
+personal use it provisions a local SQLite Store and Evidence directory in its
+OS application-data directory. Project settings select the active SQLite,
+PostgreSQL, or MySQL Store independently. On an empty Store it registers one generic HTTP
 service through the existing API. Closing the application stops only the child
 process it started. Project settings can select an existing named Store or DSN,
 or connect to an existing API service. Attached services are never stopped by the

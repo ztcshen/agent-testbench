@@ -72,6 +72,7 @@ func newAPICaseBatchCaseReport(plan apiCaseBatchCasePlan) apiCaseBatchCaseReport
 		Method:          plan.Method,
 		Path:            plan.Path,
 		StepID:          plan.StepID,
+		TimeoutSeconds:  plan.TimeoutSeconds,
 		Status:          store.StatusFailed,
 	}
 }

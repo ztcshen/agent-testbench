@@ -175,6 +175,20 @@ func requireEnvironmentAcceptanceStoreState(t *testing.T, ctx context.Context, s
 	if len(topologies) != 1 || topologies[0].WorkflowRunID != report.BatchRunID || topologies[0].StepID != "step.env.acceptance" {
 		t.Fatalf("batch topology copies = %#v", topologies)
 	}
+	caseRuns, err := s.ListAPICaseRuns(ctx, report.BatchRunID)
+	if err != nil {
+		t.Fatalf("list batch parent case runs: %v", err)
+	}
+	if len(caseRuns) != 1 || caseRuns[0].CaseID != "case.env.acceptance" || caseRuns[0].Status != store.StatusPassed {
+		t.Fatalf("batch parent case runs = %#v", caseRuns)
+	}
+	tasks, err := s.ListPostProcessTasks(ctx, report.BatchRunID)
+	if err != nil {
+		t.Fatalf("list batch parent post-process tasks: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].StepID != "step.env.acceptance" || tasks[0].Status != store.StatusPassed {
+		t.Fatalf("batch parent post-process tasks = %#v", tasks)
+	}
 }
 
 func requirePersistedEnvironmentAcceptanceReport(t *testing.T, bundle profile.Bundle, s store.Store, reportURL, batchRunID string) {

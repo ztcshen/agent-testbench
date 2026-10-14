@@ -29,9 +29,9 @@ npm run smoke:release-archive-serve
 ```
 
 This builds a host-platform release archive, extracts it outside the source
-checkout, starts the released binary from the extracted directory, loads the
-static workbench, and confirms `/api/store/current` responds through a temporary
-SQLite Store.
+checkout, starts the released binary from the extracted directory, verifies the
+Electron control-plane descriptor and HTTP 410 for retired browser routes, and
+confirms `/api/store/current` responds through a temporary SQLite Store.
 
 `release-check` refuses to run without one of `--scope`, `--scope-file`, or
 `--full`. When scoped to a Go file, release-check runs only that package. When
@@ -114,12 +114,13 @@ The gate verifies:
 - Go tests pass;
 - the React workbench builds;
 - active SQL Store CLI smoke passes without per-command Store flags;
-- SQL Store browser smoke tests pass in a headless context;
-- the headless smoke can enter the core workflow from the workbench, click the
-  workflow run button, persist the workflow run, open step Evidence, and verify
-  stored topology with provider, trace id, status, nodes, and edges. This is a
-  deterministic local wiring check unless `AGENT_TESTBENCH_TRACE_GRAPHQL_URL` is configured
-  for live SkyWalking validation.
+- SQL Store control-plane API smoke persists workflow runs, step Evidence and
+  topology with provider, trace id, status, nodes, and edges;
+- an isolated headless Electron smoke verifies request editing, scenario runs,
+  reports, map navigation and reusable step blocks against a temporary local
+  SQLite Store. Linux CI supplies a virtual display through Xvfb. Topology checks
+  are deterministic wiring checks unless `AGENT_TESTBENCH_TRACE_GRAPHQL_URL` is
+  configured for live SkyWalking validation.
 
 ## Completion Audit
 

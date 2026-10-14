@@ -76,7 +76,7 @@ async function stopProcess(child) {
   }
 }
 
-test("release archive can serve the workbench outside a source checkout", async () => {
+test("release archive serves the desktop control-plane API outside a source checkout", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agent-testbench-release-serve-"));
   const { goos, goarch } = goHostTarget();
   const version = "0.4.0-serve-smoke";
@@ -123,9 +123,15 @@ test("release archive can serve the workbench outside a source checkout", async 
       if (signal) output += `\nserve exited with signal ${signal}`;
     });
 
-    const html = await waitForText(`${serverURL}/`);
-    assert.match(html, /react-sandbox-workbench-root/);
-    assert.match(await waitForText(`${serverURL}/assets/react/controlPlane.js`), /createRoot/);
+    const descriptor = await waitForJSON(`${serverURL}/`);
+    assert.equal(descriptor.ok, true, output);
+    assert.equal(descriptor.product, "AgentTestBench", output);
+    assert.equal(descriptor.frontend, "electron", output);
+    for (const retiredPath of ["/index.html", "/workflow-detail.html", "/assets/react/controlPlane.js"]) {
+      const response = await fetch(`${serverURL}${retiredPath}`);
+      assert.equal(response.status, 410, retiredPath);
+      assert.equal((await response.json()).code, "desktop_frontend_required", retiredPath);
+    }
 
     const currentStore = await waitForJSON(`${serverURL}/api/store/current`);
     assert.equal(currentStore.ok, true, output);

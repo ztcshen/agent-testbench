@@ -21,6 +21,21 @@ export function requiredMySQLDSN(env = process.env) {
   return dsn;
 }
 
+export function storeNativeWorkflowBatchRequest() {
+  return {
+    requestId: "mysql-api-smoke-workflow",
+    workflowId: "workflow.alpha",
+    timeoutSeconds: 10,
+  };
+}
+
+export function storeNativeEnvironmentAcceptanceRequest() {
+  return {
+    requestId: "mysql-api-smoke-acceptance",
+    timeoutSeconds: 10,
+  };
+}
+
 async function freePort() {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -444,13 +459,7 @@ async function main() {
       throw new Error(`unexpected MySQL workflow discovery payload: ${JSON.stringify(workflows)}`);
     }
 
-    const createdBatch = await postJSON(`${baseURL}/api/cases/batch-runs`, {
-      requestId: "mysql-api-smoke-workflow",
-      workflowId: "workflow.alpha",
-      baseUrl: `http://127.0.0.1:${targetPort}`,
-      evidenceDir: path.join(tempDir, "workflow-evidence"),
-      timeoutSeconds: 10,
-    });
+    const createdBatch = await postJSON(`${baseURL}/api/cases/batch-runs`, storeNativeWorkflowBatchRequest());
     if (createdBatch.status !== "running" || createdBatch.total !== workflowStepCount || !createdBatch.reportUrl) {
       throw new Error(`unexpected MySQL workflow batch start payload: ${JSON.stringify(createdBatch)}`);
     }
@@ -546,12 +555,10 @@ async function main() {
       bootstrap: environmentBootstrap,
     });
 
-    const acceptanceStart = await postJSON(`${baseURL}/api/environments/env.mysql-api-smoke/acceptance-runs`, {
-      requestId: "mysql-api-smoke-acceptance",
-      baseUrl: `http://127.0.0.1:${targetPort}`,
-      evidenceDir: path.join(tempDir, "environment-acceptance-evidence"),
-      timeoutSeconds: 10,
-    });
+    const acceptanceStart = await postJSON(
+      `${baseURL}/api/environments/env.mysql-api-smoke/acceptance-runs`,
+      storeNativeEnvironmentAcceptanceRequest(),
+    );
     if (acceptanceStart.environmentId !== "env.mysql-api-smoke" || acceptanceStart.workflowId !== "workflow.alpha" || !acceptanceStart.reportUrl) {
       throw new Error(`unexpected MySQL Environment acceptance start payload: ${JSON.stringify(acceptanceStart)}`);
     }

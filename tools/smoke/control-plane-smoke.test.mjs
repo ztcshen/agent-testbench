@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   assertSmokeCatalogIndex,
+  browserSmokeWorkflowID,
   prepareSmokeTraceProvider,
   requireCompleteSmokeTraceIDs,
   smokeStepIDs,
@@ -267,16 +268,18 @@ describe("control-plane smoke workflow shape", () => {
   it("models the core button workflow as configured Store-backed steps", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "agent-testbench-smoke-profile-"));
     try {
-      const profileDir = await writeSmokeProfile(tempDir, 18080);
+      const profileDir = await writeSmokeProfile(tempDir, 18080, { workflowID: browserSmokeWorkflowID });
       const raw = await readFile(path.join(profileDir, "profile.json"), "utf8");
       const profile = JSON.parse(raw);
       assert.equal(profile.workflows.length, 1);
+      assert.equal(profile.workflows[0].id, browserSmokeWorkflowID);
       assert.equal(profile.services.length, smokeWorkflowStepCount);
       assert.equal(new Set(profile.services.map((item) => item.id)).size, smokeWorkflowStepCount);
       assert.equal(profile.workflowBindings.length, smokeWorkflowStepCount);
       assert.equal(profile.apiCases.length, smokeWorkflowStepCount);
       assert.equal(profile.templateConfigs.filter((item) => item.templateId === "case-execution").length, smokeWorkflowStepCount);
       assert.deepEqual(profile.workflowBindings.map((item) => item.stepId), smokeStepIDs);
+      assert.equal(profile.workflowBindings.every((item) => item.workflowId === browserSmokeWorkflowID), true);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

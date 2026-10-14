@@ -7,6 +7,7 @@ import {
   access,
   mkdtemp,
   rm,
+  readFile,
 } from "node:fs/promises";
 import { spawn, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
@@ -19,6 +20,11 @@ const { createBuildInfo } = require("./installation.cjs");
 
 const desktop = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(desktop, "..");
+const pkg = JSON.parse(await readFile(join(repo, "package.json"), "utf8"));
+const sourceRevision = execFileSync("git", ["rev-parse", "HEAD"], {
+  cwd: repo,
+  encoding: "utf8",
+}).trim();
 const out = join(repo, "dist", "desktop");
 await mkdir(join(out, "renderer"), { recursive: true });
 await build({
@@ -67,7 +73,7 @@ if (process.argv.includes("--engine")) {
   await new Promise((yes, no) => {
     const child = spawn(
       "go",
-      ["build", "-o", executable, "./cmd/agent-testbench"],
+      ["build", "-trimpath", "-ldflags", `-s -w -X main.version=${pkg.version} -X main.buildRevision=${sourceRevision}`, "-o", executable, "./cmd/agent-testbench"],
       { cwd: repo, stdio: "inherit", env: buildEnv },
     );
     child.once("error", no);
@@ -98,11 +104,6 @@ if (process.argv.includes("--package")) {
       join(out, "renderer", name),
       join(staging, "renderer", name),
     );
-  const pkg = JSON.parse(
-    await import("node:fs").then((fs) =>
-      fs.readFileSync(join(repo, "package.json"), "utf8"),
-    ),
-  );
   const checksums = JSON.parse(
     await import("node:fs").then((fs) =>
       fs.readFileSync(
@@ -172,10 +173,7 @@ if (process.argv.includes("--package")) {
       builtAt: new Date().toISOString(),
       platform: process.platform,
       arch: process.arch,
-      sourceRevision: execFileSync("git", ["rev-parse", "HEAD"], {
-        cwd: repo,
-        encoding: "utf8",
-      }).trim(),
+      sourceRevision,
       sourceDirty: Boolean(
         execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], {
           cwd: repo,

@@ -20,6 +20,15 @@ is_sqlite_store_dsn() {
   [[ "$1" =~ ^([Ss][Qq][Ll][Ii][Tt][Ee]://|[Ff][Ii][Ll][Ee]:) ]]
 }
 
+run_desktop_smoke() {
+  npm run desktop:build
+  if [[ "$(uname -s)" == "Linux" && -z "${DISPLAY:-}" ]]; then
+    xvfb-run -a npm run smoke:desktop
+  else
+    npm run smoke:desktop
+  fi
+}
+
 scope_paths=()
 full_release_check=0
 add_scope_path() {
@@ -336,18 +345,19 @@ if [[ "$scoped_release_check" -eq 0 ]]; then
     AGENT_TESTBENCH_MYSQL_API_SMOKE_DSN="$smoke_store_dsn" npm run smoke:api:mysql-store
   fi
 
-  step "running active SQL Store browser smoke tests"
-  if is_sqlite_store_dsn "$smoke_store_dsn"; then
-    node tools/smoke/control-plane-smoke.mjs
-  else
-    npm run smoke:frontend:sql-active
-  fi
+  step "running active SQL Store control-plane API smoke tests"
+  node tools/smoke/control-plane-smoke.mjs
+  step "running isolated Electron desktop smoke tests"
+  run_desktop_smoke
 else
   node_scope_tests=()
   go_scope_all=0
   go_scope_packages=()
   run_frontend_tests=0
   run_frontend_build=0
+  run_cli_active_store_smoke=0
+  run_control_plane_browser_smoke=0
+  run_mysql_store_api_smoke=0
   ran_scoped_runtime_tests=0
 
   add_go_scope_package() {
@@ -428,12 +438,26 @@ else
     collect_go_scope_package "$path"
 
     case "$path" in
-      control-plane/frontend/src/*|control-plane/frontend/build.mjs|package.json|package-lock.json)
+      control-plane/frontend/src/*|control-plane/frontend/build.mjs|desktop/*|package.json|package-lock.json)
         run_frontend_build=1
         run_frontend_tests=1
+        run_control_plane_browser_smoke=1
         ;;
       control-plane/static/demo-gallery.html|docs/demo-gallery.md|examples/demo-services/*|tools/examples/demo-service-server.mjs|tools/examples/demo-showcase.test.mjs)
         node_scope_tests+=("tools/examples/demo-showcase.test.mjs")
+        ;;
+      tools/smoke/mysql-store-api-smoke.mjs)
+        node_scope_tests+=("tools/smoke/mysql-store-api-smoke.test.mjs")
+        run_mysql_store_api_smoke=1
+        ;;
+      tools/smoke/control-plane-smoke.mjs)
+        node_scope_tests+=(
+          "tools/smoke/control-plane-smoke.test.mjs"
+          "tools/smoke/cli-active-store-smoke.test.mjs"
+          "tools/smoke/mysql-store-api-smoke.test.mjs"
+        )
+        run_cli_active_store_smoke=1
+        run_mysql_store_api_smoke=1
         ;;
       tools/examples/*.test.mjs|tools/smoke/*.test.mjs)
         node_scope_tests+=("$path")
@@ -446,6 +470,12 @@ else
         ;;
       tools/release-check.sh|tools/guardrails/*)
         node_scope_tests+=("tools/smoke/release-check.test.mjs")
+        ;;
+    esac
+
+    case "$path" in
+      control-plane/frontend/src/workflowDetail.jsx|control-plane/frontend/src/workflowDetailModel.mjs|internal/server/controlplane/test_kit*.go|internal/server/controlplane/api_case_batch*.go|internal/server/controlplane/workflow_run*.go|tools/smoke/control-plane-smoke.mjs)
+        run_control_plane_browser_smoke=1
         ;;
     esac
   done
@@ -542,6 +572,35 @@ else
     printf '  %s\n' "${node_scope_tests[@]}"
     node --test "${node_scope_tests[@]}"
     ran_scoped_runtime_tests=1
+  fi
+
+  if [[ "$run_cli_active_store_smoke" -eq 1 ]]; then
+    step "running scoped active SQL Store CLI smoke tests"
+    if is_sqlite_store_dsn "$smoke_store_dsn"; then
+      node tools/smoke/cli-active-store-smoke.mjs
+    else
+      npm run smoke:cli:sql-active
+    fi
+    ran_scoped_runtime_tests=1
+  fi
+
+  if [[ "$run_control_plane_browser_smoke" -eq 1 ]]; then
+    step "running scoped active SQL Store control-plane API smoke tests"
+    node tools/smoke/control-plane-smoke.mjs
+    step "running scoped isolated Electron desktop smoke tests"
+    run_desktop_smoke
+    ran_scoped_runtime_tests=1
+  fi
+
+  if [[ "$run_mysql_store_api_smoke" -eq 1 ]]; then
+    if is_mysql_store_dsn "$smoke_store_dsn"; then
+      step "running scoped MySQL Store API smoke tests"
+      AGENT_TESTBENCH_MYSQL_API_SMOKE_DSN="$smoke_store_dsn" npm run smoke:api:mysql-store
+      ran_scoped_runtime_tests=1
+    else
+      step "skipping scoped MySQL Store API smoke tests"
+      echo "A MySQL smoke Store is required for the runtime smoke; the request-shape tests still ran."
+    fi
   fi
 
   if [[ "$ran_scoped_runtime_tests" -eq 0 ]]; then
