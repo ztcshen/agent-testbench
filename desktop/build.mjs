@@ -168,6 +168,9 @@ if (process.argv.includes("--package")) {
       application,
       process.platform === "darwin" ? "Contents/Resources" : "resources",
     );
+    if (process.platform === "darwin") {
+      execFileSync("codesign", ["--force", "--deep", "--sign", "-", "--timestamp=none", application]);
+    }
     const info = createBuildInfo(resources, {
       version: pkg.version,
       builtAt: new Date().toISOString(),
@@ -186,8 +189,39 @@ if (process.argv.includes("--package")) {
       JSON.stringify(info, null, 2),
     );
     if (process.platform === "darwin") {
+      // Record signed component bytes, then seal the outer bundle without
+      // re-signing the components covered by the content-derived build ID.
+      execFileSync("codesign", ["--force", "--sign", "-", "--timestamp=none", application]);
+      execFileSync("codesign", ["--verify", "--deep", "--strict", application]);
       const archiveDirectory = join(repo, "dist", "desktop-release");
       await mkdir(archiveDirectory, { recursive: true });
+      const distribution = join(temporary, "distribution");
+      await mkdir(distribution, { recursive: true });
+      execFileSync("ditto", [application, join(distribution, "AgentTestBench.app")]);
+      for (const name of ["install.mjs", "installation.cjs"])
+        await copyFile(join(desktop, name), join(distribution, name));
+      const installerProgram = [
+        'import { pathToFileURL } from "node:url";',
+        'import { join } from "node:path";',
+        'const { installApplication } = await import(pathToFileURL(process.argv[2]).href);',
+        'const application = process.argv[3];',
+        'if (process.argv[4] === "--verify-only") {',
+        '  const { default: { verifyBuild } } = await import(pathToFileURL(join(application, "..", "installation.cjs")).href);',
+        '  console.log(JSON.stringify(verifyBuild(join(application, "Contents", "Resources")), null, 2));',
+        '} else console.log(JSON.stringify(installApplication(application), null, 2));',
+      ].join("\n");
+      await writeFile(join(distribution, "installer.mjs"), installerProgram);
+      await writeFile(join(distribution, "INSTALL.command"), [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        'installer_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"',
+        'ELECTRON_RUN_AS_NODE=1 "$installer_dir/AgentTestBench.app/Contents/MacOS/AgentTestBench" "$installer_dir/installer.mjs" "$installer_dir/install.mjs" "$installer_dir/AgentTestBench.app" "$@"',
+        "",
+      ].join("\n"));
+      await chmod(join(distribution, "INSTALL.command"), 0o755);
+      await writeFile(join(distribution, "INSTALL.txt"),
+        "Close AgentTestBench, then run INSTALL.command from this extracted folder to install the managed application and its receipt. No separate Node.js or Go installation is required. Use INSTALL.command --verify-only to check component integrity without installing. The app is ad-hoc signed, without Developer ID signing or notarization; follow your device's security policy.\n");
+      await copyFile(join(repo, "LICENSE"), join(distribution, "LICENSE"));
       const archive = join(
         archiveDirectory,
         `AgentTestBench-${process.platform}-${process.arch}.zip`,
@@ -196,8 +230,7 @@ if (process.argv.includes("--package")) {
         "-c",
         "-k",
         "--sequesterRsrc",
-        "--keepParent",
-        application,
+        distribution,
         archive,
       ]);
       process.stdout.write(

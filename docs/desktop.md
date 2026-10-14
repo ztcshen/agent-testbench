@@ -18,6 +18,11 @@ npm run desktop:start
 `npm run desktop:build` builds the renderer and the Go execution engine.
 On macOS, `npm run desktop:package` produces a ZIP archive under `dist/desktop-release/`;
 unpacked packaging directories are temporary and removed after packaging.
+For a downloaded macOS ZIP, extract the archive, close AgentTestBench and run the
+included `INSTALL.command`. It uses the bundled runtime to install the canonical
+application and register its build receipt. `INSTALL.command --verify-only`
+checks component integrity without changing an installation. The app is ad-hoc
+signed, without Developer ID signing or notarization; follow device security policy.
 `npm run desktop:install` builds the current checkout and installs the canonical
 macOS application at `/Applications/AgentTestBench.app`. Save editing work and
 quit the application before installing. Old indexed copies of the same bundle

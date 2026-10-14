@@ -15,6 +15,7 @@ should be called out in this file and in the relevant docs.
 - Add an explicit lightweight direct execution mode with local adapters and reproducible, redacted Evidence.
 - Execute workflow case references through Store-native batches and preserve parent workflow state and copied Evidence paths.
 - Maintain one managed desktop installation and validate packaged startup content and owned engine lifecycle.
+- Sign macOS desktop components before computing build identity, seal and verify the outer application, and include a runtime-backed installer in the ZIP distribution.
 
 - Added local AgentTestBench feedback registration skill support so future
   sessions can persist usability findings locally outside the public repository.
