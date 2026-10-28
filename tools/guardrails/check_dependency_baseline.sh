@@ -13,6 +13,8 @@ go list -mod=readonly ./... >/dev/null
 if [[ -f package-lock.json ]]; then
   echo "==> validating npm lockfile"
   npm ci --dry-run --ignore-scripts >/dev/null
+  echo "==> auditing npm dependencies"
+  npm audit --audit-level=high
 fi
 
 echo "dependency baseline passed"

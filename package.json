@@ -1,6 +1,6 @@
 {
   "name": "agent-testbench",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": false,
   "description": "Agent-native test environment for API workflows, auditable evidence, and quality gates.",
   "license": "Apache-2.0",
@@ -47,8 +47,8 @@
     "@dagrejs/dagre": "3.1.1",
     "@electron/packager": "20.3.0",
     "@xyflow/react": "^12.10.2",
-    "electron": "44.4.5",
-    "esbuild": "^0.28.0",
+    "electron": "44.10.0",
+    "esbuild": "^0.28.2",
     "lucide-react": "^1.14.0",
     "playwright": "^1.60.0",
     "react": "^19.2.6",
@@ -59,7 +59,7 @@
     "@earendil-works/pi-ai": "1.1.0",
     "@langchain/openai": "1.6.2",
     "langchain": "1.5.16",
-    "undici": "8.11.2",
+    "undici": "8.12.3",
     "zod": "4.6.6"
   }
 }

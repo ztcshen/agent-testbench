@@ -7,6 +7,14 @@ should be called out in this file and in the relevant docs.
 
 ## Unreleased
 
+## 0.5.1
+
+- Update Electron to 44.10.0 and Undici to patched versions, including the TLS certificate mitigations and pointer-lock attribution fix.
+- Update esbuild to the patched 0.28 series and make high-severity npm advisories block the existing dependency/release gate.
+- Require Go 1.26.10 or newer so newly built CLI and embedded engine binaries include the crypto/x509 certificate denylist fix (GO-2026-6809).
+
+Build requirement: Go 1.26.10+ replaces the previous Go 1.26 baseline. Store schemas, HTTP routes and workflow contracts are unchanged.
+
 ## 0.5.0
 
 - Replace the browser workbench with an Electron desktop workspace for API requests, scenario editing, persisted run reports, and Store map navigation. Browser workbench routes are retired; CLI and control-plane API access remain available.
